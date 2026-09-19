@@ -15,7 +15,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from vero_smoke import call, save
+from vero_smoke import call, save, instruction_delivery
 
 MODEL = "xmcp:closeai/gpt-5.4-mini"
 TASK = (
@@ -133,10 +133,13 @@ def baseline(args):
     source, data = root / "source", root / "trajectory"
     create_sandbox(benchmark, source, mode="codeproof")
     image = call(["docker", "image", "inspect", args.image, "--format", "{{.Id}}"])
-    state = call([alaya, "root", TASK, source, "--data", data, "--agent", "mini-swe", "--image", image])
+    delivery = instruction_delivery(root, TASK, source / "INSTRUCTION.md")
+    state = call([alaya, "root", TASK, source, "--instruction-file", source / "INSTRUCTION.md",
+                  "--data", data, "--agent", "mini-swe", "--image", image])
     manifest = {"kind": "fresh_model_answer_pilot", "model": MODEL,
                 "benchmark": str(benchmark), "mode": "codeproof", "budget_seconds": args.seconds,
                 "image": image, "root": state, "task": TASK,
+                "instruction_delivery": delivery,
                 "vero_commit": call(["git", "-C", args.vero, "rev-parse", "HEAD"]),
                 "baseline_alaya_commit": call(["git", "-C", Path(__file__).resolve().parent, "rev-parse", "HEAD"]),
                 "cache_initially_empty": not (data / "cache").exists()}

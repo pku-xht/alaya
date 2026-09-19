@@ -7,6 +7,7 @@ the agent container; the reference implementation and grader stay outside.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shlex
@@ -21,9 +22,35 @@ def save(path, value):
     Path(path).write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def instruction_delivery(root, task, instruction):
+    """Record the exact UTF-8 task delivered by root --instruction-file.
+
+    Reading bytes avoids Python's newline conversion: the CLI reads the same file
+    verbatim. The original benchmark instruction remains unchanged.
+    """
+    raw = Path(instruction).read_bytes()
+    full_task = task + "\n\n" + raw.decode("utf-8")
+    (root / "delivered-task.txt").write_bytes(full_task.encode("utf-8"))
+    return {"method": "root --instruction-file", "instruction_file": "INSTRUCTION.md",
+            "instruction_sha256": hashlib.sha256(raw).hexdigest(),
+            "instruction_bytes": len(raw), "instruction_characters": len(raw.decode("utf-8")),
+            "delivered_task_sha256": hashlib.sha256(full_task.encode("utf-8")).hexdigest(),
+            "delivered_task_file": "delivered-task.txt"}
+
+
 def call(args, *, timeout=600):
-    p = subprocess.run([str(a) for a in args], capture_output=True, text=True,
-                       timeout=timeout, check=True)
+    try:
+        p = subprocess.run([str(a) for a in args], capture_output=True, text=True,
+                           timeout=timeout, check=True)
+    except subprocess.CalledProcessError as exc:
+        # Python's default exception text omits captured stderr, which otherwise
+        # makes a failed grader or snapshot impossible to diagnose afterward.
+        detail = exc.stderr or ""
+        for key in ("XMCP_API_KEY", "LLM_API_KEY"):
+            if os.environ.get(key):
+                detail = detail.replace(os.environ[key], "[REDACTED]")
+        exc.add_note("Captured stderr (credential values redacted):\n" + detail)
+        raise
     return p.stdout.strip()
 
 
@@ -120,12 +147,15 @@ def run(args):
             "Lean 4.29.1 is installed; call lake build to inspect feedback. "
             "Use the submit tool when finished. Network is disabled.")
     common = ["--data", data, "--agent", "mini-swe"]
-    state = call([alaya, "root", task, source, "--image", image, *common])
+    delivery = instruction_delivery(root, task, source / "INSTRUCTION.md")
+    state = call([alaya, "root", task, source, "--instruction-file", source / "INSTRUCTION.md",
+                  "--image", image, *common])
     record = {"kind": "fresh_model_smoke", "started_at": datetime.now(timezone.utc).isoformat(),
               "model": args.model, "benchmark": "primepy", "mode": "codeproof",
               "vero_commit": call(["git", "-C", args.vero, "rev-parse", "HEAD"]),
               "alaya_commit": call(["git", "-C", alaya.parent, "rev-parse", "HEAD"]),
               "image": image, "root": state, "steps": [],
+              "instruction_delivery": delivery,
               "step_limit": args.steps, "budget_seconds": args.seconds,
               "cache_initially_empty": not (data / "cache").exists()}
     save(root / "run.json", record)

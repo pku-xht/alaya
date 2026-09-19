@@ -1,0 +1,217 @@
+import Test.Framework
+import Alaya
+
+namespace OutputReadTests
+
+open Testing Alaya Alaya.Agent Alaya.Trajectory
+open Alaya.Agent.MiniSwe
+
+private def str (j : Lean.Json) (key : String) : String :=
+  (j.getObjVal? key >>= Lean.Json.getStr?).toOption.getD ""
+
+private def nat (j : Lean.Json) (key : String) : Nat :=
+  (j.getObjVal? key >>= Lean.Json.getNat?).toOption.getD 0
+
+private def arguments (ref : String) (offset limit : Nat) : Lean.Json :=
+  .mkObj [("ref", ref), ("offset", offset), ("limit", limit)]
+
+private def fullText : String :=
+  String.ofList (List.replicate 6000 '始') ++ "MID😀é\nexact middle" ++
+  String.ofList (List.replicate 16000 '终')
+
+private def rawLog (text : String) : Log :=
+  #[.observation "original" ({ output := text, exitCode? := some 0 } : Output).toJson]
+
+private def readCall (ref : String) (offset limit : Nat) : Chat.ToolCall :=
+  { id := "page", name := "read_output", arguments := arguments ref offset limit }
+
+private def bashCall : Chat.ToolCall :=
+  { id := "original", name := "bash", arguments := .mkObj [("command", "produce output")] }
+
+private def response (calls : Array Chat.ToolCall) : Chat.Response :=
+  { toolCalls := calls, finishReason? := some "tool_calls" }
+
+private def fixed (r : Chat.Response) : Model := {
+  identity := .mkObj [("model", "scripted-output-read")]
+  sample := fun _ => pure { next := pure r }
+}
+
+private def fakeExecutor (text : String := fullText) : Executor := {
+  exec := fun _ _ _ => pure { output := text, exitCode? := some 0 }
+  uname := pure { system := "Linux", release := "test", version := "test", machine := "test" }
+}
+
+private def getObservation (log : Log) (id : String) : TestM Lean.Json := do
+  match log.reverse.findSome? (fun | .observation i content => if i == id then some content else none | _ => none) with
+  | some content => pure content
+  | none => fail s!"missing observation {id}"
+
+def suite : Suite := Testing.suite "output-read" #[
+  test "preview reference recovers the omitted middle without changing raw JSON" do
+    let raw : Output := { output := fullText, exitCode? := some 0 }
+    let shown := observation raw
+    check ((shown.getObjVal? "truncated" >>= Lean.Json.getBool?).toOption == some true) "truncation marked"
+    check ((shown.getObjVal? "displayed_ranges").toOption ==
+      some (.arr #[.arr #[0, 5000], .arr #[((fullText.length - 5000 : Nat) : Lean.Json), (fullText.length : Lean.Json)]]))
+      "exact head and tail ranges"
+    let ref := str shown "output_ref"
+    assertEqual "content identity" ref (OutputRead.reference fullText)
+    let page := OutputRead.read (rawLog fullText) (arguments ref 6000 18)
+    assertEqual "exact middle" (str page "content") (String.ofList (fullText.toList.drop 6000 |>.take 18))
+    assertEqual "original JSON still full" (str raw.toJson "output") fullText
+    assertEqual "raw structured consumer" (Output.fromJson? raw.toJson) (some raw)
+    match view #[.observation "page" page] with
+    | #[.tool "page" (.str text)] => assertEqual "page is not reprocessed" text page.pretty
+    | _ => fail "expected unchanged page",
+
+  test "pages reach EOF exactly with Unicode and a very long single line" do
+    let text := String.join (List.replicate 7001 "😀中é") ++ "THE_END"
+    let log := rawLog text
+    let ref := OutputRead.reference text
+    let mut offset := 0
+    let mut joined := ""
+    let mut pages := 0
+    while offset < text.length do
+      let page := OutputRead.read log (arguments ref offset 997)
+      let content := str page "content"
+      check (!content.isEmpty && content.length <= 997) "each page makes bounded progress"
+      joined := joined ++ content
+      offset := nat page "end_offset"
+      pages := pages + 1
+      if offset < text.length then assertEqual "next offset" (nat page "next_offset") offset
+      else
+        check ((page.getObjVal? "next_offset").toOption == some .null) "terminal next offset is null"
+        assertEqual "EOF" (page.getObjVal? "eof" >>= Lean.Json.getBool?).toOption (some true)
+    assertEqual "all characters recovered" joined text
+    check (pages > 20) "multiple full pages"
+    let endPage := OutputRead.read log (arguments ref text.length 1)
+    assertEqual "reading at EOF" (str endPage "content") ""
+    assertEqual "at EOF flag" (endPage.getObjVal? "eof" >>= Lean.Json.getBool?).toOption (some true),
+
+  test "unknown reference historical lost output and invalid ranges are honest errors" do
+    let ref := OutputRead.reference fullText
+    let missing := OutputRead.read #[] (arguments ref 0 10)
+    check ((str missing "error").startsWith "Full output unavailable") "missing full text reported"
+    let legacy : Log := #[.observation "old" (.mkObj [("output_head", "head"), ("output_tail", "tail"), ("elided_chars", 9000)])]
+    let lost := OutputRead.read legacy (arguments ref 0 10)
+    check (!(str lost "error").isEmpty) "cannot fabricate lost historical middle"
+    for args in #[arguments ref 0 0, arguments ref 0 10001, arguments ref (fullText.length + 1) 1,
+      .mkObj [("ref", ref), ("offset", (-1 : Int)), ("limit", 3)]] do
+      let page := OutputRead.read (rawLog fullText) args
+      check (!(str page "error").isEmpty) "bad request is explicit"
+      check (!(page.getObjVal? "content").isOk) "no fabricated page",
+
+  test "short and exact-limit outputs stay complete while MiniAsk accepts read_output alone" do
+    for text in #["", "short 😀\n", String.ofList (List.replicate 10000 'x')] do
+      let shown := observation { output := text, exitCode? := some 0 }
+      assertEqual "complete output" (str shown "output") text
+      check (!(shown.getObjVal? "output_ref").isOk) "no unnecessary output reference"
+    let c := readCall (OutputRead.reference fullText) 6000 10
+    match MiniAsk.parse (response #[c]) with
+    | .ordinary #[.readOutput "page"] => pure ()
+    | _ => fail "read_output should be accepted by mini-ask"
+    match MiniAsk.next { task := "t" } #[.response (response #[c])] with
+    | .act call => assertEqual "next read" call.name "read_output"
+    | _ => fail "read_output should act",
+
+  test "the reference loop supplies retained output to a later read without a store" do
+    let samples ← IO.mkRef 0
+    let ref := OutputRead.reference fullText
+    let replies := #[response #[bashCall], response #[readCall ref 6000 10],
+      response #[{ id := "done", name := "submit", arguments := .mkObj [("message", "done")] }]]
+    let sample : Dialogue -> Result Chat.Response := fun _ => do
+      let i ← Result.fromIO Error.storage (samples.modifyGet fun n => (n, n + 1))
+      pure replies[i]!
+    let (log, _) ← assertOk <| Agent.run (agent fakeExecutor { task := "t" })
+      { dir := ← scratch } sample #[]
+    assertEqual "reference loop page" (str (← getObservation log "page") "content")
+      (String.ofList (fullText.toList.drop 6000 |>.take 10)),
+
+  test "fork and resume reopen CAS with the identical output after deleting execution files" do
+    let base ← scratch
+    let project := base / "project"
+    let work := base / "work"
+    IO.FS.createDirAll project
+    IO.FS.createDirAll work
+    let store ← assertOk <| Cas.Store.create (base / "store")
+    let rt : Runtime := {
+      store, workDir := work, executor := fakeExecutor,
+      agent := agent fakeExecutor { task := "t" }, model := fixed (response #[bashCall]) }
+    let root ← assertOk <| createRoot store #[] project
+    let original ← assertOk <| stepOnce rt "original" root
+    let originalLog ← assertOk <| logOf store original
+    let ref := str (observation ((Output.fromJson? (← getObservation originalLog "original")).get!)) "output_ref"
+    IO.FS.removeDirAll work
+    let reopened ← assertOk <| Cas.Store.create (base / "store")
+    let _ ← assertOk reopened.gc
+    let reading : Runtime := { rt with store := reopened, model := fixed (response #[readCall ref 6000 10]) }
+    let left ← assertOk <| stepOnce reading "left" original
+    let right ← assertOk <| stepOnce reading "right" original
+    check (left != right) "two fork children"
+    for branch in #[left, right] do
+      assertEqual "page on fork" (str (← getObservation (← assertOk <| logOf reopened branch) "page") "content")
+        (String.ofList (fullText.toList.drop 6000 |>.take 10))
+    let finishing : Runtime := { reading with model := fixed (response #[{
+      id := "done", name := "submit", arguments := .mkObj [("message", "finished")] }]) }
+    let ended ← assertOk <| resume finishing "resume" right (fun _ => pure ())
+    assertEqual "resumed outcome" ((← assertOk (getState reopened ended)).outcome?.map (·.status)) (some "Submitted"),
+
+  test "failed state persistence never sends a preview claiming recoverable output" do
+    let base ← scratch
+    let project := base / "project"
+    let work := base / "work"
+    IO.FS.createDirAll project
+    IO.FS.createDirAll work
+    let store ← assertOk <| Cas.Store.create (base / "store")
+    let root ← assertOk <| createRoot store #[] project
+    let calls ← IO.mkRef 0
+    let model : Model := { identity := .null, sample := fun request => do
+      Result.fromIO Error.storage <| calls.modify (· + 1)
+      if !request.messages.isEmpty then throw <| .protocol "unexpected later preview"
+      pure { next := pure (response #[bashCall]) } }
+    let breakingExecutor : Executor := { fakeExecutor with exec := fun _ _ _ => do
+      IO.FS.removeDirAll (store.root / "tmp")
+      IO.FS.writeFile (store.root / "tmp") "block writes after command execution"
+      pure { output := fullText, exitCode? := some 0 } }
+    let rt : Runtime := {
+      store, workDir := work, executor := breakingExecutor,
+      agent := agent breakingExecutor { task := "t" }, model }
+    assertError "persistence failure" (resume rt "failure" root (fun _ => pure ()))
+      (fun | .storage _ => true | _ => false)
+    assertEqual "only pre-execution request" (← calls.get) 1
+    assertEqual "no output state published" (← assertOk <| allStates store) #[root],
+
+  test "new tool schema separates cache keys and read-only replay never calls a provider" do
+    let calls ← IO.mkRef 0
+    let source : Model := {
+      identity := .mkObj [("model", "cache-policy-test")]
+      sample := fun _ => do
+        Result.fromIO Error.cache <| calls.modify (· + 1)
+        pure { next := pure { content? := some "cached" } } }
+    let directory := (← scratch) / "cache"
+    let oldRequest : Chat.Request := {
+      messages := view (rawLog "short output"), tools := #[bashTool, submitTool] }
+    let recording ← assertOk <| Cache.persistent source { directory }
+    let first ← assertOk <| do (← recording.sample oldRequest).next
+    assertEqual "recorded result" first.content? (some "cached")
+    let replay ← assertOk <| Cache.persistent source { directory, readOnly := true }
+    let cached ← assertOk <| do (← replay.sample oldRequest).next
+    assertEqual "same old request hits" cached.content? (some "cached")
+    assertError "new schema must not impersonate old request"
+      (do (← replay.sample { oldRequest with tools }).next)
+      (fun | .cache _ => true | _ => false)
+    assertEqual "no read-only provider calls" (← calls.get) 1,
+
+  test "missing or corrupt state blocks recovery explicitly" do
+    let base ← scratch
+    let project := base / "project"
+    IO.FS.createDirAll project
+    let store ← assertOk <| Cas.Store.create (base / "store")
+    let root ← assertOk <| createRoot store (rawLog fullText) project
+    IO.FS.writeFile (store.blobFile root) "corrupt"
+    assertError "corrupt state" (logOf store root) (fun | .storage _ => true | _ => false)
+    IO.FS.removeFile (store.blobFile root)
+    assertError "missing state" (logOf store root) (fun | .storage _ => true | _ => false)
+]
+
+end OutputReadTests

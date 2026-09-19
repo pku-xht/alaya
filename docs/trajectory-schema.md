@@ -6,8 +6,9 @@ something you can branch, replay, evaluate, intervene in, and read back.
 
 The trajectory is the same for every agent. Wherever an agent's prompts, tools, or view matter —
 creating a root, taking a turn, rendering what the model was sent — the command line names the
-agent with `--agent`; `mini-swe` (`docs/miniswe.md`) is the one available today, and the
-examples below use it. Everything else — evaluating, intervening, replying, inspecting — is
+agent with `--agent`; the examples below use `mini-swe` ([design](miniswe.md)). `mini-ask`
+adds the question protocol described in [vero-experiment.md](vero-experiment.md).
+Everything else — evaluating, intervening, replying, inspecting — is
 agent-independent and takes no such flag.
 
 ## 1. States
@@ -23,6 +24,12 @@ echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names i
 
 alaya show adbac1          # the state: kind, parent, workspace hash, note, image, then its log
 ```
+
+When a task specification is in a UTF-8 file, add `--instruction-file ./project/INSTRUCTION.md`
+to `root`. The CLI reads this host path and appends the entire file to `TASK` before creating
+the opening log. The first request therefore includes the specification without a tool-output
+preview. The flag is optional; existing roots and task construction without the flag are
+unchanged. See [complete task delivery](output-recovery.md#complete-task-delivery).
 
 ### The state object
 
@@ -466,6 +473,14 @@ abandoned branch's files.
 `Store.gc` deletes every blob unreachable from a ref. `rm HASH` deletes a subtree by dropping its
 `state.` refs, re-pinning `workspace.` refs from the survivors, and collecting.
 
+MiniSwe's recoverable output references do not introduce another blob kind or another ref.
+The complete executor output already resides in the observation inside its state object.
+`read_output` searches the reconstructed current log by the output's SHA-256 digest. An
+ancestor observation remains available when a branch is forked or resumed, including after
+the execution container is recreated. A sibling branch's observations and an evaluation's
+private checkout are not part of that log. Keeping only `work/` or a model-cache directory is
+not enough to preserve a run; retain the trajectory store. See [output recovery](output-recovery.md).
+
 *What is on disk: the data directory, and how state and tree objects reference each other in the content-addressed store.*
 
 ```mermaid
@@ -569,6 +584,12 @@ where a **call** is `{"id", "name", "arguments": <json>, "invalid_arguments": st
 dialogue sent back to the model is byte-identical to what it produced. An observation's
 `content` is whatever the agent's `act` returned; the trajectory never reads it.
 
+For MiniSwe, an executor observation retains the complete decoded `output` string even when
+the view shows a bounded preview. Recovery-page observations instead contain `content`,
+`output_ref`, character offsets, and an end-of-output indicator. These are ordinary JSON
+observations under the existing version-1 schema; no historical state or cache entry is
+migrated or rewritten.
+
 `alaya show HASH` prints a state's fields and its full log in a readable form; with `--view` and an
 agent it also prints the dialogue that agent's view makes of the log, which is what the model is
 sent from that state:
@@ -601,6 +622,13 @@ request, so anything that changes what the model is sent — the view, the tool 
 identity including options such as reasoning echo — changes the key, and a forest recorded under
 one will not replay under another.
 
+In particular, adding `read_output` changes the tool list, and recoverable long-output previews
+change the view. New requests therefore intentionally use different cache keys. The archived
+demonstration's `example/ReplayCached.lean` retains the original two-tool list and original view
+for replaying its recorded requests; it is a compatibility fixture, not the current agent's
+presentation policy. A read-only cache miss is still an error and never falls through to a
+provider request.
+
 ```
 $ ls .alaya/cache/v1 | head -2
 1180723829451067366.json
@@ -613,8 +641,10 @@ an entry is only ever appended to.
 ## 8. Commands
 
 ```
-alaya root TASK PROJECT --agent A [--image IMAGE]      create a root from a project directory
-alaya root TASK --agent A --image IMAGE --path PATH    …or from a path inside the image
+alaya root TASK PROJECT --agent A [--image IMAGE] [--instruction-file FILE]
+                                                     create a root from a project directory
+alaya root TASK --agent A --image IMAGE --path PATH [--instruction-file FILE]
+                                                     …or from a path inside the image
 alaya resume HASH --agent A --model P:M                grow one continuation until it ends or asks
 alaya step   HASH --agent A --model P:M                advance exactly one turn
 alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a checkout; record the verdict
@@ -631,8 +661,9 @@ alaya rm HASH                                    delete a subtree and reclaim bl
 ```
 
 Every command takes `--data D` and `--json` where it prints states. `--agent A` names the agent
-where its prompts, tools, or view matter; `mini-swe` is the one available. `root` takes `--image`,
-`--container-user`, and `--network`; `resume` and `step` take `--model`,
+where its prompts, tools, or view matter; `mini-swe` and `mini-ask` are available. `root` takes `--image`,
+`--container-user`, `--network`, and the optional host UTF-8 `--instruction-file`;
+`resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
 takes `--timeout` (default 900 s) for the grader and `--force`. The image is resolved to a digest at `root`
 and recorded; `resume` uses it and refuses an `--image` that resolves to anything else.
@@ -655,3 +686,5 @@ need separate data directories: the work directory and the cache are not shared 
   after the grader ran, and nothing continues from it.
 - A waiting state grows only by `reply`.
 - The trajectory reads no observation's content and knows no tool's name.
+- Before each act, the driver supplies the full current log in `Workspace.log`; the agent
+  decides whether and how to use it. Recovery does not make evaluation leaves resumable.

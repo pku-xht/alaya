@@ -60,6 +60,37 @@ def argsSuite : Suite := suite "cli.args" #[
       | _ => false
     assertError "empty" ((parse ["--model"]).require "model" "hint") fun
       | .configuration m => m.startsWith "--model needs a value"
+      | _ => false,
+
+  test "full instruction middle reaches the first serialized model request" do
+    let path := (← scratch) / "INSTRUCTION.md"
+    let instructions := String.ofList (List.replicate 6500 '界') ++
+      "\nDONE: implement every API and prove every fixed specification.\n" ++
+      String.ofList (List.replicate 6500 '🦉') ++ "\n"
+    IO.FS.writeFile path instructions
+    let task ← assertOk ((parse ["--instruction-file", path.toString]).taskWithInstructions "solve")
+    assertEqual "verbatim file and trailing newline" task ("solve\n\n" ++ instructions)
+    let log := Agent.MiniSwe.initialLog { task } { system := "Linux", release := "test", version := "test", machine := "test" }
+    let request : Chat.Request := { messages := Agent.MiniSwe.view log, tools := Agent.MiniSwe.tools }
+    let json := request.toJson .native
+    let .ok messages := json.getObjValAs? (Array Lean.Json) "messages"
+      | fail "serialized request is missing messages"
+    let .ok content := messages[1]!.getObjValAs? String "content"
+      | fail "serialized request is missing initial task"
+    check ((content.splitOn instructions).length == 2) "complete file must occur once in first model input",
+
+  test "instruction file failures are explicit and absent flag preserves task" do
+    assertEqual "legacy task" (← assertOk ((parse []).taskWithInstructions "old task")) "old task"
+    assertError "missing value" ((parse ["--instruction-file"]).taskWithInstructions "task") fun
+      | .configuration _ => true
+      | _ => false
+    let path := (← scratch) / "missing"
+    assertError "missing file" ((parse ["--instruction-file", path.toString]).taskWithInstructions "task") fun
+      | .configuration _ => true
+      | _ => false
+    IO.FS.writeBinFile path ⟨#[255, 254]⟩
+    assertError "invalid UTF-8" ((parse ["--instruction-file", path.toString]).taskWithInstructions "task") fun
+      | .configuration m => m == "--instruction-file must contain valid UTF-8"
       | _ => false
 ]
 

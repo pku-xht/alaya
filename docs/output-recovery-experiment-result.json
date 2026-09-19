@@ -1,0 +1,767 @@
+{
+  "runs": {
+    "old-smoke": {
+      "model": "xmcp:closeai/gpt-5.4-mini",
+      "mode": "codeproof",
+      "vero_commit": "0a7325df9e9e6dbc275c0ad483b3d1cbe38d9b09",
+      "image": "sha256:89a18a67a744e17f2cbf2304cdcaa3a57daa3c3bfe3d6cad3a0cf2654a1df7c0",
+      "instruction_sha256": "0f9705968bc0b9dbb91615f1764c44fb8ba7e2a29fa3ed29087e738291a07ba0",
+      "capture": {
+        "request_count": 6,
+        "response_count": 6,
+        "full_instruction_in_first_request": false,
+        "done_condition_seen_in_any_request": false,
+        "unique_truncated_results_sent": 2,
+        "provider_reported_models": [
+          "closeai/gpt-5.4-mini"
+        ],
+        "provider_cost_fields": [],
+        "failed_transport_exchanges": [],
+        "provider_error_responses": 0,
+        "cost_status": "unavailable: provider responses contain no numeric cost/price/fee fields",
+        "request_hashes": [
+          "4ff524dfdfa02e7aaeabf88a75395883d11472640a2ee702cc3472d4c651bec0",
+          "fc3980d83ed37405a843896abef1ac5d456d58b5529f31467ddb7eae1f21f952",
+          "c716aa5b5430de40affa32d3fac6a2d8cd43dcb006fa49bdd8afb8cba92d1422",
+          "b844fe711af985ccc20ea7e280e76d36fae04dc07fda1acd9d07d57a69d07353",
+          "70465f695d51763d6d335600bc8e156212b11361b0c705994e369eb482ec3e47",
+          "0009895e3ba9456ff4fc7983fea8b293e83bb1c5b7badb18726bfc43670291a5"
+        ],
+        "response_hashes": [
+          "eff071ecc3dee9ad2df82609937b9f0930aafc8056fb29bea09791545f481224",
+          "17380a67daddc260bb97fbeb4c80c86db8c5a3d112ab2f03bc8f5bf2e037ad94",
+          "31bf6df5b7bd3c038cab8363259cd47dcc3862fbc72ba1ceb39cb5c41fa2a4fb",
+          "315489f129febe2f67acdd6a249b3ff84e7b64ae2384809d2d5638709ac539b4",
+          "bd4d4a7a5ae321ee9e717918001699a82e962d668852ef0345fdc19480d88a71",
+          "0946e2703d9170ca118240a3e97aeec73887f296578b299d698ac6111ec9ef2d"
+        ],
+        "provider_usage": {
+          "prompt_tokens": 56415,
+          "completion_tokens": 2675,
+          "total_tokens": 59090
+        },
+        "persisted_request_count": 6,
+        "incomplete_exchange_count": 0,
+        "unknown_usage_exchange_count": 0,
+        "cache_requests_verified_against_actual_payloads": 6
+      },
+      "runs": {
+        "smoke": {
+          "turns": 6,
+          "seconds": 62.075,
+          "budget_seconds": 1800,
+          "stop_reason": "step_limit",
+          "early_submit": false,
+          "usage": {
+            "input": 56415,
+            "output": 2675,
+            "total": 59090
+          },
+          "score": {
+            "passed": 0,
+            "total": 9
+          },
+          "final_build_ok": false,
+          "impl_broken": true,
+          "filled_code_slots": 7,
+          "filled_proof_slots": 0,
+          "changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "segment_changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "proof_files_changed": [],
+          "long_output_events": 2,
+          "reread_calls": 0,
+          "reread_results": [],
+          "compile_commands": 2,
+          "failed_compile_commands": 2,
+          "compile_execution_errors": 0,
+          "grading_seconds": 1.59,
+          "grader_execution_seconds": 1.59
+        }
+      },
+      "unique_solver_usage_including_question": {
+        "input": 56415,
+        "output": 2675,
+        "total": 59090
+      },
+      "unique_solver_responses_including_question": 6,
+      "generation_seconds": 62.075,
+      "grading_seconds": 1.59,
+      "total_tokens_including_simulation": 59090,
+      "token_total_basis": "known committed solver responses and recorded simulation; captured provider usage reported separately",
+      "known_captured_provider_tokens_including_simulation": 59090
+    },
+    "new-smoke": {
+      "model": "xmcp:closeai/gpt-5.4-mini",
+      "mode": "codeproof",
+      "vero_commit": "0a7325df9e9e6dbc275c0ad483b3d1cbe38d9b09",
+      "image": "sha256:89a18a67a744e17f2cbf2304cdcaa3a57daa3c3bfe3d6cad3a0cf2654a1df7c0",
+      "instruction_sha256": "0f9705968bc0b9dbb91615f1764c44fb8ba7e2a29fa3ed29087e738291a07ba0",
+      "capture": {
+        "request_count": 6,
+        "response_count": 6,
+        "full_instruction_in_first_request": true,
+        "done_condition_seen_in_any_request": true,
+        "unique_truncated_results_sent": 3,
+        "provider_reported_models": [
+          "closeai/gpt-5.4-mini"
+        ],
+        "provider_cost_fields": [],
+        "failed_transport_exchanges": [],
+        "provider_error_responses": 0,
+        "cost_status": "unavailable: provider responses contain no numeric cost/price/fee fields",
+        "request_hashes": [
+          "c3b435980896c4ef6919a9fe9f69f81e04b69f1bb2821522281f9be71c9b5d9c",
+          "e5619fc39ee7f283c3dda08c0a44e926b1ae017e1ea1cf6b2dd4d986497f5ba9",
+          "eaa852710135487e7fdbb84552faced28396c6b4d849e293bb50bd703b96b3f4",
+          "d51b74153fddfaaf391e5556247d074c01842b8b2a7eb726676c28a5d7c208ec",
+          "57946e15d740149e09e2fce2368113597f8c2898c0733aef2cc2ac8c8c3db067",
+          "0abbe527c12d21756f1851a56f277fa9d2cce7f89d769c20301768ea11a1158f"
+        ],
+        "response_hashes": [
+          "35f9b058b8c3d3bc4d4120f72c1682209c6f50efc40683c77c9e61f2ab9eb82d",
+          "54579c50571d1e7cb26a6f038a4059aff0aaa09172bd0e9b720218eeb52312fb",
+          "36c95c93e70ad43fed62c6cfb37178a5aa0fa8bb6b3545ce2987d96292171624",
+          "f53fa39b6a1009aea640ddcfb8b46f7c1a5363433e7d8a4157702fe8bd863948",
+          "af6692dafc77fb180524382b4c5ed660fae73088a38be0b5504c41719a64250c",
+          "bdc870bec64c7243eb32b9a03b505daaf2c34156610731a5af55bd4bc851e4b6"
+        ],
+        "provider_usage": {
+          "prompt_tokens": 78501,
+          "completion_tokens": 3879,
+          "total_tokens": 82380
+        },
+        "persisted_request_count": 6,
+        "incomplete_exchange_count": 0,
+        "unknown_usage_exchange_count": 0,
+        "cache_requests_verified_against_actual_payloads": 6
+      },
+      "runs": {
+        "smoke": {
+          "turns": 6,
+          "seconds": 81.074,
+          "budget_seconds": 1800,
+          "stop_reason": "step_limit",
+          "early_submit": false,
+          "usage": {
+            "input": 78501,
+            "output": 3879,
+            "total": 82380
+          },
+          "score": {
+            "passed": 0,
+            "total": 9
+          },
+          "final_build_ok": false,
+          "impl_broken": true,
+          "filled_code_slots": 7,
+          "filled_proof_slots": 0,
+          "changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "segment_changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "proof_files_changed": [],
+          "long_output_events": 3,
+          "reread_calls": 0,
+          "reread_results": [],
+          "compile_commands": 4,
+          "failed_compile_commands": 4,
+          "compile_execution_errors": 0,
+          "grading_seconds": 5.992,
+          "grader_execution_seconds": 5.992
+        }
+      },
+      "unique_solver_usage_including_question": {
+        "input": 78501,
+        "output": 3879,
+        "total": 82380
+      },
+      "unique_solver_responses_including_question": 6,
+      "generation_seconds": 81.074,
+      "grading_seconds": 5.992,
+      "total_tokens_including_simulation": 82380,
+      "token_total_basis": "known committed solver responses and recorded simulation; captured provider usage reported separately",
+      "known_captured_provider_tokens_including_simulation": 82380
+    },
+    "old-pilot": {
+      "model": "xmcp:closeai/gpt-5.4-mini",
+      "mode": "codeproof",
+      "vero_commit": "0a7325df9e9e6dbc275c0ad483b3d1cbe38d9b09",
+      "image": "sha256:89a18a67a744e17f2cbf2304cdcaa3a57daa3c3bfe3d6cad3a0cf2654a1df7c0",
+      "instruction_sha256": "0f9705968bc0b9dbb91615f1764c44fb8ba7e2a29fa3ed29087e738291a07ba0",
+      "capture": {
+        "request_count": 26,
+        "response_count": 25,
+        "full_instruction_in_first_request": false,
+        "done_condition_seen_in_any_request": false,
+        "unique_truncated_results_sent": 4,
+        "provider_reported_models": [
+          "closeai/gpt-5.4-mini"
+        ],
+        "provider_cost_fields": [],
+        "failed_transport_exchanges": [
+          {
+            "curl_exit_code": 28,
+            "seconds": 565.077229106002
+          }
+        ],
+        "provider_error_responses": 0,
+        "cost_status": "unavailable: provider responses contain no numeric cost/price/fee fields",
+        "request_hashes": [
+          "a884ded676b32e05f2416fdc657e3e7ad4530390791af878182683b7c592b96e",
+          "8599e587bfb51bf7e6f9fd71e5097716708e4d1d7ff0e4c2417ca64cb685c357",
+          "8599e587bfb51bf7e6f9fd71e5097716708e4d1d7ff0e4c2417ca64cb685c357",
+          "06a40b406080831851f5b7897796e9023a5416d6f1b22502660127555c3a22a5",
+          "bf469f9fb47847bbac99236aa058314d8a169b2f0762b1e04027a7f703e85e8f",
+          "5b6619e0a7fa3b83e7726ecb9e3b5f3e67a9becf808b3b523d3d7a107d7dcaff",
+          "e22d9acad8672a9eaf21a15623afc9fe450f686f4e7decc519dd9fc3d05f6e3e",
+          "b6f8e8ec8ac1317b08e62c346d46641a1b15b284fb37afc8b5038214b6f434a4",
+          "875bf440dd25cbe9c4db436224c06461803b0a683c217c2153c5d661e3db830a",
+          "9b77f12960492eed5e0d135fc12d34884ef8fbf32fceb9f833dfa349b63c7a53",
+          "45b80ab6f07ac3ef47bb2a5ef15b266515dbe196aa278a5f5e1206f25274283c",
+          "a0870697d5e0ae9662a8a1fed000f3954b1404e525fa5f64d285f166dc48b98c",
+          "b26d96f2aea31f6a968a6d025d83d9fe73f0059cacb453586c3a335f345e1eab",
+          "5fa93d67e2dcd58c1319b8be63dbe411728b67ebee6c7d0ec2202ed101ec8fcc",
+          "c389ed80019f3af0df6e5d582a4b403f45fe25544d471a787a28ef4227e9478e",
+          "75ab1b7f3612f47d413f144a2901a0c016fa287a65ce6280cdf9ca0cf5b056c7",
+          "035c4b1a35979161c49f3fb95933d6997381ccd19bcc2c64824d3481120b2477",
+          "a62173132069807aad7bdeca84a3cc83dcace40a5309cb8a1043780f695c212c",
+          "7560ffd8ba8fafa88ae9baf9c20dceba3f14706b57b212c67d9f9d3b95752035",
+          "e7827b0c90127007973134750d9b3173e9863d1799a32e41f058f0e1cb06080e",
+          "fd6181ac42cbca386ffd32aa524e8ccc72c07cd8d07110203505d3a459be05a9",
+          "26ac8889f7ccb79050bd7b0a251f14a390f0ca83276e9c1bf041c9ab674afaf8",
+          "a36445021e0316f7d2e16241002f9218fbc73092c11b684c58f2064015401d96",
+          "ed3f4cf2db2b105721bb556f5b849c70956be902d3d81b70cce05f3e23583068",
+          "d1871503772dca981c6556855d8f94b3f7bd5f1d52f01cef0e5f52d00be51e2e",
+          "86585d1deea42cae8f7a6af215cfa3155f48ff870558cb31b58a6ff99248fa8d"
+        ],
+        "response_hashes": [
+          "08f2ced0d4fb5b18d3a46c42d2cd296ec37b643556a369a9a378f2d905196e13",
+          null,
+          "a138296e0c2d7700b7d5a756727af2907c95407cd9d1068c213c3d2f2cd413c2",
+          "e0c3db8b4ad58754ee5f3a7f5eaff6d33f70fdbc4d3631737c5d85476b677b42",
+          "36965f96b172cabd3cecacc31702f1e8b131c9aa87fed015c7f295682f904e19",
+          "84e8f821779d46634677ff9ad2b4f8e1f42d81c391b50558fc9dea7f15d53769",
+          "0e026683d50419d2b15db2f2cf9d90346eaec9074a4d80b7ad7f0b360c7da1af",
+          "50e8b3be835e2d21e0e33bb7016ee24506e66a86c47f21a1c8c106b7addb9c21",
+          "3e2fecdbce78a76fff75f4ea1c668536a6cfa7e5cfc9c1a8fc0e6018e926a1b8",
+          "3c78282c2b6d8841a72f6d6e810ef6142e165ee1c945859d5a4285d9393cc1d8",
+          "c87cdddf2ed4172f49e36f597d19801178ab2cb80dc02226d723389fdadf4db9",
+          "bb2d7195acdd08b3dd93132085dbc7185006cbfb121eddcd422970f8d64c9973",
+          "24df920103c24f102dbd0f5e876272acffc3c1c8acd70672351bf5768de6c1b9",
+          "94e58b4f098e51a2bb6f517d4588c90432327efa554961e5c5c89b1a3babe393",
+          "a20fbe310939fa24b223137e1a3db424dfd7279d3f93c34de21321b08a1fff52",
+          "871135d44b7a3a65c4d943371ed5e43548dbe0ce4a5b9f32a0613ff1ae9bee14",
+          "6b73d3dc0d777d7f29f473b8b5916178353c9c248c135034bc763e152da07cc2",
+          "dff0787ec14b12bf41b7a938d377af9a9842d82ecdf3a5d2a952402816e0ee83",
+          "c1cfb03e3bf38e0b882d44889d8dba7ce50a1e69ca8b4e4e1eec1dc2554826aa",
+          "c51694442c8f6469a88f937d189b7db5560a02b6e8475dac1ed1c398e4c05fb6",
+          "4effbef871a6c0164e7d81e7d4d1a6707c6cc9b85dc8cfc7cc180e2c8d0a5a45",
+          "eaed46a718087933adf4a029a33c30e7acf2ba2788942735a4f210fbe6ae99e1",
+          "49d568bd9fe68248eb84f80ede19733725eec5afab84d0ea911f27630997fce5",
+          "03e5d1728646f7fa64dbb5e075fca1adcd2a9c7f03ebf4fa37d7b88d73d2df1b",
+          "75734614a989efab29cc20d7a978cd36ee6b3caca3a5c9362044790bcce7215a",
+          "fb10f2c81eb8d3263003379985ebc26fbb0f34902add7b47b9160cf252b1b1cf"
+        ],
+        "provider_usage": {
+          "prompt_tokens": 526978,
+          "completion_tokens": 9114,
+          "total_tokens": 536092
+        },
+        "persisted_request_count": 26,
+        "incomplete_exchange_count": 0,
+        "unknown_usage_exchange_count": 1,
+        "cache_requests_verified_against_actual_payloads": 25
+      },
+      "runs": {
+        "baseline": {
+          "turns": 14,
+          "seconds": 642.38,
+          "budget_seconds": 1800,
+          "stop_reason": "Submitted",
+          "early_submit": true,
+          "usage": {
+            "input": 213182,
+            "output": 5462,
+            "total": 218644
+          },
+          "score": {
+            "passed": 0,
+            "total": 9
+          },
+          "final_build_ok": false,
+          "impl_broken": true,
+          "filled_code_slots": 7,
+          "filled_proof_slots": 0,
+          "changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "segment_changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "proof_files_changed": [],
+          "long_output_events": 3,
+          "reread_calls": 0,
+          "reread_results": [],
+          "compile_commands": 5,
+          "failed_compile_commands": 5,
+          "compile_execution_errors": 0,
+          "grading_seconds": 6.785,
+          "grader_execution_seconds": 6.612
+        },
+        "control": {
+          "turns": 4,
+          "seconds": 19.243,
+          "budget_seconds": 1152.285,
+          "stop_reason": "Submitted",
+          "early_submit": true,
+          "usage": {
+            "input": 112271,
+            "output": 1176,
+            "total": 113447
+          },
+          "score": {
+            "passed": 0,
+            "total": 9
+          },
+          "final_build_ok": false,
+          "impl_broken": true,
+          "filled_code_slots": 7,
+          "filled_proof_slots": 0,
+          "changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "segment_changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "proof_files_changed": [],
+          "long_output_events": 1,
+          "reread_calls": 0,
+          "reread_results": [],
+          "compile_commands": 1,
+          "failed_compile_commands": 1,
+          "compile_execution_errors": 0,
+          "grading_seconds": 1.39,
+          "grader_execution_seconds": 1.227
+        },
+        "simulated": {
+          "turns": 6,
+          "seconds": 29.926,
+          "budget_seconds": 1152.285,
+          "stop_reason": "Submitted",
+          "early_submit": true,
+          "usage": {
+            "input": 175514,
+            "output": 2341,
+            "total": 177855
+          },
+          "score": {
+            "passed": 0,
+            "total": 9
+          },
+          "final_build_ok": false,
+          "impl_broken": true,
+          "filled_code_slots": 7,
+          "filled_proof_slots": 0,
+          "changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "segment_changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "proof_files_changed": [],
+          "long_output_events": 0,
+          "reread_calls": 0,
+          "reread_results": [],
+          "compile_commands": 2,
+          "failed_compile_commands": 2,
+          "compile_execution_errors": 0,
+          "grading_seconds": 3.443,
+          "grader_execution_seconds": 3.219
+        }
+      },
+      "unique_solver_usage_including_question": {
+        "input": 526978,
+        "output": 9114,
+        "total": 536092
+      },
+      "unique_solver_responses_including_question": 25,
+      "generation_seconds": 699.977,
+      "grading_seconds": 11.618,
+      "simulation": {
+        "kind": "same_model_simulated_human",
+        "human_participant": false,
+        "seconds": 4.983,
+        "usage": {
+          "completion_tokens": 540,
+          "prompt_tokens": 13929,
+          "total_tokens": 14469,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 6,
+            "engine_ttft_ms": 346,
+            "engine_ttlt_ms": 3533,
+            "pre_inference_ms": 123,
+            "service_tbt_ms": 6,
+            "service_ttft_ms": 917,
+            "service_ttlt_ms": 4100,
+            "user_visible_ttft_ms": 794
+          }
+        },
+        "reported_model": "closeai/gpt-5.4-mini",
+        "provider_cost_fields": {}
+      },
+      "question_seconds": 3.445,
+      "question_usage": {
+        "input": 26011,
+        "output": 135,
+        "total": 26146
+      },
+      "common_prefix_seconds": 639.287,
+      "comparison_budget_seconds": 1152.285,
+      "total_tokens_including_simulation": 550561,
+      "token_total_basis": "known committed solver responses and recorded simulation; captured provider usage reported separately",
+      "known_captured_provider_tokens_including_simulation": 550561,
+      "binary_sha256": {
+        "alaya-baseline": "6f2e4769896ab3b3837b141c24369c5c64fb5fa50ae4e2353dea4fb09756b05e",
+        "alaya-ask": "6f2e4769896ab3b3837b141c24369c5c64fb5fa50ae4e2353dea4fb09756b05e"
+      }
+    },
+    "new-pilot": {
+      "model": "xmcp:closeai/gpt-5.4-mini",
+      "mode": "codeproof",
+      "vero_commit": "0a7325df9e9e6dbc275c0ad483b3d1cbe38d9b09",
+      "image": "sha256:89a18a67a744e17f2cbf2304cdcaa3a57daa3c3bfe3d6cad3a0cf2654a1df7c0",
+      "instruction_sha256": "0f9705968bc0b9dbb91615f1764c44fb8ba7e2a29fa3ed29087e738291a07ba0",
+      "capture": {
+        "request_count": 20,
+        "response_count": 20,
+        "full_instruction_in_first_request": true,
+        "done_condition_seen_in_any_request": true,
+        "unique_truncated_results_sent": 3,
+        "provider_reported_models": [
+          "closeai/gpt-5.4-mini"
+        ],
+        "provider_cost_fields": [],
+        "failed_transport_exchanges": [],
+        "provider_error_responses": 0,
+        "cost_status": "unavailable: provider responses contain no numeric cost/price/fee fields",
+        "request_hashes": [
+          "5356e635a135e805fe4a20a9d7563ee5dfe9a197686de53dcb7f2a6a73f71faf",
+          "db65d8b158d48f03b1d5e5586f4e9b491537bd3d2c73cc1ac4341f36f18ca63c",
+          "fd65910bcdd3805fbffdbcdbde04252128e4d16a4289e5c2d31b3ff086b68db2",
+          "6ecbdd21d73e68b3f0450a370945b4eeb53c52424ec02bdf61177fc92ef564ed",
+          "6655522c6e69fd914e440136032173deb6e57362c604358b7082b1533ef82eff",
+          "79959a2bb3bbc4fecc693a19694c004aeed32284b1cd4031bfa126a583e0690f",
+          "4734350f1ddfe0e01457eacc2414677615214db67458773f4638df9167424bc3",
+          "2af5bf407d674eb64dfe8dd1cb225eb33c41c07486a7a41c5f55bbdea5af7161",
+          "5bf514d0174fc10ee9c2149c441b15e3978ad993b931bb98b1ae71d469747fb7",
+          "7ec376e87a5639c0e9ba78c532642072ece69b1526f6947a3d36470ac6656210",
+          "61d3911e3f86def01952ada8ca3dca8b01f58f9740027bcda22520b6833daa72",
+          "36767d876cb910524a4c83807cf44a809dab4b205e53c230e4262a5caaf0c83e",
+          "a5e0ec46c535d5b6acf9c79cfe56f0754b5dd5adfbf59c9ad81406be66b0bb34",
+          "77a4f880d5aa3ca73d9ce3668230860ee07764b831a343e4e7305423e9c85034",
+          "9f59a3a1e2886d9f061ae021abb3cd173da7a67a6c92548e35ca1e79aa402107",
+          "6168dff78f06c9444732da3d9bcf073df5838f9911fb927df892c49e55987df4",
+          "3afb722e656c9b949c7ec64468f33a9b58f852ef2069cdcfa08cef06650c7815",
+          "8a6a9efeb2210ac1a99af25c0087db61b88f1cff5fa074dccad2a843e67e0c63",
+          "f5c0699568c0c3a2be31a502ad9d8c7813219d088426d031edd34e8c19b32987",
+          "865c28b4fdf67f340e88ebacb61deb3b2aac7fd4d13696ee7823443fe9e47b56"
+        ],
+        "response_hashes": [
+          "21a32228fce918e78b1e40cecd05048b11f263f6300dcbfdcd301b553f5d6ac2",
+          "756c11af74bd03ae85c5d446df642e42e2a01ec6dbe627122ca05f709ac2a184",
+          "0e07a91e71636bef45a5195f927719f17f1fe69dfa5bad6e7802f8c4568d515e",
+          "f320fa71a6d1f217da0fed77be2d04b1e64479e66492760f3513749b73b0dd21",
+          "4ca91ff8fd6f1c865cce2ed8077ca3e7388c961f54ed199fb70a2fe9e4a38da8",
+          "17a6585a7b06a8e2b7014a3116e79201c4917a00742a7bf570f3284a97c8f6e4",
+          "e79a5eea969e2ace1549127c1474ea1a7377231eee866e571ebce58ea803b10b",
+          "df23834223ba0086572150d5d74f0d913f6dff5bb8f33808fd4d74ac3207b65f",
+          "4deab1483b1de40cfe8360e5daaa66d2fa7521d22dc74bcd95f0796798a987e4",
+          "bbe2e88013e60f602d1980df412698d22f425645ee53a734a5a71b193c3447f0",
+          "e826166af75c11fe5d8d3f12dc5032f253471a1af5e66d953d2ed452d5b4f2c8",
+          "c24596c764515cc62cfa361aba88e740dafe81b14b13a9914bbab2f57f937c5b",
+          "f2c968e18c6358a3d194ad92a3a3a82d32bc087f4b461f26f5a43ecda89b80eb",
+          "31b2a8fb834d8663a48b0c8894c7fb71a2dbc7dba96c35c43d3dd4bb1f522543",
+          "3e09843990e3fb96984a1963ee210a979edcbccaa08d4b77d89ff6c152b0e5c3",
+          "2c1135dcd67bc2dd2ee6b3039e6876947287bc8cd947342451af71443592fe1b",
+          "c50b365486289818b0392d7cbe26903cf2f3a6b7238d78bfd8d070543d92261b",
+          "2cf1f57db0e55ef12fe018453e9c6bd4b754e30d8365a3e235bd13e8c43a5e65",
+          "0007ae46a7269c40f5ac5d7e66e1360f0f903c078eb0a4d07fa8de82e2b00bd5",
+          "879d59307155d90005f4cfdbca17e06122a0713d78b28cb467c275ac55ebc2fe"
+        ],
+        "provider_usage": {
+          "prompt_tokens": 511353,
+          "completion_tokens": 10910,
+          "total_tokens": 522263
+        },
+        "persisted_request_count": 20,
+        "incomplete_exchange_count": 0,
+        "unknown_usage_exchange_count": 0,
+        "cache_requests_verified_against_actual_payloads": 20
+      },
+      "runs": {
+        "baseline": {
+          "turns": 9,
+          "seconds": 48.102,
+          "budget_seconds": 1800,
+          "stop_reason": "Submitted",
+          "early_submit": true,
+          "usage": {
+            "input": 158632,
+            "output": 5525,
+            "total": 164157
+          },
+          "score": {
+            "passed": 0,
+            "total": 9
+          },
+          "final_build_ok": false,
+          "impl_broken": true,
+          "filled_code_slots": 7,
+          "filled_proof_slots": 0,
+          "changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "segment_changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "proof_files_changed": [],
+          "long_output_events": 3,
+          "reread_calls": 0,
+          "reread_results": [],
+          "compile_commands": 4,
+          "failed_compile_commands": 4,
+          "compile_execution_errors": 0,
+          "grading_seconds": 2.679,
+          "grader_execution_seconds": 2.535
+        },
+        "control": {
+          "turns": 4,
+          "seconds": 23.465,
+          "budget_seconds": 1744.628,
+          "stop_reason": "Submitted",
+          "early_submit": true,
+          "usage": {
+            "input": 126667,
+            "output": 2059,
+            "total": 128726
+          },
+          "score": {
+            "passed": 0,
+            "total": 9
+          },
+          "final_build_ok": true,
+          "impl_broken": false,
+          "filled_code_slots": 7,
+          "filled_proof_slots": 0,
+          "changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "segment_changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "proof_files_changed": [],
+          "long_output_events": 0,
+          "reread_calls": 0,
+          "reread_results": [],
+          "compile_commands": 2,
+          "failed_compile_commands": 2,
+          "compile_execution_errors": 0,
+          "grading_seconds": 3.087,
+          "grader_execution_seconds": 2.955
+        },
+        "simulated": {
+          "turns": 6,
+          "seconds": 33.756,
+          "budget_seconds": 1744.628,
+          "stop_reason": "Submitted",
+          "early_submit": true,
+          "usage": {
+            "input": 197436,
+            "output": 3145,
+            "total": 200581
+          },
+          "score": {
+            "passed": 0,
+            "total": 9
+          },
+          "final_build_ok": false,
+          "impl_broken": true,
+          "filled_code_slots": 7,
+          "filled_proof_slots": 0,
+          "changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "segment_changed_lean_files": [
+            "Primepy/Impl/Primes.lean"
+          ],
+          "proof_files_changed": [],
+          "long_output_events": 0,
+          "reread_calls": 0,
+          "reread_results": [],
+          "compile_commands": 4,
+          "failed_compile_commands": 4,
+          "compile_execution_errors": 0,
+          "grading_seconds": 1.068,
+          "grader_execution_seconds": 0.946
+        }
+      },
+      "unique_solver_usage_including_question": {
+        "input": 511353,
+        "output": 10910,
+        "total": 522263
+      },
+      "unique_solver_responses_including_question": 20,
+      "generation_seconds": 115.68499999999999,
+      "grading_seconds": 6.834,
+      "simulation": {
+        "kind": "same_model_simulated_human",
+        "human_participant": false,
+        "seconds": 6.827,
+        "usage": {
+          "completion_tokens": 615,
+          "prompt_tokens": 12356,
+          "total_tokens": 12971,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0
+          },
+          "latency_checkpoint": {
+            "engine_tbt_ms": 8,
+            "engine_ttft_ms": 352,
+            "engine_ttlt_ms": 5151,
+            "pre_inference_ms": 125,
+            "service_tbt_ms": 8,
+            "service_ttft_ms": 917,
+            "service_ttlt_ms": 5715,
+            "user_visible_ttft_ms": 793
+          }
+        },
+        "reported_model": "closeai/gpt-5.4-mini",
+        "provider_cost_fields": {}
+      },
+      "question_seconds": 3.535,
+      "question_usage": {
+        "input": 28618,
+        "output": 181,
+        "total": 28799
+      },
+      "common_prefix_seconds": 45.01,
+      "comparison_budget_seconds": 1744.628,
+      "total_tokens_including_simulation": 535234,
+      "token_total_basis": "known committed solver responses and recorded simulation; captured provider usage reported separately",
+      "known_captured_provider_tokens_including_simulation": 535234,
+      "binary_sha256": {
+        "alaya-baseline": "4108ae7ea384f83eb0d14d088a144b648930bdc1a17e278503a1489b227ac45a",
+        "alaya-ask": "4108ae7ea384f83eb0d14d088a144b648930bdc1a17e278503a1489b227ac45a"
+      }
+    }
+  },
+  "limitations": [
+    "Fresh old and new samples, one execution per experimental condition; exploratory only.",
+    "The old implementation omits middle instruction content; it is a defect control, not a fair model-capability baseline.",
+    "The implementation and instruction-delivery changes are bundled; their separate effects are not identified.",
+    "Paired no-answer/simulated-answer continuations share one question and equal budgets within each implementation.",
+    "Old/new pilots may elicit different questions and have different prefix durations; comparison is not a same-question causal estimate.",
+    "Simulated answers are same-model data, not human participants; API latency is not human thinking time.",
+    "Early submissions and compile failures are retained; no forced continuation or time-feedback changes.",
+    "Costs are unavailable unless the provider explicitly returned numeric cost fields.",
+    "The primary token total counts known committed solver responses and recorded simulation; captured provider usage is reported separately, including any returned but discarded responses.",
+    "Failed or interrupted provider exchanges may have unknown usage and billing; unknown exchanges are counted explicitly.",
+    "Any captured transport timeout is an elapsed-time confound and prevents attributing wall-time differences solely to implementation changes.",
+    "Full requests, responses, trajectories and source patches remain private local evidence; only this metric summary is suitable for review before publication."
+  ],
+  "phase_wall_seconds": {
+    "old": [
+      {
+        "phase": "smoke",
+        "exit_code": 1,
+        "seconds": 74.263
+      },
+      {
+        "phase": "baseline",
+        "exit_code": 0,
+        "seconds": 653.661
+      },
+      {
+        "phase": "ask",
+        "exit_code": 0,
+        "seconds": 6.294
+      },
+      {
+        "phase": "simulate",
+        "exit_code": 0,
+        "seconds": 5.628
+      },
+      {
+        "phase": "compare",
+        "exit_code": 0,
+        "seconds": 55.059
+      }
+    ],
+    "new": [
+      {
+        "phase": "smoke",
+        "exit_code": 0,
+        "seconds": 109.287
+      },
+      {
+        "phase": "baseline",
+        "exit_code": 0,
+        "seconds": 53.645
+      },
+      {
+        "phase": "ask",
+        "exit_code": 0,
+        "seconds": 5.491
+      },
+      {
+        "phase": "simulate",
+        "exit_code": 0,
+        "seconds": 7.079
+      },
+      {
+        "phase": "compare",
+        "exit_code": 1,
+        "seconds": 61.757
+      }
+    ]
+  },
+  "totals": {
+    "old": {
+      "generation_seconds": 762.052,
+      "grading_seconds": 13.208,
+      "tokens_including_simulation": 609651,
+      "known_captured_provider_tokens_including_simulation": 609651,
+      "unknown_usage_exchange_count": 1
+    },
+    "new": {
+      "generation_seconds": 196.759,
+      "grading_seconds": 12.826,
+      "tokens_including_simulation": 617614,
+      "known_captured_provider_tokens_including_simulation": 617614,
+      "unknown_usage_exchange_count": 0
+    }
+  }
+}

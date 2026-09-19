@@ -7,9 +7,9 @@
 - what the model is sent is a pure function of the log, the agent's **view**;
 - what happens next — sample, run a tool call, ask a person, stop — is a pure function of
   the log, the agent's **next**;
-- the agent acts in a **workspace**, a directory the trajectory fills from a state's snapshot
-  and snapshots again after each act; a tool call is run by the agent's **act**, which returns
-  the observation to record;
+- the agent acts in a **workspace**, carrying both the directory the trajectory fills from a
+  state's snapshot and the current full log; the directory is snapshotted again after each act;
+  a tool call is run by the agent's **act**, which returns the observation to record;
 - the **tools** offered to the model are fixed for the agent.
 
 An agent is a value of the record `Agent` holding these; `Alaya.Agent.MiniSwe` (`docs/miniswe.md`)
@@ -68,17 +68,19 @@ model turns), `lastResponse?`, `sinceLastResponse` (the events of the current tu
 
 The view is the function that turns the log into the dialogue the model is sent. It applies the
 agent's presentation policies: a long tool output is shown truncated; a response with no valid
-tool call is shown as an error message rather than as the response; an old observation may be
-left out to save context.
+tool call is shown as an error message rather than as the response. An agent may define other
+projections; MiniSwe retains all history and uses recoverable previews, with no history pruning
+or conversation summaries.
 
 `view : Log -> Dialogue` is pure and total. Its domain is the whole log, not a
 single event, because "elide observations older than N turns" needs position and "stay under a
 token budget" needs everything. One rule keeps it pure: anything non-deterministic — a
 model-written summary, say — is itself an event in the log, and the view merely places it.
 
-The invariant: **the response at log position k was sampled from `view (log.take k)`**. Because
-the view is pure and the log is persisted, the request the model saw at any step is recomputable,
-and nothing about it needs to be stored.
+The invariant: **the response at log position k was sampled from `view (log.take k)`**, with
+that agent's tool definitions. Given the same agent implementation and configuration, the
+view is pure and the persisted log is enough to reconstruct the dialogue. Changing a view or
+tool schema changes the request and its cache key; it does not rewrite the recorded log.
 
 *An example: one agent's view of a seven-event log.*
 
@@ -100,7 +102,7 @@ flowchart LR
     V1["system message (passed through)"]
     V2["user message (passed through)"]
     V3["assistant message with the tool call"]
-    V4["tool message: output_head 5000 chars + output_tail 5000 chars + elided_chars 2000 - truncated for the model"]
+    V4["tool message: head + tail + displayed ranges + output_ref + read_output arguments"]
     V5["user message with the format-error text - response dropped, error shown instead"]
     V6["user message (passed through)"]
     V7["assistant message with the tool call"]
@@ -136,14 +138,24 @@ as if the tool had returned.
 ```lean
 structure Workspace where
   dir : System.FilePath   -- the state's files, materialized for this act
+  log : Log := #[]        -- the full current history, supplied by the driver
 ```
 
-A `Workspace` is the directory an agent's tools act in.
+A `Workspace` contains the directory an agent's tools act in and the current recorded history.
+Both `Agent.run` and the trajectory driver refresh `log` before each act, including observations
+from earlier calls in the same model response. Direct callers of `act` supply this log themselves
+when using tools that depend on history.
 
 `act : Workspace -> Chat.ToolCall -> Result Json` runs one call in the workspace and returns the
 observation to record. The shape of the observation is the agent's to define, and its view is
 what renders it. An agent that fails to execute a call returns an observation saying so rather
 than throwing, so that a run survives a failed command.
+
+MiniSwe's `read_output` uses this log to recover the complete executor text identified by an
+`output_ref`; it does not depend on a container file or open a separate store. The original
+observation remains unchanged. Page results use `content` rather than executor `output`, so
+the view does not truncate a recovery page again. See [output-recovery.md](output-recovery.md)
+for offsets, failure behavior, and persistence boundaries.
 
 ## 4. The agent record and the reference loop
 
@@ -173,7 +185,7 @@ flowchart TD
   S2 --> S3["log.push (response r)"]
   S3 --> NEXT
 
-  NEXT -->|"act call"| A1["content := agent.act workspace call"]
+  NEXT -->|"act call"| A1["content := agent.act { workspace with log } call"]
   A1 --> A2["log.push (observation call.id content)"]
   A2 --> NEXT
 

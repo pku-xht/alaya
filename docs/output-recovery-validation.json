@@ -1,0 +1,25 @@
+{
+  "lean_toolchain": "leanprover/lean4:v4.31.0",
+  "lake_build_passed": true,
+  "lean_tests": {
+    "passed": 130,
+    "failed": 0,
+    "skipped": 0,
+    "filesystem": "Linux"
+  },
+  "python_tests": {
+    "passed": 13,
+    "failed": 0,
+    "paid_calls": 0
+  },
+  "source_files_equal_between_local_public_and_validated_tree": 42,
+  "source_manifest_sha256": "3ec69ff9342b1e2933b79bff76c562d3b6df9632db7a92f9f7965a733f7ca658",
+  "experiment_binary_sha256": "4108ae7ea384f83eb0d14d088a144b648930bdc1a17e278503a1489b227ac45a",
+  "notes": [
+    "Full suite exercised Docker, including container close/recreate recovery; no SKIP output.",
+    "An initial Windows-mounted run failed filesystem assumptions; retained privately.",
+    "An initial Linux run exposed a pre-existing racy-stat test fixture. Deterministic old timestamps now test cache hits; an equal-stamp edit test protects safe rehashing.",
+    "Production CAS invalidation was not changed.",
+    "Archived ReplayCached example compiled; its original view and tool definitions are retained."
+  ]
+}

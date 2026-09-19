@@ -74,7 +74,7 @@ def goldenSuite : Suite := suite "mini.golden" #[
     -- Unicode passes through as text, not as escapes.
     if field (observation { output := "café ✓ 😀", exitCode? := some 0 }) "output" != some "café ✓ 😀" then
       throw <| IO.userError "unicode should be kept as is"
-    -- At the limit the output is replaced by its head and tail and a count of the elision.
+    -- Above the limit the output is replaced by its head and tail and a count of the elision.
     let long := observation { output := String.ofList (List.replicate 12000 'z'), exitCode? := some 0 }
     if (field long "output").isSome then throw <| IO.userError "long output must be cut"
     if field long "elided_chars" != some 2000 then throw <| IO.userError s!"elided: {long.compress}"
@@ -114,6 +114,7 @@ private def responseWith (calls : Array Chat.ToolCall) (finish := "tool_calls") 
 
 private def actionSummary : Action -> String × String
   | .bash id command => (id, command)
+  | .readOutput id => (id, "read_output")
   | .submit id message => (id, "submit:" ++ message)
 
 def parseSuite : Suite := suite "mini.parse" #[

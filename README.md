@@ -47,6 +47,9 @@ mini-SWE-agent as one agent: the original's prompts, `bash` tool, and protocol f
 response and answering a malformed one, realized through the agent API with Lean-native
 rendering, and commands run on the host or in a container.
 
+[`docs/output-recovery.md`](docs/output-recovery.md) — complete file-based task delivery and
+recoverable tool-output previews, with Unicode pagination over the recorded trajectory.
+
 ## Example
 
 [`example/`](example/README.md) is a recorded run of the mini agent on

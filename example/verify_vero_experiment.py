@@ -114,7 +114,12 @@ def verify(root):
                     content = event["content"]
                     if isinstance(content, dict) and content.get("exit_code") not in (0, None):
                         failed_tools += 1
-                    transcript.append("```text\n" + (content.get("output", "") if isinstance(content, dict) else str(content)) + "\n```")
+                    # Include page content, offsets and read errors as well as raw
+                    # executor output; a reread is not an empty tool result.
+                    displayed = (content["output"] if isinstance(content, dict) and "output" in content
+                                 else json.dumps(content, ensure_ascii=False, indent=2)
+                                 if isinstance(content, dict) else str(content))
+                    transcript.append("```text\n" + displayed + "\n```")
             parent = step["state"]
             if parent in replies:
                 extra = replies[parent]
@@ -204,19 +209,19 @@ summary{cursor:pointer;font-weight:600;padding:8px 0}.muted{color:#5d6c65;font-s
 <p class="muted">30 分钟是上限，允许模型提前提交。两条对照从同一问题状态、相同工作区起跑，共享前缀、提问与模拟回答等待时间；评分时间另计。基线不是这对实验的无回答分支。</p></section>
 <section><h2>行为证据</h2><ul>'''+"".join(behaviors)+'''</ul>
 <p>运行时间更短本身不能代表效率提高；必须结合通过的规格与实际完成的工作判断。单次分支差异也不能直接归因于回答。</p></section>
-<section><h2>发生了什么</h2><ol><li>模型独立尝试后主动提交；保留该基线结果。</li>
-<li>从提交前的普通状态继续，要求模型针对当前障碍提一个问题。</li>
+<section><h2>发生了什么</h2><ol><li>独立基线停止原因：'''+esc(result["runs"]["baseline"]["stop_reason"])+'''；保留实际结果。</li>
+<li>按预先设定的选择规则，从基线的普通状态继续，要求模型针对当前障碍提一个问题。</li>
 <li>在同一问题状态建立两个回答子节点：无回答 / 同模型模拟开发者回答。</li>
 <li>两条分支分别继续、独立评分。参考实现和评分器始终在 agent 工作区之外。</li></ol>
 <p>这是研究者触发的一次提问。它验证流程与观察单次行为，不能据此推断真人收益或统计显著性。</p></section>
-<section><h2>实际问题与原样回答</h2><p>下方保留本次模型实际提出的问题。</p>
+<section><h2>实际问题与原样回答</h2><p>下方保留模型在本次检查点实际提出的问题，以及同模型模拟回答。</p>
 <details><summary>查看实际英文问题</summary><pre>'''+esc(result["question"]["text"])+'''</pre></details>
 <details><summary>查看同模型模拟回答（未由研究者修订）</summary><pre>'''+esc(answer["answer"])+'''</pre></details>
 <p class="muted">模拟回答耗时 '''+str(answer["seconds"])+''' 秒。这是模型接口时间，不能代表人的思考时间。回答者只看到问题、当前源码和最近三轮工具反馈，没有参考解或评分结果。</p></section>
 <section><h2>检查轨迹</h2><p><a href="fork.html#'''+result["question"]["state"][:12]+'''">打开问题与两个回答分支</a> · <a href="report.html">独立基线轨迹</a> · <a href="transcript.md">完整文本轨迹</a></p>
 <details><summary>复核信息与限制</summary><ul>'''+"".join('<li>'+esc(s)+'</li>' for s in result["limitations"])+'''</ul>
 <p><a href="verification.json">机器核验结果</a> · <a href="experiment.json">实验设置及节点</a> · <a href="answer-context.json">模拟回答者实际看到的内容</a></p>
-<p>轨迹的 view context 是用报告所选 agent 重建的后续请求：基线报告为 mini-swe，分支报告为 mini-ask。历史实际调用以记录事件及原始缓存为准。</p></details></section></main></html>'''
+<p>轨迹的 view context 是用报告所选 agent 重建的后续请求：基线报告为 mini-swe，分支报告为 mini-ask。历史缓存保存规范化请求；若本次启用实验记录器，model-io/ 私有目录保存实际发送的 JSON 请求与原始响应。不要把重建视图当成历史请求快照。</p></details></section></main></html>'''
     (root / "index.html").write_text(page, encoding="utf-8")
 
 

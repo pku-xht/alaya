@@ -178,6 +178,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
   | "root" :: task :: rest =>
     if rest.length > 1 then
       throw <| .configuration "alaya root TASK (PROJECT | --path PATH --image IMAGE)"
+    let task ← args.taskWithInstructions task
     let data ← openData args
     let settings? ← (← Executor.Docker.settings? args).mapM (·.pin)
     let (uname, image?) ← rootEnvironment settings?
@@ -289,7 +290,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
       "html [FILE] --agent A [--hide DIR] | " ++
       "show HASH [--view --agent A] | diff A B | rm HASH) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++
-      "[--timeout S] [--force]"
+      "[--timeout S] [--force] [--instruction-file FILE]"
 
 /-- Exit 0 on success, 3 when a run stopped at a question (see `exitWaiting`), 1 on error. -/
 def main (args : List String) : IO UInt32 := do
