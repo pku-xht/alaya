@@ -12,3 +12,7 @@ tmp/
 
 # the unpacked example trajectory (example/trajectory.tar.gz)
 example/trajectory/
+
+# Private experiments, reference checkouts, and Python cache
+tmp/
+__pycache__/

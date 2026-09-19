@@ -79,7 +79,16 @@ private def miniSwe : AgentSpec :=
     view := Agent.MiniSwe.view
     tools := Agent.MiniSwe.tools }
 
-private def agents : Array AgentSpec := #[miniSwe]
+private def miniAsk : AgentSpec :=
+  let config : Agent.MiniSwe.Config := { task := "" }
+  { name := "mini-ask"
+    initialLog := fun task uname => Agent.MiniAsk.initialLog { config with task } uname
+    executorConfig := config.executor
+    build := fun executor => Agent.MiniAsk.agent executor config
+    view := Agent.MiniAsk.view
+    tools := Agent.MiniAsk.tools }
+
+private def agents : Array AgentSpec := #[miniSwe, miniAsk]
 
 /-- The agent named by `--agent`. Required wherever an agent's prompts, tools, or view matter:
 `root`, `resume`, `step`, `html`, and `show --view`. -/

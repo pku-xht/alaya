@@ -1,0 +1,9 @@
+# Build with the official lean-4.29.1-linux release directory as context.
+FROM python@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+COPY bin /opt/lean/bin
+COPY lib /opt/lean/lib
+COPY include /opt/lean/include
+COPY share /opt/lean/share
+COPY src /opt/lean/src
+ENV PATH="/opt/lean/bin:${PATH}"
+RUN lean --version
