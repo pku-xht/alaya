@@ -24,6 +24,11 @@ echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names i
 alaya show adbac1          # the state: kind, parent, workspace hash, note, image, then its log
 ```
 
+`root --instruction-file FILE` appends the host UTF-8 file's complete contents to the task
+before recording the opening log and root note. It takes effect on new roots; `root` itself
+does not sample a model. See [complete task instructions](task-instructions.md) for the
+delivery contract and how to inspect the initial dialogue before `step` or `resume`.
+
 ### The state object
 
 A state is stored as one object with three parts:
@@ -632,7 +637,7 @@ alaya rm HASH                                    delete a subtree and reclaim bl
 
 Every command takes `--data D` and `--json` where it prints states. `--agent A` names the agent
 where its prompts, tools, or view matter; `mini-swe` is the one available. `root` takes `--image`,
-`--container-user`, and `--network`; `resume` and `step` take `--model`,
+`--container-user`, `--network`, and `--instruction-file`; `resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
 takes `--timeout` (default 900 s) for the grader and `--force`. The image is resolved to a digest at `root`
 and recorded; `resume` uses it and refuses an `--image` that resolves to anything else.

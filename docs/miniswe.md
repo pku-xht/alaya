@@ -39,6 +39,12 @@ executor, so a run pinned to an image is told about the image and not about the 
 mini's texts, rendered from its `mini.yaml`; the only change is the two sentences that named its
 submission sentinel, which name the `submit` tool. The opening log is frozen into the root state.
 
+For a task specification in a file, `alaya root --instruction-file FILE` appends the host
+UTF-8 file verbatim to the task before constructing this log. The complete text is then in
+the first model request; no initial `bash` read is needed. Without the flag, the task is
+unchanged. See [complete task instructions](task-instructions.md) for use, inspection, and
+error and context-length limits.
+
 ## 3. Tools
 
 **`bash`** takes one string argument, `command`, a shell script. **`submit`** takes a string

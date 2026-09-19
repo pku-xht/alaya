@@ -42,6 +42,10 @@ parent, the events it appends, and a snapshot of the workspace, so a run can be 
 forked, evaluated against hidden tests, and continued after a person intervenes. The page
 specifies the state object, the store layout, the model cache entry, and every `alaya` command.
 
+[`docs/task-instructions.md`](docs/task-instructions.md) — use
+`root --instruction-file FILE` to include a complete UTF-8 task specification in the opening
+message, before the first model request, and inspect the recorded text.
+
 [`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agent.MiniSwe` is the port of
 mini-SWE-agent as one agent: the original's prompts, `bash` tool, and protocol for reading a
 response and answering a malformed one, realized through the agent API with Lean-native
