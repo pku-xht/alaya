@@ -137,10 +137,21 @@ def merkleSuite : Suite := suite "cas.merkle" #[
 
 /-! ## Feature 1: stat cache -/
 
+/-- A cache-hit fixture must predate the first cache write: a fast filesystem may assign
+new source files and that write the same timestamp, which correctly forces a safe re-hash. -/
+private def cacheableSnapshot (store : Store) : TestM Hash := do
+  let source ← sourceDir
+  writeSpec source baseSpec
+  let touched ← IO.Process.output {
+    cmd := "touch", args := #["-t", "200001010000.00"] ++
+      baseSpec.map (fun (path, _) => (source / path).toString) }
+  assertEqual "fixture timestamp setup" touched.exitCode 0
+  assertOk <| store.snapshot source
+
 def statCacheSuite : Suite := suite "cas.statcache" #[
   test "an unchanged capture re-hashes nothing" do
     let store ← withStore
-    let root ← snapshotSpec store baseSpec
+    let root ← cacheableSnapshot store
     reset store
     let again ← assertOk <| store.snapshot (← sourceDir)
     let m ← metricsOf store
@@ -150,8 +161,7 @@ def statCacheSuite : Suite := suite "cas.statcache" #[
 
   test "a changed file is the only re-hash" do
     let store ← withStore
-    let _ ← snapshotSpec store baseSpec
-    IO.sleep 10
+    let _ ← cacheableSnapshot store
     writeSpec (← sourceDir) #[("a/e.txt", "changed-content-e")]
     reset store
     let root ← assertOk <| store.snapshot (← sourceDir)
@@ -183,12 +193,39 @@ def statCacheSuite : Suite := suite "cas.statcache" #[
 
   test "the cache survives reopening the store" do
     let store ← withStore
-    let root ← snapshotSpec store baseSpec
+    let root ← cacheableSnapshot store
     let reopened ← assertOk <| Store.create ((← scratch) / "store")
     let again ← assertOk <| reopened.snapshot (← sourceDir)
     let m ← assertOk reopened.metrics
     assertEqual "same root after reopen" again root
     assertEqual "no misses after reopen" m.cacheMisses 0,
+
+  test "equal source and cache timestamps reject stale hashes" do
+    let store ← withStore
+    let root ← cacheableSnapshot store
+    let source ← sourceDir
+    let cacheFiles ← (store.root / "cache").readDir
+    assertEqual "one workspace cache" cacheFiles.size 1
+    let some cacheEntry := cacheFiles[0]? | fail "missing workspace cache"
+    let cache := cacheEntry.path
+    let changed := source / "a/b/c.txt"
+    let stamped ← IO.Process.output {
+      cmd := "touch", args := #["-r", changed.toString, cache.toString] }
+    assertEqual "cache timestamp setup" stamped.exitCode 0
+    -- Preserve both size and timestamp while changing content; equality must not be a hit.
+    IO.FS.writeFile changed "changed-c"
+    let restored ← IO.Process.output {
+      cmd := "touch", args := #["-r", cache.toString, changed.toString] }
+    assertEqual "source timestamp setup" restored.exitCode 0
+    reset store
+    let again ← assertOk <| store.snapshot source
+    let m ← metricsOf store
+    assertEqual "racy entries miss" m.cacheMisses baseSpec.size
+    assertEqual "no racy hits" m.cacheHits 0
+    check (again != root) "same-size edit must change the snapshot"
+    assertEqual "same-size edit remains visible"
+      ((← assertOk <| store.readPath again "a/b/c.txt").map (String.fromUTF8? ·))
+      (some (some "changed-c")),
 
   test "a hit is rejected when the blob was collected" do
     let store ← withStore
