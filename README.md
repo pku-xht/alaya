@@ -56,3 +56,10 @@ continues after a person fixed the parser by hand and told the agent so. A grade
 against a test suite the agent never saw, and the tree below holds all of it.
 
 ![The report of the example trajectory, with the intervention state selected](example/trajectory.png)
+
+## Experiments
+
+[`docs/output-recovery-experiment.md`](docs/output-recovery-experiment.md) records the
+2026-09-20 joint Vero comparison of complete task delivery and recoverable tool output.
+It links the frozen implementation and preserves aggregate results separately from the
+functional changes; it does not attribute outcomes to either feature alone.
