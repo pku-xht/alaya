@@ -106,6 +106,38 @@ resuming its parent again replays the recorded turns from the cache, without a r
 provider. Continuing from a state that already has a turn child is a new draw, and needs the
 provider and `XMCP_API_KEY`.
 
+## Replaying the archived branches without a provider
+
+The dedicated replay runner fixes this archive's original tool list and output view, so later
+agent changes do not silently turn its cached requests into new requests. It has no provider
+transport: a missing cache response is an error. Tools still execute in a container; this is
+cached model replay with fresh tool execution, not fresh model sampling or fresh grading.
+
+Build Alaya, have the recorded Docker image available locally, and use a new directory under
+this repository's ignored `tmp/` directory:
+
+```sh
+lake build
+python3 example/prepare_replay.py tmp/bija-replay/run-001
+lake env lean --run example/ReplayCached.lean tmp/bija-replay/run-001/replay f2f6b32a81d2
+lake env lean --run example/ReplayCached.lean tmp/bija-replay/run-001/replay d7f71105cd18
+```
+
+Preparation checks the archived content hashes and expected branch structure, leaves the
+original archive untouched, and writes `manifest.json`, an `archive/` copy, and a `replay/`
+copy. The replay copy keeps the common ancestors and intervention state but omits subsequent
+state references, so each continuation starts at its original cached draw. The manifest
+identifies the recorded container image and the original terminal and evaluation states.
+
+The runner uses that recorded image's default user and executes its commands without network
+access. No API key is needed. Use another new destination to repeat the demonstration; rerunning
+a completed branch in the same store requests a later draw and may exhaust the read-only cache.
+Recorded scores in the manifest are historical results, not a new evaluation of the replay.
+
+Fresh tool output must also match the recorded request. Diagnostics such as dependency download
+failures and retry timings can vary even in the same image; the next request then misses the
+cache and the runner stops. It does not normalize output or substitute archived tool results.
+
 ## What the run says about the agent
 
 The agent measured itself by the sample programs it could run directly and never ran the suite:
