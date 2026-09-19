@@ -1,84 +1,55 @@
 {
-  "scope": "Standalone output-recovery validation",
-  "current_candidate": {
-    "scope": "Standalone output recovery; no instruction-file implementation",
-    "upstream_base": "8f0d08b071df6901f31f790e51f5bc9ddf54be65",
-    "date": "2026-09-20",
-    "lean_toolchain": "leanprover/lean4:v4.31.0",
-    "lake_build_passed": true,
-    "lean_tests": {
-      "passed": 127,
-      "failed": 0,
-      "skipped": 0,
-      "filesystem": "Linux"
-    },
-    "output_recovery_tests": {
-      "passed": 12,
-      "included_in_full_suite": true
-    },
-    "validated_source_file_count": 41,
-    "source_manifest_sha256": "cc9a1017e62e133b67a36ed0341fafd8db407c9e7e8f722132af85b874604322",
-    "source_comparison": "The manifest covers 40 Lean/build inputs plus example/ReplayCached.lean; all copied bytes match the split checkout. It records physical-byte and LF-normalized SHA-256 per file.",
-    "binary_sha256": "b6532fa03c8bc684fd5853c3a2bdd228eec14cde9a6c8d1f980af12d657263dd",
-    "logs": {
-      "build": {
-        "exit_code": 0,
-        "log_sha256": "e4c3c5bfab67e2b3c8c943e841dcf4757375d5ccbdf3eec5615957ef0fd0fa2a",
-        "skipped": 0
-      },
-      "tests": {
-        "exit_code": 0,
-        "log_sha256": "b014fe129ad35bf7969836d15b900a214782cb493457a2ee1121f70b3ff0d222",
-        "skipped": 0,
-        "passed": 127
-      },
-      "replay-compile": {
-        "exit_code": 0,
-        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "skipped": 0
-      }
-    },
-    "notes": [
-      "Both split branches share only the existing fef7df7 CAS test-fixture support commit; CAS production code is unchanged.",
-      "Full tests exercised process restart and real Docker close/recreate output recovery without skips.",
-      "An initial parallel full-suite run failed the existing Docker cleanup test because it enumerates every container using the test image. Serial execution passed without source changes; the initial failure is retained privately.",
-      "The archived replay example compiled; a full archived replay was not rerun.",
-      "Neither split PR was sampled against a real model again. Frozen joint-experiment evidence remains separate."
-    ],
-    "initial_parallel_attempt": {
-      "exit_code": 1,
-      "log_sha256": "b8c8ac2419ae3aa9beb1c1cbaff48d0c3fa37c55f4250e21206e8c3d1d52c57f",
+  "scope": "Standalone output recovery, without CAS fixture or archived replay changes",
+  "upstream_base": "8f0d08b071df6901f31f790e51f5bc9ddf54be65",
+  "date": "2026-09-20",
+  "lean_toolchain": "leanprover/lean4:v4.31.0",
+  "lake_build_passed": true,
+  "full_suite_passed": false,
+  "lean_tests": {
+    "passed": 125,
+    "failed": 1,
+    "skipped": 0,
+    "total": 126,
+    "filesystem": "Linux"
+  },
+  "output_recovery_tests": {
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0
+  },
+  "source_file_count": 40,
+  "source_manifest_sha256": "5fe72e56c1071b1f109dfcf4381e29fd18420861f37006b62a2ea4c5d9cc0654",
+  "source_comparison": "All 40 copied Lean/build inputs match this standalone checkout; the manifest records physical-byte and LF-normalized hashes.",
+  "binary_sha256": "b6532fa03c8bc684fd5853c3a2bdd228eec14cde9a6c8d1f980af12d657263dd",
+  "checks": {
+    "build": {
+      "exit_code": 0,
+      "log_sha256": "e4c3c5bfab67e2b3c8c943e841dcf4757375d5ccbdf3eec5615957ef0fd0fa2a",
       "skipped": 0
+    },
+    "output-recovery": {
+      "exit_code": 0,
+      "log_sha256": "88f0781ec4eb85963d4ea1043b5a197177ca12caed9b30f3d8e6302cd149cc4a",
+      "skipped": 0,
+      "passed": 12
+    },
+    "tests": {
+      "exit_code": 1,
+      "log_sha256": "6f774817e88e8069f92c2671a7a46f4884eae657174759c6c55748d3df2f69ab",
+      "skipped": 0,
+      "failed": 1,
+      "total": 126,
+      "passed": 125,
+      "failures": [
+        "cas.statcache/an unchanged capture re-hashes nothing: cas.statcache/an unchanged capture re-hashes nothing: no misses: expected 0, got 5"
+      ]
     }
   },
-  "frozen_experiment": {
-    "commit": "b60f044badb448765d4e0d7ecfd9843452c65a34",
-    "fork_branch": "codex/output-recovery-experiment",
-    "validation_at_that_revision": {
-      "lean_toolchain": "leanprover/lean4:v4.31.0",
-      "lake_build_passed": true,
-      "lean_tests": {
-        "passed": 130,
-        "failed": 0,
-        "skipped": 0,
-        "filesystem": "Linux"
-      },
-      "python_tests": {
-        "passed": 13,
-        "failed": 0,
-        "paid_calls": 0
-      },
-      "source_files_equal_between_local_public_and_validated_tree": 42,
-      "source_manifest_sha256": "3ec69ff9342b1e2933b79bff76c562d3b6df9632db7a92f9f7965a733f7ca658",
-      "experiment_binary_sha256": "4108ae7ea384f83eb0d14d088a144b648930bdc1a17e278503a1489b227ac45a",
-      "notes": [
-        "Full suite exercised Docker, including container close/recreate recovery; no SKIP output.",
-        "An initial Windows-mounted run failed filesystem assumptions; retained privately.",
-        "An initial Linux run exposed a pre-existing racy-stat test fixture. Deterministic old timestamps now test cache hits; an equal-stamp edit test protects safe rehashing.",
-        "Production CAS invalidation was not changed.",
-        "Archived ReplayCached example compiled; its original view and tool definitions are retained."
-      ]
-    },
-    "note": "The old 130 Lean/13 Python counts and binary identity apply only to this frozen experiment revision; they are not current candidate counts."
-  }
+  "notes": [
+    "The only full-suite failure is the unchanged upstream CAS stat-cache fixture; PR #6 addresses it independently.",
+    "All recovery and Docker tests passed with no skips. Full suites were run serially.",
+    "The previous 127-test all-pass source included the extracted CAS fix and is not this candidate.",
+    "The independent archived replay example is not part of this source or its validation.",
+    "Joint experiment results are documented in PR #7 and are not fresh sampling of this standalone PR."
+  ]
 }

@@ -101,10 +101,13 @@ intervention state selected, taken by `screenshot.py`:
 example/screenshot.py $PWD/example/report.html example/trajectory.png 1280 780 d7f71105cd18
 ```
 
-The model cache is part of the data directory, so removing a branch with `alaya rm` and
-resuming its parent again replays the recorded turns from the cache, without a request to the
-provider. Continuing from a state that already has a turn child is a new draw, and needs the
-provider and `XMCP_API_KEY`.
+The model cache is keyed by the complete request and model identity. Removing a branch and
+resuming its parent can reuse recorded draws only when that request format still matches.
+Current MiniSwe adds `read_output` and changes long-output previews, so its requests do not
+match this historical archive. Use the original tool list and view for offline replay; a
+[dedicated cache-only runner](https://github.com/msv-lab/alaya/pull/8) is proposed separately. Normal `alaya resume`
+may contact the configured provider on a cache miss, including when requesting a new draw
+from a state that already has a turn child.
 
 ## What the run says about the agent
 

@@ -102,9 +102,9 @@ No observation schema migration is needed. Short outputs below the former thresh
 existing rendering; output exactly 10 000 characters now stays in `output` instead of displaying
 a zero-omission preview. Longer output receives the recovery metadata above. The added
 `read_output` tool and changed long-output rendering intentionally change model-cache keys.
-The archived demonstration in `example/ReplayCached.lean` retains the original view and tool
-list to replay its recorded requests. New-agent cache misses remain misses, and cache-only
-replay still fails closed without calling a provider.
+Historical cache hits require the original view and tool list. A dedicated
+[cache-only replay runner](https://github.com/msv-lab/alaya/pull/8) is proposed separately. New-agent cache misses
+remain misses; read-only cache access still fails without calling a provider.
 
 This change does not add historical-output pruning or conversation summaries, alter time
 feedback, force continuation after submission, change the model or task specification, or
@@ -115,10 +115,9 @@ Recovery reliability and Vero task performance are separate claims. Tests of exa
 contents, EOF, persistence, and failure handling establish the recovery contract; they do not
 establish an improvement in benchmark scores. Vero runs provide exploratory evidence of model
 behavior under the recorded settings, including whether the model chose to recover any output.
-The [recorded Vero comparison](output-recovery-experiment.md) sampled a frozen version with both
-task delivery and output recovery. It is a joint experiment, not a fresh run of this standalone
-recovery patch, and cannot establish the effect of either change separately. Its old control
-omitted part of the task instructions and is not a fair baseline for model capability.
+The independent [joint Vero report](https://github.com/msv-lab/alaya/pull/7) sampled a frozen version with both
+task delivery and output recovery; it cannot establish either feature's independent effect.
+It is not new sampling of this standalone patch.
 
 ## Design references
 

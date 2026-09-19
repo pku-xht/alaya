@@ -616,11 +616,10 @@ identity including options such as reasoning echo — changes the key, and a for
 one will not replay under another.
 
 In particular, adding `read_output` changes the tool list, and recoverable long-output previews
-change the view. New requests therefore intentionally use different cache keys. The archived
-demonstration's `example/ReplayCached.lean` retains the original two-tool list and original view
-for replaying its recorded requests; it is a compatibility fixture, not the current agent's
-presentation policy. A read-only cache miss is still an error and never falls through to a
-provider request.
+change the view. New requests therefore intentionally use different cache keys. Replaying
+the archived demonstration from its cache requires the original two-tool list and view;
+a [dedicated runner](https://github.com/msv-lab/alaya/pull/8) is proposed independently. A read-only cache miss
+is still an error and never falls through to a provider request.
 
 ```
 $ ls .alaya/cache/v1 | head -2

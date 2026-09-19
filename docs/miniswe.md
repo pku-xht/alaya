@@ -195,8 +195,9 @@ the run and is gone when a branch is resumed later.
 - No per-model cost accounting, so mini's `cost_limit` is not enforced.
 
 The added tool and changed long-output view intentionally change model-cache keys. Existing
-state objects remain readable; the archived replay fixture in `example/ReplayCached.lean`
-retains its original tool list and view. No history pruning, conversation summaries, time
+state objects remain readable. Historical cache replay requires the original tool list and
+view; the [dedicated runner](https://github.com/msv-lab/alaya/pull/8) is a separate change.
+No history pruning, conversation summaries, time
 feedback, or change to submission and `ask_user` policy is part of output recovery.
 The reliability of this recovery contract is tested independently of Vero performance;
 benchmark results do not determine whether the model must use the recovery tool.

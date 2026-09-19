@@ -15,7 +15,7 @@ and `Test/Cli.lean` identical to the upstream base; it neither implements nor re
 | Bounded preview with exact recovery | `MiniSwe.observation` limits only the displayed executor text; the original observation is unchanged. `read_output` provides a content hash, Unicode scalar ranges, and pages. `Test/OutputRead.lean` checks omitted-middle recovery, a maximum-size page through the view, long single-line/Unicode reconstruction to EOF, and explicit failure paths. |
 | Recovery is optional | The notice offers chosen ranges when needed, with no instruction to read to EOF. A behavioral test accepts both `long output -> submit` and `long output -> bash -> submit` without any injected recovery or continuation. |
 | Persistence and branch isolation | Forks can read ancestor observations. A sibling cannot read another branch's private output even when it knows the reference. A separate OS process reopens CAS and records a recovered page after removal of the old execution directory. The Docker test closes one container and starts another before recovery. |
-| Report experimental effects separately | The frozen joint experiment reports eight 0/9 grades and zero recovery calls. It changed both task delivery and output recovery, so it does not measure this standalone PR's effect. The timeout, unknown fees, simulated answers, early submissions, and small-sample limits remain explicit. Neither a score gain nor a timing gain is claimed. |
+| Report experimental effects separately | The [joint report](https://github.com/msv-lab/alaya/pull/7) is independent documentation, not sampling or causal evidence for this standalone feature. |
 
 The recovery suite also covers failed state persistence, missing/corrupt states,
 unknown references, invalid ranges, short/exact-limit output, and read-only cache
@@ -36,42 +36,29 @@ time-feedback prompt, model choice, or forced continuation is added by this PR.
 
 Review the final diff by responsibility:
 
-1. `Alaya/Agent/MiniSwe.lean` and `Alaya/Agent/OutputRead.lean`: preview metadata,
-   optional `read_output`, Unicode character pagination, and explicit errors.
-2. `Alaya/Agent.lean` and `Alaya/Trajectory.lean`: provide the full current log at
-   tool execution. `Test/OutputRead.lean` and `Test/Docker.lean` cover recovery,
-   branch isolation, persistence, process restart, and container recreation.
-3. `Test/Cas.lean`: stabilize the existing stat-cache fixture while retaining a
-   same-size/same-timestamp edit guard. Production CAS invalidation is unchanged.
-4. `example/ReplayCached.lean` and `example/prepare_replay.py`: retain the archived
-   view/tool schema. Read-only cache misses still fail without a provider transport.
-5. API and recovery documentation, this map, independent candidate validation,
-   and the separately identified joint experiment report.
+1. `MiniSwe.lean` and `OutputRead.lean`: optional recovery, preview metadata, pagination, and errors.
+2. `Agent.lean` and `Trajectory.lean`: provide the selected log to tool execution.
+3. `Test/OutputRead.lean`, `Test/Docker.lean`, `Test/Mini.lean`, and the test worker:
+   direct coverage of the new behavior and its cache, persistence, and isolation boundaries.
+4. API/contract documentation and the current validation metadata.
 
-## Frozen experiments and current validation
+## Independent changes
 
-The complete Vero/MiniAsk harness and its original source are preserved on the
-fork's [`codex/output-recovery-experiment` branch](https://github.com/pku-xht/alaya/tree/b60f044badb448765d4e0d7ecfd9843452c65a34).
-Old control commit `9727039` and new experimental commit `b60f044` remain available
-for reproducing the comparison. They are optional experiment support, not
-dependencies that upstream must adopt to review the production fix.
+The CAS fixture repair is [PR #6](https://github.com/msv-lab/alaya/pull/6), the historical
+cache-only runner is [a separate replay change](https://github.com/msv-lab/alaya/pull/8), and the frozen joint
+Vero report is [PR #7](https://github.com/msv-lab/alaya/pull/7). None is implemented by or required to use recovery.
+The old archive needs its original request format for cache hits; this PR documents that
+boundary rather than including a second replay implementation.
 
-The [experiment report](output-recovery-experiment.md) describes those frozen
-runs. In particular, its 130 Lean tests, 13 Python tests, 42-file manifest, and
-experiment binary hash are historical evidence for `b60f044`; they are not reused
-as the standalone output-recovery candidate's test count or binary identity. The optional
-notice was clarified after those runs. Neither split PR has been sampled again; these runs
-changed delivery and recovery together and cannot attribute outcomes to either feature.
+## Current validation
 
-The standalone candidate passed `lake build` and all **127 Lean tests with zero skips**
-on a Linux filesystem, including the 12 recovery tests and real Docker recreation.
-The archived replay example compiled; its full replay was not rerun. The
-[validation metadata](output-recovery-validation.json) binds these results to the source
-manifest and binary. It covers 40 Lean/build inputs plus the replay example. The earlier
-combined candidate's 129-test result is not reused for this split source.
+After extraction, `lake build` and all **12 output-recovery tests passed**. The complete
+Linux suite reported **125 passed, 1 failed, zero skipped** (126 total). Its only failure
+was the unchanged upstream CAS fixture `an unchanged capture re-hashes nothing`
+(expected zero cache misses, got five). All Docker tests, including container recreation,
+passed. The independent CAS test fix is not folded back into this PR to make the suite green.
 
-An initial parallel test run exposed the existing Docker cleanup test's global image-based
-container enumeration. Running the two full suites serially passed without changing the
-recovery source. Both PRs share the existing `fef7df7` CAS test-fixture support commit;
-production CAS behavior is unchanged. Initial failure records and the original private
-request/response evidence remain outside the public patch.
+[Validation metadata](output-recovery-validation.json) binds this result to the 40-file
+source manifest and executable. Earlier 127/129-test all-pass results included other changes
+and are not this source's validation. The moved replay example and joint experiment carry
+their own evidence. No new model sampling was performed during this extraction.
