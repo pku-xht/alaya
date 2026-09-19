@@ -1,22 +1,78 @@
 import Test.Framework
 import Alaya
 
+/-! Tests of the MiniVero port: the opening message it sends, and how it behaves on compiler
+feedback, submission, and its limits. -/
+
 namespace MiniVeroTests
 open Testing Alaya
 open Alaya.Agent
 
 private def config : MiniVero.Config := { MiniVero.defaultConfig with task := "TASK_CODEPROOF" }
 
+private def contains (text needle : String) : Bool :=
+  (text.splitOn needle).length > 1
+
+private def openingText (task : String) : TestM String := do
+  let log := MiniVero.initialLog
+    { config with task } { system := "Linux", release := "", version := "", machine := "x86_64" }
+  match log[1]? with
+  | some (Event.message (Chat.Message.user text)) => pure text
+  | _ => fail "missing task"
+
 def suite : Suite := Testing.suite "mini-vero" #[
-  test "Vero task and both modes are in the opening log" do
-    let log := MiniVero.initialLog config { system := "Linux", release := "", version := "", machine := "x86_64" }
-    match log[1]? with
-    | some (Event.message (Chat.Message.user text)) =>
-      for needle in ["TASK_CODEPROOF", "-- !benchmark @start", "-- !benchmark @end", "proof or codeproof alternatives", "lake lean", "lake build", "Classical.choice", "propext", "Quot.sound", "submit tool"] do
-        check ((text.splitOn needle).length > 1) s!"missing {needle}"
-      check ((text.splitOn "INSTRUCTION.md").length == 1) "the agent should not be told to read INSTRUCTION.md"
-      check ((text.splitOn "do not assume Mathlib").length == 1) "the prompt must not forbid an available library"
-    | _ => fail "missing task",
+  test "the opening message quotes Vero's framing and rule sections" do
+    let text ← openingText "TASK_CODEPROOF"
+    check (text.startsWith "You are an expert Lean 4 engineer in a self-contained sandbox")
+      "Vero's framing should open the message"
+    for needle in [
+      "TASK_CODEPROOF",
+      "Your edits are evaluated automatically — the grader reads the sandbox state after you stop.",
+      "## Marker grammar (NON-NEGOTIABLE)",
+      "**Only slot interiors are kept.**",
+      "## Oracle commands",
+      "## Grading (``proof`` mode)",
+      "## Grading (``codeproof`` mode)",
+      "## Done condition — non-negotiable",
+      "## Anti-cheating — what the grader rejects",
+      "## Scoring and stopping",
+      "An unfilled slot scores the same as a wrong proof: zero.",
+      "The turn/budget cap is the only signal to stop before the Done condition is met.",
+      "-- !benchmark @start",
+      "-- !benchmark @end",
+      "lake lean",
+      "lake build",
+      "Classical.choice",
+      "propext",
+      "Quot.sound",
+      "submit tool"] do
+      check (contains text needle) s!"missing {needle}",
+  test "the instance and run facts are left to the task text" do
+    let text ← openingText "TASK_CODEPROOF"
+    for absent in [
+      "INSTRUCTION.md",
+      "MINIVERO_TASK.md",
+      "## Benchmark scale",
+      "## Project layout",
+      "## Your task in ",
+      "## Checkpointing",
+      "## Reference — original upstream source",
+      "upstream_source"] do
+      check (!contains text absent) s!"the prompt should not carry {absent}",
+  test "the scoring facts are kept and the advice is not" do
+    let text ← openingText "TASK_CODEPROOF"
+    for absent in [
+      "## Persistence",
+      "## Workflow",
+      "## Proof strategy",
+      "Never regress",
+      "locked-in",
+      "keep working",
+      "keep iterating",
+      "two genuinely distinct tactics",
+      "Treat every spec as independently valuable",
+      "do not assume Mathlib"] do
+      check (!contains text absent) s!"the prompt should not carry {absent}",
   test "a failed compile remains observable and the agent continues" do
     let executor : Executor := {
       exec := fun _ _ _ => pure { output := "Lean type mismatch", exitCode? := some 1 }
