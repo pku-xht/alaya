@@ -58,19 +58,20 @@ lake build
 lake exe tests cli.args
 ```
 
-These are local construction and serialization checks, not a real-model benchmark. Earlier
-experiments that combined this change with tool-output recovery cannot isolate this option's
-effect on model scores.
+These are local construction and serialization checks, not a real-model benchmark.
+The [frozen joint experiment](https://github.com/msv-lab/alaya/pull/7) is reported separately and cannot isolate
+this option's effect on model scores. No new model sampling was performed for this split.
 
-On 2026-09-20, this standalone source passed `lake build` and all **116 Lean tests with
-zero skips** on a Linux filesystem. Both split PRs reuse the existing `fef7df7` CAS
-test-fixture support commit: the initial run reproduced the upstream timestamp race;
-the shared fixture makes that check deterministic without changing production CAS code.
-The full suites were run serially because an existing Docker cleanup check enumerates
-every container using its test image.
+On 2026-09-20, after removing the unrelated CAS fixture change, `lake build` and all
+**8 CLI argument tests passed**. The complete Linux suite reported **113 passed, 2 failed,
+zero skipped** (115 total). Both failures were in the unchanged upstream CAS stat-cache
+fixtures: unchanged capture and reopening the cache expected zero misses but got five.
+Their independent fix is [PR #6](https://github.com/msv-lab/alaya/pull/6); it is not included
+in this branch. The earlier 116-test all-pass result included that fix and is not the
+current standalone result. Tests were run serially; Docker tests were not skipped.
 
 Validation identity (38 Lean/build source files):
 
-- Source-manifest SHA-256: `6fb29449f3471dea4a90e121bde7f25c7c54569488cea91ba31a4e207232c753`.
+- Source-manifest SHA-256: `a08ff6d58bc8f1744f8d217c1dd147dede0c86949029475b105ff9be603b1491`.
 - Executable SHA-256: `152675bd3d6c72abf5baa6e66b8de110de7e34b060eeb5318fb8fe4be1f99bb1`.
-- Full-test log SHA-256: `9cedcec47d51a964bb37fea627050f07befbc88e92ba70f1e64be36d3930116c`.
+- Full-test log SHA-256: `9948000f7eba15e1f715b3ec207527d16cd956b6b1caad8142369bffa7959153`.
