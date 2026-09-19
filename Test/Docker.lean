@@ -211,6 +211,44 @@ def suite : Suite := Testing.suite "docker" #[
       finally
         rt.executor.close,
 
+  test "read_output survives closing and recreating the execution container" <| withDocker
+    fun settings => do
+      let work ← workspace
+      let project := (← scratch) / "proj"
+      IO.FS.createDirAll project
+      let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
+      let model ← scripted #[toolResponse "awk 'BEGIN {for(i=0;i<6000;i++) printf \"a\"; printf \"MIDDLE\"; for(i=0;i<6000;i++) printf \"z\"}'"]
+      let first ← runtime settings work store model
+      let saved ← try
+        let root ← assertOk <| createRoot store #[] project (image? := some settings.image)
+        assertOk <| stepOnce first "produce" root
+      finally first.executor.close
+      let log ← assertOk <| logOf store saved
+      let raw? := log.findSome? fun
+        | .observation _ content => Output.fromJson? content
+        | _ => none
+      let raw ← match raw? with
+        | some output => pure output
+        | none => fail "expected raw output"
+      let ref := Agent.OutputRead.reference raw.output
+      IO.FS.removeDirAll work
+      IO.FS.createDirAll work
+      let reopened ← assertOk <| Cas.Store.create ((← scratch) / "store")
+      let readCall : Chat.ToolCall := {
+        id := "read", name := "read_output"
+        arguments := .mkObj [("ref", ref), ("offset", 6000), ("limit", 6)] }
+      let reading ← scripted #[{ toolCalls := #[readCall] }]
+      let second ← runtime settings work reopened reading
+      try
+        -- Start an actual replacement container before reading through the resumed driver.
+        assertEqual "new container starts" (← second.executor.bash work "true").exitCode? (some 0)
+        let child ← assertOk <| stepOnce second "read" saved
+        let page? := (← assertOk <| logOf reopened child).reverse.findSome? fun
+          | .observation "read" content => (content.getObjVal? "content" >>= Lean.Json.getStr?).toOption
+          | _ => none
+        assertEqual "original middle remains readable" page? (some "MIDDLE")
+      finally second.executor.close,
+
   test "a missing image is a configuration error naming it" <| withDocker
     fun _ => do
       let missing : Docker.Settings := { image := "alaya.invalid/nope@sha256:0" }

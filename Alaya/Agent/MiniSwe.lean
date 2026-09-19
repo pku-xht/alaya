@@ -1,5 +1,6 @@
 import Alaya.Agent
 import Alaya.Executor
+import Alaya.Agent.OutputRead
 
 /-! A port of mini-SWE-agent's default tool-calling agent as an `Alaya.Agent.Agent`. See
 `docs/miniswe.md`. -/
@@ -80,25 +81,34 @@ def submitTool : Chat.ToolDefinition := {
 }
 
 /-- The tools offered on every sample. -/
-def tools : Array Chat.ToolDefinition := #[bashTool, submitTool]
+def tools : Array Chat.ToolDefinition := #[bashTool, submitTool, OutputRead.tool]
 
 /-! ## The view of an observation -/
 
 /-- How much of a command's output the model is shown; longer outputs show their head and tail. -/
 def outputLimit : Nat := 10000
 
-/-- The tool message for an execution result: the recorded `Output` as JSON, with `output`
-cut to its first and last `outputLimit / 2` characters when it is `outputLimit` or longer. -/
+/-- The model-facing preview only. Full executor output stays unchanged in the recorded event;
+`output_ref` recovers any character range through `read_output`. -/
 def observation (o : Output) : Lean.Json :=
   let length := o.output.length
   let fields : List (String × Lean.Json) :=
-    if length < outputLimit then [("output", o.output)]
+    if length <= outputLimit then [("output", o.output)]
     else
       let half := outputLimit / 2
+      let ref := OutputRead.reference o.output
       [("output_head", String.ofList (o.output.toList.take half)),
        ("output_tail", String.ofList (o.output.toList.drop (length - half))),
        ("elided_chars", (length - outputLimit : Nat)),
-       ("warning", "Output too long.")]
+       ("truncated", true), ("total_chars", length),
+       ("displayed_ranges", .arr #[.arr #[0, (half : Lean.Json)],
+         .arr #[(length - half : Lean.Json), (length : Lean.Json)]]),
+       ("output_ref", ref),
+       ("read_output", .mkObj [("ref", ref), ("offset", half), ("limit", OutputRead.pageLimit)]),
+       ("warning", "Output truncated. Full output is retained in the recorded observation. " ++
+         "Displayed ranges are zero-based Unicode character offsets [start,end). " ++
+         "Recovery is optional: use read_output with a chosen offset and limit only if omitted content is needed. " ++
+         "Use next_offset for another page when useful; you need not read the full output.")]
   let fields := fields ++ [("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null)]
   let fields := match o.error? with
     | some error => fields ++ [("error", Lean.Json.str error)]
@@ -132,11 +142,13 @@ def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : O
 /-- One parsed tool call: a shell script to run, or the call that ends the run. -/
 inductive Action where
   | bash (id : String) (command : String)
+  | readOutput (id : String)
   | submit (id : String) (message : String)
   deriving Inhabited
 
 def Action.id : Action -> String
   | .bash id _ => id
+  | .readOutput id => id
   | .submit id _ => id
 
 /-- A parsed model turn: its actions, or a format-error message to send back as a user turn. -/
@@ -158,6 +170,10 @@ def parseActions (response : Chat.Response) : Parsed := Id.run do
           (match Lean.Json.parse raw with | .error e => e | .ok _ => "invalid JSON") ++ ".")
       else match call.name with
         | "submit" => none
+        | "read_output" =>
+          match OutputRead.parse call.arguments with
+          | .ok _ => none
+          | .error message => some message
         | "bash" =>
           match call.arguments.getObjVal? "command" with
           | .ok (.str _) => none
@@ -167,6 +183,7 @@ def parseActions (response : Chat.Response) : Parsed := Id.run do
     if let some problem := problem? then
       return .formatError (formatErrorMessage problem true response.finishReason?)
     match call.name with
+    | "read_output" => actions := actions.push (.readOutput call.id)
     | "submit" =>
       let message := match call.arguments.getObjVal? "message" with
         | .ok (.str m) => m
@@ -229,14 +246,15 @@ def next (config : Config) (log : Log) : Directive :=
       match actions.find? (fun action => pending.any (·.id == action.id)) with
       | none => sampleOrStop
       | some (.submit _ message) => .done { status := "Submitted", submission := message }
-      | some (.bash id _) =>
+      | some (.bash id _) | some (.readOutput id) =>
         match pending.find? (·.id == id) with
         | some call => .act call
         | none => sampleOrStop
 
-/-- Runs one `bash` call in the workspace through the executor and records the `Output`. -/
+/-- Executes bash without truncating its recorded `Output`, or reads a page of prior output. -/
 def act (executor : Executor) (workspace : Agent.Workspace) (call : Chat.ToolCall) :
     Result Lean.Json := do
+  if call.name == "read_output" then return OutputRead.read workspace.log call.arguments
   let command ← match call.name, call.arguments.getObjVal? "command" with
     | "bash", .ok (.str command) => pure command
     | _, _ => throw <| .configuration s!"not a runnable bash call: {call.name}"

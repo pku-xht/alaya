@@ -46,6 +46,9 @@ inductive Directive where
 /-- The directory an agent's tools act in. -/
 structure Workspace where
   dir : System.FilePath
+  /-- The current recorded history, for tools that recover prior observations. The driver
+  supplies it on each act; it is independent of the mutable execution directory. -/
+  log : Log := #[]
   deriving Inhabited
 
 structure Agent where
@@ -115,7 +118,7 @@ partial def run (agent : Agent) (workspace : Workspace) (sample : Dialogue -> Re
     let response ← sample (agent.view log)
     run agent workspace sample (log.push (.response response))
   | .act call =>
-    let content ← agent.act workspace call
+    let content ← agent.act { workspace with log } call
     run agent workspace sample (log.push (.observation call.id content))
 
 end Alaya.Agent
