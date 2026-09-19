@@ -1,11 +1,17 @@
 # Fresh Vero comparison: complete instructions and recoverable output
 
-The delivery defect is fixed, but this exploratory rerun did **not** improve the
-Vero score: all eight evaluated outcomes scored **0/9**. Both new runs transmitted
+The frozen joint implementation fixed the delivery defect, but this exploratory rerun did
+**not** improve the Vero score: all eight evaluated outcomes scored **0/9**. Both new runs transmitted
 the complete instruction in their first real solver request. Neither old run ever
 transmitted the middle `Done condition` in a solver request. The new model did not
 call `read_output`; recovery correctness is established by behavioral tests, not
 by claiming that this sample exercised the new tool spontaneously.
+
+Task delivery and output recovery are now proposed independently. This report retains the
+original joint experiment at `b60f044`; it is not fresh model sampling of either split PR.
+The standalone task-delivery change is on
+[PR #5](https://github.com/msv-lab/alaya/pull/5).
+No effect in the tables below can be attributed to either individual feature.
 
 ## Settings and evidence
 
@@ -41,8 +47,8 @@ direct sibling-isolation and process-restart tests, and removed MiniAsk/Vero
 product and harness additions from the main PR. The complete experiment revision
 is retained on the fork's
 [`codex/output-recovery-experiment` branch](https://github.com/pku-xht/alaya/tree/b60f044badb448765d4e0d7ecfd9843452c65a34).
-The scoped reliability patch has separate validation; this report does not claim
-a fresh model rerun of its revised notice. See [the review map](output-recovery-review.md).
+The standalone output-recovery patch has separate validation; this report does not claim
+a fresh model rerun of that patch or its revised notice. See [the review map](output-recovery-review.md).
 
 A minimal real API/execution smoke succeeded first: HTTP 200, returned model
 `closeai/gpt-5.4-mini`, 164 reported tokens, 3.041 seconds. These preflight tokens
@@ -139,8 +145,8 @@ raw-output page matches, actual transport requests, and official score artifacts
 
 Private evidence retains all real requests/responses, CAS/cache, transcripts,
 simulated-answer context, code/proof snapshots and diffs, failure records, and
-grading leaves. The current PR contains the core fix, reviewed reports, validation
-metadata, and the archived replay example. The aggregate metrics and Vero
+grading leaves. The current PR contains the standalone output-recovery change, reviewed
+reports, validation metadata, and the archived replay example. The aggregate metrics and Vero
 reproduction harness are linked from the frozen experiment branch. The HTML context view remains a
 prospective reconstruction; the saved actual request bodies establish transmission.
 

@@ -1,41 +1,14 @@
-# Complete task delivery and recoverable output
+# Recoverable tool output
 
 MiniSwe keeps a bounded preview of long command output in the model context and lets the model
 read any omitted part from the recorded observation. The trajectory already stores the complete
 executor output, so recovery reuses that content rather than creating another spill directory
-or CAS blob. A separate CLI option delivers a file-based task specification in the opening
-request, before any shell output can be truncated.
+or CAS blob.
 
-## Complete task delivery
-
-```sh
-alaya root "Implement the task in INSTRUCTION.md" ./project \
-  --agent mini-swe --instruction-file ./project/INSTRUCTION.md
-```
-
-`--instruction-file FILE` reads a host file as strict UTF-8 and constructs the task as
-`TASK + "\n\n" + file contents`. It preserves the file's text, including its final newline,
-and does not edit the task specification. A missing value, unreadable file, or invalid UTF-8
-returns an error before root creation. Even with `--image` and `--path`, `FILE` is a host path;
-it is not resolved inside the container. Without the flag, task construction is unchanged.
-
-The agent places this task in its opening user message. The opening log is frozen into the
-root's CAS state and passes through the view without output truncation. Inspect it with:
-
-```sh
-alaya show ROOT --view --agent mini-swe --data RUN_DATA
-```
-
-The view plus the same agent's tool definitions reconstructs a request. For a live experiment,
-also retain the actual provider request record and verify that the complete instruction text
-is present in its first request. This distinguishes a recorded opening prompt from evidence
-that a provider request was actually sent. Optional Vero reproduction support is preserved
-separately on the fork's `codex/output-recovery-experiment` branch at commit
-`b60f044badb448765d4e0d7ecfd9843452c65a34`:
-[smoke procedure](https://github.com/pku-xht/alaya/blob/b60f044badb448765d4e0d7ecfd9843452c65a34/docs/vero-smoke.md)
-and [paired experiment procedure](https://github.com/pku-xht/alaya/blob/b60f044badb448765d4e0d7ecfd9843452c65a34/docs/vero-experiment.md).
-That experiment code uses the file-delivery path; its harness and MiniAsk agent are not
-dependencies of the core delivery and output-recovery fix.
+File-based task delivery is a separate change on
+[PR #5](https://github.com/msv-lab/alaya/pull/5).
+This output-recovery change does not alter root task construction and has no dependency on
+that CLI option.
 
 ## Preview and page contract
 
@@ -135,15 +108,17 @@ replay still fails closed without calling a provider.
 
 This change does not add historical-output pruning or conversation summaries, alter time
 feedback, force continuation after submission, change the model or task specification, or
-change `ask_user` policy. When comparing old and new implementations, a control whose original
-prompt delivery omitted instructions measures that delivery defect as well; it is not a fair
-baseline for model capability. Real requests, tool execution, cached replay, and fresh grading
-must be reported separately.
+change `ask_user` policy. Real requests, tool execution, cached replay, and fresh grading must
+be reported separately.
 
 Recovery reliability and Vero task performance are separate claims. Tests of exact page
 contents, EOF, persistence, and failure handling establish the recovery contract; they do not
 establish an improvement in benchmark scores. Vero runs provide exploratory evidence of model
 behavior under the recorded settings, including whether the model chose to recover any output.
+The [recorded Vero comparison](output-recovery-experiment.md) sampled a frozen version with both
+task delivery and output recovery. It is a joint experiment, not a fresh run of this standalone
+recovery patch, and cannot establish the effect of either change separately. Its old control
+omitted part of the task instructions and is not a fair baseline for model capability.
 
 ## Design references
 

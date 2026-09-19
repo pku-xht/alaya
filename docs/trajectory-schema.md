@@ -6,8 +6,8 @@ something you can branch, replay, evaluate, intervene in, and read back.
 
 The trajectory is the same for every agent. Wherever an agent's prompts, tools, or view matter —
 creating a root, taking a turn, rendering what the model was sent — the command line names the
-agent with `--agent`; the examples below use `mini-swe` ([design](miniswe.md)), the
-available agent. Everything else — evaluating, intervening, replying, inspecting — is
+agent with `--agent`; `mini-swe` (`docs/miniswe.md`) is the one available today, and the
+examples below use it. Everything else — evaluating, intervening, replying, inspecting — is
 agent-independent and takes no such flag.
 
 ## 1. States
@@ -23,12 +23,6 @@ echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names i
 
 alaya show adbac1          # the state: kind, parent, workspace hash, note, image, then its log
 ```
-
-When a task specification is in a UTF-8 file, add `--instruction-file ./project/INSTRUCTION.md`
-to `root`. The CLI reads this host path and appends the entire file to `TASK` before creating
-the opening log. The first request therefore includes the specification without a tool-output
-preview. The flag is optional; existing roots and task construction without the flag are
-unchanged. See [complete task delivery](output-recovery.md#complete-task-delivery).
 
 ### The state object
 
@@ -640,10 +634,8 @@ an entry is only ever appended to.
 ## 8. Commands
 
 ```
-alaya root TASK PROJECT --agent A [--image IMAGE] [--instruction-file FILE]
-                                                     create a root from a project directory
-alaya root TASK --agent A --image IMAGE --path PATH [--instruction-file FILE]
-                                                     …or from a path inside the image
+alaya root TASK PROJECT --agent A [--image IMAGE]      create a root from a project directory
+alaya root TASK --agent A --image IMAGE --path PATH    …or from a path inside the image
 alaya resume HASH --agent A --model P:M                grow one continuation until it ends or asks
 alaya step   HASH --agent A --model P:M                advance exactly one turn
 alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a checkout; record the verdict
@@ -661,8 +653,7 @@ alaya rm HASH                                    delete a subtree and reclaim bl
 
 Every command takes `--data D` and `--json` where it prints states. `--agent A` names the agent
 where its prompts, tools, or view matter; `mini-swe` is the one available. `root` takes `--image`,
-`--container-user`, `--network`, and the optional host UTF-8 `--instruction-file`;
-`resume` and `step` take `--model`,
+`--container-user`, and `--network`; `resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
 takes `--timeout` (default 900 s) for the grader and `--force`. The image is resolved to a digest at `root`
 and recorded; `resume` uses it and refuses an `--image` that resolves to anything else.

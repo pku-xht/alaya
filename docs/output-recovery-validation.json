@@ -1,11 +1,13 @@
 {
-  "scope": "Reliability acceptance; experiment gains reported separately",
+  "scope": "Standalone output-recovery validation",
   "current_candidate": {
-    "core_commit": "caa412eee17cc52414842f382a466f5cfe18ca0b",
+    "scope": "Standalone output recovery; no instruction-file implementation",
+    "upstream_base": "8f0d08b071df6901f31f790e51f5bc9ddf54be65",
+    "date": "2026-09-20",
     "lean_toolchain": "leanprover/lean4:v4.31.0",
     "lake_build_passed": true,
     "lean_tests": {
-      "passed": 129,
+      "passed": 127,
       "failed": 0,
       "skipped": 0,
       "filesystem": "Linux"
@@ -14,32 +16,40 @@
       "passed": 12,
       "included_in_full_suite": true
     },
-    "compiled_source_file_count": 40,
-    "compiled_source_manifest_sha256": "b6eb0a28c41c4b586c43c381d9a148eedd071122cc0b3b25f25c5deefab5f618",
-    "git_source_manifest_sha256": "b6eb0a28c41c4b586c43c381d9a148eedd071122cc0b3b25f25c5deefab5f618",
-    "source_comparison": "All 40 compiled source/build files match the public checkout byte-for-byte and the committed Git files after CRLF/LF normalization. The compiled manifest hashes the exact physical bytes used.",
-    "binary_sha256": "2976e5dc00f66ecffd67d6504f38e6294e28642b256a97ba715a14fd8cc7673c",
+    "validated_source_file_count": 41,
+    "source_manifest_sha256": "cc9a1017e62e133b67a36ed0341fafd8db407c9e7e8f722132af85b874604322",
+    "source_comparison": "The manifest covers 40 Lean/build inputs plus example/ReplayCached.lean; all copied bytes match the split checkout. It records physical-byte and LF-normalized SHA-256 per file.",
+    "binary_sha256": "b6532fa03c8bc684fd5853c3a2bdd228eec14cde9a6c8d1f980af12d657263dd",
     "logs": {
       "build": {
-        "sha256": "05fa5895146493a1b72f4beb65c164497ef8ed60612e6be78fc7e2a30ec02cd0",
-        "exit_code": 0
+        "exit_code": 0,
+        "log_sha256": "e4c3c5bfab67e2b3c8c943e841dcf4757375d5ccbdf3eec5615957ef0fd0fa2a",
+        "skipped": 0
       },
       "tests": {
-        "sha256": "bf1a040f145766d7fdef713a49ebcc7f2beed8bd4c81dee6d88ab4cc6ad5b6e9",
-        "exit_code": 0
+        "exit_code": 0,
+        "log_sha256": "b014fe129ad35bf7969836d15b900a214782cb493457a2ee1121f70b3ff0d222",
+        "skipped": 0,
+        "passed": 127
       },
       "replay-compile": {
-        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "exit_code": 0
+        "exit_code": 0,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "skipped": 0
       }
     },
     "notes": [
-      "No MiniAsk or Vero harness is compiled into this candidate.",
-      "The full suite exercised Docker close/recreate recovery without skips.",
-      "Direct tests cover sibling-private reference denial, recovery in an independent OS process, optional continuation/submission without recovery, and intact maximum-size page serialization.",
-      "The archived replay example was compiled but a full archived replay was not rerun.",
-      "The revised optional recovery notice was not subjected to another real-model rerun during this scope audit."
-    ]
+      "Both split branches share only the existing fef7df7 CAS test-fixture support commit; CAS production code is unchanged.",
+      "Full tests exercised process restart and real Docker close/recreate output recovery without skips.",
+      "An initial parallel full-suite run failed the existing Docker cleanup test because it enumerates every container using the test image. Serial execution passed without source changes; the initial failure is retained privately.",
+      "The archived replay example compiled; a full archived replay was not rerun.",
+      "Neither split PR was sampled against a real model again. Frozen joint-experiment evidence remains separate."
+    ],
+    "initial_parallel_attempt": {
+      "exit_code": 1,
+      "log_sha256": "b8c8ac2419ae3aa9beb1c1cbaff48d0c3fa37c55f4250e21206e8c3d1d52c57f",
+      "skipped": 0
+    }
   },
   "frozen_experiment": {
     "commit": "b60f044badb448765d4e0d7ecfd9843452c65a34",

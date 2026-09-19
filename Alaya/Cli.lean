@@ -103,14 +103,4 @@ def Args.float? (args : Args) (name : String) : Result (Option Float) :=
 def Args.floatD (args : Args) (name : String) (fallback : Float) : Result Float :=
   return (← args.float? name).getD fallback
 
-/-- Append an explicitly supplied UTF-8 instruction file verbatim to the root task. This is
-read on the host before the first model request, not through a bounded shell observation. -/
-def Args.taskWithInstructions (args : Args) (task : String) : Result String := do
-  if !args.isSet "instruction-file" then return task
-  let path ← args.require "instruction-file" "a UTF-8 file to include in the initial task"
-  let bytes ← Result.fromIO Error.configuration (IO.FS.readBinFile path)
-  let some instructions := String.fromUTF8? bytes
-    | throw <| .configuration "--instruction-file must contain valid UTF-8"
-  pure (task ++ "\n\n" ++ instructions)
-
 end Alaya.Cli

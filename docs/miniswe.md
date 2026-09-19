@@ -40,13 +40,6 @@ executor, so a run pinned to an image is told about the image and not about the 
 mini's texts, rendered from its `mini.yaml`; the only change is the two sentences that named its
 submission sentinel, which name the `submit` tool. The opening log is frozen into the root state.
 
-For a task whose specification lives in a file, `alaya root TASK PROJECT --agent mini-swe
---instruction-file FILE` appends two newlines and the complete UTF-8 file to `TASK` before
-building this log. `FILE` is read on the host, even when the workspace comes from a container.
-This puts the specification in the first model request without relying on a later `bash cat`
-preview. The file is not rewritten. Missing or invalid UTF-8 files fail root creation; omitting
-the flag keeps the original task construction. See [delivery and inspection](output-recovery.md#complete-task-delivery).
-
 ## 3. Tools
 
 **`bash`** takes one string argument, `command`, a shell script. **`submit`** takes a string
