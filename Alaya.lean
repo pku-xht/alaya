@@ -10,5 +10,6 @@ import Alaya.Executor
 import Alaya.Executor.Docker
 import Alaya.Agent
 import Alaya.Agent.MiniSwe
+import Alaya.Agent.MiniVero
 import Alaya.Trajectory
 import Alaya.Trajectory.Html
