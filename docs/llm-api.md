@@ -250,6 +250,7 @@ flowchart BT
         yunwu["yunwu"]
         closeai["closeai"]
         xmcp["xmcp"]
+        apiyi["apiyi"]
         dgx["dgx"]
     end
 
@@ -276,7 +277,7 @@ flowchart BT
 
 ### Provider transport
 
-`Provider.fromSpec "PROVIDER:NAME"` builds the innermost model for one of four providers; the
+`Provider.fromSpec "PROVIDER:NAME"` builds the innermost model for one of five providers; the
 name may contain colons, so only the first splits.
 
 | Provider | Default endpoint | Key variable | Endpoint override |
@@ -284,6 +285,7 @@ name may contain colons, so only the first splits.
 | `yunwu` | `https://yunwu.ai/v1` | `YUNWU_API_KEY` | `YUNWU_BASE_URL` |
 | `closeai` | `https://api.openai-proxy.org/v1` | `CLOSEAI_API_KEY` | — |
 | `xmcp` | `https://llm.xmcp.ltd` | `XMCP_API_KEY` | — |
+| `apiyi` | `https://api.apiyi.com/v1` | `APIYI_API_KEY` | `APIYI_BASE_URL` |
 | `dgx` | `http://10.42.0.1:8000/v1` | `DGX_API_KEY`, default `EMPTY` | `DGX_BASE_URL`, or `--url`/`--port` |
 
 A missing key is a configuration error, except for `dgx`, where `EMPTY` is the vLLM convention for
@@ -291,7 +293,7 @@ a server that needs no credential. `--url` accepts anything from a bare host to 
 fills in `http`, port `8000`, and `/v1`; `--port` wins over a port inside `--url`; passing either
 turns off the `DGX_BASE_URL` fallback.
 
-All four are `Provider.ChatCompletions`, the one transport. It serializes the request with
+All five are `Provider.ChatCompletions`, the one transport. It serializes the request with
 `Request.toJson`, adds `model` and `temperature` (and `n` for several draws), and POSTs it with
 `curl` to `<baseUrl>/chat/completions` under a connect timeout of 30 s and a total timeout of 10
 minutes. HTTP failures become `Error.http status body retryAfterMs?`, with `Retry-After` parsed
