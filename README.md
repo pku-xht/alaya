@@ -2,7 +2,7 @@
 
 A Lean 4 library for typed chat models and recorded agent runs. An agent's run is a tree of
 immutable states in a content-addressed store: every model turn, every tool result, and every
-workspace snapshot is kept exactly as it happened, so a run can be replayed, branched at any
+tracked workspace version is recorded, so a run can be replayed, branched at any
 point, evaluated against hidden tests, and interrupted by a person.
 
 The library is organised in four layers, each documented on its own page.
@@ -17,9 +17,9 @@ Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls these progra
 | Program | Used for |
 | --- | --- |
 | `curl` | every request to a model provider |
-| `git` with SHA-256 repository support | storing snapshots and recorded states in an independent bare repository |
+| `git` | staging and checking out snapshot commits; storing objects and recorded states |
 | `docker` | running an agent's commands in a pinned container image |
-| `/bin/sh`, `uname`, `find`, `ln`, `readlink`, `mktemp` | running commands on the host, describing the host, and capturing/restoring directories |
+| `/bin/sh`, `uname` | running commands on the host and describing the host |
 
 `docker` is needed only for trajectories created with `--image`; the rest are on any Unix host.
 A grader given to `alaya eval` is a shell command of your own and brings its own dependencies.
@@ -44,9 +44,10 @@ forked, evaluated against hidden tests, and continued after a person intervenes.
 specifies the state object, the store layout, the model cache entry, and every `alaya` command.
 
 [`docs/git-store.md`](docs/git-store.md) — the snapshot backend. Creating a snapshot returns a
-native Git tree hash; restoring that hash rebuilds the directory. The backend uses its own
-bare SHA-256 repository, preserves raw file bytes, and reads existing Alaya archives without
-rewriting their old hashes. It does not use the captured project's index, branches, or filters.
+native Git commit ID. Capture uses the project's index and creates a detached snapshot commit;
+restore checks out that commit while retaining repository history. Git's ignore rules and
+tracked-file semantics apply; this is not a whole-directory backup. Original raw archives
+remain unchanged and can be converted explicitly with `alaya import-legacy`.
 
 [`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agent.MiniSwe` is the port of
 mini-SWE-agent as one agent: the original's prompts, `bash` tool, and protocol for reading a

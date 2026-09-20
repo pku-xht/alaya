@@ -13,13 +13,15 @@ agent-independent and takes no such flag.
 ## 1. States
 
 A **state** is a point in a run: the log up to that point, and the workspace at that point. The
-workspace is recorded as a **snapshot**: the content of the directory the agent acts in, written
-into the content-addressed store as a tree of files and named by its hash.
+workspace is recorded as a **snapshot**: a native Git commit for the directory the agent acts
+in, stored with its tree and parent history and named by its commit ID. Capture uses
+`git add -A`; ignore rules and supported attributes follow Git, and ignored untracked files are omitted.
+See [Git snapshot storage](git-store.md) for the visible index and HEAD changes.
 
 ```sh
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
 root=$(alaya root "make the test suite pass" ./project --agent mini-swe --image python:3.12-slim)
-echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
+echo $root      # adbac197aea8…  a Git object ID; any unambiguous prefix names it from here on
 
 alaya show adbac1          # the state: kind, parent, workspace hash, note, image, then its log
 ```
@@ -49,7 +51,7 @@ flowchart LR
     E["workspace: b66cab13bd86"]
   end
   Parent["state adbac197aea8, the root<br/>no parent · the opening prompts · the project snapshot"]
-  Tree["tree b66cab13bd86<br/>src/ · tests/ · pyproject.toml · …"]
+  Tree["workspace commit b66cab13bd86<br/>tree: src/ · tests/ · pyproject.toml · …"]
   P --> Parent
   E --> Tree
 ```
@@ -63,7 +65,7 @@ driven by `resume` or `step`.
 
 | Kind | Created by | `appended` | `workspace` |
 | --- | --- | --- | --- |
-| `root` | `alaya root` | the agent's opening prompts | the project as given |
+| `root` | `alaya root` | the agent's opening prompts | the project's Git snapshot |
 | `turn` | one model turn | the response, and the observation of each call it made | the workspace after those calls ran |
 | `question` | a model turn whose call asked a person | the response, and the observations of the calls before the ask | the workspace after those calls ran |
 | `reply` | `alaya reply` | one observation: the person's answer to the question, verbatim | the parent's |
@@ -144,8 +146,8 @@ flowchart TD
 ```
 
 ```sh
-alaya step 4f2c8b --agent mini-swe --model xmcp:ds/deepseek-v4-flash      # exactly one turn
-alaya resume 4f2c8b --agent mini-swe --model xmcp:ds/deepseek-v4-flash    # turns until the run ends or asks
+alaya step 4f2c8b --agent mini-swe --model xmcp:closeai/gpt-5.6-luna      # exactly one turn
+alaya resume 4f2c8b --agent mini-swe --model xmcp:closeai/gpt-5.6-luna    # turns until the run ends or asks
 ```
 
 `step` prints the new child's hash; `resume` prints one line per new state and ends with
@@ -202,8 +204,8 @@ the recorded response without a provider call when the complete request still ma
 `alaya rm HASH` followed by a `resume` from its parent can reuse the deleted branch's draws when
 `.alaya/cache` is kept and every subsequent request matches. Tools execute again, so changed
 output can produce a cache miss. Ordinary `resume` may then sample the provider; a cache-only
-caller must fail on that miss. Restoring a legacy archive and writing new Git-backed states can
-change state hashes without changing the model-cache key (§5).
+caller must fail on that miss. Explicitly importing a legacy archive creates new state hashes
+without changing the response-cache format or the recorded log used to construct a request (§5).
 
 ## 3. People in the tree
 
@@ -215,10 +217,12 @@ be forked like a model turn.
 
 ### Changing the workspace: `commit`
 
-`alaya commit HASH DIR [-m NOTE] [--tell TEXT]` snapshots the directory `DIR` and records it as
+`alaya commit HASH DIR [-m NOTE] [--tell TEXT]` stages and snapshots the Git workspace `DIR` and records it as
 an `intervention` child of `HASH`. The child's log is the parent's: without `--tell`, nothing is
 appended, and the agent learns of the change only by running commands, as it would if the files
 had changed under it. `-m NOTE` is provenance for the reader of the tree, not for the model.
+The snapshot operation affects `DIR`'s actual index and may detach HEAD; its original branch
+refs and existing commit history remain intact.
 
 With `--tell TEXT`, one event is appended: a user message carrying a **notice**. The notice is
 rendered from a record the state also keeps, `intervention? = { message, changed }`, where
@@ -448,120 +452,98 @@ The data directory (`--data D`, default `.alaya`) holds everything one set of ru
 
 | Path | Contents |
 | --- | --- |
-| `D/store/git/` | independent bare Git repository, initialized with `--object-format=sha256`; native trees store directories and blobs store file bytes, link targets, and state JSON |
-| `D/store/git/refs/alaya/<encoded-name>/<logical-hash>` | pins the native Git object for an Alaya ref; `encoded-name` is the UTF-8 ref name encoded as hex |
-| `D/store/blobs/<2 hex>/<64 hex>` | legacy objects addressed by the SHA-256 of raw bytes, retained for compatibility |
-| `D/store/refs/<name>` | legacy named refs, still readable; a successful `setRef` for that name replaces it with a Git ref |
-| `D/store/tmp/` | temporary staging for ancillary metadata writes |
+| `D/store/git/` | bare Git repository; new stores default to SHA-1, and existing SHA-256 repositories retain their format |
+| `D/store/git/refs/alaya/...` | named refs pinning state blobs and workspace/evidence commits; Git may pack these refs |
 | `D/cache/v1/<hash>.json` | model response cache entries (§7) |
-| `D/work/` | the working directory; wiped and re-materialized at every checkout, holds nothing durable |
-| `D/eval/` | a grader's checkout and output directory; emptied before every evaluation |
+| `D/work/` | mutable workspace with a self-contained `.git` repository; tracked files switch to the selected snapshot while ignored caches normally remain |
+| `D/eval/` | a separate grader checkout and output directory |
+| `D/legacy-import.json` | old-to-new state mapping when an explicit legacy import has run |
 
-A new workspace is a native Git **tree object**. File and link entries reference Git blobs;
-directory entries reference subtrees. Equal contents deduplicate, and a snapshot's tree hash
-is sufficient to restore it while the objects remain in the store. Capture reads file bytes
-directly with filters disabled; it does not use the captured project's index or honor its
-ignore rules. Restore builds a complete checkout in staging before replacing the destination,
-so a fork cannot retain files from the branch it replaced. The contract, removed performance
-options, filesystem limits, and validation procedure are in [Git snapshot storage](git-store.md).
+A workspace ID names a native Git **commit**, which references its tree and parent commits.
+State JSON is a Git blob, and its `workspace` field names that commit. Git does not interpret
+links inside state JSON, so Alaya separately pins state blobs and the commits used for
+workspaces and evaluation evidence. New SHA-1 stores use 40-hex IDs; SHA-256 stores use
+64-hex IDs. A workspace repository and its store must use the same object format.
+
+Snapshot capture uses the project's actual index and records a commit after `git add -A`.
+A new snapshot commit retains HEAD as parent and detaches HEAD without advancing the original
+branch. An unchanged tree reuses HEAD. Restore fetches and checks out the selected commit in
+place, then runs `git clean -fd`. It does not replace `.git` with a stored directory image or
+remove all ignored files. The supported repository forms, host configuration restrictions,
+retained-history visibility, and validation procedure are in [Git snapshot storage](git-store.md).
 
 Logical refs retain the names `state.<hex>` and `workspace.<hex>`. The first set defines the
-forest; the second pins workspace and evaluation-evidence trees. Git does not interpret links
-inside state JSON, so both kinds are necessary. The trailing logical hash in a Git ref's path
-preserves the original public identity of a legacy object even when the target uses a new Git
-object ID.
+trajectory forest; the second pins workspace and evaluation-evidence commits. `Store.gc`
+delegates reachability to Git. `rm HASH` drops a trajectory subtree's state refs, re-pins the
+workspace refs required by surviving states, and collects. A workspace commit reachable as
+an ancestor of another live snapshot remains, so dropping one trajectory does not necessarily
+reclaim its entire Git history.
 
-`Store.gc` pins live legacy refs in Git, then collects unreachable Git objects. `rm HASH`
-deletes a subtree by dropping its `state.` refs, re-pinning `workspace.` refs from survivors,
-and collecting. Legacy raw blobs are not deleted, so removing an archived branch need not
-reclaim its old disk usage. Fresh stores use Git objects and Git refs only; the old stat cache
-and checkout records are no longer used.
+### Importing older archives
 
-### Reading older archives
+The old raw-SHA-256 blobs and JSON directory trees are handled only by an explicit importer;
+normal store operations do not transparently migrate them. Work on a fresh extracted copy of
+the archive and run:
 
-Legacy tree objects are JSON arrays of `{"name", "type": "file"|"exec"|"link"|"dir", "hash"}`.
-The compatibility reader accepts them and their raw blobs at the original hashes. Existing
-state JSON and its hash are never rewritten. Loading legacy trees imports their contents into
-Git as needed, allowing new tree operations and content comparisons to use native object IDs.
+```sh
+alaya import-legacy --data EXTRACTED_DATA
+```
 
-Git hashes include an object header as well as its body. New snapshots and states therefore
-have different hashes from the old raw-byte format even if their visible contents match. Do
-not use equality with an archived final state hash as a replay acceptance check after migrating
-storage. Compare the restored files and recorded messages instead. The model-cache format and
-request key are unchanged; cached model sampling, actual tool execution, and fresh grading
-remain separate operations.
+The importer verifies old objects, creates native Git workspace/evidence commits, and writes
+new state blobs with remapped parents and snapshot IDs. It records the old-to-new state mapping
+in `legacy-import.json`. The original raw blobs, refs, events, and model cache remain unchanged;
+there is no model sampling. Legacy trees containing `.git` are rejected rather than treating a
+copy of repository internals as native history. See [the import contract](git-store.md#explicit-legacy-import)
+for extraction requirements and limits.
 
-*The new store keeps Git objects separate from the model cache and temporary workspaces.*
+Earlier development revisions used Git trees directly as workspace IDs. Those intermediate
+states are not the raw archive format handled by this importer, and current checkout requires
+a commit. They have no automatic migration: retain the original binary for inspecting those
+scratch runs and use a fresh data directory for native-commit runs. Support for SHA-256 Git
+repositories does not by itself make tree-valued states compatible.
+
+Imported state IDs differ from the archive's IDs. Preserve historical reports and use the
+mapping when inspecting imported runs; do not replace original evidence with newly generated
+hashes. The response-cache format is unchanged, but actual tool output can still affect the
+next request and therefore cache reuse.
+
+*Trajectory objects and Git file history are distinct, with both retained by the store.*
 
 ```mermaid
 flowchart TD
-  alayaRoot[".alaya/"]
-  storeDir["store/"]
-  modelCacheDir["cache/, model response cache"]
-  workDir["work/, agent's working directory"]
-  alayaRoot --> storeDir
-  alayaRoot --> modelCacheDir
-  alayaRoot --> workDir
-
-  gitDir["git/, bare SHA-256 repository"]
-  objectsDir["objects/, native Git objects"]
-  refsDir["refs/alaya/, named object pins"]
-  legacyDir["legacy blobs/ and refs/, when present"]
-  storeDir --> gitDir
-  gitDir --> objectsDir
-  gitDir --> refsDir
-  storeDir --> legacyDir
-
-  stateObj["blob, state JSON"]
-  parentState["parent state object"]
-  envTree["native Git tree, the workspace"]
-  objectsDir -.stores.-> stateObj
-  objectsDir -.stores.-> envTree
-  stateObj -.->|JSON parent hash| parentState
-  stateObj -.->|JSON workspace hash| envTree
-
-  fileBlob["file content blob"]
-  subTree["sub-tree object"]
-  envTree -->|file, exec, or link| fileBlob
-  envTree -->|directory| subTree
-
-  stateRef["encoded state.hex name / logical hash"]
-  envRef["encoded workspace.hex name / logical hash"]
-  refsDir --> stateRef
-  refsDir --> envRef
-  stateRef -->|pins| stateObj
-  envRef -->|pins| envTree
-
-  cacheEntry["cache/v1/hash.json: key + responses[]"]
-  modelCacheDir --> cacheEntry
-
-  subgraph Notes[" "]
-    direction TB
-    gcNote["Git collects unreachable native objects; legacy raw blobs remain"]
-    workNote["work/ is replaced at checkout and holds nothing durable"]
-  end
+  data[".alaya/"] --> store["store/git/, bare repository"]
+  data --> cache["cache/v1/, model responses"]
+  data --> work["work/, normal Git workspace"]
+  store --> refs["refs/alaya/, named pins"]
+  store --> objects["Git objects"]
+  refs --> state["state JSON blob"]
+  refs --> workspace["workspace commit"]
+  objects -.stores.-> state
+  objects -.stores.-> workspace
+  state -.->|JSON parent| parentState["parent state blob"]
+  state -.->|JSON workspace| workspace
+  workspace -->|tree| tree["native Git tree"]
+  workspace -->|parent| parentCommit["previous Git commit"]
+  tree --> files["file blobs and subtrees"]
+  work -.fetch / checkout.-> workspace
 ```
 
-```
-$ ls .alaya
-cache  store  work
-$ git --git-dir=.alaya/store/git rev-parse --show-object-format
-sha256
-$ git --git-dir=.alaya/store/git for-each-ref --format='%(refname) %(objectname)' refs/alaya/
-# The encoded logical names and their native Git object IDs.
+```sh
+git --git-dir=.alaya/store/git rev-parse --show-object-format
+git --git-dir=.alaya/store/git for-each-ref --format='%(refname) %(objectname)' refs/alaya/
 ```
 
 ## 6. The state object
 
 A state object is compact JSON. Field order is canonical (sorted keys), so equal states have
-equal hashes within one object format. New states are Git blobs; legacy raw state objects keep
-their original hashes (§5).
+equal hashes within one object format. States are Git blobs; legacy import writes new mapped
+state objects while preserving its original source objects (§5).
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `v` | 1 | schema version; a reader refuses any other |
 | `parent` | hex or null | the parent state |
-| `workspace` | hex | the workspace tree |
+| `workspace` | hex | the workspace Git commit |
 | `kind` | string | one of the kinds in §1 |
 | `appended` | array of events | what this state adds to the parent's log |
 | `outcome` | `{status, submission}` or null | when this state ended the run |
@@ -639,12 +621,13 @@ alaya commit HASH DIR [-m NOTE] [--tell TEXT]    record a hand-edited workspace 
 alaya tell   HASH TEXT                           send the agent a message, as a child
 alaya reply  HASH TEXT                           answer the question a state is waiting on
 alaya waiting                                    list every unanswered question
-alaya checkout HASH DIR [--evidence]             materialize a state's workspace (or an evaluation's evidence) into DIR
+alaya checkout HASH DIR [--evidence]             check out a workspace/evidence commit into DIR
 alaya tree                                       show the whole forest
 alaya show HASH [--view --agent A]               metadata, the log, and optionally the view
 alaya diff A B                                   workspace changes between two states
 alaya html [FILE] --agent A [--hide DIR]         write the forest as one self-contained page
-alaya rm HASH                                    delete a subtree and reclaim blobs
+alaya rm HASH                                    delete a trajectory subtree and collect unreachable Git objects
+alaya import-legacy                             explicitly import old objects from --data D
 ```
 
 Every command takes `--data D` and `--json` where it prints states. `--agent A` names the agent

@@ -428,7 +428,8 @@ def buildModel (spec : String) (temperature : Float) (cacheDir : System.FilePath
 sample. -/
 structure Sandbox where
   store : Store
-  /-- Wiped and re-materialized from a snapshot at every checkout; holds nothing durable. -/
+  /-- A native Git checkout; tracked files switch versions while local history and ignored
+  caches remain. Durable trajectory state lives in `store`. -/
   workDir : System.FilePath
   executor : Executor
 
@@ -490,10 +491,8 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
     note? := some note, image? }
   pure (child, log ++ appended, workspace, halt)
 
-/-- Releases the previous executor before restoring the workspace: replacing a directory
-invalidates a container's bind mount. The next command starts a container over the new files. -/
+/-- Switch versions in place, preserving the directory mounted by a running executor. -/
 private def checkoutInto (rt : Runtime) (workspace : Hash) : Result Unit := do
-  Result.fromIO Error.configuration rt.executor.close
   rt.store.materialize workspace rt.workDir { onExisting := .replace }
 
 /-- Advances exactly one model turn from `hash`, returning the new child state. -/

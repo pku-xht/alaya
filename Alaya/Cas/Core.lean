@@ -1,17 +1,17 @@
 import Lean.Data.Json
 
 /-!
-The API view of Git SHA-256 blobs and directory trees. Legacy raw SHA-256 identifiers remain
-readable through the storage adapter; new identifiers are native Git object IDs.
+The API view of Git blobs, trees and snapshot commits. New identifiers are native Git object
+IDs; the separate legacy importer accepts original raw SHA-256 addresses.
 
 Because each directory is its own object referencing children by hash, an unchanged subtree
 keeps its address across snapshots. Only changed content adds new objects, and diffing skips
-identical subtrees; capture still reads each file and invokes Git.
+identical subtrees. Git's index manages working-tree change detection.
 -/
 
 namespace Alaya.Cas
 
-/-- A Git SHA-256 object ID, or a legacy raw SHA-256 address, in lowercase hexadecimal. -/
+/-- A Git SHA-1/SHA-256 object ID or legacy SHA-256 address, in lowercase hexadecimal. -/
 structure Hash where
   hex : String
   deriving BEq, Hashable, Repr, Inhabited
@@ -19,10 +19,10 @@ structure Hash where
 private def hexDigit (c : Char) : Bool :=
   c.isDigit || (97 <= c.toNat && c.toNat <= 102)
 
-/-- A well-formed lowercase SHA-256 digest. Anything else must be rejected before it reaches
+/-- A well-formed lowercase Git object ID. Anything else must be rejected before it reaches
 the blob layout, where a hostile "digest" like `../../x` would escape the store root. -/
 def validHex (hex : String) : Bool :=
-  hex.length == 64 && hex.all hexDigit
+  (hex.length == 40 || hex.length == 64) && hex.all hexDigit
 
 /-- A valid single path component: what an `Entry` may be named. -/
 def validName (name : String) : Bool :=
@@ -44,6 +44,8 @@ inductive EntryType where
   | symlink
   /-- A directory; the hash addresses its serialized `Tree` object. -/
   | directory
+  /-- A submodule commit pointer. Git manages its separate checkout; Alaya does not recurse. -/
+  | gitlink
   deriving BEq, Repr, Inhabited
 
 def EntryType.tag : EntryType -> String
@@ -51,12 +53,14 @@ def EntryType.tag : EntryType -> String
   | .executable => "exec"
   | .symlink => "link"
   | .directory => "dir"
+  | .gitlink => "gitlink"
 
 def EntryType.fromTag : String -> Except String EntryType
   | "file" => pure .file
   | "exec" => pure .executable
   | "link" => pure .symlink
   | "dir" => pure .directory
+  | "gitlink" => pure .gitlink
   | other => throw s!"unknown entry type: {other}"
 
 /-- One name in a directory. -/

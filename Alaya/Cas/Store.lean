@@ -1,10 +1,8 @@
-import Std.Data.HashMap
 import Alaya.Cas.Core
-import Alaya.Cas.Sha256
 import Alaya.Cas.Git
 
-/-! Git owns new objects, tree encoding, refs and garbage collection. Legacy raw SHA-256
-objects are read without rewriting the old store or its trajectory identities. -/
+/-! Native Git objects and references. Historical raw stores are handled explicitly by
+`Alaya.Cas.Legacy`, never by ordinary snapshot reads or writes. -/
 
 namespace Alaya.Cas
 
@@ -20,14 +18,14 @@ namespace Store
 
 private def args (store : Store) (command : Array String) : Array String :=
   #["--git-dir=" ++ store.gitDir.toString,
-    "-c", "core.hooksPath=/dev/null", "-c", "gc.auto=0", "-c", "core.logAllRefUpdates=false"] ++ command
+    "-c", "core.hooksPath=/dev/null", "-c", "gc.auto=0",
+    "-c", "core.logAllRefUpdates=false"] ++ command
 
-/-- Execute plumbing in the store's repository, isolated from the caller's Git configuration. -/
+/-- Execute plumbing in the store repository. -/
 def git (store : Store) (command : Array String) (input : ByteArray := .empty) : Result ByteArray :=
   Git.checked (args store command) input
 
-private def gitText (store : Store) (command : Array String)
-    (input : ByteArray := .empty) : Result String := do
+def gitText (store : Store) (command : Array String) (input : ByteArray := .empty) : Result String := do
   Git.text (← store.git command input)
 
 private def checkHash (hash : Hash) : Result Unit :=
@@ -38,20 +36,25 @@ private def parseHash (bytes : ByteArray) : Result Hash := do
   checkHash hash
   pure hash
 
-/-- Opens an isolated bare SHA-256 repository. The caller's project and index are untouched. -/
+/-- The repository's native object format (`sha1` or `sha256`). -/
+def objectFormat (store : Store) : Result String := do
+  pure (← store.gitText #["rev-parse", "--show-object-format"]).trimAscii.toString
+
+/-- Create a bare SHA-1 repository, or open an existing bare SHA-1/SHA-256 repository. -/
 def create (root : System.FilePath) : Result Store := do
   io <| IO.FS.createDirAll (root / "tmp")
   let root ← io <| IO.FS.realPath root
   let store : Store := { root, counter := ← io (IO.mkRef 0) }
   if !(← io (store.gitDir / "HEAD").pathExists) then
-    let _ ← Git.checked #["init", "--bare", "--object-format=sha256", "--template=",
+    let _ ← Git.checked #["init", "--bare", "--object-format=sha1", "--template=",
       store.gitDir.toString]
-  if (← store.gitText #["rev-parse", "--show-object-format"]).trimAscii.toString != "sha256" ||
+  let format ← store.objectFormat
+  if (format != "sha1" && format != "sha256") ||
       (← store.gitText #["rev-parse", "--is-bare-repository"]).trimAscii.toString != "true" then
-    throw <| .storage "the snapshot store requires a bare SHA-256 Git repository"
+    throw <| .storage "the snapshot store requires a bare SHA-1 or SHA-256 Git repository"
   pure store
 
-/-- Used only for ancillary metadata; durable content is written by Git. -/
+/-- Atomic write for ancillary metadata; Git writes durable snapshot objects. -/
 def atomicWrite (store : Store) (destination : System.FilePath) (bytes : ByteArray) : IO Unit := do
   let suffix ← store.counter.modifyGet fun n => (n, n + 1)
   let temporary := store.root / "tmp" / s!"{suffix}-{← IO.monoNanosNow}.tmp"
@@ -59,42 +62,74 @@ def atomicWrite (store : Store) (destination : System.FilePath) (bytes : ByteArr
   IO.FS.createDirAll (destination.parent.getD store.root)
   IO.FS.rename temporary destination
 
-private def objectType? (store : Store) (hash : Hash) : Result (Option String) := do
+/-- Native type lookup. Commits and tags are legitimate Git objects as well as blobs and trees. -/
+def objectType? (store : Store) (hash : Hash) : Result (Option String) := do
   checkHash hash
   let output ← store.gitText #["cat-file", "--batch-check=%(objecttype)"] (hash.hex ++ "\n").toUTF8
   let value := output.trimAscii.toString
   if value == s!"{hash.hex} missing" then return none
-  if value != "blob" && value != "tree" then
+  if !["blob", "tree", "commit", "tag"].contains value then
     throw <| .storage s!"unexpected Git object type for {hash.hex}: {value}"
   pure (some value)
 
-private def legacyBytes? (store : Store) (hash : Hash) : Result (Option ByteArray) := do
+private def rejectLegacy (store : Store) (hash : Hash) : Result Unit := do
   checkHash hash
-  let path := store.root / "blobs" / (hash.hex.take 2).toString / hash.hex
-  if !(← io path.pathExists) then return none
-  let bytes ← io <| IO.FS.readBinFile path
-  if Sha256.sumHex bytes != hash.hex then
-    throw <| .storage s!"corrupt legacy object: {hash.hex}"
-  pure (some bytes)
+  if hash.hex.length == 64 &&
+      (← io (store.root / "blobs" / (hash.hex.take 2).toString / hash.hex).pathExists) then
+    throw <| .storage s!"{hash.hex} is a legacy raw object; read or import it explicitly with Alaya.Cas.Legacy"
 
-/-- Store the exact bytes as a native Git blob; no attributes, filters or line conversion. -/
+/-- Store the supplied bytes as a native blob, without working-tree attribute conversion. -/
 def putBytes (store : Store) (bytes : ByteArray) : Result Hash := do
   parseHash (← store.git #["hash-object", "-w", "--stdin", "--no-filters"] bytes)
 
+/-- Read a native blob in one binary-safe batch request. Legacy stores require explicit import. -/
 def getBytes (store : Store) (hash : Hash) : Result (Option ByteArray) := do
-  match ← store.objectType? hash with
-  | some "blob" => pure (some (← store.git #["cat-file", "blob", hash.hex]))
-  | some _ => throw <| .storage s!"object {hash.hex} is not a blob"
-  | none => store.legacyBytes? hash
+  store.rejectLegacy hash
+  let output ← store.git #["cat-file", "--batch"] (hash.hex ++ "\n").toUTF8
+  let mut headerEnd := 0
+  while headerEnd < output.size && output[headerEnd]! != 10 do
+    headerEnd := headerEnd + 1
+  let header ← Git.text (output.extract 0 headerEnd)
+  match header.splitOn " " with
+  | [_, "missing"] => pure none
+  | [_, "blob", size] =>
+    let some size := size.toNat? | throw <| .storage "invalid Git blob size"
+    if output.size != headerEnd + size + 2 then
+      throw <| .storage "incomplete Git blob response"
+    pure (some (output.extract (headerEnd + 1) (headerEnd + 1 + size)))
+  | [_, kind, _] => throw <| .storage s!"object {hash.hex} is a {kind}, not a blob"
+  | _ => throw <| .storage "invalid Git cat-file response"
 
 def hasBytes (store : Store) (hash : Hash) : Result Bool := do
-  pure ((← store.objectType? hash).isSome || (← store.legacyBytes? hash).isSome)
+  store.rejectLegacy hash
+  pure (← store.objectType? hash).isSome
+
+/-- Resolve a native commit, tag, or tree to its tree; no historical conversion takes place. -/
+def treeHash (store : Store) (hash : Hash) : Result Hash := do
+  store.rejectLegacy hash
+  parseHash (← store.git #["rev-parse", "--verify", hash.hex ++ "^{tree}"])
+
+/-- Create a snapshot commit. Workspace capture reuses its HEAD when the tree is unchanged. -/
+def commitTree (store : Store) (tree : Hash) (parent? : Option Hash := none) : Result Hash := do
+  store.rejectLegacy tree
+  if let some parent := parent? then store.rejectLegacy parent
+  let command := #["-c", "user.name=Alaya", "-c", "user.email=alaya@localhost",
+    "commit-tree", tree.hex] ++
+    (parent?.map (fun parent => #["-p", parent.hex]) |>.getD #[]) ++
+    #["-m", "Alaya snapshot"]
+  parseHash (← store.git command)
 
 private def mode : EntryType → String
   | .file => "100644"
   | .executable => "100755"
   | .symlink => "120000"
   | .directory => "040000"
+  | .gitlink => "160000"
+
+private def kind : EntryType → String
+  | .directory => "tree"
+  | .gitlink => "commit"
+  | _ => "blob"
 
 private def typeOfMode (value : String) : Result EntryType :=
   match value with
@@ -102,10 +137,20 @@ private def typeOfMode (value : String) : Result EntryType :=
   | "100755" => pure .executable
   | "120000" => pure .symlink
   | "040000" => pure .directory
+  | "160000" => pure .gitlink
   | _ => throw <| .storage s!"unsupported Git tree mode: {value}"
 
-private def rawTree (store : Store) (hash : Hash) : Result Tree := do
-  let text ← store.gitText #["ls-tree", "-z", hash.hex]
+/-- Write native entries in one mktree call. Gitlinks may refer to a commit in another repo. -/
+def putTree (store : Store) (tree : Tree) : Result Hash := do
+  let _ ← Result.fromExcept Error.storage (Tree.fromJson tree.toJson)
+  let records := tree.entries.map fun entry =>
+    s!"{mode entry.type} {kind entry.type} {entry.hash.hex}\t{entry.name}\x00"
+  parseHash (← store.git #["mktree", "-z", "--missing"] (String.join records.toList).toUTF8)
+
+/-- Read the native directory named by a tree or commit. -/
+def getTree (store : Store) (hash : Hash) : Result Tree := do
+  let tree ← store.treeHash hash
+  let text ← store.gitText #["ls-tree", "-z", tree.hex]
   let entries ← (text.splitOn "\x00" |>.filter (!·.isEmpty)).toArray.mapM fun record => do
     let parts := record.splitOn "\t"
     let header := parts.head!
@@ -113,55 +158,15 @@ private def rawTree (store : Store) (hash : Hash) : Result Tree := do
     if parts.length < 2 || !validName name then
       throw <| .storage "invalid name in Git snapshot"
     match header.splitOn " " with
-    | [permissions, kind, hex] =>
+    | [permissions, objectKind, hex] =>
       let type ← typeOfMode permissions
-      if kind != (if type == .directory then "tree" else "blob") then
+      if objectKind != kind type then
         throw <| .storage "invalid object type in Git snapshot"
       let hash : Hash := ⟨hex⟩
       checkHash hash
       pure ({ name, type, hash } : Entry)
     | _ => throw <| .storage "invalid Git ls-tree response"
   pure (Tree.ofEntries entries)
-
-private def legacyTree (store : Store) (hash : Hash) : Result Tree := do
-  let some bytes ← store.legacyBytes? hash
-    | throw <| .storage s!"missing tree {hash.hex}"
-  let text ← Git.text bytes
-  let json ← Result.fromExcept Error.storage (Lean.Json.parse text)
-  Result.fromExcept Error.storage (Tree.fromJson json)
-
-private def importBlob (store : Store) (hash : Hash) : Result Hash := do
-  match ← store.objectType? hash with
-  | some "blob" => pure hash
-  | some _ => throw <| .storage s!"expected blob: {hash.hex}"
-  | none =>
-    let some bytes ← store.legacyBytes? hash
-      | throw <| .storage s!"missing blob {hash.hex}"
-    store.putBytes bytes
-
-mutual
-  /-- Resolve a legacy JSON tree to its native Git tree without rewriting old objects. -/
-  partial def importTree (store : Store) (hash : Hash) : Result Hash := do
-    match ← store.objectType? hash with
-    | some "tree" => pure hash
-    | some _ => throw <| .storage s!"expected tree: {hash.hex}"
-    | none => store.putTree (← store.legacyTree hash)
-
-  /-- Write a native tree, importing legacy children according to their declared type. -/
-  partial def putTree (store : Store) (tree : Tree) : Result Hash := do
-    let _ ← Result.fromExcept Error.storage (Tree.fromJson tree.toJson)
-    let records ← tree.entries.mapM fun entry => do
-      let oid ← if entry.type == .directory then store.importTree entry.hash
-        else store.importBlob entry.hash
-      let kind := if entry.type == .directory then "tree" else "blob"
-      pure s!"{mode entry.type} {kind} {oid.hex}\t{entry.name}\x00"
-    parseHash (← store.git #["mktree", "-z"] (String.join records.toList).toUTF8)
-end
-
-/-- Trees read through the legacy adapter expose canonical native child identities, so
-unchanged old/new snapshots compare equal without treating every file as modified. -/
-def getTree (store : Store) (hash : Hash) : Result Tree := do
-  store.rawTree (← store.importTree hash)
 
 /-- Reference names remain the public Alaya names; Git path restrictions stay internal. -/
 def validRefName (name : String) : Bool :=
@@ -192,8 +197,9 @@ private def decodeName (text : String) : Result String := do
   checkRefName name
   pure name
 
-private def gitRefs (store : Store) : Result (Array (String × Hash × String)) := do
-  let output ← store.gitText #["for-each-ref", "--format=%(refname)", "refs/alaya/"]
+private def gitRefs (store : Store) (refPrefix : String := "refs/alaya/") :
+    Result (Array (String × Hash × String)) := do
+  let output ← store.gitText #["for-each-ref", "--format=%(refname)", refPrefix]
   (output.splitOn "\n" |>.filter (!·.isEmpty)).toArray.mapM fun ref => do
     match ref.splitOn "/" with
     | ["refs", "alaya", encoded, hex] =>
@@ -203,62 +209,38 @@ private def gitRefs (store : Store) : Result (Array (String × Hash × String)) 
       pure (name, hash, ref)
     | _ => throw <| .storage s!"corrupt Alaya Git reference: {ref}"
 
-/-- Enumerate logical hashes, including unchanged legacy state identities. -/
+/-- Enumerate active native Alaya refs. Old raw ref files remain untouched and unenumerated. -/
 def listRefs (store : Store) : Result (Array (String × Hash)) := do
-  let mut refs : Std.HashMap String Hash := {}
-  let legacy := store.root / "refs"
-  if ← io legacy.pathExists then
-    for entry in ← io legacy.readDir do
-      checkRefName entry.fileName
-      let hash : Hash := ⟨(← io (IO.FS.readFile entry.path)).trimAscii.toString⟩
-      checkHash hash
-      refs := refs.insert entry.fileName hash
-  for (name, hash, _) in ← store.gitRefs do
-    refs := refs.insert name hash
-  pure (refs.toArray.qsort fun a b => compare a.1 b.1 == .lt)
+  pure <| ((← store.gitRefs).map fun (name, hash, _) => (name, hash)).qsort
+    (fun a b => compare a.1 b.1 == .lt)
 
 def getRef? (store : Store) (name : String) : Result (Option Hash) := do
   checkRefName name
-  pure ((← store.listRefs).find? (fun entry => entry.1 == name) |>.map (·.2))
+  pure ((← store.gitRefs s!"refs/alaya/{encodeName name}/")[0]?.map fun (_, hash, _) => hash)
 
-private def legacyRef (store : Store) (name : String) : System.FilePath := store.root / "refs" / name
-
-/-- The ref path carries the public hash, while its target pins the corresponding Git
-object. This preserves old state IDs even though Git's object hash includes a type header. -/
+/-- Atomically replace this named native ref. Updates to one name must be serialized. -/
 def setRef (store : Store) (name : String) (hash : Hash) : Result Unit := do
   checkRefName name
-  checkHash hash
-  let oid ← match ← store.objectType? hash with
-    | some _ => pure hash
-    | none =>
-      let some bytes ← store.legacyBytes? hash
-        | throw <| .storage s!"cannot pin missing object {hash.hex}"
-      match String.fromUTF8? bytes >>= (fun text => (Lean.Json.parse text).toOption) >>=
-          (fun json => (Tree.fromJson json).toOption) with
-      | some tree => store.putTree tree
-      | none => store.putBytes bytes
+  store.rejectLegacy hash
   let target := s!"refs/alaya/{encodeName name}/{hash.hex}"
   let mut commands := "start\n"
-  for (existing, _, ref) in ← store.gitRefs do
-    if existing == name && ref != target then commands := commands ++ s!"delete {ref}\n"
-  commands := commands ++ s!"update {target} {oid.hex}\nprepare\ncommit\n"
+  for (_, _, ref) in ← store.gitRefs s!"refs/alaya/{encodeName name}/" do
+    if ref != target then commands := commands ++ s!"delete {ref}\n"
+  commands := commands ++ s!"update {target} {hash.hex}\nprepare\ncommit\n"
   let _ ← store.git #["update-ref", "--stdin"] commands.toUTF8
-  if ← io (store.legacyRef name).pathExists then io <| IO.FS.removeFile (store.legacyRef name)
+  pure ()
 
 def deleteRef (store : Store) (name : String) : Result Unit := do
   checkRefName name
   let mut commands := "start\n"
-  for (existing, _, ref) in ← store.gitRefs do
-    if existing == name then commands := commands ++ s!"delete {ref}\n"
+  for (_, _, ref) in ← store.gitRefs s!"refs/alaya/{encodeName name}/" do
+    commands := commands ++ s!"delete {ref}\n"
   let _ ← store.git #["update-ref", "--stdin"] (commands ++ "prepare\ncommit\n").toUTF8
-  if ← io (store.legacyRef name).pathExists then io <| IO.FS.removeFile (store.legacyRef name)
+  pure ()
 
-/-- Git traverses native tree references. Legacy blobs remain read-only compatibility data.
-Run only when no writer is using this store (the same exclusive maintenance boundary as rm). -/
+/-- Collect unreachable Git objects during exclusive maintenance. Commit ancestry is retained
+through live refs. Explicit legacy import refs pin their converted objects separately. -/
 def gc (store : Store) : Result Unit := do
-  -- Legacy refs can point at Git-imported children. Pin all live roots before pruning.
-  for (name, hash) in ← store.listRefs do
-    store.setRef name hash
   let _ ← store.git #["reflog", "expire", "--expire=now", "--all"]
   let _ ← store.git #["gc", "--prune=now"]
   pure ()

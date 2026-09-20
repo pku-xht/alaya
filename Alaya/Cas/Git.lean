@@ -1,6 +1,7 @@
 import Alaya.Error
 
-/-! Binary-safe, configuration-isolated Git plumbing. No shell or working-tree index is used. -/
+/-! Binary-safe Git execution without a shell. Repository-local configuration applies;
+ambient repository/index overrides and global configuration do not. -/
 
 namespace Alaya.Cas.Git
 
@@ -15,7 +16,8 @@ private def environment : IO (Array (String × Option String)) := do
   let mut env := #[
     ("LC_ALL", some "C"), ("GIT_CONFIG_NOSYSTEM", some "1"),
     ("GIT_CONFIG_GLOBAL", some "/dev/null"), ("GIT_CONFIG_SYSTEM", some "/dev/null"),
-    ("GIT_ATTR_NOSYSTEM", some "1"), ("GIT_TERMINAL_PROMPT", some "0")]
+    ("GIT_ATTR_NOSYSTEM", some "1"), ("GIT_TERMINAL_PROMPT", some "0"),
+    ("GIT_ALLOW_PROTOCOL", some "file")]
   for key in #["PATH", "SystemRoot", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP"] do
     if let some value ← IO.getEnv key then env := env.push (key, some value)
   pure env

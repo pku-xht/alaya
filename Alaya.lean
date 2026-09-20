@@ -11,4 +11,5 @@ import Alaya.Executor.Docker
 import Alaya.Agent
 import Alaya.Agent.MiniSwe
 import Alaya.Trajectory
+import Alaya.Trajectory.Legacy
 import Alaya.Trajectory.Html

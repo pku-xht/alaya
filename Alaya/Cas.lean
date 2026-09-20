@@ -4,17 +4,17 @@ import Alaya.Cas.Store
 import Alaya.Cas.Workspace
 
 /-!
-A Git-backed content-addressed store with a compatibility reader for legacy objects.
+A thin Git-backed store for recorded states and workspace commits.
 
-- `Cas.Store.create` opens a separate bare SHA-256 Git repository; `putBytes`/`getBytes`
-  store and read raw blobs without applying the captured project's Git filters.
-- `Store.snapshot` captures a directory as a native Git tree and returns its hash.
-  `Store.materialize`/`restore` rebuild its contents, including symlinks, executable
-  bits, and empty directories. Capture does not use the project's index or ignore rules.
-- `Store.readPath`/`writePath`/`removePath`/`listPaths` edit snapshots purely — cheap
-  branching without touching the working directory.
-- `Store.setRef` pins objects by name; `Store.gc` collects unpinned Git objects.
-  Legacy raw objects remain readable at their original hashes and are not collected.
+- `Cas.Store.create` opens a bare Git store; new stores use SHA-1, while existing SHA-256
+  Git stores retain their format. Project and store formats must match.
+- `Store.snapshot` stages a workspace through its own real Git index and returns a native
+  commit ID. New snapshot commits retain HEAD as parent and detach HEAD without advancing
+  the original branch. Ignore rules, supported attributes, and empty directories follow Git semantics.
+- `Store.materialize`/`restore` fetch and check out a commit in a normal repository. Git
+  metadata and history are retained, and ignored caches normally remain in the workspace.
+- `Store.setRef` pins objects by name; `Store.gc` delegates reachability to Git, including
+  surviving commit ancestry. Legacy raw stores require a separate explicit import.
 
 See `docs/git-store.md` for the storage contract and migration limits.
 -/

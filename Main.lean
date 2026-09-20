@@ -93,7 +93,7 @@ private def agentOf (args : Cli.Args) : Result AgentSpec := do
 private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args)
     (image? : Option String) : Result Runtime := do
   let spec ← agentOf args
-  let modelSpec ← args.require "model" "e.g. --model yunwu:gpt-5.6-luna"
+  let modelSpec ← args.require "model" "e.g. --model xmcp:closeai/gpt-5.6-luna"
   let temperature ← args.floatD "temperature" 0.0
   let model ← buildModel modelSpec temperature data.cache (← Provider.Options.ofArgs args)
   let executor ← executorFor args image? spec.executorConfig
@@ -166,6 +166,12 @@ private def dispatch (argv : List String) : Result UInt32 := do
   let args := Cli.parse argv (aliases := [("-m", "note")])
   let json := args.isSet "json"
   match args.positional.toList with
+  | ["import-legacy"] =>
+    let path : System.FilePath := ← args.valueD "data" ".alaya"
+    let mappings ← Alaya.Trajectory.Legacy.importData path
+    if json then emit (Alaya.Trajectory.Legacy.mappingJson mappings).compress
+    else emit s!"imported {mappings.size} legacy state(s); address mapping: {path / "legacy-import.json"}"
+    pure 0
   | "root" :: task :: rest =>
     if rest.length > 1 then
       throw <| .configuration "alaya root TASK (PROJECT | --path PATH --image IMAGE)"
@@ -278,7 +284,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++
       "html [FILE] --agent A [--hide DIR] | " ++
-      "show HASH [--view --agent A] | diff A B | rm HASH) " ++
+      "show HASH [--view --agent A] | diff A B | rm HASH | import-legacy) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++
       "[--timeout S] [--force]"
 

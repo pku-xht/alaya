@@ -40,6 +40,24 @@ private def withDocker (body : Docker.Settings -> TestM Unit) : TestM Unit := do
   | some settings => body settings
   | none => skipping s!"no docker daemon, or {imageReference} unavailable"
 
+/-- This integration needs Git inside the container. Use an explicitly supplied local image;
+the test never pulls or builds an image just to install Git. -/
+private def withGitDocker (body : Docker.Settings -> TestM Unit) : TestM Unit := do
+  let some image ← IO.getEnv "ALAYA_TEST_GIT_IMAGE"
+    | return ← skipping "set ALAYA_TEST_GIT_IMAGE to a local image containing Git"
+  let available ←
+    try pure ((← IO.Process.output {
+      cmd := "docker", args := #["image", "inspect", image] }).exitCode == 0)
+    catch _ => pure false
+  if !available then return ← skipping s!"local Git test image {image} is unavailable"
+  let probe ← IO.Process.output {
+    cmd := "docker", args := #["run", "--pull=never", "--rm", "--network=none",
+      "--entrypoint", "/bin/sh", image, "-c", "command -v git"] }
+  if probe.exitCode != 0 then return ← skipping s!"{image} does not provide Git"
+  let args := Cli.parse ["--image", image]
+  let settings ← assertOk <| (do (← Docker.settingsFor args image).pin)
+  body settings
+
 /-- A model that answers with `responses` in order, for driving one real turn. -/
 private def scripted (responses : Array Chat.Response) : TestM Model := do
   let index ← IO.mkRef 0
@@ -228,6 +246,47 @@ def suite : Suite := Testing.suite "docker" #[
           (← assertOk (store.readPath secondTree "first.txt")) none
         assertEqual "sibling write was captured" (← assertOk (store.readPath secondTree "second.txt"))
           (some "second\n".toUTF8)
+      finally
+        rt.executor.close,
+
+  test "native Git in the container retains commits when restoring a fork" <| withGitDocker
+    fun settings => do
+      let work ← workspace
+      let project := (← scratch) / "proj"
+      writeSpec project #[("seed.txt", "seed-value\n")]
+      let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
+      let commit := "git status --porcelain && git log -1 --format=%H && " ++
+        "printf 'container-change\\n' > seed.txt && git add seed.txt && " ++
+        "git -c user.name=Container -c user.email=container@localhost commit -qm container-commit && " ++
+        "git update-ref refs/test/container-commit HEAD && git rev-parse HEAD"
+      let inspect := "test -d .git && git status --porcelain && git log -1 --format=%H && " ++
+        "git cat-file -t refs/test/container-commit && cat seed.txt"
+      let model ← scripted #[toolResponse commit, toolResponse inspect]
+      let rt ← runtime settings work store model
+      try
+        let uname ← assertOk (Docker.uname settings)
+        let root ← assertOk <| createRoot store (Agent.MiniSwe.initialLog miniConfig uname) project
+          (some "t") (some settings.image)
+        let rootCommit := (← assertOk (getState store root)).workspace
+        let first ← assertOk <| stepOnce rt "test:model" root
+        let firstOutput ← observedOutput store first
+        assertEqual "container commit exit" firstOutput.exitCode? (some 0)
+        let containerCommit := (← assertOk (getState store first)).workspace
+        check (containerCommit != rootCommit) "the container should have created a new commit"
+        assertEqual "Git runs inside the initial container" firstOutput.output
+          s!"{rootCommit.hex}\n{containerCommit.hex}\n"
+        let fork ← assertOk <| tell store root "Restore the original tracked files."
+        let second ← assertOk <| stepOnce rt "test:model" fork
+        let secondOutput ← observedOutput store second
+        assertEqual "container Git after restore" secondOutput.exitCode? (some 0)
+        assertEqual "old tree restored and later commit still readable" secondOutput.output
+          s!"{rootCommit.hex}\ncommit\nseed-value\n"
+        assertEqual "container commit remains in the store"
+          (← assertOk (store.readPath containerCommit "seed.txt"))
+          (some "container-change\n".toUTF8)
+        assertEqual "restored branch has the original tracked file"
+          (← assertOk (store.readPath (← assertOk (getState store second)).workspace "seed.txt"))
+          (some "seed-value\n".toUTF8)
       finally
         rt.executor.close,
 
