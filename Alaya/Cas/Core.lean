@@ -1,17 +1,17 @@
 import Lean.Data.Json
 
 /-!
-The object model of the content-addressed store: blobs addressed by SHA-256, and git-style
-Merkle trees built from per-directory `Tree` objects.
+The API view of Git SHA-256 blobs and directory trees. Legacy raw SHA-256 identifiers remain
+readable through the storage adapter; new identifiers are native Git object IDs.
 
 Because each directory is its own object referencing children by hash, an unchanged subtree
-keeps its address across snapshots: snapshots share structure, writing a snapshot costs only
-the objects along changed paths, and diffing two snapshots skips identical subtrees wholesale.
+keeps its address across snapshots. Only changed content adds new objects, and diffing skips
+identical subtrees; capture still reads each file and invokes Git.
 -/
 
 namespace Alaya.Cas
 
-/-- A SHA-256 content address, held as its lowercase hex digest. -/
+/-- A Git SHA-256 object ID, or a legacy raw SHA-256 address, in lowercase hexadecimal. -/
 structure Hash where
   hex : String
   deriving BEq, Hashable, Repr, Inhabited
@@ -26,7 +26,7 @@ def validHex (hex : String) : Bool :=
 
 /-- A valid single path component: what an `Entry` may be named. -/
 def validName (name : String) : Bool :=
-  !name.isEmpty && name != "." && name != ".." && !name.any (· == '/')
+  !name.isEmpty && name != "." && name != ".." && !name.any (fun c => c == '/' || c == '\x00')
 
 /-- Accepts only clean relative paths: no absolute roots and no empty, `.`, or `..`
 components. Anything else must be rejected before it reaches a filesystem join, where an

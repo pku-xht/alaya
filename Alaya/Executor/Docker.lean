@@ -119,8 +119,8 @@ private structure Container where
 
 /-- Starts the run's container with the working directory bind-mounted.
 
-The mount is bound to that directory's inode, and a full (non-incremental) materialize replaces
-it — `Store.materialize` removes the destination and recreates it. A trajectory checks out
+The mount is bound to that directory's inode, and `Store.materialize` replaces that directory
+after preparing a complete checkout. A trajectory checks out
 once, before the first command, so the container is always started against the final inode.
 Anything that re-materializes mid-run has to restart the container too. -/
 private def start (settings : Settings) (workDir : System.FilePath) : IO Container := do

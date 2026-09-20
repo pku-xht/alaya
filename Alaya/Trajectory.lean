@@ -393,7 +393,8 @@ partial def subtree (store : Store) (hash : Hash) : Result (Array Hash) := do
     acc := acc ++ (← subtree store kid)
   pure acc
 
-/-- Deletes a state and its whole subtree, then reclaims every blob no longer reachable. -/
+/-- Deletes a state and its whole subtree, then reclaims unreferenced Git objects.
+Legacy archive objects are retained by the compatibility reader. -/
 def removeSubtree (store : Store) (hash : Hash) : Result Nat := do
   let doomed ← subtree store hash
   -- Re-pin tree refs from the survivors only, so a tree shared with a survivor stays live.
@@ -489,9 +490,8 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
     note? := some note, image? }
   pure (child, log ++ appended, workspace, halt)
 
-/-- Materializes `workspace` into `rt.workDir`, replacing whatever is there. Relies on
-`MaterializeConfig.verify` (the default): the run's commands modify the directory after every
-checkout, and an incremental apply against the stale record would keep those writes. -/
+/-- Restores `workspace` exactly into the mutable execution directory. Complete replacement
+prevents a later branch or continuation from inheriting a previous tool's writes. -/
 private def checkoutInto (sandbox : Sandbox) (workspace : Hash) : Result Unit :=
   sandbox.store.materialize workspace sandbox.workDir { onExisting := .replace }
 

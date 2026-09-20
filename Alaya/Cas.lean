@@ -4,13 +4,17 @@ import Alaya.Cas.Store
 import Alaya.Cas.Workspace
 
 /-!
-A content-addressed store with git-style Merkle snapshots.
+A Git-backed content-addressed store with a compatibility reader for legacy objects.
 
-- `Cas.Store.create` opens a store; `putBytes`/`getBytes` are the blob layer.
-- `Store.snapshot` captures a directory (stat-cached, parallel-hashed, ignore-filtered,
-  symlink- and exec-bit-aware); `Store.materialize` writes a snapshot back out
-  incrementally by diffing against the destination's previous checkout.
+- `Cas.Store.create` opens a separate bare SHA-256 Git repository; `putBytes`/`getBytes`
+  store and read raw blobs without applying the captured project's Git filters.
+- `Store.snapshot` captures a directory as a native Git tree and returns its hash.
+  `Store.materialize`/`restore` rebuild its contents, including symlinks, executable
+  bits, and empty directories. Capture does not use the project's index or ignore rules.
 - `Store.readPath`/`writePath`/`removePath`/`listPaths` edit snapshots purely — cheap
   branching without touching the working directory.
-- `Store.setRef` pins snapshots by name; `Store.gc` collects everything unreachable.
+- `Store.setRef` pins objects by name; `Store.gc` collects unpinned Git objects.
+  Legacy raw objects remain readable at their original hashes and are not collected.
+
+See `docs/git-store.md` for the storage contract and migration limits.
 -/

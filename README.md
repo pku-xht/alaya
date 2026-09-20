@@ -17,8 +17,9 @@ Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls these progra
 | Program | Used for |
 | --- | --- |
 | `curl` | every request to a model provider |
+| `git` with SHA-256 repository support | storing snapshots and recorded states in an independent bare repository |
 | `docker` | running an agent's commands in a pinned container image |
-| `/bin/sh`, `uname`, `cp`, `find` | running commands on the host, describing the host, and snapshotting a directory |
+| `/bin/sh`, `uname`, `find`, `ln`, `readlink`, `mktemp` | running commands on the host, describing the host, and capturing/restoring directories |
 
 `docker` is needed only for trajectories created with `--image`; the rest are on any Unix host.
 A grader given to `alaya eval` is a shell command of your own and brings its own dependencies.
@@ -41,6 +42,11 @@ person, or stop, an `act` that runs a tool call in a workspace, and the tools it
 parent, the events it appends, and a snapshot of the workspace, so a run can be replayed,
 forked, evaluated against hidden tests, and continued after a person intervenes. The page
 specifies the state object, the store layout, the model cache entry, and every `alaya` command.
+
+[`docs/git-store.md`](docs/git-store.md) — the snapshot backend. Creating a snapshot returns a
+native Git tree hash; restoring that hash rebuilds the directory. The backend uses its own
+bare SHA-256 repository, preserves raw file bytes, and reads existing Alaya archives without
+rewriting their old hashes. It does not use the captured project's index, branches, or filters.
 
 [`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agent.MiniSwe` is the port of
 mini-SWE-agent as one agent: the original's prompts, `bash` tool, and protocol for reading a

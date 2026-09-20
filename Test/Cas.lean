@@ -1,9 +1,8 @@
 import Test.Framework
 import Alaya.Cas
 
-/-! Per-feature suites for the content-addressed store: blob/tree objects, Merkle structure
-sharing and diffing, the stat cache, incremental and linked materialization, exec/symlink
-metadata, ignore rules, refs and garbage collection, parallel hashing, and pure path ops. -/
+/-! Behavior tests for Git-backed snapshots: native object identity, exact restoration,
+filesystem metadata, isolation from the source repository, refs, and legacy reads. -/
 
 namespace CasTests
 
@@ -32,11 +31,26 @@ private def snapshotSpec (store : Store) (spec : Array (String × String))
   writeSpec source spec
   assertOk <| store.snapshot source config
 
-private def metricsOf (store : Store) : TestM Metrics :=
-  assertOk store.metrics
+private def command (cmd : String) (args : Array String) : TestM String := do
+  let out ← IO.Process.output { cmd, args }
+  assertEqual s!"{cmd}: {out.stderr}" out.exitCode 0
+  pure out.stdout
 
-private def reset (store : Store) : TestM Unit := do
-  assertOk store.resetMetrics
+private def git (store : Store) (args : Array String) : TestM String :=
+  command "git" (#["--git-dir", store.gitDir.toString] ++ args)
+
+private def missingHash : Hash := ⟨String.ofList (List.replicate 64 'a')⟩
+
+/-- Manufacture the historical on-disk format without using the new implementation. -/
+private def legacyBlob (store : Store) (bytes : ByteArray) : TestM Hash := do
+  let hash : Hash := ⟨Sha256.sumHex bytes⟩
+  let parent := store.root / "blobs" / (hash.hex.take 2).toString
+  IO.FS.createDirAll parent
+  IO.FS.writeBinFile (parent / hash.hex) bytes
+  pure hash
+
+private def legacyTree (store : Store) (tree : Tree) : TestM Hash :=
+  legacyBlob store tree.toJson.compress.toUTF8
 
 /-! ## Objects and blobs -/
 
@@ -49,11 +63,9 @@ def objectSuite : Suite := suite "cas.objects" #[
       (some bytes.toList)
     let again ← assertOk <| store.putBytes bytes
     assertEqual "stable address" again hash
-    let m ← metricsOf store
-    assertEqual "written once" m.blobsWritten 1
-    assertEqual "reused once" m.blobsReused 1
-    assertEqual "missing blob" (← assertOk <| store.getBytes ⟨String.ofList
-      (List.replicate 64 'a')⟩) none,
+    assertEqual "native blob" (← git store #["cat-file", "-t", hash.hex]) "blob\n"
+    assertEqual "object exists" (← assertOk <| store.hasBytes hash) true
+    assertEqual "missing blob" (← assertOk <| store.getBytes missingHash) none,
 
   test "tree roundtrip preserves entries and types" do
     let store ← withStore
@@ -65,7 +77,9 @@ def objectSuite : Suite := suite "cas.objects" #[
     let hash ← assertOk <| store.putTree tree
     let loaded ← assertOk <| store.getTree hash
     assertEqual "canonical order survives" loaded tree
-    assertEqual "sorted by name" (loaded.entries.map (·.name)) #["link", "run.sh", "z.txt"],
+    assertEqual "sorted by name" (loaded.entries.map (·.name)) #["link", "run.sh", "z.txt"]
+    assertEqual "native tree" (← git store #["cat-file", "-t", hash.hex]) "tree\n"
+    assertEqual "SHA-256 repository" (← git store #["rev-parse", "--show-object-format"]) "sha256\n",
 
   test "tree parsing rejects hostile input" do
     let bad (json : String) : TestM Unit := do
@@ -86,7 +100,22 @@ def objectSuite : Suite := suite "cas.objects" #[
 
   test "missing tree is a storage error" do
     let store ← withStore
-    assertError "getTree" (store.getTree ⟨String.ofList (List.replicate 64 'b')⟩) isStorage
+    assertError "getTree" (store.getTree missingHash) isStorage,
+
+  test "binary blobs keep every byte" do
+    let store ← withStore
+    let bytes := deterministicBytes 42 65537
+    let hash ← assertOk <| store.putBytes bytes
+    assertEqual "binary roundtrip" ((← assertOk <| store.getBytes hash).map (·.toList))
+      (some bytes.toList)
+    let empty ← assertOk <| store.putBytes ByteArray.empty
+    assertEqual "empty blob" ((← assertOk <| store.getBytes empty).map (·.size)) (some 0),
+
+  test "invalid hashes cannot address paths or git options" do
+    let store ← withStore
+    for value in ["../outside", "--help", "HEAD", "", "deadbeef"] do
+      assertError "getBytes" (store.getBytes ⟨value⟩) isStorage
+      assertError "getTree" (store.getTree ⟨value⟩) isStorage
 ]
 
 /-! ## Feature 2: Merkle trees -/
@@ -114,16 +143,6 @@ def merkleSuite : Suite := suite "cas.merkle" #[
     let changedAfter ← assertOk <| store.entryAt? v2 "a"
     check (changedBefore != changedAfter) "changed spine must differ",
 
-  test "a one-file change writes only the blob and its spine" do
-    let store ← withStore
-    let _ ← snapshotSpec store baseSpec
-    writeSpec (← sourceDir) #[("a/b/c.txt", "changed-c")]
-    reset store
-    let _ ← assertOk <| store.snapshot (← sourceDir)
-    let m ← metricsOf store
-    -- One content blob plus the three trees on the changed path: a/b, a, and the root.
-    assertEqual "objects written" m.blobsWritten 4,
-
   test "empty directories are preserved" do
     let store ← withStore
     let source ← sourceDir
@@ -132,74 +151,35 @@ def merkleSuite : Suite := suite "cas.merkle" #[
     let root ← assertOk <| store.snapshot source
     let destination := (← scratch) / "out"
     assertOk <| store.materialize root destination
-    check (← (destination / "empty" / "nested").isDir) "nested empty dir restored"
-]
+    check (← (destination / "empty" / "nested").isDir) "nested empty dir restored",
 
-/-! ## Feature 1: stat cache -/
+  test "same-size edits with identical mtime are captured" do
+    let store ← withStore
+    let source ← sourceDir
+    writeSpec source #[("a.txt", "before")]
+    let stamp := (← scratch) / "stamp"
+    IO.FS.writeFile stamp "timestamp fixture"
+    let _ ← command "touch" #["-t", "200001010000.00", stamp.toString]
+    let _ ← command "touch" #["-r", stamp.toString, (source / "a.txt").toString]
+    let before ← assertOk <| store.snapshot source
+    IO.FS.writeFile (source / "a.txt") "after!"
+    let _ ← command "touch" #["-r", stamp.toString, (source / "a.txt").toString]
+    let after ← assertOk <| store.snapshot source
+    check (before != after) "changed bytes change the snapshot even with the same size and mtime"
+    assertEqual "new content" ((← assertOk <| store.readPath after "a.txt").map
+      (String.fromUTF8? ·)) (some (some "after!"))
+    assertEqual "old snapshot immutable" ((← assertOk <| store.readPath before "a.txt").map
+      (String.fromUTF8? ·)) (some (some "before")),
 
-def statCacheSuite : Suite := suite "cas.statcache" #[
-  test "an unchanged capture re-hashes nothing" do
+  test "snapshots survive closing the handle and losing the original workspace" do
     let store ← withStore
     let root ← snapshotSpec store baseSpec
-    reset store
-    let again ← assertOk <| store.snapshot (← sourceDir)
-    let m ← metricsOf store
-    assertEqual "same root" again root
-    assertEqual "no misses" m.cacheMisses 0
-    assertEqual "all hits" m.cacheHits baseSpec.size,
-
-  test "a changed file is the only re-hash" do
-    let store ← withStore
-    let _ ← snapshotSpec store baseSpec
-    IO.sleep 10
-    writeSpec (← sourceDir) #[("a/e.txt", "changed-content-e")]
-    reset store
-    let root ← assertOk <| store.snapshot (← sourceDir)
-    let m ← metricsOf store
-    assertEqual "one miss" m.cacheMisses 1
-    assertEqual "others hit" m.cacheHits (baseSpec.size - 1)
-    assertEqual "new content visible" ((← assertOk <| store.readPath root "a/e.txt").map
-      (String.fromUTF8? ·)) (some (some "changed-content-e")),
-
-  test "disabling the cache re-hashes everything" do
-    let store ← withStore
-    let config : CaptureConfig := { statCache := false }
-    let root ← snapshotSpec store baseSpec config
-    reset store
-    let again ← assertOk <| store.snapshot (← sourceDir) config
-    let m ← metricsOf store
-    assertEqual "same root without cache" again root
-    assertEqual "no hits" m.cacheHits 0
-    assertEqual "all misses" m.cacheMisses baseSpec.size,
-
-  test "caches are keyed per workspace" do
-    let store ← withStore
-    let _ ← snapshotSpec store baseSpec
-    let other := (← scratch) / "other"
-    writeSpec other baseSpec
-    reset store
-    let _ ← assertOk <| store.snapshot other
-    assertEqual "sibling workspace misses" (← metricsOf store).cacheMisses baseSpec.size,
-
-  test "the cache survives reopening the store" do
-    let store ← withStore
-    let root ← snapshotSpec store baseSpec
-    let reopened ← assertOk <| Store.create ((← scratch) / "store")
-    let again ← assertOk <| reopened.snapshot (← sourceDir)
-    let m ← assertOk reopened.metrics
-    assertEqual "same root after reopen" again root
-    assertEqual "no misses after reopen" m.cacheMisses 0,
-
-  test "a hit is rejected when the blob was collected" do
-    let store ← withStore
-    let root ← snapshotSpec store baseSpec
-    let _ ← assertOk store.gc  -- nothing is pinned: every blob goes
-    reset store
-    let again ← assertOk <| store.snapshot (← sourceDir)
-    assertEqual "same root rebuilt" again root
-    assertEqual "hits rejected" (← metricsOf store).cacheHits 0
-    let bytes ← assertOk <| store.readPath again "a/b/c.txt"
-    assertEqual "content restored" (bytes.map (String.fromUTF8? ·)) (some (some "content-c"))
+    assertOk <| store.setRef "keep" root
+    IO.FS.removeDirAll (← sourceDir)
+    let reopened ← assertOk <| Store.create store.root
+    let destination := (← scratch) / "out"
+    assertOk <| reopened.materialize root destination
+    assertEqual "restored after reopen" (← readSpec destination) baseSpec
 ]
 
 /-! ## Feature 2: diff -/
@@ -246,7 +226,7 @@ def diffSuite : Suite := suite "cas.diff" #[
     check (changes.any fun c => c matches .added "x" .directory _) "directory added"
 ]
 
-/-! ## Feature 3: incremental, linked materialize -/
+/-! ## Exact and independent materialization -/
 
 def materializeSuite : Suite := suite "cas.materialize" #[
   test "roundtrip reproduces the source exactly" do
@@ -256,7 +236,7 @@ def materializeSuite : Suite := suite "cas.materialize" #[
     assertOk <| store.materialize root destination
     assertEqual "specs equal" (← readSpec destination) (← readSpec (← sourceDir)),
 
-  test "a second materialize touches only the changes" do
+  test "a second materialize removes files absent from the new snapshot" do
     let store ← withStore
     let v1 ← snapshotSpec store baseSpec
     let destination := (← scratch) / "out"
@@ -265,11 +245,7 @@ def materializeSuite : Suite := suite "cas.materialize" #[
     IO.FS.removeFile (source / "dup.txt")
     writeSpec source #[("a/b/c.txt", "changed-c")]
     let v2 ← assertOk <| store.snapshot source
-    reset store
     assertOk <| store.materialize v2 destination
-    let m ← metricsOf store
-    assertEqual "one file rewritten" m.filesWritten 1
-    assertEqual "one path deleted" m.filesDeleted 1
     assertEqual "destination matches v2" (← readSpec destination) (← readSpec source),
 
   test "an untracked non-empty destination errors when asked to" do
@@ -294,59 +270,113 @@ def materializeSuite : Suite := suite "cas.materialize" #[
     let v2 ← assertOk <| store.snapshot source
     let destination := (← scratch) / "out"
     assertOk <| store.materialize v1 destination
-    -- The store now has a record for this path. Removing the directory behind its back and
-    -- checking out another state must not leave only the paths that differ between them.
     IO.FS.removeDirAll destination
     assertOk <| store.materialize v2 destination
     assertEqual "whole snapshot" (← readSpec destination)
       #[("change.txt", "two"), ("keep.txt", "same")],
 
-  test "a tampered checkout is repaired by default, and trusted only when asked" do
+  test "restoring repairs tampering without modifying the stored snapshot" do
     let store ← withStore
     let v1 ← snapshotSpec store baseSpec
     let destination := (← scratch) / "out"
     assertOk <| store.materialize v1 destination
     IO.FS.writeFile (destination / "shared" / "s.txt") "tampered"
-    -- `verify` is on by default: the destination is re-captured, the record no longer matches,
-    -- and the snapshot is written in full.
+    writeSpec destination #[("extra/abandoned.txt", "from another branch")]
     assertOk <| store.materialize v1 destination
-    assertEqual "verified checkout repaired"
-      (← IO.FS.readFile (destination / "shared" / "s.txt")) "content-s"
-    IO.FS.writeFile (destination / "shared" / "s.txt") "tampered"
-    -- Turning it off is the opt-out for a destination known to be untouched: the tampered file
-    -- sits at a path the diff does not mention, so trust leaves it alone.
-    assertOk <| store.materialize v1 destination { verify := false }
-    assertEqual "trusted checkout untouched"
-      (← IO.FS.readFile (destination / "shared" / "s.txt")) "tampered",
+    assertEqual "exact restored contents" (← readSpec destination) baseSpec,
 
-  test "a collected previous tree falls back to a full write" do
-    let store ← withStore
-    let v1 ← snapshotSpec store baseSpec
-    let destination := (← scratch) / "out"
-    assertOk <| store.materialize v1 destination
-    let _ ← assertOk store.gc  -- v1 is unpinned: its trees vanish
-    -- Change a file so the new snapshot does not resurrect v1's root tree.
-    writeSpec (← sourceDir) #[("a/b/c.txt", "revived-c")]
-    let v2 ← assertOk <| store.snapshot (← sourceDir)
-    check (v2 != v1) "snapshots differ"
-    assertOk <| store.materialize v2 destination
-    assertEqual "full rewrite succeeded" (← readSpec destination) (← readSpec (← sourceDir)),
-
-  test "clone mode produces independent, editable copies" do
-    if !System.Platform.isOSX then return ()
+  test "materialized files are independent editable copies" do
     let store ← withStore
     let root ← snapshotSpec store baseSpec
     let destination := (← scratch) / "out"
-    assertOk <| store.materialize root destination { linkMode := .clone }
-    assertEqual "content via clone" (← readSpec destination) (← readSpec (← sourceDir))
-    let cloned ← (destination / "a" / "e.txt").metadata
-    assertEqual "clone owns its inode" cloned.numLinks 1
-    -- Editing the checkout must not disturb the stored blob (the agent-workspace contract).
+    assertOk <| store.materialize root destination
     IO.FS.writeFile (destination / "a" / "e.txt") "agent edited this"
-    let entry ← assertOk <| store.entryAt? root "a/e.txt"
-    let blob ← assertOk <| store.getBytes (entry.map (·.hash)).get!
-    assertEqual "blob unchanged after edit" (blob.map (String.fromUTF8? ·))
-      (some (some "content-e"))
+    assertEqual "stored blob unchanged"
+      ((← assertOk <| store.readPath root "a/e.txt").map (String.fromUTF8? ·))
+      (some (some "content-e")),
+
+  test "binary data and unusual UTF-8 paths are restored verbatim" do
+    let store ← withStore
+    let source ← sourceDir
+    let names := #["中文 文件.txt", "line\nbreak.txt", "tab\tname.txt", "-leading-option"]
+    IO.FS.createDirAll source
+    let bytes := ByteArray.mk #[0, 255, 128, 13, 10, 0, 42]
+    for name in names do IO.FS.writeBinFile (source / name) bytes
+    let root ← assertOk <| store.snapshot source
+    let destination := (← scratch) / "out"
+    assertOk <| store.materialize root destination
+    for name in names do
+      assertEqual s!"raw bytes for {name}" (← IO.FS.readBinFile (destination / name)).toList bytes.toList
+    assertEqual "only captured names" (← destination.readDir).size names.size,
+
+  test "restoring replaces file-directory conflicts and does not follow destination links" do
+    let store ← withStore
+    let root ← snapshotSpec store #[("dir/child.txt", "inside"), ("file.txt", "plain")]
+    let destination := (← scratch) / "out"
+    let outside := (← scratch) / "outside"
+    writeSpec outside #[("child.txt", "do not touch")]
+    writeSpec destination #[("file.txt/was-a-directory.txt", "old")]
+    createSymlink (← IO.FS.realPath outside).toString (destination / "dir")
+    assertOk <| store.materialize root destination
+    assertEqual "destination contents" (← readSpec destination)
+      #[("dir/child.txt", "inside"), ("file.txt", "plain")]
+    assertEqual "outside untouched" (← IO.FS.readFile (outside / "child.txt")) "do not touch",
+
+  test "a missing snapshot leaves an existing destination intact" do
+    let store ← withStore
+    let destination := (← scratch) / "out"
+    writeSpec destination #[("precious.txt", "keep me")]
+    assertError "missing snapshot" (store.materialize missingHash destination) isStorage
+    assertEqual "destination preserved" (← readSpec destination) #[("precious.txt", "keep me")],
+
+  test "a missing child object leaves an existing destination intact" do
+    let store ← withStore
+    let root ← snapshotSpec store baseSpec
+    let some entry ← assertOk <| store.entryAt? root "a/b/c.txt"
+      | fail "missing fixture entry"
+    -- Remove a real Git loose object to simulate a damaged store, not a nonexistent root.
+    IO.FS.removeFile (store.gitDir / "objects" / (entry.hash.hex.take 2).toString /
+      (entry.hash.hex.drop 2).toString)
+    let destination := (← scratch) / "out"
+    writeSpec destination #[("precious.txt", "keep me")]
+    assertError "missing child" (store.materialize root destination) isStorage
+    assertEqual "destination preserved" (← readSpec destination) #[("precious.txt", "keep me")],
+
+  test "snapshots and materializations cannot overlap the store" do
+    let store ← withStore
+    let root ← snapshotSpec store baseSpec
+    assertError "capture store itself" (store.snapshot store.root) isStorage
+    assertError "capture ancestor" (store.snapshot (← scratch)) isStorage
+    assertError "restore store itself" (store.materialize root store.root) isStorage
+    assertError "restore descendant" (store.materialize root (store.root / "nested")) isStorage
+    assertError "restore ancestor" (store.materialize root (← scratch)) isStorage
+    assertEqual "snapshot still readable" ((← assertOk <| store.readPath root "dup.txt").map
+      (String.fromUTF8? ·)) (some (some "content-c")),
+
+  test "destination aliases are normalized before overlap checks and replacement" do
+    let store ← withStore
+    let root ← snapshotSpec store baseSpec
+    let base ← scratch
+    for target in #[store.root / ".", store.root / "missing" / "..",
+        base / "missing" / ".." / "store", store.root / ".."] do
+      assertError s!"restore alias {target}" (store.materialize root target) isStorage
+    check (!(← (store.root / "missing").pathExists)) "no store-side directory created"
+    check (!(← (base / "missing").pathExists)) "no future ancestor created"
+    let destination := base / "out"
+    writeSpec destination #[("old.txt", "replace me")]
+    assertOk <| store.materialize root (destination / ".")
+    assertEqual "dot destination" (← readSpec destination) baseSpec
+    IO.FS.writeFile (destination / "dup.txt") "tampered"
+    assertOk <| store.materialize root (destination / "missing" / "..")
+    assertEqual "dot-dot destination" (← readSpec destination) baseSpec
+    let alias := base / "alias"
+    createSymlink destination.toString alias
+    assertError "final symlink" (store.materialize root alias) isStorage
+    assertError "final symlink with trailing slash"
+      (store.materialize root ⟨alias.toString ++ "/"⟩) isStorage
+    assertEqual "link target preserved" (← readSpec destination) baseSpec
+    assertEqual "store preserved" ((← assertOk <| store.readPath root "dup.txt").map
+      (String.fromUTF8? ·)) (some (some "content-c"))
 ]
 
 /-! ## Feature 5: metadata -/
@@ -390,6 +420,18 @@ def metadataSuite : Suite := suite "cas.metadata" #[
     assertEqual "dangling link" (← readSymlink (destination / "dangling")) "does-not-exist"
     assertEqual "cyclic link" (← readSymlink (destination / "self")) ".",
 
+  test "symlink targets retain leading and trailing whitespace" do
+    let store ← withStore
+    let source ← sourceDir
+    IO.FS.createDirAll source
+    let target := " target with spaces\t\n"
+    createSymlink target (source / "link")
+    let root ← assertOk <| store.snapshot source
+    let destination := (← scratch) / "out"
+    assertOk <| store.materialize root destination
+    -- readlink adds one newline; keep the target's own whitespace distinct from it.
+    assertEqual "target bytes" (← command "readlink" #[(destination / "link").toString]) (target ++ "\n"),
+
   test "the reject policy refuses symlinks" do
     let store ← withStore
     let source ← sourceDir
@@ -430,10 +472,55 @@ def ignoreSuite : Suite := suite "cas.ignore" #[
     let store ← withStore
     let source ← sourceDir
     writeSpec source #[("keep.txt", "k"), ("skip/deep/file.txt", "s")]
-    reset store
+    let _ ← command "mkfifo" #[(source / "skip" / "special").toString]
     let root ← assertOk <| store.snapshot source { ignore := (· == "skip") }
     assertEqual "kept paths" ((← assertOk <| store.listPaths root).map (·.1)) #["keep.txt"]
-    assertEqual "pruned files never hashed" (← metricsOf store).cacheMisses 1
+]
+
+/-! ## The task repository remains data, not the snapshot backend -/
+
+def isolationSuite : Suite := suite "cas.isolation" #[
+  test "capturing a Git project preserves its metadata and bypasses filters and ignores" do
+    let store ← withStore
+    let source ← sourceDir
+    IO.FS.createDirAll source
+    let _ ← command "git" #["init", "-q", source.toString]
+    writeSpec source #[("staged.txt", "staged content\n")]
+    let _ ← command "git" #["-C", source.toString, "add", "staged.txt"]
+    let _ ← command "git" #["-C", source.toString, "config", "filter.must-not-run.clean", "false"]
+    let _ ← command "git" #["-C", source.toString, "config", "filter.must-not-run.smudge", "false"]
+    let _ ← command "git" #["-C", source.toString, "config", "filter.must-not-run.required", "true"]
+    let _ ← command "git" #["-C", source.toString, "config", "core.autocrlf", "true"]
+    writeSpec source #[
+      (".gitignore", "ignored.txt\n"),
+      (".gitattributes", "*.txt filter=must-not-run text eol=lf\n"),
+      ("ignored.txt", "ignored but captured\r\n"),
+      ("unstaged.txt", "raw CRLF\r\n"),
+      (".git/hooks/post-checkout", "#!/bin/sh\nprintf ran > hook-ran\nexit 99\n")]
+    setExecutable (source / ".git" / "hooks" / "post-checkout")
+    let index ← IO.FS.readBinFile (source / ".git" / "index")
+    let config ← IO.FS.readFile (source / ".git" / "config")
+    let head ← IO.FS.readFile (source / ".git" / "HEAD")
+    let root ← assertOk <| store.snapshot source
+    assertEqual "source index unchanged" (← IO.FS.readBinFile (source / ".git" / "index")).toList index.toList
+    assertEqual "source config unchanged" (← IO.FS.readFile (source / ".git" / "config")) config
+    assertEqual "source HEAD unchanged" (← IO.FS.readFile (source / ".git" / "HEAD")) head
+    let destination := (← scratch) / "out"
+    assertOk <| store.materialize root destination
+    assertEqual "captured index" (← IO.FS.readBinFile (destination / ".git" / "index")).toList index.toList
+    assertEqual "captured config" (← IO.FS.readFile (destination / ".git" / "config")) config
+    assertEqual "captured HEAD" (← IO.FS.readFile (destination / ".git" / "HEAD")) head
+    assertEqual "ignored file kept verbatim" (← IO.FS.readFile (destination / "ignored.txt")) "ignored but captured\r\n"
+    assertEqual "attributes did not transform bytes" (← IO.FS.readFile (destination / "unstaged.txt")) "raw CRLF\r\n"
+    check (!(← (source / "hook-ran").pathExists)) "source hook did not run"
+    check (!(← (destination / "hook-ran").pathExists)) "checkout hook did not run",
+
+  test "capture rejects unsupported special files" do
+    let store ← withStore
+    let source ← sourceDir
+    IO.FS.createDirAll source
+    let _ ← command "mkfifo" #[(source / "fifo").toString]
+    assertError "special file" (store.snapshot source) isStorage
 ]
 
 /-! ## Feature 7: refs and garbage collection -/
@@ -457,58 +544,90 @@ def gcSuite : Suite := suite "cas.gc" #[
     let root ← snapshotSpec store baseSpec
     assertOk <| store.setRef "keep" root
     let orphan ← assertOk <| store.putBytes "orphaned bytes".toUTF8
-    let stats ← assertOk store.gc
-    check (stats.deletedBlobs >= 1) "the orphan went"
-    check (stats.keptBlobs >= 1) "the snapshot stayed"
+    assertOk store.gc
     assertEqual "orphan unreadable" (← assertOk <| store.getBytes orphan) none
     let destination := (← scratch) / "out"
     assertOk <| store.materialize root destination
-    assertEqual "snapshot fully intact" (← readSpec destination) (← readSpec (← sourceDir)),
+    assertEqual "snapshot fully intact" (← readSpec destination) (← readSpec (← sourceDir))
+    let _ ← git store #["fsck", "--full", "--no-reflogs"]
+    pure (),
 
   test "deleting the ref releases the snapshot" do
     let store ← withStore
     let root ← snapshotSpec store baseSpec
     assertOk <| store.setRef "main" root
-    let _ ← assertOk store.gc
+    assertOk store.gc
     assertOk <| store.deleteRef "main"
-    let stats ← assertOk store.gc
-    check (stats.deletedBlobs >= 1) "snapshot collected"
+    assertOk store.gc
     assertError "tree gone" (store.getTree root) isStorage,
 
-  test "gc clears leftover temp files" do
+  test "collecting one branch preserves shared objects referenced by its sibling" do
     let store ← withStore
-    let stray := (← scratch) / "store" / "tmp" / "stray.tmp"
-    IO.FS.writeFile stray "leftover"
-    let _ ← assertOk store.gc
-    check (!(← stray.pathExists)) "tmp swept"
+    let root ← snapshotSpec store baseSpec
+    let forked ← assertOk <| store.writePath root "a/e.txt" "fork content".toUTF8
+    assertOk <| store.setRef "original" root
+    assertOk <| store.setRef "fork" forked
+    assertOk <| store.deleteRef "original"
+    assertOk store.gc
+    let reopened ← assertOk <| Store.create store.root
+    let destination := (← scratch) / "out"
+    assertOk <| reopened.materialize forked destination
+    assertEqual "shared bytes survive" (← IO.FS.readFile (destination / "dup.txt")) "content-c"
+    assertEqual "fork bytes survive" (← IO.FS.readFile (destination / "a" / "e.txt")) "fork content"
 ]
 
-/-! ## Feature 4: parallel hashing -/
+/-! ## Historical hashes remain readable while new snapshots use Git objects -/
 
-private def wideSpec : Array (String × String) := Id.run do
-  let mut spec := #[]
-  for i in [0:40] do
-    spec := spec.push (s!"dir{i % 5}/file{i}.txt",
-      s!"content-{i}-" ++ String.ofList (List.replicate (16 + i) 'x'))
-  return spec
-
-def parallelSuite : Suite := suite "cas.parallel" #[
-  test "concurrency does not change the snapshot" do
-    let store1 ← assertOk <| Store.create ((← scratch) / "store1")
-    let store2 ← assertOk <| Store.create ((← scratch) / "store2")
-    let source ← sourceDir
-    writeSpec source wideSpec
-    let serial ← assertOk <| store1.snapshot source { concurrency := 1, statCache := false }
-    let parallel ← assertOk <| store2.snapshot source { concurrency := 8, statCache := false }
-    assertEqual "same root either way" parallel serial,
-
-  test "zero concurrency is clamped rather than dividing by zero" do
+def legacySuite : Suite := suite "cas.legacy" #[
+  test "legacy trees and blobs import without changing their original files or logical refs" do
     let store ← withStore
-    let source ← sourceDir
-    writeSpec source wideSpec
-    let root ← assertOk <| store.snapshot source { concurrency := 0 }
-    assertEqual "all files captured"
-      ((← assertOk <| store.listPaths root).filter (·.2 == .file)).size wideSpec.size
+    let bytes := ByteArray.mk #[0, 255, 10, 128, 42]
+    let blob ← legacyBlob store bytes
+    let empty ← legacyTree store Tree.empty
+    let child ← legacyTree store (Tree.ofEntries #[{ name := "data.bin", type := .file, hash := blob }])
+    let oldTree := Tree.ofEntries #[
+      { name := "empty", type := .directory, hash := empty },
+      { name := "nested", type := .directory, hash := child }]
+    let root ← legacyTree store oldTree
+    IO.FS.createDirAll (store.root / "refs")
+    IO.FS.writeFile (store.root / "refs" / "legacy") (root.hex ++ "\n")
+    let reopened ← assertOk <| Store.create store.root
+    assertEqual "legacy logical ref retained" (← assertOk <| reopened.getRef? "legacy") (some root)
+    check ((← assertOk reopened.listRefs).contains ("legacy", root)) "legacy ref listed"
+    assertEqual "legacy bytes" ((← assertOk <| reopened.getBytes blob).map (·.toList)) (some bytes.toList)
+    let destination := (← scratch) / "out"
+    assertOk <| reopened.materialize root destination
+    assertEqual "binary legacy materialization" (← IO.FS.readBinFile (destination / "nested" / "data.bin")).toList bytes.toList
+    check (← (destination / "empty").isDir) "legacy empty directory restored"
+    let imported ← assertOk <| reopened.importTree root
+    check (imported != root) "native tree has a different address from the JSON tree"
+    assertEqual "imported object is a tree" (← git reopened #["cat-file", "-t", imported.hex]) "tree\n"
+    let captured ← assertOk <| reopened.snapshot destination
+    assertEqual "same native tree after recapture" captured imported
+    assertEqual "migration is not a workspace change" (← assertOk <| reopened.diff root captured) #[]
+    assertEqual "old raw tree file unchanged"
+      (← IO.FS.readBinFile (store.root / "blobs" / (root.hex.take 2).toString / root.hex)).toList
+      oldTree.toJson.compress.toUTF8.toList
+    let edited ← assertOk <| reopened.writePath root "new.txt" "new branch".toUTF8
+    assertEqual "old snapshot remains unchanged" (← assertOk <| reopened.readPath root "new.txt") none
+    assertEqual "new branch can be read" ((← assertOk <| reopened.readPath edited "new.txt").map
+      (String.fromUTF8? ·)) (some (some "new branch")),
+
+  test "legacy refs survive reopen and Git garbage collection" do
+    let store ← withStore
+    let blob ← legacyBlob store "legacy contents".toUTF8
+    let root ← legacyTree store (Tree.ofEntries #[{ name := "old.txt", type := .file, hash := blob }])
+    IO.FS.createDirAll (store.root / "refs")
+    IO.FS.writeFile (store.root / "refs" / "old") (root.hex ++ "\n")
+    let reopened ← assertOk <| Store.create store.root
+    assertOk <| reopened.setRef "also-old" root
+    assertOk reopened.gc
+    let again ← assertOk <| Store.create store.root
+    assertEqual "old ref identity" (← assertOk <| again.getRef? "old") (some root)
+    assertEqual "new ref can retain old logical identity" (← assertOk <| again.getRef? "also-old") (some root)
+    let destination := (← scratch) / "out"
+    assertOk <| again.materialize root destination
+    assertEqual "legacy content after GC" (← IO.FS.readFile (destination / "old.txt")) "legacy contents"
 ]
 
 /-! ## Pure path operations (cheap branching) -/
@@ -577,7 +696,7 @@ def pathOpsSuite : Suite := suite "cas.pathops" #[
 ]
 
 def suites : Array Suite := #[
-  objectSuite, merkleSuite, statCacheSuite, diffSuite, materializeSuite,
-  metadataSuite, ignoreSuite, gcSuite, parallelSuite, pathOpsSuite]
+  objectSuite, merkleSuite, diffSuite, materializeSuite,
+  metadataSuite, ignoreSuite, isolationSuite, gcSuite, legacySuite, pathOpsSuite]
 
 end CasTests

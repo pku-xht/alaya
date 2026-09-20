@@ -198,8 +198,12 @@ alaya tree                                     # 2c7f0a now has three turn child
 
 Replay needs no command of its own. If the second `step` had been interrupted after the model
 answered but before the child was written, running it again asks for draw 1 again and receives
-the recorded response without a provider call. Likewise `alaya rm HASH` followed by a `resume`
-from its parent reproduces the deleted branch draw for draw, as long as `.alaya/cache` is kept.
+the recorded response without a provider call when the complete request still matches. Likewise
+`alaya rm HASH` followed by a `resume` from its parent can reuse the deleted branch's draws when
+`.alaya/cache` is kept and every subsequent request matches. Tools execute again, so changed
+output can produce a cache miss. Ordinary `resume` may then sample the provider; a cache-only
+caller must fail on that miss. Restoring a legacy archive and writing new Git-backed states can
+change state hashes without changing the model-cache key (§5).
 
 ## 3. People in the tree
 
@@ -444,29 +448,50 @@ The data directory (`--data D`, default `.alaya`) holds everything one set of ru
 
 | Path | Contents |
 | --- | --- |
-| `D/store/blobs/<2 hex>/<64 hex>` | every object, addressed by the SHA-256 of its bytes: state objects, tree objects, file contents, link targets |
-| `D/store/refs/state.<hex>` | pins a state object; the set of these *is* the forest |
-| `D/store/refs/workspace.<hex>` | pins a tree a state refers to — a workspace, or an evaluation's evidence — so `gc` keeps it |
-| `D/store/cache/`, `D/store/checkouts/` | the snapshot stat cache and the record of what was last materialized where; performance only |
-| `D/store/tmp/` | staging for atomic writes (write, then rename) |
+| `D/store/git/` | independent bare Git repository, initialized with `--object-format=sha256`; native trees store directories and blobs store file bytes, link targets, and state JSON |
+| `D/store/git/refs/alaya/<encoded-name>/<logical-hash>` | pins the native Git object for an Alaya ref; `encoded-name` is the UTF-8 ref name encoded as hex |
+| `D/store/blobs/<2 hex>/<64 hex>` | legacy objects addressed by the SHA-256 of raw bytes, retained for compatibility |
+| `D/store/refs/<name>` | legacy named refs, still readable; a successful `setRef` for that name replaces it with a Git ref |
+| `D/store/tmp/` | temporary staging for ancillary metadata writes |
 | `D/cache/v1/<hash>.json` | model response cache entries (§7) |
 | `D/work/` | the working directory; wiped and re-materialized at every checkout, holds nothing durable |
 | `D/eval/` | a grader's checkout and output directory; emptied before every evaluation |
 
-A workspace is a git-style Merkle tree: a **tree object** is the JSON array of its entries
-`{"name", "type": "file"|"exec"|"link"|"dir", "hash"}`, sorted by name so its serialization is
-canonical; a file entry's hash addresses the content blob, a directory's the sub-tree. Unchanged
-subtrees keep their address across snapshots, so a snapshot costs only the objects along changed
-paths and diffing skips identical subtrees. Snapshots are stat-cached, hashed in parallel,
-record symlinks and executable bits, and can ignore paths. Materializing is incremental against
-the recorded checkout and, by default, re-captures the destination first (`verify`), because the
-record goes stale the moment the agent writes; without that, a fork would start from the
-abandoned branch's files.
+A new workspace is a native Git **tree object**. File and link entries reference Git blobs;
+directory entries reference subtrees. Equal contents deduplicate, and a snapshot's tree hash
+is sufficient to restore it while the objects remain in the store. Capture reads file bytes
+directly with filters disabled; it does not use the captured project's index or honor its
+ignore rules. Restore builds a complete checkout in staging before replacing the destination,
+so a fork cannot retain files from the branch it replaced. The contract, removed performance
+options, filesystem limits, and validation procedure are in [Git snapshot storage](git-store.md).
 
-`Store.gc` deletes every blob unreachable from a ref. `rm HASH` deletes a subtree by dropping its
-`state.` refs, re-pinning `workspace.` refs from the survivors, and collecting.
+Logical refs retain the names `state.<hex>` and `workspace.<hex>`. The first set defines the
+forest; the second pins workspace and evaluation-evidence trees. Git does not interpret links
+inside state JSON, so both kinds are necessary. The trailing logical hash in a Git ref's path
+preserves the original public identity of a legacy object even when the target uses a new Git
+object ID.
 
-*What is on disk: the data directory, and how state and tree objects reference each other in the content-addressed store.*
+`Store.gc` pins live legacy refs in Git, then collects unreachable Git objects. `rm HASH`
+deletes a subtree by dropping its `state.` refs, re-pinning `workspace.` refs from survivors,
+and collecting. Legacy raw blobs are not deleted, so removing an archived branch need not
+reclaim its old disk usage. Fresh stores use Git objects and Git refs only; the old stat cache
+and checkout records are no longer used.
+
+### Reading older archives
+
+Legacy tree objects are JSON arrays of `{"name", "type": "file"|"exec"|"link"|"dir", "hash"}`.
+The compatibility reader accepts them and their raw blobs at the original hashes. Existing
+state JSON and its hash are never rewritten. Loading legacy trees imports their contents into
+Git as needed, allowing new tree operations and content comparisons to use native object IDs.
+
+Git hashes include an object header as well as its body. New snapshots and states therefore
+have different hashes from the old raw-byte format even if their visible contents match. Do
+not use equality with an archived final state hash as a replay acceptance check after migrating
+storage. Compare the restored files and recorded messages instead. The model-cache format and
+request key are unchanged; cached model sampling, actual tool execution, and fresh grading
+remain separate operations.
+
+*The new store keeps Git objects separate from the model cache and temporary workspaces.*
 
 ```mermaid
 flowchart TD
@@ -478,37 +503,30 @@ flowchart TD
   alayaRoot --> modelCacheDir
   alayaRoot --> workDir
 
-  blobsDir["blobs/, content-addressed objects"]
-  refsDir["refs/, named pointers"]
-  statCacheDir["cache/, per-workspace stat cache"]
-  checkoutsDir["checkouts/, last materialized where"]
-  tmpDir["tmp/, atomic-write staging"]
-  storeDir --> blobsDir
-  storeDir --> refsDir
-  storeDir --> statCacheDir
-  storeDir --> checkoutsDir
-  storeDir --> tmpDir
+  gitDir["git/, bare SHA-256 repository"]
+  objectsDir["objects/, native Git objects"]
+  refsDir["refs/alaya/, named object pins"]
+  legacyDir["legacy blobs/ and refs/, when present"]
+  storeDir --> gitDir
+  gitDir --> objectsDir
+  gitDir --> refsDir
+  storeDir --> legacyDir
 
-  blobLayout["blob path: blobs/, 2-hex subdir, 64-hex filename"]
-  blobsDir --> blobLayout
-
-  stateObj["state object, JSON"]
+  stateObj["blob, state JSON"]
   parentState["parent state object"]
-  envTree["tree object, the workspace"]
-  blobLayout -.stores.-> stateObj
-  blobLayout -.stores.-> envTree
-  stateObj -->|parent hash| parentState
-  stateObj -->|workspace hash| envTree
+  envTree["native Git tree, the workspace"]
+  objectsDir -.stores.-> stateObj
+  objectsDir -.stores.-> envTree
+  stateObj -.->|JSON parent hash| parentState
+  stateObj -.->|JSON workspace hash| envTree
 
-  treeEntry["entry: name, type file or exec or link or dir, hash"]
-  envTree --> treeEntry
   fileBlob["file content blob"]
   subTree["sub-tree object"]
-  treeEntry -->|file, exec, or link| fileBlob
-  treeEntry -->|dir| subTree
+  envTree -->|file, exec, or link| fileBlob
+  envTree -->|directory| subTree
 
-  stateRef["state.hex ref"]
-  envRef["workspace.hex ref"]
+  stateRef["encoded state.hex name / logical hash"]
+  envRef["encoded workspace.hex name / logical hash"]
   refsDir --> stateRef
   refsDir --> envRef
   stateRef -->|pins| stateObj
@@ -519,26 +537,25 @@ flowchart TD
 
   subgraph Notes[" "]
     direction TB
-    gcNote["Store.gc keeps exactly what is reachable from refs"]
-    workNote["work/ is wiped and re-materialized at every checkout, and holds nothing durable"]
+    gcNote["Git collects unreachable native objects; legacy raw blobs remain"]
+    workNote["work/ is replaced at checkout and holds nothing durable"]
   end
 ```
 
 ```
 $ ls .alaya
 cache  store  work
-$ ls .alaya/store
-blobs  cache  checkouts  refs  tmp
-$ ls .alaya/store/refs | head -3
-state.adbac197aea8…
-state.4f2c8b1e0a33…
-workspace.b66cab13bd86…
+$ git --git-dir=.alaya/store/git rev-parse --show-object-format
+sha256
+$ git --git-dir=.alaya/store/git for-each-ref --format='%(refname) %(objectname)' refs/alaya/
+# The encoded logical names and their native Git object IDs.
 ```
 
 ## 6. The state object
 
 A state object is compact JSON. Field order is canonical (sorted keys), so equal states have
-equal hashes.
+equal hashes within one object format. New states are Git blobs; legacy raw state objects keep
+their original hashes (§5).
 
 | Field | Type | Meaning |
 | --- | --- | --- |
