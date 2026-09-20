@@ -92,11 +92,9 @@ def taskMessage (task : String) (uname : Uname) : String :=
   "definition that carries **no** ``@[implemented_by]`` is fine.)\n\nThe anti-cheat rules " ++
   "apply in addition to the Done condition and the per-slot taint checks; a run that " ++
   "passes all specs but trips one of the anti-cheat patterns still scores zero.\n\n" ++
-  "## Scoring and stopping\n\n" ++
+  "## Scoring\n\n" ++
   "An unfilled slot scores the same as a wrong proof: zero. Every additional spec you " ++
-  "close strictly increases the score, so progress counts even short of the Done " ++
-  "condition. The turn/budget cap is the only signal to stop before the Done condition " ++
-  "is met.\n\nUse " ++
+  "close strictly increases the score.\n\nUse " ++
   "repository-relative paths. Shell directory and environment changes do not persist " ++
   "across tool calls. When the Done condition holds, call the submit tool once with a " ++
   "short summary.\n\nEnvironment: " ++

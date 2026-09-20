@@ -35,9 +35,9 @@ def suite : Suite := Testing.suite "mini-vero" #[
       "## Grading (``codeproof`` mode)",
       "## Done condition — non-negotiable",
       "## Anti-cheating — what the grader rejects",
-      "## Scoring and stopping",
+      "## Scoring",
       "An unfilled slot scores the same as a wrong proof: zero.",
-      "The turn/budget cap is the only signal to stop before the Done condition is met.",
+      "Every additional spec you close strictly increases the score.",
       "-- !benchmark @start",
       "-- !benchmark @end",
       "lake lean",
@@ -71,6 +71,7 @@ def suite : Suite := Testing.suite "mini-vero" #[
       "keep iterating",
       "two genuinely distinct tactics",
       "Treat every spec as independently valuable",
+      "The turn/budget cap is the only signal to stop before the Done condition is met.",
       "do not assume Mathlib"] do
       check (!contains text absent) s!"the prompt should not carry {absent}",
   test "a failed compile remains observable and the agent continues" do
