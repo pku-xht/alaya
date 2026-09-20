@@ -1,6 +1,6 @@
 # MiniVero
 
-`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Use it with `--agent mini-vero` for root, step, resume, HTML, and `show --view` commands.
+`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Use it with `--agent mini-vero` for root, step, resume, HTML, and `show --view` commands; `root` also takes `--mode proof` or `--mode codeproof`, Vero's evaluation mode for the run.
 
 ## How it is built
 
@@ -17,7 +17,24 @@ A run opens with two messages, frozen into the root state:
     3. the rule sections, quoted from Vero's instruction templates;
     4. this agent's mechanics — repository-relative paths, no shell state between calls, one `submit` call — and the executor's `uname`.
 
-The rule sections are: `Marker grammar`, `Oracle commands`, `Grading` for each mode, `Done condition`, `Anti-cheating`, and the two scoring facts under `Scoring`.
+The rule sections are: `Marker grammar`, `Oracle commands`, the `Grading` section of the run's mode, `Done condition`, `Anti-cheating`, and the two scoring facts under `Scoring`. A run is sent the grading rules of its own mode only, as Vero's per-mode templates do: a `proof` run never reads about `unsat_`/`sat_` stubs or Part A, which its sandbox does not have.
+
+## Where Vero's text lives
+
+The quoted sections are not string literals. Each is a Markdown file in `Alaya/Agent/MiniVero/`, taken into the module with `include_str`, and holds one contiguous piece of Vero's templates (`templates/instruction/` at sunblaze-ucb/vero `0a7325d`) byte for byte, so it can be compared with the template by `diff`:
+
+| File | From | Section |
+| --- | --- | --- |
+| `framing.md` | `base.md.j2` | the two opening sentences |
+| `rules.md` | `base.md.j2` | `Marker grammar`, `Oracle commands` |
+| `grading-proof.md` | `proof.md.j2` | `Grading (proof mode)` |
+| `grading-codeproof.md` | `codeproof.md.j2` | `Grading (codeproof mode)` |
+| `done.md` | `base.md.j2` | `Done condition` |
+| `anti-cheating.md` | `base.md.j2` | `Anti-cheating` |
+
+The files are cut where Vero's templates branch (`{% if %}`, `{% block %}`), and the branching is done in Lean: `MiniVero.taskMessage` lists the sections of a run and joins them with blank lines, choosing `grading mode` by a `match` on `MiniVero.Mode`. Text that is conditional is thus a file of its own and a Lean expression that includes it or not; a section that may be absent would be an `Option String` in that list.
+
+Lake does not track `include_str`, so editing one of these files does not rebuild the module. The test `the compiled sections are the files in the source tree` fails when that has happened; touch `Alaya/Agent/MiniVero.lean` and rebuild.
 
 ## `MINIVERO_TASK.md`: the instance
 
@@ -62,7 +79,7 @@ python run.py prepare --run RUN --benchmark BENCHMARK --mode proof|codeproof
 Run against an already rendered Vero source directory:
 
 ```bash
-alaya root "$(cat /path/to/source/MINIVERO_TASK.md)" /path/to/source --agent mini-vero --data /path/to/audit
+alaya root "$(cat /path/to/source/MINIVERO_TASK.md)" /path/to/source --agent mini-vero --mode codeproof --data /path/to/audit
 alaya step STATE --agent mini-vero --model PROVIDER:MODEL --data /path/to/audit --json
 alaya html /path/to/report.html --agent mini-vero --data /path/to/audit
 ```

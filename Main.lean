@@ -61,8 +61,9 @@ private def executorFor (args : Cli.Args) (image? : Option String) (config : Exe
 /-- An agent the command line can name with `--agent`. -/
 private structure AgentSpec where
   name : String
-  /-- The opening log of a run for a task, on a machine described by `uname`. -/
-  initialLog : String -> Uname -> Agent.Log
+  /-- The opening log of a run for a task, on a machine described by `uname`. The command
+  line is there for options of the agent's own, as `--mode` is for `mini-vero`. -/
+  initialLog : Cli.Args -> String -> Uname -> Result Agent.Log
   /-- How the agent's shell commands are run. -/
   executorConfig : Executor.Config
   /-- The agent over an executor. -/
@@ -73,7 +74,7 @@ private structure AgentSpec where
 private def miniSwe : AgentSpec :=
   let config : Agent.MiniSwe.Config := { task := "" }
   { name := "mini-swe"
-    initialLog := fun task uname => Agent.MiniSwe.initialLog { config with task } uname
+    initialLog := fun _ task uname => pure (Agent.MiniSwe.initialLog { config with task } uname)
     executorConfig := config.executor
     build := fun executor => Agent.MiniSwe.agent executor config
     view := Agent.MiniSwe.view
@@ -82,7 +83,12 @@ private def miniSwe : AgentSpec :=
 private def miniVero : AgentSpec :=
   let config := Agent.MiniVero.defaultConfig
   { name := "mini-vero"
-    initialLog := fun task uname => Agent.MiniVero.initialLog { config with task } uname
+    initialLog := fun args task uname => do
+      let known := " or ".intercalate (Agent.MiniVero.Mode.all.map toString)
+      let name ← args.require "mode" known
+      match Agent.MiniVero.Mode.ofString? name with
+      | some mode => pure (Agent.MiniVero.initialLog { config with task } mode uname)
+      | none => throw <| .configuration s!"unknown mode: {name} (use {known})"
     executorConfig := config.executor
     build := fun executor => Agent.MiniVero.agent executor config
     view := Agent.MiniVero.view
@@ -182,8 +188,9 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let settings? ← (← Executor.Docker.settings? args).mapM (·.pin)
     let (uname, image?) ← rootEnvironment settings?
     let spec ← agentOf args
+    let log ← spec.initialLog args task uname
     let project ← rootProject args data settings? rest.head?
-    let hash ← createRoot data.store (spec.initialLog task uname) project (some task) image?
+    let hash ← createRoot data.store log project (some task) image?
     emit hash.hex
     pure 0
   | "resume" :: pfx :: _ =>
@@ -282,7 +289,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | _ =>
     throw <| .configuration <|
-      "usage: alaya (root TASK (PROJECT | --path P --image I) --agent A | resume HASH --agent A --model P:M | " ++
+      "usage: alaya (root TASK (PROJECT | --path P --image I) --agent A [--mode M] | resume HASH --agent A --model P:M | " ++
       "step HASH --agent A --model P:M | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++

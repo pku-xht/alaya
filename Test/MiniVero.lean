@@ -13,9 +13,9 @@ private def config : MiniVero.Config := { MiniVero.defaultConfig with task := "T
 private def contains (text needle : String) : Bool :=
   (text.splitOn needle).length > 1
 
-private def openingText (task : String) : TestM String := do
-  let log := MiniVero.initialLog
-    { config with task } { system := "Linux", release := "", version := "", machine := "x86_64" }
+private def openingText (task : String) (mode : MiniVero.Mode := .codeproof) : TestM String := do
+  let log := MiniVero.initialLog { config with task } mode
+    { system := "Linux", release := "", version := "", machine := "x86_64" }
   match log[1]? with
   | some (Event.message (Chat.Message.user text)) => pure text
   | _ => fail "missing task"
@@ -31,7 +31,6 @@ def suite : Suite := Testing.suite "mini-vero" #[
       "## Marker grammar (NON-NEGOTIABLE)",
       "**Only slot interiors are kept.**",
       "## Oracle commands",
-      "## Grading (``proof`` mode)",
       "## Grading (``codeproof`` mode)",
       "## Done condition — non-negotiable",
       "## Anti-cheating — what the grader rejects",
@@ -42,11 +41,45 @@ def suite : Suite := Testing.suite "mini-vero" #[
       "-- !benchmark @end",
       "lake lean",
       "lake build",
-      "Classical.choice",
-      "propext",
-      "Quot.sound",
       "submit tool"] do
       check (contains text needle) s!"missing {needle}",
+  test "a run is sent the grading rules of its own mode only" do
+    let proofOnly := ["## Grading (``proof`` mode)", "disprove_<S>", "Classical.choice"]
+    let codeproofOnly := ["## Grading (``codeproof`` mode)", "unsat_<S>", "unpaired_sat", "Part A"]
+    let proof ← openingText "TASK_PROOF" .proof
+    let codeproof ← openingText "TASK_CODEPROOF" .codeproof
+    for needle in proofOnly do
+      check (contains proof needle) s!"proof mode is missing {needle}"
+      check (!contains codeproof needle) s!"codeproof mode should not carry {needle}"
+    for needle in codeproofOnly do
+      check (contains codeproof needle) s!"codeproof mode is missing {needle}"
+      check (!contains proof needle) s!"proof mode should not carry {needle}"
+    -- Everything else is the same message.
+    assertEqual "the rest" (proof.replace MiniVero.gradingProof "" |>.replace "TASK_PROOF" "")
+      (codeproof.replace MiniVero.gradingCodeproof "" |>.replace "TASK_CODEPROOF" ""),
+  test "sections are separated by one blank line, with no template syntax left" do
+    let text ← openingText "TASK_CODEPROOF"
+    for absent in ["\n\n\n", "{%", "{{"] do
+      check (!contains text absent) s!"the prompt should not carry {absent.quote}"
+    check (contains text "stop.\n\nSolve this Vero task:\n\nTASK_CODEPROOF\n\n## Marker grammar")
+      "the task should sit between the framing and the rules",
+  test "the compiled sections are the files in the source tree" do
+    -- Lake does not rebuild a module when a file it takes with `include_str` changes.
+    let dir : System.FilePath := "Alaya" / "Agent" / "MiniVero"
+    for (file, compiled) in [
+      ("framing.md", MiniVero.framing), ("rules.md", MiniVero.rules),
+      ("grading-proof.md", MiniVero.gradingProof),
+      ("grading-codeproof.md", MiniVero.gradingCodeproof),
+      ("done.md", MiniVero.doneCondition), ("anti-cheating.md", MiniVero.antiCheating)] do
+      let onDisk ← IO.FS.readFile (dir / file)
+      check (onDisk.trimAsciiEnd.toString == compiled)
+        s!"{file} changed after Alaya.Agent.MiniVero was built: touch the module and rebuild",
+  test "a mode is named as Vero names it" do
+    assertEqual "proof" (MiniVero.Mode.ofString? "proof") (some .proof)
+    assertEqual "codeproof" (MiniVero.Mode.ofString? "codeproof") (some .codeproof)
+    assertEqual "unknown" (MiniVero.Mode.ofString? "Proof") none
+    assertEqual "round trip" (MiniVero.Mode.all.map (MiniVero.Mode.ofString? ·.toString))
+      (MiniVero.Mode.all.map some),
   test "the instance and run facts are left to the task text" do
     let text ← openingText "TASK_CODEPROOF"
     for absent in [
