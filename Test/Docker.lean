@@ -67,6 +67,12 @@ private def runtime (settings : Docker.Settings) (work : System.FilePath) (store
   let executor ← assertOk (Docker.executor settings config)
   pure { store, workDir := work, executor, model, agent := Agent.MiniSwe.agent executor miniConfig }
 
+private def observedOutput (store : Cas.Store) (hash : Cas.Hash) : TestM Output := do
+  for event in (← assertOk (getState store hash)).appended do
+    if let .observation _ content := event then
+      if let some output := Output.fromJson? content then return output
+  fail "expected a recorded command observation"
+
 def suite : Suite := Testing.suite "docker" #[
   test "pins the image to exact bits and reads uname from it, not the host" <| withDocker
     fun settings => do
@@ -164,6 +170,64 @@ def suite : Suite := Testing.suite "docker" #[
         assertEqual "snapshot"
           ((← assertOk (store.readPath state.workspace "made.txt")).map (String.fromUTF8? ·))
           (some (some "made-in-container\n"))
+      finally
+        rt.executor.close,
+
+  test "reusing one runtime remounts the workspace for stepOnce and resume" <| withDocker
+    fun settings => do
+      let work ← workspace
+      let project := (← scratch) / "proj"
+      writeSpec project #[("seed.txt", "seed-value\n")]
+      let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
+      let read := toolResponse "cat seed.txt"
+      let submit : Chat.ToolCall := { id := "submit", name := "submit", arguments := .mkObj [] }
+      let model ← scripted #[read, read, { read with toolCalls := read.toolCalls.push submit }]
+      let rt ← runtime settings work store model
+      try
+        let uname ← assertOk (Docker.uname settings)
+        let root ← assertOk <| createRoot store (Agent.MiniSwe.initialLog miniConfig uname) project
+          (some "t") (some settings.image)
+        let first ← assertOk <| stepOnce rt "test:model" root
+        let second ← assertOk <| stepOnce rt "test:model" first
+        let final ← assertOk <| resume rt "test:model" second (fun _ => pure ())
+        for child in [first, second, final] do
+          let output ← observedOutput store child
+          assertEqual "command exit" output.exitCode? (some 0)
+          assertEqual "command read" output.output "seed-value\n"
+        assertEqual "submitted" ((← assertOk (getState store final)).outcome?.map (·.status))
+          (some "Submitted")
+      finally
+        rt.executor.close,
+
+  test "reusing one runtime restores an independent fork before its next command" <| withDocker
+    fun settings => do
+      let work ← workspace
+      let project := (← scratch) / "proj"
+      writeSpec project #[("seed.txt", "seed-value\n")]
+      let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
+      let model ← scripted #[toolResponse "echo first > first.txt",
+        toolResponse "test ! -e first.txt && cat seed.txt && echo second > second.txt"]
+      let rt ← runtime settings work store model
+      try
+        let uname ← assertOk (Docker.uname settings)
+        let root ← assertOk <| createRoot store (Agent.MiniSwe.initialLog miniConfig uname) project
+          (some "t") (some settings.image)
+        let first ← assertOk <| stepOnce rt "test:model" root
+        let fork ← assertOk <| tell store root "Start an independent branch."
+        let second ← assertOk <| stepOnce rt "test:model" fork
+        let output ← observedOutput store second
+        assertEqual "fork command exit" output.exitCode? (some 0)
+        assertEqual "fork reads the root" output.output "seed-value\n"
+        let firstTree := (← assertOk (getState store first)).workspace
+        let secondTree := (← assertOk (getState store second)).workspace
+        assertEqual "first branch remains intact" (← assertOk (store.readPath firstTree "first.txt"))
+          (some "first\n".toUTF8)
+        assertEqual "first branch did not gain the sibling's file"
+          (← assertOk (store.readPath firstTree "second.txt")) none
+        assertEqual "sibling did not inherit first branch's file"
+          (← assertOk (store.readPath secondTree "first.txt")) none
+        assertEqual "sibling write was captured" (← assertOk (store.readPath secondTree "second.txt"))
+          (some "second\n".toUTF8)
       finally
         rt.executor.close,
 

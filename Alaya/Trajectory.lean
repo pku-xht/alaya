@@ -490,16 +490,17 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
     note? := some note, image? }
   pure (child, log ++ appended, workspace, halt)
 
-/-- Restores `workspace` exactly into the mutable execution directory. Complete replacement
-prevents a later branch or continuation from inheriting a previous tool's writes. -/
-private def checkoutInto (sandbox : Sandbox) (workspace : Hash) : Result Unit :=
-  sandbox.store.materialize workspace sandbox.workDir { onExisting := .replace }
+/-- Releases the previous executor before restoring the workspace: replacing a directory
+invalidates a container's bind mount. The next command starts a container over the new files. -/
+private def checkoutInto (rt : Runtime) (workspace : Hash) : Result Unit := do
+  Result.fromIO Error.configuration rt.executor.close
+  rt.store.materialize workspace rt.workDir { onExisting := .replace }
 
 /-- Advances exactly one model turn from `hash`, returning the new child state. -/
 def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result Hash := do
   let state ← getState rt.store hash
   Result.fromExcept Error.configuration state.continuable
-  checkoutInto rt.toSandbox state.workspace
+  checkoutInto rt state.workspace
   let (child, _, _, _) ← advance rt note hash (← logOf rt.store hash) state.workspace
   pure child
 
@@ -509,7 +510,7 @@ partial def resume (rt : Runtime) (note : String) (hash : Hash)
     (onStep : Hash -> Result Unit) : Result Hash := do
   let start ← getState rt.store hash
   Result.fromExcept Error.configuration start.continuable
-  checkoutInto rt.toSandbox start.workspace
+  checkoutInto rt start.workspace
   let rec go (parent : Hash) (log : Log) (workspace : Hash) : Result Hash := do
     let (child, log, workspace, halt) ← advance rt note parent log workspace
     onStep child
