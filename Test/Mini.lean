@@ -1,11 +1,12 @@
 import Test.Framework
+import Test.DirectoryWorkspaces
 import Test.MiniFixtures
 import Alaya
 
 /-! Tests of the mini-SWE-agent port, and of the trajectory tree driven by it. The prompt
 fixtures (`Test/MiniFixtures.lean`) are rendered by mini's own jinja templates, so the prompts
 are checked against upstream to the byte, except where the port names its `submit` tool in place
-of mini's output sentinel. End-to-end cases drive the real agent over a Cas-backed workspace with
+of mini's output sentinel. End-to-end cases drive the real agent over a snapshotted workspace with
 a scripted model. -/
 
 namespace MiniTests
@@ -191,15 +192,14 @@ private def workDir : TestM System.FilePath := do
 /-- Runs the mini agent with a scripted model through the reference loop, then snapshots the
 workspace. Returns the view of the final log, the snapshot, and the outcome. -/
 private def runAgent (config : Config) (responses : Array Chat.Response) :
-    TestM (Dialogue × Cas.Hash × Outcome) := do
+    TestM (Dialogue × Hash × Outcome) := do
   let work ← workDir
   let model ← scriptedModel responses
   let mini := agent (Executor.onHost config.executor) config
   let sample (dialogue : Dialogue) : Result Chat.Response := do
     (← model.sample { messages := dialogue, tools := mini.tools }).next
   let (log, stop) ← assertOk <| Agent.run mini { dir := work } sample (initialLog config testUname)
-  let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
-  let env ← assertOk <| store.snapshot work
+  let env ← assertOk <| (← workspaces).snapshot work
   match stop with
   | .outcome outcome => pure (view log, env, outcome)
   | .question _ q => fail s!"unexpected question: {q}"
@@ -220,9 +220,8 @@ def runSuite : Suite := suite "mini.run" #[
     | _ => fail "expected a tool observation at index 3"
     -- The live workspace and the snapshot both reflect the edit.
     assertEqual "workspace file" (← IO.FS.readFile ((← scratch) / "work" / "a.txt")) "hello\n"
-    let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
     assertEqual "snapshot file"
-      ((← assertOk <| store.readPath env "a.txt").map (String.fromUTF8? ·))
+      ((← assertOk <| (← workspaces).readFile? env "a.txt").map (String.fromUTF8? ·))
       (some (some "hello\n")),
 
   test "multiple tool calls in one turn run in order and both observe" do
@@ -239,9 +238,8 @@ def runSuite : Suite := suite "mini.run" #[
       responseWith #[call "c1" "bash" "echo a > a.txt", submitCall "s" "done",
                      call "c2" "bash" "echo b > b.txt"]]
     assertEqual "submitted" outcome.status "Submitted"
-    let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
-    check (← assertOk (store.entryAt? env "a.txt")).isSome "the call before submit ran"
-    check (← assertOk (store.entryAt? env "b.txt")).isNone "the call after submit did not",
+    check (← assertOk ((← workspaces).readFile? env "a.txt")).isSome "the call before submit ran"
+    check (← assertOk ((← workspaces).readFile? env "b.txt")).isNone "the call after submit did not",
 
   test "a format error is appended and the offending turn is dropped" do
     let (dialogue, _, outcome) ← runAgent { task := "t" } #[
@@ -359,15 +357,16 @@ private def cachedRuntime (responses : Array Chat.Response) (config : Config := 
     TestM Runtime := do
   let model ← scriptedModel responses
   let cached ← assertOk <| Cache.persistent model { directory := (← scratch) / "cache" }
-  let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
+  let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
   let work ← workDir
   let executor := Executor.onHost config.executor
-  pure { store, workDir := work, executor, model := cached, agent := agent executor config }
+  pure { store, workspaces := ← workspaces, workDir := work, executor, model := cached
+         agent := agent executor config }
 
 /-- A root for the test task over `project`. -/
 private def mkRoot (rt : Runtime) (project : System.FilePath) (image? : Option String := none) :
-    TestM Cas.Hash :=
-  assertOk <| createRoot rt.store (initialLog { task := "t" } testUname) project (some "t") image?
+    TestM Hash :=
+  assertOk <| createRoot rt.store rt.workspaces (initialLog { task := "t" } testUname) project (some "t") image?
 
 /-- A directory standing in for a hidden test set. -/
 private def testsDir : TestM System.FilePath := do
@@ -437,9 +436,9 @@ def trajectorySuite : Suite := suite "trajectory" #[
     assertOk <| Result.fromIO Error.storage do
       IO.FS.createDirAll edited
       IO.FS.writeFile (edited / "fix.txt") "fixed\n"
-    let silent ← assertOk <| commit rt.store root edited (some "fix")
+    let silent ← assertOk <| commit rt.store rt.workspaces root edited (some "fix")
     check (← assertOk (getState rt.store silent)).appended.isEmpty "without --tell a commit stays silent"
-    let child ← assertOk <| commit rt.store root edited (some "fix") (tell? := some "I added a file.")
+    let child ← assertOk <| commit rt.store rt.workspaces root edited (some "fix") (tell? := some "I added a file.")
     let state ← assertOk (getState rt.store child)
     check (state.kind == .intervention) "still an intervention"
     match state.intervention? with
@@ -463,9 +462,9 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let state ← assertOk (getState rt.store stopped)
     check (state.kind == .question) "the run stops at a question"
     assertEqual "question" state.question? (some { callId := "q1", text := "Exact wording or mine?" })
-    check (← assertOk (rt.store.entryAt? state.workspace "before.txt")).isSome
+    check (← assertOk (rt.workspaces.readFile? state.workspace "before.txt")).isSome
       "the call before the question ran"
-    check (← assertOk (rt.store.entryAt? state.workspace "after.txt")).isNone
+    check (← assertOk (rt.workspaces.readFile? state.workspace "after.txt")).isNone
       "the call after the question did not run"
     check ((← assertOk (waiting rt.store)).size == 1) "the question is open"
     match ← (stepOnce rt "test:model" stopped).toBaseIO with
@@ -488,11 +487,11 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let root ← mkRoot rt (← emptyProject)
     let first ← assertOk <| stepOnce rt "test:model" root
     let second ← assertOk <| stepOnce rt "test:model" first
-    let page ← assertOk <| Html.dataJson rt.store view tools
+    let page ← assertOk <| Html.dataJson rt.store rt.workspaces view tools
     let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
     let envelope ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "request")
     -- Assemble the context as the page does: every state's `wire` from the root down.
-    let wireOf (hash : Cas.Hash) : TestM (Array Lean.Json) := do
+    let wireOf (hash : Hash) : TestM (Array Lean.Json) := do
       match states.find? (fun s => (s.getObjVal? "hash" >>= Lean.Json.getStr?).toOption == some hash.hex) with
       | some s => assertOk <| Result.fromExcept Error.storage (s.getObjVal? "wire" >>= Lean.Json.getArr?)
       | none => fail s!"state {hash.hex} missing from the report"
@@ -528,7 +527,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let child ← assertOk <| stepOnce rt "test:model" root
     assertEqual "turn" (← assertOk (getState rt.store child)).image? (some pinned)
     let edited ← emptyProject
-    let intervention ← assertOk <| commit rt.store child edited (some "by hand")
+    let intervention ← assertOk <| commit rt.store rt.workspaces child edited (some "by hand")
     assertEqual "intervention" (← assertOk (getState rt.store intervention)).image? (some pinned)
     -- A trajectory created without an image keeps running on the host.
     let hostRoot ← mkRoot rt (← emptyProject)
@@ -540,14 +539,14 @@ def trajectorySuite : Suite := suite "trajectory" #[
       responseWith #[call "b" "bash" "echo other > other.txt"]]
     let root ← mkRoot rt (← emptyProject)
     let first ← assertOk <| stepOnce rt "test:model" root
-    check (← assertOk (rt.store.entryAt? (← assertOk (getState rt.store first)).workspace "junk.txt")).isSome
+    check (← assertOk (rt.workspaces.readFile? (← assertOk (getState rt.store first)).workspace "junk.txt")).isSome
       "the first branch should have written junk.txt"
     -- Forking checks the root's workspace out again: the first branch's file must be gone.
     let second ← assertOk <| stepOnce rt "test:model" root
     let state ← assertOk (getState rt.store second)
-    check (← assertOk (rt.store.entryAt? state.workspace "other.txt")).isSome
+    check (← assertOk (rt.workspaces.readFile? state.workspace "other.txt")).isSome
       "the second branch should have written other.txt"
-    check (← assertOk (rt.store.entryAt? state.workspace "junk.txt")).isNone
+    check (← assertOk (rt.workspaces.readFile? state.workspace "junk.txt")).isNone
       "a fork must not start from the abandoned branch's workspace",
 
   test "a grader runs on the host against a checkout, and its files never reach a later turn" do
@@ -555,23 +554,23 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let root ← mkRoot rt (← emptyProject)
     let tests ← testsDir
     let scratch := (← scratch) / "eval"
-    let node ← assertOk <| evaluate rt.store scratch root
+    let node ← assertOk <| evaluate rt.store rt.workspaces scratch root
       ("cp -R " ++ tests.toString ++ "/. {checkout}/ && test -f {checkout}/tests/extra.txt")
     let state ← assertOk (getState rt.store node)
     assertEqual "kind" state.kind Kind.evaluation
     assertEqual "verdict" (state.evaluation?.map (·.passed)) (some true)
     -- The evaluation's workspace is the checkout as the grader left it, and the next turn from
     -- the root does not see the tests.
-    check (← assertOk (rt.store.entryAt? state.workspace "tests/extra.txt")).isSome
+    check (← assertOk (rt.workspaces.readFile? state.workspace "tests/extra.txt")).isSome
       "the evaluation's workspace holds what the grader did"
     let child ← assertOk <| stepOnce rt "test:model" root
-    check (← assertOk (rt.store.entryAt? (← assertOk (getState rt.store child)).workspace "tests/extra.txt")).isNone
+    check (← assertOk (rt.workspaces.readFile? (← assertOk (getState rt.store child)).workspace "tests/extra.txt")).isNone
       "a grader's files must never reach a state the agent continues from"
     -- Nothing may continue from the evaluation.
     assertError "step" (stepOnce rt "test:model" node) fun
       | .configuration m => (m.splitOn "cannot continue from an evaluation").length > 1
       | _ => false
-    assertError "commit" (commit rt.store node (← emptyProject) none) fun
+    assertError "commit" (commit rt.store rt.workspaces node (← emptyProject) none) fun
       | .configuration m => (m.splitOn "cannot build on an evaluation").length > 1
       | _ => false,
 
@@ -579,15 +578,15 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let rt ← cachedRuntime #[]
     let root ← mkRoot rt (← emptyProject)
     let scratch := (← scratch) / "eval"
-    let node ← assertOk <| evaluate rt.store scratch root "exit 3"
+    let node ← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3"
     let state ← assertOk (getState rt.store node)
     assertEqual "returncode" (state.evaluation?.map (·.returncode)) (some 3)
     assertEqual "passed" (state.evaluation?.map (·.passed)) (some false)
     assertEqual "no evidence" (state.evaluation?.bind (·.evidence?)) none
-    assertEqual "same node again" (← assertOk <| evaluate rt.store scratch root "exit 3") node
+    assertEqual "same node again" (← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3") node
     assertEqual "one child" (← assertOk (children rt.store root)).size 1
     -- A different grader is a separate evaluation of the same state.
-    let other ← assertOk <| evaluate rt.store scratch root "true"
+    let other ← assertOk <| evaluate rt.store rt.workspaces scratch root "true"
     check (other != node) "expected a distinct node for a distinct grader"
     assertEqual "two children" (← assertOk (children rt.store root)).size 2,
 
@@ -601,7 +600,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let grader := "test -f {checkout}/app.txt && " ++
       "printf '{\"passed\": true, \"score\": {\"passed\": 3, \"total\": 4}}' > {out}/verdict.json && " ++
       "echo detail > {out}/report.txt && exit 1"
-    let node ← assertOk <| evaluate rt.store scratch root grader
+    let node ← assertOk <| evaluate rt.store rt.workspaces scratch root grader
     let state ← assertOk (getState rt.store node)
     let some e := state.evaluation? | fail "expected an evaluation"
     assertEqual "returncode" e.returncode 1
@@ -610,9 +609,9 @@ def trajectorySuite : Suite := suite "trajectory" #[
     assertEqual "verdict line" e.verdict "pass 3/4"
     let some evidence := e.evidence? | fail "expected the output directory as evidence"
     assertEqual "report kept"
-      ((← assertOk (rt.store.readPath evidence "report.txt")).map (String.fromUTF8? ·))
+      ((← assertOk (rt.workspaces.readFile? evidence "report.txt")).map (String.fromUTF8? ·))
       (some (some "detail\n"))
-    check (← assertOk (rt.store.entryAt? evidence "verdict.json")).isSome "verdict.json is in the evidence"
+    check (← assertOk (rt.workspaces.readFile? evidence "verdict.json")).isSome "verdict.json is in the evidence"
     -- The checkout is gone afterwards; only the store holds what was tested.
     check (!(← (scratch / "checkout").pathExists)) "the checkout is discarded",
 
@@ -634,7 +633,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     assertEqual "middle parent" mstate.parent? (some root)
     assertEqual "middle events" mstate.appended.size 2
     assertEqual "final events" fstate.appended.size 1
-    check (← assertOk (rt.store.entryAt? fstate.workspace "a.txt")).isSome "the edit is in the final workspace"
+    check (← assertOk (rt.workspaces.readFile? fstate.workspace "a.txt")).isSome "the edit is in the final workspace"
     -- The tree shows the calls by name and argument.
     let lines ← assertOk <| treeLines rt.store
     check (lines.any fun line => contains line "bash  echo hi > a.txt") "the tree labels a turn by its call"

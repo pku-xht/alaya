@@ -415,5 +415,5 @@ front end reports it.
 | `protocol` | a payload that is not the chat protocol |
 | `structuredOutput` | the reply did not satisfy the requested schema |
 | `cache` | the response cache could not be read or extended |
-| `storage` | the content-addressed store or a snapshot failed |
+| `storage` | reading or writing the states, or a workspace snapshot, failed |
 | `cancelled` | stopped on purpose |

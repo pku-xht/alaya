@@ -15,7 +15,7 @@ namespace Alaya.Trajectory.Html
 
 open Alaya (Result Error)
 open Alaya.Agent (Event Log View)
-open Alaya.Cas (Hash Store Change)
+open Alaya.Workspaces (Change)
 
 /-- Paths under these are listed but never carried, and never diffed line by line. -/
 private def uninteresting : Array String :=
@@ -53,25 +53,32 @@ private def jsonText? (bytes? : Option ByteArray) : Option String :=
       | some text => if text.any (· == '\x00') then none else some text
       | none => none
 
-private def readText? (store : Store) (root? : Option Hash) (path : String) :
-    Result (Option String) := do
-  match root? with
-  | none => pure none
-  | some root => pure (jsonText? (← store.readPath root path))
+/-- The text of `paths` in a snapshot, read in one request. -/
+private def readTexts (workspaces : Workspaces) (root? : Option Hash) (paths : Array String) :
+    Result (Std.HashMap String String) := do
+  let some root := root? | return {}
+  if paths.isEmpty then return {}
+  let contents ← workspaces.readFiles root paths
+  pure <| (paths.zip contents).foldl (init := {}) fun texts (path, bytes?) =>
+    match jsonText? bytes? with
+    | some text => texts.insert path text
+    | none => texts
 
-/-- One workspace change, with the before and after text when both are cheap to carry. -/
-private def changeJson (store : Store) (before? : Option Hash) (after? : Option Hash)
-    (change : Change) : Result Lean.Json := do
-  let path := change.path
-  let kind := match change with
-    | .added .. => "added" | .removed .. => "removed" | .modified .. => "modified"
-  let carry := !isUninteresting path
-  let old ← if carry then readText? store before? path else pure none
-  let new ← if carry then readText? store after? path else pure none
-  pure <| .mkObj [
-    ("path", path), ("kind", kind),
-    ("old", old.map Lean.Json.str |>.getD .null),
-    ("new", new.map Lean.Json.str |>.getD .null)]
+/-- The changes, each with the before and after text when both are cheap to carry. A side the
+path is absent from has no text, and a directory has none on either. -/
+private def changesJson (workspaces : Workspaces) (before? : Option Hash) (after : Hash)
+    (changes : Array Change) : Result (Array Lean.Json) := do
+  let carried := changes.filter fun change => !isUninteresting change.path && !change.directory
+  let pathsWhere (keep : Change -> Bool) := (carried.filter keep).map (·.path)
+  let old ← readTexts workspaces before? (pathsWhere (·.kind != .added))
+  let new ← readTexts workspaces (some after) (pathsWhere (·.kind != .removed))
+  pure <| changes.map fun change =>
+    let kind := match change.kind with
+      | .added => "added" | .removed => "removed" | .modified => "modified"
+    .mkObj [
+      ("path", change.path), ("kind", kind),
+      ("old", old.get? change.path |>.map Lean.Json.str |>.getD .null),
+      ("new", new.get? change.path |>.map Lean.Json.str |>.getD .null)]
 
 private def callJson (call : Chat.ToolCall) : Lean.Json :=
   .mkObj [
@@ -104,7 +111,8 @@ private def eventJson : Event -> Lean.Json
 private def wireOf (dialogue : Array Chat.Message) : Array String :=
   dialogue.map fun m => m.toJson.compress
 
-private def stateJson (store : Store) (view : View) (hidden : Array String) (hash : Hash) :
+private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
+    (hidden : Array String) (hash : Hash) :
     Result Lean.Json := do
   let state ← getState store hash
   let parentEnv? ← match state.parent? with
@@ -112,7 +120,7 @@ private def stateJson (store : Store) (view : View) (hidden : Array String) (has
     | none => pure none
   let changes ← match parentEnv? with
     | none => pure #[]
-    | some before => store.diff before state.workspace
+    | some before => workspaces.diff before state.workspace
   -- Folded prefixes are counted, never listed: a run that rebuilds a virtual environment
   -- changes hundreds of paths that say nothing, and they would otherwise crowd out the ones
   -- that do — the listing limit applies to what is left after folding.
@@ -123,10 +131,10 @@ private def stateJson (store : Store) (view : View) (hidden : Array String) (has
     | none => listed := listed.push change
     | some prefix' =>
       let fold := folds.getD prefix' {}
-      folds := folds.insert prefix' <| match change with
-        | .added .. => { fold with added := fold.added + 1 }
-        | .removed .. => { fold with removed := fold.removed + 1 }
-        | .modified .. => { fold with modified := fold.modified + 1 }
+      folds := folds.insert prefix' <| match change.kind with
+        | .added => { fold with added := fold.added + 1 }
+        | .removed => { fold with removed := fold.removed + 1 }
+        | .modified => { fold with modified := fold.modified + 1 }
   let foldedJson := hidden.filterMap fun prefix' =>
     folds.get? prefix' |>.map fun fold =>
       Lean.Json.mkObj [
@@ -134,7 +142,7 @@ private def stateJson (store : Store) (view : View) (hidden : Array String) (has
         ("removed", (fold.removed : Lean.Json)), ("modified", (fold.modified : Lean.Json)),
         ("total", (fold.total : Lean.Json))]
   let shown := listed.extract 0 changeLimit
-  let changesJson ← shown.mapM (changeJson store parentEnv? (some state.workspace))
+  let changesJson ← changesJson workspaces parentEnv? state.workspace shown
   let evaluation := match state.evaluation? with
     | none => Lean.Json.null
     | some e => .mkObj [
@@ -933,20 +941,32 @@ def requestEnvelope (tools : Array Chat.ToolDefinition) : Lean.Json :=
 
 /-- Everything the page renders, as one JSON document: the states (see `stateJson`) and the
 request envelope. `view` and `tools` are the agent's; nothing else about it is needed. -/
-def dataJson (store : Store) (view : View) (tools : Array Chat.ToolDefinition)
-    (hidden : Array String := #[]) : Result Lean.Json := do
+def dataJson (store : Store) (workspaces : Workspaces) (view : View)
+    (tools : Array Chat.ToolDefinition) (hidden : Array String := #[]) : Result Lean.Json := do
   let hidden := hidden.map fun prefix' =>
     if prefix'.endsWith "/" then (prefix'.dropEnd 1).toString else prefix'
   let hashes ← allStates store
-  let states ← hashes.mapM (stateJson store view hidden)
+  -- A few states at a time: a state costs the snapshot store a diff and two reads, which for
+  -- restic are processes that mostly wait.
+  let mut states : Array Lean.Json := #[]
+  let mut rest := hashes
+  while !rest.isEmpty do
+    let tasks ← (rest.extract 0 8).mapM fun hash => Result.fromIO Error.storage <|
+      IO.asTask (prio := .dedicated) (stateJson store workspaces view hidden hash).toBaseIO
+    for task in tasks do
+      match task.get with
+      | .ok (.ok json) => states := states.push json
+      | .ok (.error error) => throw error
+      | .error error => throw <| .storage (toString error)
+    rest := rest.extract 8 rest.size
   pure <| .mkObj [("states", .arr states), ("request", requestEnvelope tools)]
 
 /-- Renders every state in the store as one standalone page. Paths under `hidden` are counted
 rather than listed, so a directory that changes constantly and means nothing — a virtual
 environment, a bytecode cache — is reported without burying the rest. -/
-def report (store : Store) (title : String) (view : View) (tools : Array Chat.ToolDefinition)
-    (hidden : Array String := #[]) : Result String := do
-  let json := (← dataJson store view tools hidden).compress
+def report (store : Store) (workspaces : Workspaces) (title : String) (view : View)
+    (tools : Array Chat.ToolDefinition) (hidden : Array String := #[]) : Result String := do
+  let json := (← dataJson store workspaces view tools hidden).compress
   -- `</` cannot appear inside a script element; the JSON parser does not mind the escape.
   let safe := json.replace "</" "<\\/"
   pure <|

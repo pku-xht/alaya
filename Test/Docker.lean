@@ -1,4 +1,5 @@
 import Test.Framework
+import Test.DirectoryWorkspaces
 import Alaya
 
 /-! The container executor, against a real docker daemon. Every case skips when the machine has
@@ -62,10 +63,11 @@ private def workspace : TestM System.FilePath := do
   pure work
 
 /-- A runtime driving the mini agent in the container. -/
-private def runtime (settings : Docker.Settings) (work : System.FilePath) (store : Cas.Store)
+private def runtime (settings : Docker.Settings) (work : System.FilePath) (store : Trajectory.Store)
     (model : Model) : TestM Runtime := do
   let executor ← assertOk (Docker.executor settings config)
-  pure { store, workDir := work, executor, model, agent := Agent.MiniSwe.agent executor miniConfig }
+  pure { store, workspaces := ← workspaces, workDir := work, executor, model
+         agent := Agent.MiniSwe.agent executor miniConfig }
 
 def suite : Suite := Testing.suite "docker" #[
   test "pins the image to exact bits and reads uname from it, not the host" <| withDocker
@@ -150,19 +152,19 @@ def suite : Suite := Testing.suite "docker" #[
       let work ← workspace
       let project := (← scratch) / "proj"
       assertOk <| Result.fromIO Error.storage (IO.FS.createDirAll project)
-      let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
+      let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
       let model ← scripted #[toolResponse "echo made-in-container > made.txt"]
       let rt ← runtime settings work store model
       try
         let uname ← assertOk (Docker.uname settings)
-        let root ← assertOk <| createRoot store (Agent.MiniSwe.initialLog miniConfig uname) project
+        let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig uname) project
           (some "t") (some settings.image)
         let child ← assertOk <| stepOnce rt "test:model" root
         let state ← assertOk (getState store child)
         assertEqual "image inherited" state.image? (some settings.image)
-        -- The container wrote it, the host snapshotted it, the store has it.
+        -- The container wrote it, the host snapshotted it.
         assertEqual "snapshot"
-          ((← assertOk (store.readPath state.workspace "made.txt")).map (String.fromUTF8? ·))
+          ((← assertOk ((← workspaces).readFile? state.workspace "made.txt")).map (String.fromUTF8? ·))
           (some (some "made-in-container\n"))
       finally
         rt.executor.close,
@@ -174,11 +176,10 @@ def suite : Suite := Testing.suite "docker" #[
       assertOk <| Docker.copyOut settings "/etc/apk" work
       let contents ← IO.FS.readFile (work / "repositories")
       check (!contents.isEmpty) "expected alpine's /etc/apk/repositories to be copied out"
-      -- Copied files belong to the host user, or the store could neither read nor wipe them.
+      -- Copied files belong to the host user, or a snapshot could neither read nor wipe them.
       IO.FS.removeFile (work / "repositories")
-      let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
-      let snapshot ← assertOk <| store.snapshot work
-      check (← assertOk (store.entryAt? snapshot "world")).isSome
+      let snapshot ← assertOk <| (← workspaces).snapshot work
+      check (← assertOk ((← workspaces).readFile? snapshot "world")).isSome
         "expected /etc/apk/world in the snapshot",
 
   test "a path that is not in the image is a configuration error" <| withDocker
@@ -193,16 +194,16 @@ def suite : Suite := Testing.suite "docker" #[
       let work ← workspace
       let project := (← scratch) / "proj"
       assertOk <| Result.fromIO Error.storage (IO.FS.createDirAll project)
-      let store ← assertOk <| Cas.Store.create ((← scratch) / "store")
+      let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
       let model ← scripted #[toolResponse "echo made-in-container > made.txt"]
       let rt ← runtime settings work store model
       try
         let uname ← assertOk (Docker.uname settings)
-        let root ← assertOk <| createRoot store (Agent.MiniSwe.initialLog miniConfig uname) project
+        let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig uname) project
           (some "t") (some settings.image)
         let child ← assertOk <| stepOnce rt "test:model" root
         -- The grader is a host program over a checkout; the container is not involved.
-        let node ← assertOk <| evaluate store ((← scratch) / "eval") child
+        let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") child
           "test -f {checkout}/made.txt && cat {checkout}/made.txt"
         let state ← assertOk (getState store node)
         assertEqual "passed" (state.evaluation?.map (·.passed)) (some true)

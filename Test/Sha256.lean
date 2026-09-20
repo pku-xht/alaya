@@ -1,13 +1,13 @@
 import Test.Framework
-import Alaya.Cas
+import Alaya.Sha256
 
-/-! Feature 4 (in-process hashing): the pure SHA-256 against NIST vectors and, for block
+/-! The pure SHA-256 against NIST vectors and, for block
 boundaries and bulk input, cross-checked against the system checksum tool. -/
 
-namespace CasTests.Sha256
+namespace Sha256Tests
 
 open Testing
-open Alaya.Cas
+open Alaya
 
 private def vectors : Array (String × String) := #[
   ("", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
@@ -48,4 +48,4 @@ def suite : Suite := Testing.suite "sha256" #[
     assertEqual "256KiB digest" (Sha256.sumHex bytes) (← systemDigest bytes)
 ]
 
-end CasTests.Sha256
+end Sha256Tests

@@ -1,9 +1,10 @@
 # Alaya
 
 A Lean 4 library for typed chat models and recorded agent runs. An agent's run is a tree of
-immutable states in a content-addressed store: every model turn, every tool result, and every
-workspace snapshot is kept exactly as it happened, so a run can be replayed, branched at any
-point, evaluated against hidden tests, and interrupted by a person.
+immutable states, each a file named by the hash of its content, with their workspaces in a
+restic repository beside them: every model turn, every tool result, and every workspace snapshot
+is kept exactly as it happened, so a run can be replayed, branched at any point, evaluated
+against hidden tests, and interrupted by a person.
 
 The library is organised in four layers, each documented on its own page.
 
@@ -18,9 +19,11 @@ Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls these progra
 | --- | --- |
 | `curl` | every request to a model provider |
 | `docker` | running an agent's commands in a pinned container image |
-| `/bin/sh`, `uname`, `cp`, `find` | running commands on the host, describing the host, and snapshotting a directory |
+| `restic` (0.17 or later) | snapshotting a workspace, writing one back out, and diffing two ([restic.net](https://restic.net)) |
+| `/bin/sh`, `uname`, `chmod` | running commands on the host, describing the host, and making a directory replaceable |
 
-`docker` is needed only for trajectories created with `--image`; the rest are on any Unix host.
+`docker` is needed only for trajectories created with `--image`; `restic` is a single binary,
+and the rest are on any Unix host.
 A grader given to `alaya eval` is a shell command of your own and brings its own dependencies.
 
 ## Documentation
@@ -40,7 +43,8 @@ person, or stop, an `act` that runs a tool call in a workspace, and the tools it
 `Alaya.Trajectory` records a run as a tree of content-addressed states, each holding its
 parent, the events it appends, and a snapshot of the workspace, so a run can be replayed,
 forked, evaluated against hidden tests, and continued after a person intervenes. The page
-specifies the state object, the store layout, the model cache entry, and every `alaya` command.
+specifies the state object, the store layout, the workspace snapshots kept in a restic
+repository, the model cache entry, and every `alaya` command.
 
 [`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agent.MiniSwe` is the port of
 mini-SWE-agent as one agent: the original's prompts, `bash` tool, and protocol for reading a
