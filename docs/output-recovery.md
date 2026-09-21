@@ -57,11 +57,13 @@ from 1 through 10 000. Its result has this shape:
 }
 ```
 
-Recovery is entirely on demand. Choose an `offset` and `limit` for a needed section; there is
-no obligation to read the omitted text or reach EOF. The agent can continue with `bash` or
-`submit` without any recovery call, or after reading only part of the output. For another page,
-use `next_offset` when useful. If the entire remaining output is needed, following it reaches
-`eof: true` with `next_offset: null`.
+Recovery is entirely on demand. `bash` remains the default for commands and file work. If the
+preview is sufficient for the next decision, continue without recovery. If omitted content is
+needed, choose an `offset` and `limit` for that section; `read_output` may be the only tool call
+in the response. There is no obligation to reach EOF. The agent can continue with `bash` or
+call `submit` separately after reading only the needed part. For another page, use `next_offset` when
+useful. If the entire remaining output is needed, following it reaches `eof: true` with
+`next_offset: null`.
 `offset == total_chars` returns an empty final page; an offset beyond the end returns an error.
 The unit is a Unicode scalar value, not a UTF-8 byte, UTF-16 code unit, line, or grapheme cluster.
 Pages do not split a scalar value. They can split a multi-scalar displayed glyph, but concatenating

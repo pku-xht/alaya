@@ -30,9 +30,9 @@ structure Config where
 
 /-! ## Prompts
 
-The strings jinja renders from `mini.yaml`, except for the two sentences that name mini's
-submission sentinel (`submitInstruction`). jinja strips one trailing newline, so none end in
-`\n`. -/
+The strings jinja renders from `mini.yaml`, adapted for the `submit` tool and optional
+recorded-output recovery. Bash remains the default tool; recovery-only turns are permitted.
+jinja strips one trailing newline, so none end in `\n`. -/
 
 def systemMessage : String :=
   "You are a helpful assistant that can interact with a computer."
@@ -44,7 +44,7 @@ def submitInstruction (indent : String) : String :=
   indent ++ "Do not combine it with any other tool call. <important>After this call, you cannot continue working on this task.</important>"
 
 private def instanceMiddle : String :=
-  "\n\nYou can execute bash commands and edit files to implement the necessary changes.\n\n## Recommended Workflow\n\nThis workflow should be done step-by-step so that you can iterate on your changes and any possible problems.\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n6. " ++ submitInstruction "   " ++ "\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n- " ++ submitInstruction "  " ++ "\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n[Makes bash tool call with {\"command\": \"ls -la\"} as arguments]\n</example_response>\n\n<system_information>\n"
+  "\n\nYou can execute bash commands and edit files to implement the necessary changes.\n\n## Recommended Workflow\n\nThis workflow should be done step-by-step so that you can iterate on your changes and any possible problems.\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n6. " ++ submitInstruction "   " ++ "\n\n## Command Execution Rules\n\nWhen using bash:\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- " ++ OutputRead.usageGuidance ++ "\n- Directory or environment variable changes are not persistent. Each bash call is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n- " ++ submitInstruction "  " ++ "\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n[Makes bash tool call with {\"command\": \"ls -la\"} as arguments]\n</example_response>\n\n<system_information>\n"
 
 private def instanceSuffixDarwin : String :=
   "\n</system_information>\n\n## Useful command examples\n\n### Create a new file:\n\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:<important>\nYou are on MacOS. For all the below examples, you need to use `sed -i ''` instead of `sed -i`.\n</important>```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n\n```bash\nanything\n```"
@@ -131,12 +131,13 @@ def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : O
     "Your previous response reached the output token limit (finish_reason=" ++
       finishReason?.getD "" ++
       ") before you produced a tool call, so it was cut off. Respond more concisely and finish " ++
-      "with exactly one bash tool call. If you need to think more, do so briefly."
+      "with exactly one valid tool call. If you need to think more, do so briefly.\n\n" ++
+      OutputRead.usageGuidance ++ "\n\n" ++ endHint
   else
     "Tool call error:\n\n<error>\n" ++ error ++ "\n</error>\n\n" ++
     "Here is general guidance on how to submit correct toolcalls:\n\n" ++
-    "Every response needs to use the 'bash' tool at least once to execute commands.\n\n" ++
-    "Call the bash tool with your command as the argument:\n" ++
+    OutputRead.usageGuidance ++ "\n\n" ++
+    "For bash, pass your command as the argument:\n" ++
     "- Tool: bash\n- Arguments: {\"command\": \"your_command_here\"}\n\n" ++ endHint
 
 /-- One parsed tool call: a shell script to run, or the call that ends the run. -/

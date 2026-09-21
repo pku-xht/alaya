@@ -13,11 +13,18 @@ def pageLimit : Nat := 10000
 /-- Content identity of a recorded output. Its bytes remain inside the recorded state event. -/
 def reference (text : String) : String := "sha256:" ++ Sha256.sumHex text.toUTF8
 
+/-- The default tool policy shared by opening prompts, repair guidance, and this tool. -/
+def usageGuidance : String :=
+  "Use bash by default for workspace inspection, edits, and command execution. " ++
+  "Use read_output only when omitted text from a recorded output is needed for your next decision. " ++
+  "read_output may be the only tool call in that response. " ++
+  "Read only what you need; you do not have to reach EOF."
+
 def tool : Chat.ToolDefinition := {
   name := "read_output"
   description := "Read a character page of a full recorded tool output by its output_ref. " ++
     "Works across resumed and forked runs. Offsets count Unicode characters, not bytes or lines. " ++
-    "This tool may be used instead of bash when recovering output."
+    usageGuidance
   parameters := .object #[
     ("ref", .string (description? := some "The exact output_ref from a truncated result")),
     ("offset", .integer (description? := some "Zero-based character offset, inclusive")),

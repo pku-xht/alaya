@@ -5,8 +5,8 @@ import Alaya
 
 /-! Tests of the mini-SWE-agent port, and of the trajectory tree driven by it. The prompt
 fixtures (`Test/MiniFixtures.lean`) are rendered by mini's own jinja templates, so the prompts
-are checked against upstream to the byte, except where the port names its `submit` tool in place
-of mini's output sentinel. End-to-end cases drive the real agent over a snapshotted workspace with
+are checked against upstream to the byte, except for the port's `submit` tool and its optional
+recorded-output recovery policy. End-to-end cases drive the real agent over a snapshotted workspace with
 a scripted model. -/
 
 namespace MiniTests
@@ -36,11 +36,17 @@ private def miniSubmitInstruction (indent : String) : String :=
   "Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n" ++
   indent ++ "Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>"
 
-/-- A fixture rendered by mini's templates, with the sentences that name the submission sentinel
-replaced by the port's, which name the `submit` tool. Everything else must match to the byte. -/
+/-- Adapt the upstream fixture only for submission and the optional recovery policy.
+Everything outside these explicit differences must still match to the byte. -/
 private def portOf (miniText : String) : String :=
   let step1 := miniText.replace (miniSubmitInstruction "   ") (submitInstruction "   ")
-  step1.replace (miniSubmitInstruction "  ") (submitInstruction "  ")
+  let step2 := step1.replace (miniSubmitInstruction "  ") (submitInstruction "  ")
+  let step3 := step2.replace "You are operating in an environment where" "When using bash:"
+  let step4 := step3.replace "At least one tool call with your command" "At least one tool call"
+  let step5 := step4.replace "Your response MUST include AT LEAST ONE bash tool call"
+    Alaya.Agent.OutputRead.usageGuidance
+  step5.replace "Every action is executed in a new subshell."
+    "Each bash call is executed in a new subshell."
 
 /-- A fixed `uname`, so prompts do not depend on the machine the tests run on. -/
 private def testUname : Uname :=
@@ -53,15 +59,33 @@ def goldenSuite : Suite := suite "mini.golden" #[
     if systemMessage != "You are a helpful assistant that can interact with a computer." then
       throw <| IO.userError "system message drift",
 
-  test "instance message (Darwin) is mini's, with the submit tool in place of the sentinel" do
+  test "instance message (Darwin) preserves mini outside submission and recovery guidance" do
     assertStringEq "instance"
       (instanceMessage "Fix the bug in foo.py" "Darwin" "23.5.0" "Darwin Kernel Version 23.5.0" "arm64")
       (portOf MiniFixtures.instanceDarwin)
-    -- The replacement is real: the fixture and the prompt differ exactly there.
+    -- The sentinel replacement is real; recovery guidance is checked separately below.
     check (contains MiniFixtures.instanceDarwin "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
       "the fixture names the sentinel"
     check (!contains (instanceMessage "t" "Linux" "r" "v" "m") "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
       "the prompt does not",
+
+  test "opening and repair prompts keep bash default and permit recovery-only turns" do
+    let prompts := #[
+      instanceMessage "t" "Linux" "r" "v" "m",
+      instanceMessage "t" "Darwin" "r" "v" "m",
+      Alaya.Agent.OutputRead.tool.description,
+      formatErrorMessage "read_output requires an integer 'limit' from 1 to 10000." true (some "stop"),
+      formatErrorMessage "irrelevant" false (some "length"),
+      formatErrorMessage "irrelevant" false (some "tool_calls")]
+    for prompt in prompts do
+      check (contains prompt "Use bash by default") "normal work must still default to bash"
+      check (contains prompt "only when omitted text from a recorded output is needed")
+        "recovery must be driven by an information need"
+      check (contains prompt "read_output may be the only tool call") "no companion bash call is required"
+      check (contains prompt "you do not have to reach EOF") "recovery must remain partial and optional"
+      for obsolete in #["MUST include AT LEAST ONE bash", "Every response needs to use the 'bash'",
+        "exactly one bash tool call", "Every action is executed in a new subshell"] do
+        check (!contains prompt obsolete) s!"conflicting guidance: {obsolete}",
 
   iotest "an observation is the recorded output as JSON, cut when long" do
     let field (json : Lean.Json) (key : String) : Option Lean.Json := (json.getObjVal? key).toOption

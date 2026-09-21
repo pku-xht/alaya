@@ -40,9 +40,10 @@ time-feedback change, new model selection, changed task specification, or `ask_u
 change. Submission remains terminal. Existing model caching is reused; historical cache hits
 still require the original request format and model identity.
 
-## Validation
+## Baseline validation (`0a31780`)
 
-`lake build` passed on a Linux filesystem with Lean 4.31.0 and restic 0.19.1. All **126 cases
+The following results belong to the reviewed baseline `0a31780`, before the prompt-policy
+follow-up. `lake build` passed on a Linux filesystem with Lean 4.31.0 and restic 0.19.1. All **126 cases
 were verified**: the full run executed 114 and skipped 12 while Docker Desktop was unavailable;
 after recovery, all 12 Docker cases passed with no skips. Targeted checks passed: output
 recovery **13/13**, CLI **13/13**, and MiniVero **11/11**. Eight additional real CLI checks
@@ -56,3 +57,20 @@ belong to older sources, not this combined revision.
 The [experiment validation metadata](output-recovery-experiment-validation.json) belongs only
 to frozen commit `b60f044`; its 130-test result and real Vero runs must not be reported as
 validation of the current source.
+
+## Prompt-policy follow-up
+
+Opening instructions, ordinary format-error guidance, truncation guidance, and the
+`read_output` description now use one policy: default to `bash` for workspace and command
+work; use `read_output` alone when omitted text is needed for the next decision; stop once
+enough information is available. Reading to EOF is optional, and `submit` remains independent.
+The parser and execution loop are unchanged. Existing roots retain their recorded opening log.
+
+For this follow-up, a fresh Linux `lake build` passed. Targeted checks passed with no skips:
+`lake exe tests mini` **37/37** (including MiniVero), and `lake exe tests output-read` **13/13**.
+The added regression checks all model-facing guidance for the default/exception policy and
+the absence of the old mandatory-bash wording. No model request was sent. The full suite
+was not rerun; the 126-case record above belongs to baseline `0a31780`.
+
+The `prompt_policy_followup` object in [validation metadata](output-recovery-validation.json)
+records the exact 51-input source manifest, executable hash, commands and log hashes.

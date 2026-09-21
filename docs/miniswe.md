@@ -2,8 +2,8 @@
 
 `Alaya.Agent.MiniSwe` is a port of [mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent)'s
 default tool-calling agent as an `Alaya.Agent.Agent`. It keeps what defines that agent — its
-prompts, its `bash` command tool, its protocol for reading a response and answering a malformed one,
-its limits — and realizes them through the five operations of the agent API
+prompt structure, its `bash` command tool, its protocol for reading a response and answering a
+malformed one, its limits — and realizes them through the five operations of the agent API
 (`docs/agent-api.md`): the tools, the view, `next`, `act`, and an identity. Rendering and
 execution are Lean's own rather than imitations of the Python original; the differences that
 change behaviour are listed in §8. The full output recovery contract and design are in
@@ -37,8 +37,10 @@ The command line names the agent `--agent mini-swe`.
 `initialLog config uname` produces the two events a run starts from: the system message, and
 the instance message with the task and a line describing the machine — the `uname` of the
 executor, so a run pinned to an image is told about the image and not about the host. Both are
-mini's texts, rendered from its `mini.yaml`; the only change is the two sentences that named its
-submission sentinel, which name the `submit` tool. The opening log is frozen into the root state.
+based on mini's texts, rendered from its `mini.yaml`. The submission instructions name the
+`submit` tool, and the tool-use rules keep `bash` as the default while allowing `read_output`
+alone when omitted output is needed for the next decision. The opening log is frozen into the
+root state; changing these instructions does not rewrite an existing root's opening messages.
 
 For file-based tasks, `root --instruction-file FILE` appends the file verbatim to `config.task`
 before constructing this log. The first request includes it in full; it is not read through a
@@ -55,8 +57,10 @@ It reads the current log and does not run a shell command. All schemas are stric
 command prints a sentinel line, which would require whoever runs the agent to read tool output;
 here the end of a run is a tool call, visible in the log's structure.
 
-Recovery is optional and can target just a needed section. The agent need not read to EOF and
-can continue with `bash` or `submit` without calling `read_output`, or after a partial read.
+`bash` is the default for commands and file work. When a preview is enough, the agent can
+continue with `bash` or `submit`; when omitted output is needed for the next decision, it can
+call `read_output` alone for the relevant range. Recovery never requires an accompanying
+`bash` call or reading to EOF. `submit` remains a separate terminal call.
 
 ## 4. Reading a response: `parseActions`
 
@@ -72,11 +76,12 @@ Every response is read into either a list of **actions** or a **format error**:
 | otherwise | one `Action.bash id command`, `Action.readOutput id`, or `Action.submit id message` per call, in order |
 
 The first call with a problem decides; the whole turn is a format error. The message the model
-will see (`formatErrorMessage`) wraps the problem in mini's guidance on how to call the tool,
-ending with how to submit — except when the provider reports that it **cut the response off**
+will see (`formatErrorMessage`) wraps the problem in tool-use guidance, including the same
+default `bash` and optional standalone `read_output` rules, ending with how to submit — except
+when the provider reports that it **cut the response off**
 (`finish_reason` is `length`, or `tool_calls` with no calls present): then the message says so
-and asks for a shorter response, because the model did nothing wrong that repeating the guidance
-would fix.
+and asks for a shorter response with one tool call. It preserves the same tool choices and
+does not require a `bash` call alongside recovery.
 
 ## 5. The view
 
@@ -188,6 +193,8 @@ the run and is gone when a branch is resumed later.
 - Tool schemas are strict.
 - `read_output` recovers full recorded command output from bounded previews; no separate spill
   directory is required. The current log carries the content across forks and container restarts.
+- Opening and format-error instructions allow `read_output` without `bash` when omitted output
+  is needed; `bash` remains the default for commands and file work.
 - Observations are JSON values rendered by Lean, so non-ASCII text is not escaped and the fields
   are `output`, `exit_code`, and `error`, rather than mini's `returncode` and `exception_info`.
 - A non-string `command` is a format error, not run the way Python's `Popen` would happen to run
