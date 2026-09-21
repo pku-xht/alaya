@@ -1,27 +1,27 @@
 # Trajectory and cache schema
 
-`Alaya.Trajectory` records an agent's run as a tree of immutable states in a content-addressed
-store, and `Alaya.Cache` records every model response the run drew. Together they make a run
+`Alaya.Trajectory` records an agent's run as a tree of immutable states, each named by the hash
+of its content, and `Alaya.Cache` records every model response the run drew. Together they make a run
 something you can branch, replay, evaluate, intervene in, and read back.
 
 The trajectory is the same for every agent. Wherever an agent's prompts, tools, or view matter —
 creating a root, taking a turn, rendering what the model was sent — the command line names the
-agent with `--agent`; `mini-swe` (`docs/miniswe.md`) is the one available today, and the
-examples below use it. Everything else — evaluating, intervening, replying, inspecting — is
-agent-independent and takes no such flag.
+agent with `--agent`: `mini-swe` (`docs/miniswe.md`), which the examples below use, or
+`mini-vero` (`docs/minivero.md`). Everything else — evaluating, intervening, replying,
+inspecting — is agent-independent and takes no such flag.
 
 ## 1. States
 
 A **state** is a point in a run: the log up to that point, and the workspace at that point. The
-workspace is recorded as a **snapshot**: the content of the directory the agent acts in, written
-into the content-addressed store as a tree of files and named by its hash.
+workspace is recorded as a **snapshot**: the content of the directory the agent acts in, kept in
+a restic repository and named by its snapshot ID (§5).
 
 ```sh
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
 root=$(alaya root "make the test suite pass" ./project --agent mini-swe --image python:3.12-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
 
-alaya show adbac1          # the state: kind, parent, workspace hash, note, image, then its log
+alaya show adbac1          # the state: kind, parent, workspace snapshot, note, image, then its log
 ```
 
 ### The state object
@@ -30,7 +30,7 @@ A state is stored as one object with three parts:
 
 - the hash of its **parent** state, or none for a root;
 - the events it **appends** to the parent's log;
-- the hash of its workspace snapshot, `workspace`.
+- the identifier of its workspace snapshot, `workspace`.
 
 The object is itself content-addressed: its hash covers those three parts, so a state's hash
 names its whole history and its files, and nothing under a hash ever changes. The full log at a
@@ -434,7 +434,7 @@ alaya eval e5a1c3 --grader 'patch -p1 -d {checkout} < ./tests.diff && cd {checko
 alaya eval e5a1c3 --grader 'grade-project --candidate {checkout} --source ./benchmark --report-dir {out}'
 # 3c9e02a71b5d  fail 1 155/232  (61377 ms)
 
-alaya show 7b19d4                        # verdict, summary, evidence hash, and the grader's output
+alaya show 7b19d4                        # verdict, summary, evidence snapshot, and the grader's output
 alaya checkout 7b19d4 ./report --evidence  # the grader's report files
 ```
 
@@ -444,29 +444,99 @@ The data directory (`--data D`, default `.alaya`) holds everything one set of ru
 
 | Path | Contents |
 | --- | --- |
-| `D/store/blobs/<2 hex>/<64 hex>` | every object, addressed by the SHA-256 of its bytes: state objects, tree objects, file contents, link targets |
-| `D/store/refs/state.<hex>` | pins a state object; the set of these *is* the forest |
-| `D/store/refs/workspace.<hex>` | pins a tree a state refers to — a workspace, or an evaluation's evidence — so `gc` keeps it |
-| `D/store/cache/`, `D/store/checkouts/` | the snapshot stat cache and the record of what was last materialized where; performance only |
-| `D/store/tmp/` | staging for atomic writes (write, then rename) |
+| `D/states/<64 hex>.json` | one file per state object, named by the SHA-256 of its bytes; the set of these files *is* the forest |
+| `D/restic/` | the [restic](https://restic.net) repository holding every workspace snapshot |
+| `D/restic-scratch/` | where files read out of a snapshot land; emptied after each use |
 | `D/cache/v1/<hash>.json` | model response cache entries (§7) |
-| `D/work/` | the working directory; wiped and re-materialized at every checkout, holds nothing durable |
+| `D/work/` | the working directory; re-materialized at every checkout, holds nothing durable |
 | `D/eval/` | a grader's checkout and output directory; emptied before every evaluation |
 
-A workspace is a git-style Merkle tree: a **tree object** is the JSON array of its entries
-`{"name", "type": "file"|"exec"|"link"|"dir", "hash"}`, sorted by name so its serialization is
-canonical; a file entry's hash addresses the content blob, a directory's the sub-tree. Unchanged
-subtrees keep their address across snapshots, so a snapshot costs only the objects along changed
-paths and diffing skips identical subtrees. Snapshots are stat-cached, hashed in parallel,
-record symlinks and executable bits, and can ignore paths. Materializing is incremental against
-the recorded checkout and, by default, re-captures the destination first (`verify`), because the
-record goes stale the moment the agent writes; without that, a fork would start from the
-abandoned branch's files.
+A state is written once, as a finished temporary file renamed into place, and never changes: its
+name is the hash of its bytes, which is also what its children's `parent` holds. `rm` deletes
+files; there is nothing else to collect.
 
-`Store.gc` deletes every blob unreachable from a ref. `rm HASH` deletes a subtree by dropping its
-`state.` refs, re-pinning `workspace.` refs from the survivors, and collecting.
+### Workspace snapshots
 
-MiniSwe's recoverable output references do not introduce another blob kind or another ref.
+A state names the directory the agent left behind by an identifier, `workspace`, and the
+trajectory never looks inside it. It asks for five things, and `Alaya.Workspaces` is that
+contract:
+
+```lean
+structure Workspaces where
+  snapshot : System.FilePath -> Result Hash              -- capture a directory as it is now
+  materialize : Hash -> System.FilePath -> Result Unit   -- make a directory hold exactly a snapshot
+  diff : Hash -> Hash -> Result (Array Change)           -- added, removed, modified paths
+  readFiles : Hash -> Array String -> Result (Array (Option ByteArray))  -- regular files of a snapshot
+  retainOnly : Array Hash -> Result Unit                 -- drop every snapshot not listed
+```
+
+| Operation | Used by |
+| --- | --- |
+| `snapshot` | `root`, every act of a turn, `commit`, `eval` (the graded checkout and the grader's evidence) |
+| `materialize` | the start of `step` and `resume`, `eval`, `checkout` |
+| `diff` | the notice of a `commit --tell`, `alaya diff`, the HTML report |
+| `readFiles` | the HTML report, for the text of a state's changed files |
+| `retainOnly` | `rm`, with the snapshots the surviving states name |
+
+An identifier is 64 hexadecimal digits and means something only to the store that issued it.
+**Equal directories need not get equal identifiers**, and nothing compares them: a state's hash
+covers its workspace identifier, which makes a state immutable, not reproducible — a run's
+observations carry timings and temporary paths, and a repeated `step` is a new draw, so two
+runs do not meet at the same state hash anyway. What the contract does require
+(`Test/Workspaces.lean`):
+
+- a snapshot materializes as the directory it was taken of: file contents, executable bits,
+  symbolic links, empty directories;
+- `materialize` replaces whatever the destination held, read-only directories included;
+- an edit is captured even when it keeps a file's size and modification time, as archive
+  extraction, `cp -p`, and package managers that normalize timestamps leave it;
+- a file name may hold any character, a newline included;
+- an added or removed directory is one change, standing for its subtree; a file replaced by a
+  directory, or the reverse, is a removal and an addition; a file that was only touched is not a
+  change;
+- a read is `none` for a directory, an absent path, and a path that leaves the snapshot.
+
+`Workspaces.Restic` keeps the contract with a restic repository (restic 0.17 or later). restic
+is a backup program: walking a directory, deciding what changed — by a file's change time and
+inode as well as its size and modification time — and writing a snapshot back out are its
+business, and a snapshot records what the filesystem holds: permissions, times, owners, hard
+links, extended attributes. The identifier is the restic snapshot ID.
+
+| Contract | restic |
+| --- | --- |
+| `snapshot` | `restic backup . --no-scan --host alaya`, run inside the directory so paths are relative to it; a snapshot that could not read every file is a failure |
+| `materialize` | `restic restore ID --target DIR --delete --overwrite always`: in place, comparing content, not times, after the directory is made writable |
+| `diff` | `restic diff A B --json` without `--metadata`, folded so that a directory stands for its subtree; for a type change whose new side is a file, one `restic ls` of the old side tells whether a directory was replaced |
+| `readFiles` | one `restic restore ID --include …` of just those paths into `D/restic-scratch`, read back from there |
+| `retainOnly` | `restic forget` of the rest, then `restic prune` |
+
+A snapshot or a checkout of a directory that overlaps the run's own storage — the repository,
+`D/states`, `D/cache` — is refused before anything is touched: the one would capture the
+storage, and the other deletes what the snapshot does not hold, which is the storage. So
+`alaya checkout STATE .` beside `.alaya`, and `alaya root TASK .` with the default data
+directory, are errors that say to move one of the two.
+
+Every operation is one `restic` process with `--no-cache --insecure-no-password`: the repository
+sits beside the states, which are not encrypted either. It is restic's own format, so `restic
+snapshots`, `restic mount` and the rest work on it directly; a crashed run can leave a stale
+lock, which `restic unlock` removes. `rm HASH` deletes a subtree's state files and keeps only
+the snapshots the surviving states name, which also drops those a turn took between its acts.
+
+A `restic` process spends about 0.8 s deriving the repository key before it does anything,
+which is why reads are batched and the report renders several states at once. On a Lean
+project with Mathlib — 7.2 GB in 121,433 files, an Apple M5 Pro's internal volume, one run each:
+
+| | |
+| --- | ---: |
+| first snapshot | 18.5 s |
+| snapshot after an act, nothing or one file changed | 5.6 s |
+| checkout, into an empty directory or in place | 22–25 s |
+| diff of two states | 1.6 s |
+| repository after three snapshots | 2.4 GB |
+
+*What is on disk: the data directory, and what a state object refers to.*
+
+MiniSwe's recoverable output references do not introduce another stored object or workspace snapshot.
 The complete executor output already resides in the observation inside its state object.
 `read_output` searches the reconstructed current log by the output's SHA-256 digest. An
 ancestor observation remains available when a branch is forked or resumed, including after
@@ -474,73 +544,42 @@ the execution container is recreated. A sibling branch's observations and an eva
 private checkout are not part of that log. Keeping only `work/` or a model-cache directory is
 not enough to preserve a run; retain the trajectory store. See [output recovery](output-recovery.md).
 
-*What is on disk: the data directory, and how state and tree objects reference each other in the content-addressed store.*
-
 ```mermaid
 flowchart TD
   alayaRoot[".alaya/"]
-  storeDir["store/"]
+  statesDir["states/, one file per state"]
+  resticDir["restic/, workspace snapshots"]
   modelCacheDir["cache/, model response cache"]
   workDir["work/, agent's working directory"]
-  alayaRoot --> storeDir
+  alayaRoot --> statesDir
+  alayaRoot --> resticDir
   alayaRoot --> modelCacheDir
   alayaRoot --> workDir
 
-  blobsDir["blobs/, content-addressed objects"]
-  refsDir["refs/, named pointers"]
-  statCacheDir["cache/, per-workspace stat cache"]
-  checkoutsDir["checkouts/, last materialized where"]
-  tmpDir["tmp/, atomic-write staging"]
-  storeDir --> blobsDir
-  storeDir --> refsDir
-  storeDir --> statCacheDir
-  storeDir --> checkoutsDir
-  storeDir --> tmpDir
-
-  blobLayout["blob path: blobs/, 2-hex subdir, 64-hex filename"]
-  blobsDir --> blobLayout
-
-  stateObj["state object, JSON"]
+  stateObj["state object: hash.json, JSON"]
   parentState["parent state object"]
-  envTree["tree object, the workspace"]
-  blobLayout -.stores.-> stateObj
-  blobLayout -.stores.-> envTree
-  stateObj -->|parent hash| parentState
-  stateObj -->|workspace hash| envTree
-
-  treeEntry["entry: name, type file or exec or link or dir, hash"]
-  envTree --> treeEntry
-  fileBlob["file content blob"]
-  subTree["sub-tree object"]
-  treeEntry -->|file, exec, or link| fileBlob
-  treeEntry -->|dir| subTree
-
-  stateRef["state.hex ref"]
-  envRef["workspace.hex ref"]
-  refsDir --> stateRef
-  refsDir --> envRef
-  stateRef -->|pins| stateObj
-  envRef -->|pins| envTree
+  snapshot["restic snapshot, the workspace"]
+  statesDir --> stateObj
+  resticDir --> snapshot
+  stateObj -->|parent, its hash| parentState
+  stateObj -->|workspace, a snapshot ID| snapshot
 
   cacheEntry["cache/v1/hash.json: key + responses[]"]
   modelCacheDir --> cacheEntry
 
   subgraph Notes[" "]
     direction TB
-    gcNote["Store.gc keeps exactly what is reachable from refs"]
-    workNote["work/ is wiped and re-materialized at every checkout, and holds nothing durable"]
+    rmNote["rm deletes state files and keeps the snapshots the surviving states name"]
+    workNote["work/ is re-materialized at every checkout, and holds nothing durable"]
   end
 ```
 
 ```
 $ ls .alaya
-cache  store  work
-$ ls .alaya/store
-blobs  cache  checkouts  refs  tmp
-$ ls .alaya/store/refs | head -3
-state.adbac197aea8…
-state.4f2c8b1e0a33…
-workspace.b66cab13bd86…
+cache  restic  restic-scratch  states  work
+$ ls .alaya/states | head -2
+4f2c8b1e0a33….json
+adbac197aea8….json
 ```
 
 ## 6. The state object
@@ -552,7 +591,7 @@ equal hashes.
 | --- | --- | --- |
 | `v` | 1 | schema version; a reader refuses any other |
 | `parent` | hex or null | the parent state |
-| `workspace` | hex | the workspace tree |
+| `workspace` | hex | the workspace: a snapshot ID (§5) |
 | `kind` | string | one of the kinds in §1 |
 | `appended` | array of events | what this state adds to the parent's log |
 | `outcome` | `{status, submission}` or null | when this state ended the run |
@@ -577,7 +616,7 @@ where a **call** is `{"id", "name", "arguments": <json>, "invalid_arguments": st
 dialogue sent back to the model is byte-identical to what it produced. An observation's
 `content` is whatever the agent's `act` returned; the trajectory never reads it.
 
-For MiniSwe, an executor observation retains the complete decoded `output` string even when
+For MiniSwe and MiniVero, an executor observation retains the complete decoded `output` string even when
 the view shows a bounded preview. Recovery-page observations instead contain `content`,
 `output_ref`, character offsets, and an end-of-output indicator. These are ordinary JSON
 observations under the existing version-1 schema; no historical state or cache entry is
@@ -617,9 +656,9 @@ one will not replay under another.
 
 In particular, adding `read_output` changes the tool list, and recoverable long-output previews
 change the view. New requests therefore intentionally use different cache keys. Replaying
-the archived demonstration from its cache requires the original two-tool list and view;
-a [dedicated runner](https://github.com/msv-lab/alaya/pull/8) is proposed independently. A read-only cache miss
-is still an error and never falls through to a provider request.
+the archived demonstration from its cache requires the original two-tool list, view, and
+model identity. The existing cache mechanism is unchanged: a read-only cache miss is still
+an error and never falls through to a provider request; ordinary CLI runs may call the provider.
 
 ```
 $ ls .alaya/cache/v1 | head -2
@@ -633,8 +672,8 @@ an entry is only ever appended to.
 ## 8. Commands
 
 ```
-alaya root TASK PROJECT --agent A [--image IMAGE]      create a root from a project directory
-alaya root TASK --agent A --image IMAGE --path PATH    …or from a path inside the image
+alaya root TASK PROJECT --agent A [--image IMAGE] [--instruction-file FILE]   create a root from a project directory
+alaya root TASK --agent A --image IMAGE --path PATH [--instruction-file FILE] …or from a path inside the image
 alaya resume HASH --agent A --model P:M                grow one continuation until it ends or asks
 alaya step   HASH --agent A --model P:M                advance exactly one turn
 alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a checkout; record the verdict
@@ -647,12 +686,19 @@ alaya tree                                       show the whole forest
 alaya show HASH [--view --agent A]               metadata, the log, and optionally the view
 alaya diff A B                                   workspace changes between two states
 alaya html [FILE] --agent A [--hide DIR]         write the forest as one self-contained page
-alaya rm HASH                                    delete a subtree and reclaim blobs
+alaya rm HASH                                    delete a subtree and the snapshots only it used
 ```
 
+`root --instruction-file FILE` reads a UTF-8 file on the host and appends its exact contents to
+`TASK` with two newlines. The combined task is saved in the opening log and root note, so the
+first request includes the entire file without a tool read. Without the option, the original
+task path is unchanged. A missing value, unreadable file, or invalid UTF-8 fails before root
+creation. See [complete task instructions](task-instructions.md).
+
 Every command takes `--data D` and `--json` where it prints states. `--agent A` names the agent
-where its prompts, tools, or view matter; `mini-swe` is the one available. `root` takes `--image`,
-`--container-user`, and `--network`; `resume` and `step` take `--model`,
+where its prompts, tools, or view matter: `mini-swe` or `mini-vero`. `root` takes `--image`,
+`--container-user`, `--network`, and `--instruction-file`, and for `mini-vero` a required `--mode proof|codeproof`
+(`docs/minivero.md`); `resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
 takes `--timeout` (default 900 s) for the grader and `--force`. The image is resolved to a digest at `root`
 and recorded; `resume` uses it and refuses an `--image` that resolves to anything else.

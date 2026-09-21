@@ -4,7 +4,6 @@ import Alaya
 `docs/trajectory-schema.md` for the commands. -/
 
 open Alaya
-open Alaya.Cas (Store Hash)
 open Alaya.Agent (Outcome)
 open Alaya.Trajectory
 
@@ -17,13 +16,25 @@ private def emitLines (lines : Array String) : Result Unit :=
 private structure DataDir where
   path : System.FilePath
   store : Store
+  workspaces : Workspaces
 
 private def DataDir.cache (data : DataDir) : System.FilePath := data.path / "cache"
 
+/-- A data directory with a `store/` is from before states became files under `states/` and
+workspaces moved to restic; its states name snapshots nothing can read any more. -/
+private def refuseLegacy (path : System.FilePath) : Result Unit := do
+  if ← Result.fromIO Error.storage (path / "store").isDir then
+    throw <| .configuration <|
+      s!"{path} has the layout of an earlier alaya (`store/`), which this one does not read: " ++
+      "convert it with a build from before the change, or start a new data directory"
+
 private def openData (args : Cli.Args) : Result DataDir := do
   let path : System.FilePath := ← args.valueD "data" ".alaya"
-  let store ← Store.create (path / "store")
-  pure { path, store }
+  refuseLegacy path
+  let store ← Store.create (path / "states")
+  -- The states and the model cache are as much the run as the repository is.
+  let workspaces ← Workspaces.Restic.open (path / "restic") (keep := #[store.dir, path / "cache"])
+  pure { path, store, workspaces }
 
 /-- The work directory, always `DATA/work`: not configurable, so no path a user names can be
 destroyed by a checkout, and the store and the cache are out of its reach by construction. -/
@@ -61,8 +72,9 @@ private def executorFor (args : Cli.Args) (image? : Option String) (config : Exe
 /-- An agent the command line can name with `--agent`. -/
 private structure AgentSpec where
   name : String
-  /-- The opening log of a run for a task, on a machine described by `uname`. -/
-  initialLog : String -> Uname -> Agent.Log
+  /-- The opening log of a run for a task, on a machine described by `uname`. The command
+  line is there for options of the agent's own, as `--mode` is for `mini-vero`. -/
+  initialLog : Cli.Args -> String -> Uname -> Result Agent.Log
   /-- How the agent's shell commands are run. -/
   executorConfig : Executor.Config
   /-- The agent over an executor. -/
@@ -73,13 +85,27 @@ private structure AgentSpec where
 private def miniSwe : AgentSpec :=
   let config : Agent.MiniSwe.Config := { task := "" }
   { name := "mini-swe"
-    initialLog := fun task uname => Agent.MiniSwe.initialLog { config with task } uname
+    initialLog := fun _ task uname => pure (Agent.MiniSwe.initialLog { config with task } uname)
     executorConfig := config.executor
     build := fun executor => Agent.MiniSwe.agent executor config
     view := Agent.MiniSwe.view
     tools := Agent.MiniSwe.tools }
 
-private def agents : Array AgentSpec := #[miniSwe]
+private def miniVero : AgentSpec :=
+  let config := Agent.MiniVero.defaultConfig
+  { name := "mini-vero"
+    initialLog := fun args task uname => do
+      let known := " or ".intercalate (Agent.MiniVero.Mode.all.map toString)
+      let name ← args.require "mode" known
+      match Agent.MiniVero.Mode.ofString? name with
+      | some mode => pure (Agent.MiniVero.initialLog { config with task } mode uname)
+      | none => throw <| .configuration s!"unknown mode: {name} (use {known})"
+    executorConfig := config.executor
+    build := fun executor => Agent.MiniVero.agent executor config
+    view := Agent.MiniVero.view
+    tools := Agent.MiniVero.tools }
+
+private def agents : Array AgentSpec := #[miniSwe, miniVero]
 
 /-- The agent named by `--agent`. Required wherever an agent's prompts, tools, or view matter:
 `root`, `resume`, `step`, `html`, and `show --view`. -/
@@ -97,7 +123,8 @@ private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args)
   let temperature ← args.floatD "temperature" 0.0
   let model ← buildModel modelSpec temperature data.cache (← Provider.Options.ofArgs args)
   let executor ← executorFor args image? spec.executorConfig
-  pure { store := data.store, workDir := work.path, executor, model, agent := spec.build executor }
+  pure { store := data.store, workspaces := data.workspaces, workDir := work.path, executor, model
+         agent := spec.build executor }
 
 /-- The `uname` a new trajectory's prompt is built from, and the image it is pinned to: read
 from the image when there is one, from the host otherwise. -/
@@ -111,6 +138,7 @@ private def rootEnvironment (settings? : Option Executor.Docker.Settings) :
 clean, and it is the one place holding nothing durable. -/
 private def clearWork (data : DataDir) : Result WorkDir := do
   let work ← openWork data
+  Workspaces.makeWritable work.path
   Result.fromIO Error.storage do
     IO.FS.removeDirAll work.path
     IO.FS.createDirAll work.path
@@ -169,12 +197,17 @@ private def dispatch (argv : List String) : Result UInt32 := do
   | "root" :: task :: rest =>
     if rest.length > 1 then
       throw <| .configuration "alaya root TASK (PROJECT | --path PATH --image IMAGE)"
+    -- Before the data directory is created: inside the project it would become part of it.
+    if let some project := rest.head? then
+      Workspaces.refuseOverlap "snapshot" project #[← args.valueD "data" ".alaya"]
+    let task ← args.taskWithInstructions task
     let data ← openData args
     let settings? ← (← Executor.Docker.settings? args).mapM (·.pin)
     let (uname, image?) ← rootEnvironment settings?
     let spec ← agentOf args
+    let log ← spec.initialLog args task uname
     let project ← rootProject args data settings? rest.head?
-    let hash ← createRoot data.store (spec.initialLog task uname) project (some task) image?
+    let hash ← createRoot data.store data.workspaces log project (some task) image?
     emit hash.hex
     pure 0
   | "resume" :: pfx :: _ =>
@@ -220,14 +253,14 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let grader ← args.require "grader"
       "e.g. --grader 'cp -R ./hidden-tests/. {checkout}/ && pytest -q'"
     let timeout ← args.natD "timeout" 900
-    let node ← evaluate data.store (data.path / "eval") target grader timeout (args.isSet "force")
+    let node ← evaluate data.store data.workspaces (data.path / "eval") target grader timeout (args.isSet "force")
     match (← getState data.store node).evaluation? with
     | some e => emit s!"{node.hex}  {e.verdict}  ({e.elapsedMs} ms)"
     | none => emit node.hex
     pure 0
   | ["commit", pfx, dir] =>
     let data ← openData args
-    let hash ← commit data.store (← resolve data.store pfx) dir
+    let hash ← commit data.store data.workspaces (← resolve data.store pfx) dir
       ((args.get? "note").filter (!·.isEmpty)) (tell? := (args.get? "tell").filter (!·.isEmpty))
     emit hash.hex
     pure 0
@@ -239,7 +272,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
       match state.evaluation?.bind (·.evidence?) with
       | some evidence => pure evidence
       | none => throw <| .configuration "this state has no evidence: it is not an evaluation, or its grader wrote nothing"
-    data.store.materialize tree dir { onExisting := .replace }
+    data.workspaces.materialize tree dir
     emit s!"checked out {tree.hex} into {dir}"
     pure 0
   | "html" :: rest =>
@@ -249,7 +282,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let hidden := (args.all "hide").foldl (init := #[]) fun paths value =>
       paths ++ (value.splitOn ",").toArray.filter (!·.isEmpty)
     let spec ← agentOf args
-    let page ← Html.report data.store s!"alaya {data.path}" spec.view spec.tools hidden
+    let page ← Html.report data.store data.workspaces s!"alaya {data.path}" spec.view spec.tools hidden
     Result.fromIO Error.storage (IO.FS.writeFile out page)
     emit s!"wrote {out} ({page.length} bytes)"
     pure 0
@@ -264,23 +297,23 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | ["diff", a, b] =>
     let data ← openData args
-    emitLines (← diffLines data.store (← resolve data.store a) (← resolve data.store b))
+    emitLines (← diffLines data.store data.workspaces (← resolve data.store a) (← resolve data.store b))
     pure 0
   | ["rm", pfx] =>
     let data ← openData args
-    let n ← removeSubtree data.store (← resolve data.store pfx)
+    let n ← removeSubtree data.store data.workspaces (← resolve data.store pfx)
     emit s!"removed {n} state(s)"
     pure 0
   | _ =>
     throw <| .configuration <|
-      "usage: alaya (root TASK (PROJECT | --path P --image I) --agent A | resume HASH --agent A --model P:M | " ++
+      "usage: alaya (root TASK (PROJECT | --path P --image I) --agent A [--mode M] | resume HASH --agent A --model P:M | " ++
       "step HASH --agent A --model P:M | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++
       "html [FILE] --agent A [--hide DIR] | " ++
       "show HASH [--view --agent A] | diff A B | rm HASH) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++
-      "[--timeout S] [--force]"
+      "[--timeout S] [--force] [--instruction-file FILE]"
 
 /-- Exit 0 on success, 3 when a run stopped at a question (see `exitWaiting`), 1 on error. -/
 def main (args : List String) : IO UInt32 := do

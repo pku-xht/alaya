@@ -3,6 +3,7 @@ import Alaya.Provider.ChatCompletions
 import Alaya.Provider.CloseAI
 import Alaya.Provider.XMCP
 import Alaya.Provider.Yunwu
+import Alaya.Provider.Apiyi
 import Alaya.Provider.Dgx
 
 /-! The provider table: turns a `PROVIDER:NAME` spec from the command line into a bare provider
@@ -11,7 +12,7 @@ model. -/
 namespace Alaya.Provider
 
 /-- The providers a spec may name. -/
-def names : Array String := #["yunwu", "closeai", "xmcp", "dgx"]
+def names : Array String := #["yunwu", "closeai", "xmcp", "apiyi", "dgx"]
 
 /-- Settings that only some providers accept, gathered from the command line. -/
 structure Options where
@@ -48,6 +49,7 @@ def fromSpec (spec : String) (temperature : Float) (options : Options := {}) : R
     | "yunwu" => Yunwu.model name temperature (echoReasoning := options.echoReasoning)
     | "closeai" => CloseAI.model name temperature (echoReasoning := options.echoReasoning)
     | "xmcp" => XMCP.model name temperature (echoReasoning := options.echoReasoning)
+    | "apiyi" => Apiyi.model name temperature (echoReasoning := options.echoReasoning)
     | "dgx" => Dgx.model name temperature options.dgxEndpoint? (echoReasoning := options.echoReasoning)
     | other =>
       throw <| .configuration s!"unknown provider: {other} (use {"|".intercalate names.toList})"

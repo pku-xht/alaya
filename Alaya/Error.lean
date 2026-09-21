@@ -15,7 +15,7 @@ inductive Error where
   | structuredOutput (message : String)
   /-- Reading, extending, or atomically persisting a cache entry failed. -/
   | cache (message : String)
-  /-- Reading or writing the content-addressed store, or a filesystem snapshot, failed. -/
+  /-- Reading or writing the states, or a workspace snapshot, failed. -/
   | storage (message : String)
   /-- The operation was intentionally cancelled. -/
   | cancelled

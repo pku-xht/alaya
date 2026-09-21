@@ -40,6 +40,10 @@ executor, so a run pinned to an image is told about the image and not about the 
 mini's texts, rendered from its `mini.yaml`; the only change is the two sentences that named its
 submission sentinel, which name the `submit` tool. The opening log is frozen into the root state.
 
+For file-based tasks, `root --instruction-file FILE` appends the file verbatim to `config.task`
+before constructing this log. The first request includes it in full; it is not read through a
+tool observation. See [complete task instructions](task-instructions.md).
+
 ## 3. Tools
 
 **`bash`** takes one string argument, `command`, a shell script. **`submit`** takes a string
@@ -195,8 +199,8 @@ the run and is gone when a branch is resumed later.
 - No per-model cost accounting, so mini's `cost_limit` is not enforced.
 
 The added tool and changed long-output view intentionally change model-cache keys. Existing
-state objects remain readable. Historical cache replay requires the original tool list and
-view; the [dedicated runner](https://github.com/msv-lab/alaya/pull/8) is a separate change.
+state objects remain readable. Historical cache replay requires the original tool list,
+view, and model identity; the existing cache mechanism is unchanged.
 No history pruning, conversation summaries, time
 feedback, or change to submission and `ask_user` policy is part of output recovery.
 The reliability of this recovery contract is tested independently of Vero performance;

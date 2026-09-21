@@ -1,12 +1,11 @@
 /-!
 A pure, in-process SHA-256 (FIPS 180-4).
 
-The content-addressed store hashes every blob it touches, so hashing must not cost a process
-spawn per object the way shelling out to `sha256sum` does; a pure function is also trivially
-safe to run from concurrently hashing capture workers.
+A state is named by the hash of its bytes, so hashing must not cost a process spawn per state
+the way shelling out to `sha256sum` does.
 -/
 
-namespace Alaya.Cas.Sha256
+namespace Alaya.Sha256
 
 private def k : Array UInt32 := #[
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -98,4 +97,4 @@ def sumHex (bytes : ByteArray) : String := Id.run do
     state := processBlock state padded (64 * i)
   return toHex state
 
-end Alaya.Cas.Sha256
+end Alaya.Sha256

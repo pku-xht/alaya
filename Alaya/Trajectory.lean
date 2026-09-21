@@ -1,5 +1,6 @@
 import Alaya.Agent
-import Alaya.Cas
+import Alaya.Trajectory.Store
+import Alaya.Workspaces
 import Alaya.Cache
 import Alaya.Provider
 import Alaya.Executor
@@ -11,7 +12,6 @@ namespace Alaya.Trajectory
 
 open Alaya (Result Error Output Executor)
 open Alaya.Agent (Agent Event Log Dialogue Outcome Directive View)
-open Alaya.Cas (Hash Store)
 
 /-! ## Event serialization -/
 
@@ -329,39 +329,30 @@ end State
 
 /-! ## The store as a trajectory tree -/
 
-private def stateRef (h : Hash) : String := "state." ++ h.hex
-private def workspaceRef (h : Hash) : String := "workspace." ++ h.hex
-
-/-- The trees a state keeps alive: its workspace, and an evaluation's evidence. -/
-private def treesOf (state : State) : Array Hash :=
+/-- The snapshots a state keeps alive: its workspace, and an evaluation's evidence. -/
+private def snapshotsOf (state : State) : Array Hash :=
   #[state.workspace] ++ (state.evaluation?.bind (·.evidence?)).toArray
 
-/-- Persists a state, returning its content hash, and pins its liveness refs. -/
-def putState (store : Store) (state : State) : Result Hash := do
-  let hash ← store.putBytes state.toJson.compress.toUTF8
-  store.setRef (stateRef hash) hash
-  for tree in treesOf state do
-    store.setRef (workspaceRef tree) tree
-  pure hash
+/-- Persists a state, returning its content hash. Its snapshots are kept by `Workspaces` from
+the moment they were taken. -/
+def putState (store : Store) (state : State) : Result Hash :=
+  store.put state.toJson.compress.toUTF8
 
 /-- Loads the state at `hash`. -/
 def getState (store : Store) (hash : Hash) : Result State := do
-  match ← store.getBytes hash with
+  match ← store.get? hash with
   | none => throw <| .storage s!"no such state: {hash.hex}"
   | some bytes =>
     let text ← match String.fromUTF8? bytes with
       | some text => pure text
-      | none => throw <| .storage s!"corrupt state blob: {hash.hex}"
+      | none => throw <| .storage s!"corrupt state: {hash.hex}"
     let json ← Result.fromExcept Error.storage (Lean.Json.parse text)
     Result.fromExcept Error.storage (State.fromJson json)
 
-/-- Every state hash in the store, from the liveness refs. -/
-def allStates (store : Store) : Result (Array Hash) := do
-  let refs ← store.listRefs
-  pure <| refs.filterMap fun (name, hash) =>
-    if name.startsWith "state." then some hash else none
+/-- Every state hash in the store. -/
+def allStates (store : Store) : Result (Array Hash) := store.list
 
-/-- The children of `hash`, in ref-listing (hash) order. -/
+/-- The children of `hash`, in hash order. -/
 def children (store : Store) (hash : Hash) : Result (Array Hash) := do
   let states ← allStates store
   states.filterMapM fun candidate => do
@@ -393,20 +384,16 @@ partial def subtree (store : Store) (hash : Hash) : Result (Array Hash) := do
     acc := acc ++ (← subtree store kid)
   pure acc
 
-/-- Deletes a state and its whole subtree, then reclaims every blob no longer reachable. -/
-def removeSubtree (store : Store) (hash : Hash) : Result Nat := do
+/-- Deletes a state and its whole subtree, then drops the snapshots no surviving state names,
+which includes those a turn took between its acts. -/
+def removeSubtree (store : Store) (workspaces : Workspaces) (hash : Hash) : Result Nat := do
   let doomed ← subtree store hash
-  -- Re-pin tree refs from the survivors only, so a tree shared with a survivor stays live.
   for h in doomed do
-    store.deleteRef (stateRef h)
-  let refs ← store.listRefs
-  for (name, _) in refs do
-    if name.startsWith "workspace." then store.deleteRef name
-  let survivors := (← allStates store)
-  for s in survivors do
-    for tree in treesOf (← getState store s) do
-      store.setRef (workspaceRef tree) tree
-  let _ ← store.gc
+    store.delete h
+  let mut kept : Array Hash := #[]
+  for survivor in ← allStates store do
+    kept := kept ++ snapshotsOf (← getState store survivor)
+  workspaces.retainOnly kept
   pure doomed.size
 
 /-! ## Model construction -/
@@ -427,6 +414,7 @@ def buildModel (spec : String) (temperature : Float) (cacheDir : System.FilePath
 sample. -/
 structure Sandbox where
   store : Store
+  workspaces : Workspaces
   /-- Wiped and re-materialized from a snapshot at every checkout; holds nothing durable. -/
   workDir : System.FilePath
   executor : Executor
@@ -459,7 +447,7 @@ private partial def follow (rt : Runtime) (log : Log) (appended : Log) (workspac
     pure (appended, workspace, some question, .question question)
   | .act call =>
     let content ← rt.agent.act { dir := rt.workDir, log } call
-    let workspace ← rt.store.snapshot rt.workDir
+    let workspace ← rt.workspaces.snapshot rt.workDir
     let event := Event.observation call.id content
     follow rt (log.push event) (appended.push event) workspace
 
@@ -489,11 +477,9 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
     note? := some note, image? }
   pure (child, log ++ appended, workspace, halt)
 
-/-- Materializes `workspace` into `rt.workDir`, replacing whatever is there. Relies on
-`MaterializeConfig.verify` (the default): the run's commands modify the directory after every
-checkout, and an incremental apply against the stale record would keep those writes. -/
+/-- Materializes `workspace` into `rt.workDir`, replacing whatever is there. -/
 private def checkoutInto (sandbox : Sandbox) (workspace : Hash) : Result Unit :=
-  sandbox.store.materialize workspace sandbox.workDir { onExisting := .replace }
+  sandbox.workspaces.materialize workspace sandbox.workDir
 
 /-- Advances exactly one model turn from `hash`, returning the new child state. -/
 def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result Hash := do
@@ -543,7 +529,9 @@ def evaluationOf? (store : Store) (hash : Hash) (grader : String) : Result (Opti
   pure none
 
 /-- Empties `dir`, creating it if needed. -/
-private def emptyDir (dir : System.FilePath) : Result Unit :=
+private def emptyDir (dir : System.FilePath) : Result Unit := do
+  -- A grader or a checkout may have left directories that cannot be deleted from.
+  Workspaces.makeWritable dir
   Result.fromIO Error.storage do
     if ← dir.pathExists then IO.FS.removeDirAll dir
     IO.FS.createDirAll dir
@@ -555,8 +543,8 @@ private def nonEmpty (dir : System.FilePath) : Result Bool :=
 /-- Runs `grader` on the host against a fresh checkout of `hash`'s workspace and records the
 verdict as a leaf child whose workspace is the checkout after the grader ran. `scratch` is a directory the trajectory may wipe: the checkout and the
 grader's output directory are made under it. -/
-def evaluate (store : Store) (scratch : System.FilePath) (hash : Hash) (grader : String)
-    (timeoutSeconds : Nat := 900) (force : Bool := false) : Result Hash := do
+def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePath) (hash : Hash)
+    (grader : String) (timeoutSeconds : Nat := 900) (force : Bool := false) : Result Hash := do
   let state ← getState store hash
   if state.kind == .evaluation then
     throw <| .configuration "cannot evaluate an evaluation: it is already a leaf"
@@ -569,14 +557,14 @@ def evaluate (store : Store) (scratch : System.FilePath) (hash : Hash) (grader :
   let out := scratch / "out"
   emptyDir checkout
   emptyDir out
-  store.materialize state.workspace checkout { onExisting := .replace }
+  workspaces.materialize state.workspace checkout
   let command := expandGrader grader checkout out
   let runner := Executor.onHost { timeoutSeconds }
   let started ← Result.fromIO Error.storage IO.monoMsNow
   -- In the caller's directory, so relative paths in the command are the person's, not the checkout's.
   let output ← Result.fromIO Error.storage (runner.bash (← Result.fromIO Error.storage IO.currentDir) command)
   let elapsedMs := (← Result.fromIO Error.storage IO.monoMsNow) - started
-  let evidence? ← if ← nonEmpty out then some <$> store.snapshot out else pure none
+  let evidence? ← if ← nonEmpty out then some <$> workspaces.snapshot out else pure none
   let summary? ← Result.fromIO Error.storage do
     let verdict := out / "verdict.json"
     if !(← verdict.pathExists) then pure none
@@ -585,7 +573,8 @@ def evaluate (store : Store) (scratch : System.FilePath) (hash : Hash) (grader :
       | .error _ => pure none
   -- The evaluation's workspace is the checkout as the grader left it, so the tree shows what
   -- the grader did to the files; the leaf rule keeps it out of any state a run continues from.
-  let graded ← store.snapshot checkout
+  let graded ← workspaces.snapshot checkout
+  Workspaces.makeWritable checkout
   Result.fromIO Error.storage (IO.FS.removeDirAll checkout)
   putState store {
     parent? := some hash, workspace := graded, kind := .evaluation, appended := #[]
@@ -600,9 +589,9 @@ def evaluate (store : Store) (scratch : System.FilePath) (hash : Hash) (grader :
 
 /-- Creates a root state from the initial project directory: the agent's opening log — its
 prompts — and a snapshot of `project`. -/
-def createRoot (store : Store) (log : Log) (project : System.FilePath)
+def createRoot (store : Store) (workspaces : Workspaces) (log : Log) (project : System.FilePath)
     (note? : Option String := none) (image? : Option String := none) : Result Hash := do
-  let workspace ← store.snapshot project
+  let workspace ← workspaces.snapshot project
   putState store { parent? := none, workspace, kind := .root, appended := log, note?, image? }
 
 /-- A state a person may build on: anything but an evaluation, which is a leaf, or a state
@@ -616,24 +605,26 @@ private def buildable (state : State) : Result Unit := do
       s!"this state is waiting for an answer to: {q.text}\nanswer it with `alaya reply HASH TEXT`"
 
 /-- The workspace changes from `before` to `after`, one line each. -/
-private def changedLines (store : Store) (before after : Hash) : Result (Array String) := do
-  let changes ← store.diff before after
-  pure <| changes.map fun
-    | .added path _ _ => s!"+ {path}"
-    | .removed path _ => s!"- {path}"
-    | .modified path _ _ => s!"M {path}"
+private def changedLines (workspaces : Workspaces) (before after : Hash) :
+    Result (Array String) := do
+  let changes ← workspaces.diff before after
+  pure <| changes.map fun change =>
+    match change.kind with
+    | .added => s!"+ {change.path}"
+    | .removed => s!"- {change.path}"
+    | .modified => s!"M {change.path}"
 
 /-- Records a hand-edited workspace `dir` as an intervention child of `hash`, with a notice to
 the model when `tell?` is given. -/
-def commit (store : Store) (hash : Hash) (dir : System.FilePath) (note? : Option String)
-    (tell? : Option String := none) : Result Hash := do
+def commit (store : Store) (workspaces : Workspaces) (hash : Hash) (dir : System.FilePath)
+    (note? : Option String) (tell? : Option String := none) : Result Hash := do
   let parent ← getState store hash
   buildable parent
-  let workspace ← store.snapshot dir
+  let workspace ← workspaces.snapshot dir
   let intervention? ← match tell? with
     | none => pure none
     | some message =>
-      pure (some ({ message, changed := ← changedLines store parent.workspace workspace } : Intervention))
+      pure (some ({ message, changed := ← changedLines workspaces parent.workspace workspace } : Intervention))
   putState store {
     parent? := some hash, workspace, kind := .intervention, note?
     appended := intervention?.map (fun i => #[Event.message (.user (interventionNotice i))])
@@ -815,9 +806,9 @@ def showLines (store : Store) (hash : Hash) (view? : Option View := none) :
   pure lines
 
 /-- The workspace changes from `a`'s snapshot to `b`'s. -/
-def diffLines (store : Store) (a b : Hash) : Result (Array String) := do
+def diffLines (store : Store) (workspaces : Workspaces) (a b : Hash) : Result (Array String) := do
   let sa ← getState store a
   let sb ← getState store b
-  changedLines store sa.workspace sb.workspace
+  changedLines workspaces sa.workspace sb.workspace
 
 end Alaya.Trajectory

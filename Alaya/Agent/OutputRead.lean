@@ -1,17 +1,17 @@
 import Alaya.Agent
 import Alaya.Executor
-import Alaya.Cas.Sha256
+import Alaya.Sha256
 
 /-! Recoverable character pages over the full executor output already in recorded events.
-The digest identifies text in the current log, not a host path or a standalone CAS blob. -/
+The digest identifies text in the current log, not a host path or a separate storage object. -/
 
 namespace Alaya.Agent.OutputRead
 
 /-- Maximum characters in one page, independent of newline placement or UTF-8 byte width. -/
 def pageLimit : Nat := 10000
 
-/-- Content identity of a recorded output. Its bytes remain inside the CAS state event. -/
-def reference (text : String) : String := "sha256:" ++ Cas.Sha256.sumHex text.toUTF8
+/-- Content identity of a recorded output. Its bytes remain inside the recorded state event. -/
+def reference (text : String) : String := "sha256:" ++ Sha256.sumHex text.toUTF8
 
 def tool : Chat.ToolDefinition := {
   name := "read_output"

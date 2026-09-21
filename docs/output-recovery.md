@@ -1,14 +1,19 @@
-# Recoverable tool output
+# Complete task delivery and recoverable tool output
 
 MiniSwe keeps a bounded preview of long command output in the model context and lets the model
 read any omitted part from the recorded observation. The trajectory already stores the complete
 executor output, so recovery reuses that content rather than creating another spill directory
-or CAS blob.
+or workspace snapshot.
 
-File-based task delivery is a separate change on
-[PR #5](https://github.com/msv-lab/alaya/pull/5).
-This output-recovery change does not alter root task construction and has no dependency on
-that CLI option.
+`root --instruction-file FILE` puts a task file directly into the opening user message, so
+completion conditions do not depend on the model reading a long file through a tool preview.
+The file is appended verbatim to the positional task, and the combined text is recorded in
+the root before any model request. Without the option, task construction is unchanged.
+See [complete task instructions](task-instructions.md) for host-path handling, errors, and
+how to inspect the saved opening message.
+
+MiniVero shares MiniSwe's tools, view, and execution loop, so it also offers `read_output`.
+Its Vero mode, prompt sections, limits, and submission behavior are unchanged.
 
 ## Preview and page contract
 
@@ -82,8 +87,8 @@ access to its ancestors' output, a resumed process reopens the same recorded con
 fresh execution container does not need a copy of a spill file. Sibling branch observations
 are not searched. Grading checkouts remain separate and evaluation nodes remain terminal leaves.
 
-There is no second full-output save step and no output-specific GC root. Existing state refs
-keep the observations alive. A failure to read or persist a trajectory state is a storage error;
+There is no second full-output save step or output-specific retention mechanism. The ordinary
+state files keep the observations alive. A failure to read or persist a trajectory state is a storage error;
 the driver does not acknowledge a durable child state when its write failed. A reference missing
 from the supplied log returns `Full output unavailable` rather than a fabricated page. The
 store must be preserved along with the trajectory; deleting it cannot be repaired from a
@@ -94,7 +99,7 @@ The executor already decodes command output as UTF-8 and replaces invalid byte s
 Recovery preserves that entire decoded string; it does not introduce raw binary capture.
 The current implementation also scans and hashes recorded outputs during lookup, so very large
 logs can make recovery expensive. This change bounds the model's preview and page size, not
-executor memory, CAS state size, or the accumulated context.
+executor memory, state-file size, or the accumulated context.
 
 ## Compatibility and scope
 
@@ -102,9 +107,10 @@ No observation schema migration is needed. Short outputs below the former thresh
 existing rendering; output exactly 10 000 characters now stays in `output` instead of displaying
 a zero-omission preview. Longer output receives the recovery metadata above. The added
 `read_output` tool and changed long-output rendering intentionally change model-cache keys.
-Historical cache hits require the original view and tool list. A dedicated
-[cache-only replay runner](https://github.com/msv-lab/alaya/pull/8) is proposed separately. New-agent cache misses
-remain misses; read-only cache access still fails without calling a provider.
+Historical cache hits require the original view, tool list, and model identity. The existing
+cache mechanism is unchanged: ordinary CLI runs may call the provider on a miss; library
+callers using read-only cache access receive an error instead. No archive-specific replay
+runner is included.
 
 This change does not add historical-output pruning or conversation summaries, alter time
 feedback, force continuation after submission, change the model or task specification, or
@@ -115,9 +121,9 @@ Recovery reliability and Vero task performance are separate claims. Tests of exa
 contents, EOF, persistence, and failure handling establish the recovery contract; they do not
 establish an improvement in benchmark scores. Vero runs provide exploratory evidence of model
 behavior under the recorded settings, including whether the model chose to recover any output.
-The independent [joint Vero report](https://github.com/msv-lab/alaya/pull/7) sampled a frozen version with both
-task delivery and output recovery; it cannot establish either feature's independent effect.
-It is not new sampling of this standalone patch.
+The included [joint Vero report](output-recovery-experiment.md) sampled the frozen `b60f044`
+implementation with both task delivery and output recovery. It cannot establish either
+feature's independent effect, and it is not new sampling of this restic-based revision.
 
 ## Design references
 

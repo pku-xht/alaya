@@ -11,4 +11,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+      # The tests snapshot directories with restic; the distribution's package is older than 0.17.
+      - name: Install restic
+        run: |
+          curl -sSL https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_linux_amd64.bz2 | bunzip2 > restic
+          sudo install -m 755 restic /usr/local/bin/restic
+          restic version
       - uses: leanprover/lean-action@v1

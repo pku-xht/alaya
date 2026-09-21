@@ -1,7 +1,7 @@
 # Example: one run of the mini agent on Bija, forked and graded
 
-`trajectory.tar.gz` is a complete alaya data directory — the content-addressed store and the
-model cache — holding a run of `Alaya.Agent.MiniSwe` on the Bija benchmark (`bija/`), a fork
+`trajectory.tar.gz` is a complete alaya data directory — the states, the restic repository of
+their workspaces, and the model cache — holding a run of `Alaya.Agent.MiniSwe` on the Bija benchmark (`bija/`), a fork
 with a hand-made intervention, and a grader's verdict on both branches. `report.html` is its
 report, a single file to open in a browser. To use the commands below, unpack the archive first:
 
@@ -16,15 +16,15 @@ the agent so, and a grader scoring a state the agent could never continue from.
 ## What it shows
 
 ```
-46bce813368b  root      the task and the skeleton of the Bija project
+c65e69cce522  root      the task and the skeleton of the Bija project
   ...         10 turns  the agent reads SPEC.md, writes src/bija/cli.py, runs sample programs
-  f2f6b32a81d2  turn    three sample programs still fail to parse
-    591182d5114e  submit   [Submitted] "I'm out of time for a complete spec pass"
-      aa05d3dee444  eval   [fail 29/232]
-    d7f71105cd18  commit   a person fixes three parser bugs by hand and tells the agent
+  adfc3ed05434  turn    three sample programs still fail to parse
+    4766611d3c43  submit   [Submitted] "I'm out of time for a complete spec pass"
+      3d504a99cf8b  eval   [fail 29/232]
+    9de33216c587  commit   a person fixes three parser bugs by hand and tells the agent
       ...           4 turns  the agent rewrites the file and breaks it
-      80a182b272b5  submit   [Submitted] "Partially updated src/bija/cli.py"
-        62f007b68972  eval   [fail 0/232]
+      27a96c1f4d92  submit   [Submitted] "Partially updated src/bija/cli.py"
+        51a3f547c757  eval   [fail 0/232]
 ```
 
 The first branch is the agent's own run: eleven model turns, ending in a submission that the
@@ -49,7 +49,9 @@ ran from ever held them.
 From the repository root, with `alaya` built (`lake build`) and on the `PATH`, starting from an
 empty `example/trajectory`. The agent ran in
 `ghcr.io/astral-sh/uv:python3.12-alpine3.23` without network access, the default; the model was
-`gpt-5.4-mini` at temperature 0 through the xmcp provider.
+`gpt-5.4-mini` at temperature 0 through the xmcp provider. The run predates restic snapshots: the
+archive is that run with every workspace moved into a restic repository, which changed the
+state hashes and nothing else, and the hashes here are the archive's.
 
 ```sh
 D=example/trajectory
@@ -61,24 +63,24 @@ root=$(alaya root "$(cat example/bija/TASK.txt)" example/bija/skeleton --agent m
 
 # The first branch, to its submission.
 alaya resume $root --agent mini-swe --model $M --data $D
-# ... 591182d5114e  [Submitted]
+# ... 4766611d3c43  [Submitted]
 
 # Grade it against the reference suite.
-alaya eval 591182d5114e --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800 --data $D
-# aa05d3dee444  fail 1 29/232  (76971 ms)
+alaya eval 4766611d3c43 --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800 --data $D
+# 3d504a99cf8b  fail 1 29/232  (76971 ms)
 
 # The intervention: check out the last turn before the submission, edit by hand, commit with a message.
-alaya checkout f2f6b32a81d2 /tmp/fix --data $D
+alaya checkout adfc3ed05434 /tmp/fix --data $D
 $EDITOR /tmp/fix/src/bija/cli.py
-alaya commit f2f6b32a81d2 /tmp/fix -m "Hand fix: expression-first statements, literal keywords, depth" \
+alaya commit adfc3ed05434 /tmp/fix -m "Hand fix: expression-first statements, literal keywords, depth" \
   --tell "I fixed three parser bugs in src/bija/cli.py by hand. ..." --data $D
-# d7f71105cd18
+# 9de33216c587
 
 # The second branch, from the intervention, and its verdict.
-alaya resume d7f71105cd18 --agent mini-swe --model $M --data $D
-# ... 80a182b272b5  [Submitted]
-alaya eval 80a182b272b5 --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800 --data $D
-# 62f007b68972  fail 1 0/232  (6993 ms)
+alaya resume 9de33216c587 --agent mini-swe --model $M --data $D
+# ... 27a96c1f4d92  [Submitted]
+alaya eval 27a96c1f4d92 --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800 --data $D
+# 51a3f547c757  fail 1 0/232  (6993 ms)
 ```
 
 ## Reading it
@@ -86,26 +88,26 @@ alaya eval 80a182b272b5 --grader 'example/bija/grade.py {checkout} {out}' --time
 ```sh
 D=example/trajectory
 alaya tree --data $D                                  # the tree above
-alaya show d7f71105cd18 --data $D                     # the intervention: message, log, workspace
-alaya diff f2f6b32a81d2 d7f71105cd18 --data $D        # what the person changed
-alaya show aa05d3dee444 --data $D                     # the verdict and the grader's output
-alaya checkout aa05d3dee444 /tmp/evidence --evidence --data $D   # verdict.json, junit.xml, pytest.txt
+alaya show 9de33216c587 --data $D                     # the intervention: message, log, workspace
+alaya diff adfc3ed05434 9de33216c587 --data $D        # what the person changed
+alaya show 3d504a99cf8b --data $D                     # the verdict and the grader's output
+alaya checkout 3d504a99cf8b /tmp/evidence --evidence --data $D   # verdict.json, junit.xml, pytest.txt
 alaya html example/report.html --agent mini-swe --hide .venv --hide __pycache__ --data $D
 ```
 
 The archive holds only the durable parts of the data directory (`docs/trajectory-schema.md`
-§5): the store's blobs and refs, and the model cache. The screenshot is the report with the
+§5): the state files, the restic repository, and the model cache. The screenshot is the report with the
 intervention state selected, taken by `screenshot.py`:
 
 ```sh
-example/screenshot.py $PWD/example/report.html example/trajectory.png 1280 780 d7f71105cd18
+example/screenshot.py $PWD/example/report.html example/trajectory.png 1280 780 9de33216c587
 ```
 
 The model cache is keyed by the complete request and model identity. Removing a branch and
 resuming its parent can reuse recorded draws only when that request format still matches.
 Current MiniSwe adds `read_output` and changes long-output previews, so its requests do not
-match this historical archive. Use the original tool list and view for offline replay; a
-[dedicated cache-only runner](https://github.com/msv-lab/alaya/pull/8) is proposed separately. Normal `alaya resume`
+match this historical archive. Cache replay requires the original tool list, view, and model
+identity; no archive-specific runner is included. Normal `alaya resume`
 may contact the configured provider on a cache miss, including when requesting a new draw
 from a state that already has a turn child.
 

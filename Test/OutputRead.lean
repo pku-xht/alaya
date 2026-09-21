@@ -1,4 +1,5 @@
 import Test.Framework
+import Test.DirectoryWorkspaces
 import Alaya
 
 namespace OutputReadTests
@@ -49,12 +50,14 @@ private def getObservation (log : Log) (id : String) : TestM Lean.Json := do
 /-- A subprocess entry point used only by the test runner. No output text is supplied by the
 parent process: the child must reopen the trajectory and recover the page through its driver. -/
 def recoveryWorker (storePath workPath stateHex ref : String) : IO UInt32 := do
-  let recover : Result Cas.Hash := do
-    let store ← Cas.Store.create storePath
+  let recover : Result Hash := do
+    let store ← Trajectory.Store.create storePath
+    let workspaceDir := (System.FilePath.mk storePath).parent.getD "." / "restic"
+    let workspaces ← Workspaces.Restic.open workspaceDir
     let original ← resolve store stateHex
     let executor := fakeExecutor
     let rt : Runtime := {
-      store, workDir := workPath, executor,
+      store, workspaces, workDir := workPath, executor,
       agent := agent executor { task := "t" }, model := fixed (response #[readCall ref 6000 18]) }
     let child ← stepOnce rt "new-process-read" original
     let log : Log ← logOf store child
@@ -184,15 +187,47 @@ def suite : Suite := Testing.suite "output-read" #[
       check (!(log.calls.any (·.name == "read_output"))) "no recovery call was injected"
       assertEqual "unread raw output preserved" (str (← getObservation log "original") "output") fullText,
 
+  test "mini-vero inherits optional recovery in both modes and still submits immediately" do
+    for mode in #[MiniVero.Mode.proof, MiniVero.Mode.codeproof] do
+      for recover in #[false, true] do
+        let cfg : MiniVero.Config := { MiniVero.defaultConfig with task := "original Vero task" }
+        let initial := MiniVero.initialLog cfg mode default
+        let samples ← IO.mkRef 0
+        let submit : Chat.ToolCall := {
+          id := "done", name := "submit", arguments := .mkObj [("message", "finished")] }
+        let replies := #[response #[bashCall]] ++
+          (if recover then #[response #[readCall (OutputRead.reference fullText) 6000 18]] else #[]) ++
+          #[response #[submit]]
+        let sample : Dialogue -> Result Chat.Response := fun _ => do
+          let i ← Result.fromIO Error.storage (samples.modifyGet fun n => (n, n + 1))
+          let some reply := replies[i]? | throw <| .protocol "unexpected Vero continuation"
+          pure reply
+        let (log, stop) ← assertOk <| Agent.run (MiniVero.agent fakeExecutor cfg)
+          { dir := ← scratch } sample initial
+        match stop with
+        | .outcome outcome => assertEqual "submission accepted" outcome.status "Submitted"
+        | .question _ _ => fail "recovery must not change Vero into a question"
+        assertEqual "only selected model turns" (← samples.get) replies.size
+        assertEqual "only the model's chosen recovery calls" (log.calls.filter (·.name == "read_output")).size
+          (if recover then 1 else 0)
+        if recover then
+          assertEqual "Vero gets the exact middle" (str (← getObservation log "page") "content")
+            (String.ofList (fullText.toList.drop 6000 |>.take 18))
+        match (MiniVero.view log)[1]? with
+        | some (Chat.Message.user text) =>
+          assertEqual "original mode-specific opening preserved" text
+            (MiniVero.taskMessage cfg.task mode default)
+        | _ => fail "missing Vero opening",
+
   test "a sibling cannot recover another branch's output even with its reference" do
     let base ← scratch
     let project := base / "project"
     IO.FS.createDirAll project
-    let store ← assertOk <| Cas.Store.create (base / "store")
+    let store ← assertOk <| Trajectory.Store.create (base / "states")
     let rt : Runtime := {
-      store, workDir := base / "work", executor := fakeExecutor,
+      store, workspaces := ← workspaces, workDir := base / "work", executor := fakeExecutor,
       agent := agent fakeExecutor { task := "t" }, model := fixed (response #[bashCall]) }
-    let root ← assertOk <| createRoot store #[] project
+    let root ← assertOk <| createRoot store (← workspaces) #[] project
     let ancestor ← assertOk <| stepOnce rt "shared-output" root
     let leftText := fullText ++ "\nLEFT_ONLY"
     let leftExecutor := fakeExecutor leftText
@@ -231,16 +266,18 @@ def suite : Suite := Testing.suite "output-read" #[
     let project := base / "project"
     let work := base / "work"
     IO.FS.createDirAll project
-    let store ← assertOk <| Cas.Store.create (base / "store")
+    IO.FS.writeFile (project / "fixture.txt") "workspace retained across process restart\n"
+    let store ← assertOk <| Trajectory.Store.create (base / "states")
+    let workspaces ← assertOk <| Workspaces.Restic.open (base / "restic")
     let rt : Runtime := {
-      store, workDir := work, executor := fakeExecutor,
+      store, workspaces, workDir := work, executor := fakeExecutor,
       agent := agent fakeExecutor { task := "t" }, model := fixed (response #[bashCall]) }
-    let root ← assertOk <| createRoot store #[] project
+    let root ← assertOk <| createRoot store workspaces #[] project
     let original ← assertOk <| stepOnce rt "original-process" root
     IO.FS.removeDirAll work
     let child ← IO.Process.output {
       cmd := (← IO.appPath).toString,
-      args := #["--output-recovery-worker", store.root.toString, (base / "new-work").toString,
+      args := #["--output-recovery-worker", store.dir.toString, (base / "new-work").toString,
         original.hex, OutputRead.reference fullText] }
     check (child.exitCode == 0) s!"recovery subprocess failed: {child.stderr}"
     let resumed ← assertOk <| resolve store child.stdout.trimAscii.toString
@@ -250,23 +287,22 @@ def suite : Suite := Testing.suite "output-read" #[
     assertEqual "subprocess persisted the exact middle" (str page "content")
       (String.ofList (fullText.toList.drop 6000 |>.take 18)),
 
-  test "fork and resume reopen CAS with the identical output after deleting execution files" do
+  test "fork and resume reopen storage with the identical output after deleting execution files" do
     let base ← scratch
     let project := base / "project"
     let work := base / "work"
     IO.FS.createDirAll project
     IO.FS.createDirAll work
-    let store ← assertOk <| Cas.Store.create (base / "store")
+    let store ← assertOk <| Trajectory.Store.create (base / "states")
     let rt : Runtime := {
-      store, workDir := work, executor := fakeExecutor,
+      store, workspaces := ← workspaces, workDir := work, executor := fakeExecutor,
       agent := agent fakeExecutor { task := "t" }, model := fixed (response #[bashCall]) }
-    let root ← assertOk <| createRoot store #[] project
+    let root ← assertOk <| createRoot store (← workspaces) #[] project
     let original ← assertOk <| stepOnce rt "original" root
     let originalLog ← assertOk <| logOf store original
     let ref := str (observation ((Output.fromJson? (← getObservation originalLog "original")).get!)) "output_ref"
     IO.FS.removeDirAll work
-    let reopened ← assertOk <| Cas.Store.create (base / "store")
-    let _ ← assertOk reopened.gc
+    let reopened ← assertOk <| Trajectory.Store.create (base / "states")
     let reading : Runtime := { rt with store := reopened, model := fixed (response #[readCall ref 6000 10]) }
     let left ← assertOk <| stepOnce reading "left" original
     let right ← assertOk <| stepOnce reading "right" original
@@ -285,22 +321,26 @@ def suite : Suite := Testing.suite "output-read" #[
     let work := base / "work"
     IO.FS.createDirAll project
     IO.FS.createDirAll work
-    let store ← assertOk <| Cas.Store.create (base / "store")
-    let root ← assertOk <| createRoot store #[] project
+    let store ← assertOk <| Trajectory.Store.create (base / "states")
+    let root ← assertOk <| createRoot store (← workspaces) #[] project
     let calls ← IO.mkRef 0
     let model : Model := { identity := .null, sample := fun request => do
       Result.fromIO Error.storage <| calls.modify (· + 1)
       if !request.messages.isEmpty then throw <| .protocol "unexpected later preview"
       pure { next := pure (response #[bashCall]) } }
     let breakingExecutor : Executor := { fakeExecutor with exec := fun _ _ _ => do
-      IO.FS.removeDirAll (store.root / "tmp")
-      IO.FS.writeFile (store.root / "tmp") "block writes after command execution"
+      IO.FS.rename store.dir (base / "saved-states")
+      IO.FS.writeFile store.dir "block state writes after command execution"
       pure { output := fullText, exitCode? := some 0 } }
     let rt : Runtime := {
-      store, workDir := work, executor := breakingExecutor,
+      store, workspaces := ← workspaces, workDir := work, executor := breakingExecutor,
       agent := agent breakingExecutor { task := "t" }, model }
-    assertError "persistence failure" (resume rt "failure" root (fun _ => pure ()))
-      (fun | .storage _ => true | _ => false)
+    try
+      assertError "persistence failure" (resume rt "failure" root (fun _ => pure ()))
+        (fun | .storage _ => true | _ => false)
+    finally
+      IO.FS.removeFile store.dir
+      IO.FS.rename (base / "saved-states") store.dir
     assertEqual "only pre-execution request" (← calls.get) 1
     assertEqual "no output state published" (← assertOk <| allStates store) #[root],
 
@@ -329,11 +369,11 @@ def suite : Suite := Testing.suite "output-read" #[
     let base ← scratch
     let project := base / "project"
     IO.FS.createDirAll project
-    let store ← assertOk <| Cas.Store.create (base / "store")
-    let root ← assertOk <| createRoot store (rawLog fullText) project
-    IO.FS.writeFile (store.blobFile root) "corrupt"
+    let store ← assertOk <| Trajectory.Store.create (base / "states")
+    let root ← assertOk <| createRoot store (← workspaces) (rawLog fullText) project
+    IO.FS.writeFile (store.dir / (root.hex ++ ".json")) "corrupt"
     assertError "corrupt state" (logOf store root) (fun | .storage _ => true | _ => false)
-    IO.FS.removeFile (store.blobFile root)
+    IO.FS.removeFile (store.dir / (root.hex ++ ".json"))
     assertError "missing state" (logOf store root) (fun | .storage _ => true | _ => false)
 ]
 
