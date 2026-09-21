@@ -61,6 +61,36 @@ namespace Workspaces
 def readFile? (workspaces : Workspaces) (id : Hash) (path : String) : Result (Option ByteArray) := do
   pure ((← workspaces.readFiles id #[path])[0]?.join)
 
+/-- `path` with its symbolic links resolved, as far as it exists: the rest is appended as given,
+so a directory that is yet to be created can be compared with ones that are there. -/
+partial def resolved (path : System.FilePath) : IO System.FilePath := do
+  if ← path.pathExists then IO.FS.realPath path
+  else
+    -- A bare relative name has no parent to climb to; the current directory is one.
+    let here ← IO.currentDir
+    let path := if path.isAbsolute then path else here / path
+    match path.parent, path.fileName with
+    | some parent, some name => pure ((← resolved parent) / name)
+    | _, _ => pure path
+
+/-- Whether one of the two paths is the other or lies inside it. -/
+def overlap (a b : System.FilePath) : Bool :=
+  let inside (inner outer : String) := inner == outer || inner.startsWith (outer ++ "/")
+  inside a.toString b.toString || inside b.toString a.toString
+
+/-- Refuses a directory that overlaps one of `kept`: snapshotting such a directory would
+capture the storage itself, and materializing into it deletes what the snapshot does not
+hold, which is that storage. Nothing is touched before the refusal. -/
+def refuseOverlap (verb : String) (directory : System.FilePath) (kept : Array System.FilePath) :
+    Result Unit := do
+  let target ← Result.fromIO Error.storage (resolved directory)
+  for path in kept do
+    let path ← Result.fromIO Error.storage (resolved path)
+    if overlap target path then
+      throw <| .configuration <|
+        s!"cannot {verb} {target}: it overlaps {path}, where alaya keeps this run. " ++
+        "Use a directory outside the data directory, or a data directory (--data) outside it"
+
 /-- Gives the owner write permission throughout `directory`, when it exists. Replacing a tree
 means deleting from its directories, and tools leave read-only ones behind — Go's module cache
 is one — that neither restic nor `rm -r` can empty. -/

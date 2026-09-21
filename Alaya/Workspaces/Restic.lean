@@ -21,6 +21,9 @@ structure Settings where
   repository : System.FilePath
   /-- Where `readFiles` restores to; emptied after each use. -/
   scratch : System.FilePath
+  /-- What a snapshot may not capture and a restore may not overwrite: the repository, the
+  scratch directory, and whatever else of the run's storage the caller names. -/
+  kept : Array System.FilePath
   program : String := "restic"
 
 private structure Finished where
@@ -71,6 +74,7 @@ def init (settings : Settings) : Result Unit := do
 it whichever directory it was. A snapshot that could not read every file is a failure, not a
 smaller snapshot. -/
 def snapshot (settings : Settings) (directory : System.FilePath) : Result Hash := do
+  refuseOverlap "snapshot" directory settings.kept
   let finished ← run settings
     #["backup", ".", "--json", "--quiet", "--no-scan", "--host", "alaya"] (cwd? := some directory)
   let finished ← succeed "backup" finished
@@ -84,6 +88,7 @@ def snapshot (settings : Settings) (directory : System.FilePath) : Result Hash :
 /-- Restores in place: files whose content differs are rewritten, and what the snapshot does
 not hold is deleted. -/
 def materialize (settings : Settings) (id : Hash) (directory : System.FilePath) : Result Unit := do
+  refuseOverlap "check out into" directory settings.kept
   Result.fromIO Error.storage (IO.FS.createDirAll directory)
   makeWritable directory
   let _ ← succeed "restore" (← run settings
@@ -96,36 +101,50 @@ private def relative (path : String) : String × Bool :=
   let path := if directory then (path.dropEnd 1).toString else path
   ((path.dropWhile (· == '/')).toString, directory)
 
+/-- Which of `paths` are directories in the snapshot. -/
+private def directoriesAmong (settings : Settings) (id : Hash) (paths : Array String) :
+    Result (Array String) := do
+  if paths.isEmpty then return #[]
+  let finished ← succeed "ls" (← run settings
+    (#["ls", id.hex, "--json"] ++ paths.map ("/" ++ ·)))
+  pure <| paths.filter fun path => (jsonLines finished.stdout).any fun json =>
+    stringField? json "path" == some ("/" ++ path) && stringField? json "type" == some "dir"
+
 /-- Content and type changes, without `--metadata`: a touched file is not a change. restic
 lists every path under an added or removed directory; those are dropped, the directory standing
-for them. -/
+for them. A path that was a directory and is a file, or the reverse, restic reports as one type
+change and nothing beneath it; here it is the removal of the one and the addition of the
+other. A file that became a link, or the reverse, is a modification. -/
 def diff (settings : Settings) (before after : Hash) : Result (Array Change) := do
   let finished ← succeed "diff" (← run settings #["diff", before.hex, after.hex, "--json"])
   let mut changes : Array Change := #[]
+  -- Type changes whose new side is not a directory: the old side may have been one.
+  let mut retyped : Array String := #[]
   for json in jsonLines finished.stdout do
     if stringField? json "message_type" != some "change" then continue
     let some path := stringField? json "path" | continue
     let some modifier := stringField? json "modifier" | continue
+    -- The trailing slash describes the path in the second snapshot, or in the first if removed.
     let (path, directory) := relative path
     if path.isEmpty then continue
-    let kind? : Option ChangeKind :=
-      if modifier.contains '+' then some .added
-      else if modifier.contains '-' then some .removed
-      else if directory then none
-      else if modifier.contains 'M' || modifier.contains 'T' then some .modified
-      else none
-    if let some kind := kind? then changes := changes.push { kind, path, directory }
-  let sorted := changes.qsort fun a b => a.path < b.path
-  let mut kept : Array Change := #[]
-  let mut covering : Option (String × ChangeKind) := none
-  for change in sorted do
-    let covered := match covering with
-      | some (root, kind) => change.kind == kind && change.path.startsWith (root ++ "/")
-      | none => false
-    if covered then continue
-    kept := kept.push change
-    if change.directory then covering := some (change.path, change.kind)
-  pure kept
+    if modifier.contains '+' then changes := changes.push { kind := .added, path, directory }
+    else if modifier.contains '-' then changes := changes.push { kind := .removed, path, directory }
+    else if modifier.contains 'T' then
+      if directory then
+        changes := changes ++ #[{ kind := .removed, path }, { kind := .added, path, directory := true }]
+      else retyped := retyped.push path
+    else if modifier.contains 'M' && !directory then changes := changes.push { kind := .modified, path }
+  let wereDirectories ← directoriesAmong settings before retyped
+  for path in retyped do
+    if wereDirectories.contains path then
+      changes := changes ++ #[{ kind := .removed, path, directory := true }, { kind := .added, path }]
+    else changes := changes.push { kind := .modified, path }
+  let roots (kind : ChangeKind) := changes.filterMap fun change =>
+    if change.kind == kind && change.directory then some (change.path ++ "/") else none
+  let covered (change : Change) := (roots change.kind).any (change.path.startsWith ·)
+  let rank : ChangeKind -> Nat | .removed => 0 | .added => 1 | .modified => 2
+  pure <| (changes.filter (!covered ·)).qsort fun a b =>
+    a.path < b.path || (a.path == b.path && rank a.kind < rank b.kind)
 
 /-- A path as a `restore --include` pattern that matches it alone. -/
 private def literalPattern (path : String) : String :=
@@ -190,13 +209,16 @@ def version (settings : Settings) : Result (Nat × Nat) := do
     | _, _ => throw unrecognized
   | _ => throw unrecognized
 
-/-- The snapshots kept in `repository`, which is created if it does not exist. -/
-def «open» (repository : System.FilePath) (program : String := "restic") : Result Workspaces := do
+/-- The snapshots kept in `repository`, which is created if it does not exist. `keep` names the
+rest of the run's storage, which like the repository no snapshot or checkout may overlap. -/
+def «open» (repository : System.FilePath) (keep : Array System.FilePath := #[])
+    (program : String := "restic") : Result Workspaces := do
   -- Absolute, because `backup` runs from inside the directory it snapshots.
   let repository ← Result.fromIO Error.storage do
     IO.FS.createDirAll repository
     IO.FS.realPath repository
-  let settings : Settings := { repository, scratch := repository.withFileName "restic-scratch", program }
+  let scratch := repository.withFileName "restic-scratch"
+  let settings : Settings := { repository, scratch, kept := #[repository, scratch] ++ keep, program }
   let (major, minor) ← version settings
   if major == 0 && minor < 17 then
     throw <| .configuration s!"restic {major}.{minor} is too old: 0.17 or later is needed"

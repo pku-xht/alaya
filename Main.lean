@@ -32,7 +32,9 @@ private def openData (args : Cli.Args) : Result DataDir := do
   let path : System.FilePath := ← args.valueD "data" ".alaya"
   refuseLegacy path
   let store ← Store.create (path / "states")
-  pure { path, store, workspaces := ← Workspaces.Restic.open (path / "restic") }
+  -- The states and the model cache are as much the run as the repository is.
+  let workspaces ← Workspaces.Restic.open (path / "restic") (keep := #[store.dir, path / "cache"])
+  pure { path, store, workspaces }
 
 /-- The work directory, always `DATA/work`: not configurable, so no path a user names can be
 destroyed by a checkout, and the store and the cache are out of its reach by construction. -/
@@ -195,6 +197,9 @@ private def dispatch (argv : List String) : Result UInt32 := do
   | "root" :: task :: rest =>
     if rest.length > 1 then
       throw <| .configuration "alaya root TASK (PROJECT | --path PATH --image IMAGE)"
+    -- Before the data directory is created: inside the project it would become part of it.
+    if let some project := rest.head? then
+      Workspaces.refuseOverlap "snapshot" project #[← args.valueD "data" ".alaya"]
     let data ← openData args
     let settings? ← (← Executor.Docker.settings? args).mapM (·.pin)
     let (uname, image?) ← rootEnvironment settings?

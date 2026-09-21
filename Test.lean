@@ -12,5 +12,5 @@ import Test.Docker
 only the cases whose `suite/case` name contains the substring. -/
 
 def main (args : List String) : IO UInt32 := do
-  let suites := #[LegacyTests.suite, Sha256Tests.suite, StoreTests.suite] ++ MiniTests.suites ++ CliTests.suites ++ #[MiniVeroTests.suite, WorkspacesTests.pathSuite, WorkspacesTests.suite, WorkspacesTests.trajectorySuite, DockerTests.suite]
+  let suites := #[LegacyTests.suite, Sha256Tests.suite, StoreTests.suite] ++ MiniTests.suites ++ CliTests.suites ++ #[MiniVeroTests.suite, WorkspacesTests.pathSuite, WorkspacesTests.suite, WorkspacesTests.resticSuite, WorkspacesTests.trajectorySuite, DockerTests.suite]
   Testing.runSuites suites args.head?

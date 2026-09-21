@@ -491,8 +491,9 @@ runs do not meet at the same state hash anyway. What the contract does require
 - an edit is captured even when it keeps a file's size and modification time, as archive
   extraction, `cp -p`, and package managers that normalize timestamps leave it;
 - a file name may hold any character, a newline included;
-- an added or removed directory is one change, standing for its subtree, and a file that was
-  only touched is not a change;
+- an added or removed directory is one change, standing for its subtree; a file replaced by a
+  directory, or the reverse, is a removal and an addition; a file that was only touched is not a
+  change;
 - a read is `none` for a directory, an absent path, and a path that leaves the snapshot.
 
 `Workspaces.Restic` keeps the contract with a restic repository (restic 0.17 or later). restic
@@ -505,9 +506,15 @@ links, extended attributes. The identifier is the restic snapshot ID.
 | --- | --- |
 | `snapshot` | `restic backup . --no-scan --host alaya`, run inside the directory so paths are relative to it; a snapshot that could not read every file is a failure |
 | `materialize` | `restic restore ID --target DIR --delete --overwrite always`: in place, comparing content, not times, after the directory is made writable |
-| `diff` | `restic diff A B --json` without `--metadata`, folded so that a directory stands for its subtree |
+| `diff` | `restic diff A B --json` without `--metadata`, folded so that a directory stands for its subtree; for a type change whose new side is a file, one `restic ls` of the old side tells whether a directory was replaced |
 | `readFiles` | one `restic restore ID --include …` of just those paths into `D/restic-scratch`, read back from there |
 | `retainOnly` | `restic forget` of the rest, then `restic prune` |
+
+A snapshot or a checkout of a directory that overlaps the run's own storage — the repository,
+`D/states`, `D/cache` — is refused before anything is touched: the one would capture the
+storage, and the other deletes what the snapshot does not hold, which is the storage. So
+`alaya checkout STATE .` beside `.alaya`, and `alaya root TASK .` with the default data
+directory, are errors that say to move one of the two.
 
 Every operation is one `restic` process with `--no-cache --insecure-no-password`: the repository
 sits beside the states, which are not encrypted either. It is restic's own format, so `restic

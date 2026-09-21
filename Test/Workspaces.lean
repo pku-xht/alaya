@@ -116,6 +116,26 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
       (.removed, "src/lib", true)]
     assertEqual "no changes" (summary (← assertOk <| workspaces.diff after after)) #[],
 
+  onEach "a file replaced by a directory, or the reverse, is a removal and an addition" fun workspaces => do
+    let source ← source
+    writeSpec source #[("toDir", "file"), ("toEmptyDir", "file"), ("toFile/inner.txt", "inner"),
+      ("toLink", "file"), ("keep", "keep")]
+    let before ← assertOk <| workspaces.snapshot source
+    IO.FS.removeFile (source / "toDir")
+    writeSpec source #[("toDir/new.txt", "new")]
+    IO.FS.removeFile (source / "toEmptyDir")
+    IO.FS.createDirAll (source / "toEmptyDir")
+    IO.FS.removeDirAll (source / "toFile")
+    IO.FS.writeFile (source / "toFile") "now a file"
+    IO.FS.removeFile (source / "toLink")
+    run #["ln", "-s", "keep", (source / "toLink").toString]
+    let after ← assertOk <| workspaces.snapshot source
+    assertEqual "changes" (summary (← assertOk <| workspaces.diff before after)) #[
+      (.removed, "toDir", false), (.added, "toDir", true),
+      (.removed, "toEmptyDir", false), (.added, "toEmptyDir", true),
+      (.removed, "toFile", true), (.added, "toFile", false),
+      (.modified, "toLink", false)],
+
   onEach "a touched file is not a change" fun workspaces => do
     let source ← source
     writeSpec source baseSpec
@@ -160,11 +180,44 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
 ]
 
 def pathSuite : Suite := Testing.suite "workspaces.paths" #[
+  test "a path that does not exist yet resolves against the directories that do" do
+    let base ← IO.FS.realPath (← scratch)
+    assertEqual "absolute" (← Workspaces.resolved ((← scratch) / "new" / "deeper")) (base / "new" / "deeper")
+    -- A bare name, as the default data directory `.alaya` is, is relative to where we are.
+    assertEqual "bare name" (← Workspaces.resolved "no-such-directory-here")
+      ((← IO.FS.realPath (← IO.currentDir)) / "no-such-directory-here")
+    check (Workspaces.overlap (base / "p") (base / "p" / ".alaya")) "a directory overlaps what it holds"
+    check (!Workspaces.overlap (base / "p") (base / "p2")) "a shared name prefix is not an overlap",
+
   test "safeRelativePath accepts only clean relative paths" do
     for good in ["a", "a/b.txt", ".hidden/x", "run\nme.sh"] do
       check (Workspaces.safeRelativePath good) s!"{good.quote} should be accepted"
     for bad in ["", "/etc/passwd", "../x", "a/../b", "a//b", "./a"] do
       check (!Workspaces.safeRelativePath bad) s!"{bad.quote} should be rejected"
+]
+
+/-- What only the real store can get wrong. -/
+def resticSuite : Suite := Testing.suite "workspaces.restic" #[
+  test "the run's own storage is refused as a checkout target and as a snapshot source" do
+    let data := (← scratch) / "data"
+    let store ← assertOk <| Trajectory.Store.create (data / "states")
+    let workspaces ← assertOk <| Workspaces.Restic.open (data / "restic") (keep := #[store.dir])
+    let project ← source
+    writeSpec project baseSpec
+    let root ← assertOk <| createRoot store workspaces #[] project (some "t")
+    let id := (← assertOk <| getState store root).workspace
+    let refused (label : String) (action : Result Unit) : TestM Unit :=
+      assertError label action fun | .configuration _ => true | _ => false
+    -- `restore --delete` into any of these would delete the states or the repository.
+    for target in [data, (← scratch), data / "states", data / "restic", data / "restic" / "inside"] do
+      refused s!"checkout into {target}" (workspaces.materialize id target)
+    check (!(← (data / "restic" / "inside").pathExists)) "a refused target was created"
+    refused "snapshot of the data directory" (discard <| workspaces.snapshot data)
+    refused "snapshot of a project holding it" (discard <| workspaces.snapshot (← scratch))
+    -- Nothing was touched, and a directory beside the storage is still fine.
+    assertEqual "the state survives" (← assertOk <| Trajectory.allStates store) #[root]
+    assertOk <| workspaces.materialize id (data / "work")
+    assertEqual "checked out" (← readSpec (data / "work")) (← readSpec project)
 ]
 
 /-- The trajectory's own operations over a real repository, where the other suites use copies. -/

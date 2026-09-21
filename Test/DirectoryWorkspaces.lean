@@ -53,20 +53,26 @@ def directoryWorkspaces (root : System.FilePath) : Workspaces where
   diff before after := storageIO do
     let old := Std.HashMap.ofList (← listing (root / before.hex)).toList
     let new := Std.HashMap.ofList (← listing (root / after.hex)).toList
-    let removed := old.toArray.filter fun (path, _) => !new.contains path
-    let added := new.toArray.filter fun (path, _) => !old.contains path
-    let roots (entries : Array (String × Option String)) :=
-      entries.filterMap fun (path, content) => if content.isNone then some path else none
+    -- A path that was a directory and is not, or the reverse, is a removal and an addition.
+    let retyped (path : String) : Bool :=
+      match old.get? path, new.get? path with
+      | some was, some now => was.isNone != now.isNone
+      | _, _ => false
+    let removed := old.toArray.filter fun (path, _) => !new.contains path || retyped path
+    let added := new.toArray.filter fun (path, _) => !old.contains path || retyped path
     let fold (kind : Workspaces.ChangeKind) (entries : Array (String × Option String)) :=
+      let roots := entries.filterMap fun (path, content) => if content.isNone then some path else none
       entries.filterMap fun (path, content) =>
-        if under (roots entries) path then none
+        if under roots path then none
         else some ({ kind, path, directory := content.isNone } : Change)
     let modified := new.toArray.filterMap fun (path, content) =>
       match old.get? path with
       | some was => if was != content && was.isSome && content.isSome
           then some ({ kind := .modified, path } : Change) else none
       | none => none
-    pure <| (fold .removed removed ++ fold .added added ++ modified).qsort (·.path < ·.path)
+    let rank : Workspaces.ChangeKind -> Nat | .removed => 0 | .added => 1 | .modified => 2
+    pure <| (fold .removed removed ++ fold .added added ++ modified).qsort fun a b =>
+      a.path < b.path || (a.path == b.path && rank a.kind < rank b.kind)
   readFiles id paths := paths.mapM fun path => storageIO do
     if !Workspaces.safeRelativePath path then return none
     let file := root / id.hex / (path : System.FilePath)
