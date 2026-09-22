@@ -38,6 +38,10 @@ structure Outcome where
 inductive Directive where
   | sample
   | act (call : Chat.ToolCall)
+  /-- Record `content` as the observation of `callId`: the result of a tool call that `next`
+  answered from the log alone, without the workspace — a page of an earlier output, a value
+  the agent keeps for itself. Nothing runs and the workspace is not snapshotted. -/
+  | observe (callId : String) (content : Lean.Json)
   /-- Stop and wait for a person; their answer is recorded as the observation of `callId`. -/
   | ask (callId : String) (question : String)
   | done (outcome : Outcome)
@@ -46,9 +50,6 @@ inductive Directive where
 /-- The directory an agent's tools act in. -/
 structure Workspace where
   dir : System.FilePath
-  /-- The current recorded history, for tools that recover prior observations. The driver
-  supplies it on each act; it is independent of the mutable execution directory. -/
-  log : Log := #[]
   deriving Inhabited
 
 structure Agent where
@@ -118,7 +119,9 @@ partial def run (agent : Agent) (workspace : Workspace) (sample : Dialogue -> Re
     let response ← sample (agent.view log)
     run agent workspace sample (log.push (.response response))
   | .act call =>
-    let content ← agent.act { workspace with log } call
+    let content ← agent.act workspace call
     run agent workspace sample (log.push (.observation call.id content))
+  | .observe callId content =>
+    run agent workspace sample (log.push (.observation callId content))
 
 end Alaya.Agent

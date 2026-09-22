@@ -2,19 +2,18 @@
 
 `Alaya.Agent.MiniSwe` is a port of [mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent)'s
 default tool-calling agent as an `Alaya.Agent.Agent`. It keeps what defines that agent — its
-prompt structure, its `bash` command tool, its protocol for reading a response and answering a
-malformed one, its limits — and realizes them through the five operations of the agent API
+prompts, its one `bash` tool, its protocol for reading a response and answering a malformed one,
+its limits — and realizes them through the five operations of the agent API
 (`docs/agent-api.md`): the tools, the view, `next`, `act`, and an identity. Rendering and
 execution are Lean's own rather than imitations of the Python original; the differences that
-change behaviour are listed in §8. The full output recovery contract and design are in
-[output-recovery.md](output-recovery.md).
+change behaviour are listed in §7.
 
 ## 1. The agent
 
 ```lean
 def agent (executor : Executor) (config : Config) : Agent := {
   identity := { agent := "mini-swe", step_limit, max_consecutive_format_errors, timeout_seconds }
-  tools := #[bashTool, submitTool, OutputRead.tool]
+  tools := #[bashTool, submitTool]            -- and read_output, when config.recoverOutput
   view
   next := next config
   act := act executor }
@@ -37,30 +36,21 @@ The command line names the agent `--agent mini-swe`.
 `initialLog config uname` produces the two events a run starts from: the system message, and
 the instance message with the task and a line describing the machine — the `uname` of the
 executor, so a run pinned to an image is told about the image and not about the host. Both are
-based on mini's texts, rendered from its `mini.yaml`. The submission instructions name the
-`submit` tool, and the tool-use rules keep `bash` as the default while allowing `read_output`
-alone when omitted output is needed for the next decision. The opening log is frozen into the
-root state; changing these instructions does not rewrite an existing root's opening messages.
-
-`config.task` is what `root` was given as `--task TEXT` or `--task-file FILE`
-(`docs/trajectory-schema.md` §8); the first request includes it in full, so a task kept in a file
-is not read through a tool observation.
+mini's texts, rendered from its `mini.yaml`; the only change is the two sentences that named its
+submission sentinel, which name the `submit` tool. The opening log is frozen into the root state.
 
 ## 3. Tools
 
 **`bash`** takes one string argument, `command`, a shell script. **`submit`** takes a string
-`message` and ends the run; the message becomes the run's submission. **`read_output`** takes
-`ref`, `offset`, and `limit` to recover a page of a previous command's full recorded output.
-Offsets count Unicode scalar values from zero; `limit` is an integer from 1 through 10 000.
-It reads the current log and does not run a shell command. All schemas are strict
+`message` and ends the run; the message becomes the run's submission. Both schemas are strict
 (every property required, no others). `submit` replaces mini's convention of ending a run when a
 command prints a sentinel line, which would require whoever runs the agent to read tool output;
 here the end of a run is a tool call, visible in the log's structure.
 
-`bash` is the default for commands and file work. When a preview is enough, the agent can
-continue with `bash` or `submit`; when omitted output is needed for the next decision, it can
-call `read_output` alone for the relevant range. Recovery never requires an accompanying
-`bash` call or reading to EOF. `submit` remains a separate terminal call.
+With `recoverOutput` on, a third tool is offered. **`read_output`** takes `call_id`, the id of an
+earlier `bash` call, and `offset` and `limit`, a range of lines counting from 1, and shows those
+lines of that call's full output — the view shows a long output cut to its head and tail (§5),
+while the log holds all of it. See §9.
 
 ## 4. Reading a response: `parseActions`
 
@@ -72,16 +62,14 @@ Every response is read into either a list of **actions** or a **format error**:
 | has a call whose arguments are not JSON | format error: "Error parsing tool call arguments: …" |
 | has a call to an unknown tool | format error: "Unknown tool '…'." |
 | has a `bash` call without `command`, or with a non-string one | format error saying which |
-| has a `read_output` call with an invalid reference type, offset, or limit | format error saying which |
-| otherwise | one `Action.bash id command`, `Action.readOutput id`, or `Action.submit id message` per call, in order |
+| otherwise | one `Action.bash id command` or `Action.submit id message` per call, in order |
 
 The first call with a problem decides; the whole turn is a format error. The message the model
-will see (`formatErrorMessage`) wraps the problem in tool-use guidance, including the same
-default `bash` and optional standalone `read_output` rules, ending with how to submit — except
-when the provider reports that it **cut the response off**
+will see (`formatErrorMessage`) wraps the problem in mini's guidance on how to call the tool,
+ending with how to submit — except when the provider reports that it **cut the response off**
 (`finish_reason` is `length`, or `tool_calls` with no calls present): then the message says so
-and asks for a shorter response with one tool call. It preserves the same tool choices and
-does not require a `bash` call alongside recovery.
+and asks for a shorter response, because the model did nothing wrong that repeating the guidance
+would fix.
 
 ## 5. The view
 
@@ -95,17 +83,9 @@ does not require a `bash` call alongside recovery.
   own broken output and try to continue it. The log still holds the response.
 - An **observation** — the `Output` the agent recorded, as JSON — becomes a tool message with
   the JSON rendered as text: `output`, `exit_code` (null when the command did not complete), and
-  `error` when there is one. When `output` exceeds `outputLimit` (10 000) Unicode characters, the
+  `error` when there is one. When `output` is `outputLimit` (10 000) characters or longer, the
   model is shown `output_head` and `output_tail` of 5 000 characters each and `elided_chars`
-  instead. It also receives `truncated`, `total_chars`, zero-based half-open
-  `displayed_ranges`, a SHA-256 `output_ref`, and concrete `read_output` arguments starting at
-  the first omitted character. The record keeps the whole decoded output; the 10 000-character
-  limit bounds the preview text, with JSON metadata in addition.
-- A **page** returned by `read_output` uses `content`, with `offset`, `end_offset`,
-  `total_chars`, `next_offset`, and `eof`. It passes through without being previewed again.
-  When more content is needed, `next_offset` selects the following page. Reading all pages can
-  reach the end even for a single line longer than the preview limit; it is not a prerequisite
-  for continuing the task.
+  instead. The record keeps the whole output.
 
 *Two turns of a log and their view: a malformed response is replaced, a long output is cut.*
 
@@ -122,7 +102,7 @@ flowchart LR
     direction TB
     V1["user: Tool call error … (the response is not shown)"]
     V2["assistant: bash cat big.log"]
-    V3["tool: head + tail, ranges, output_ref, read_output arguments, exit_code 0"]
+    V3["tool: output_head, output_tail, elided_chars 2000, exit_code 0"]
     V1 --> V2 --> V3
   end
   L1 --> V1
@@ -140,17 +120,15 @@ flowchart LR
    observation does, since it means a turn ran.
 2. **After a response with actions.** The first action whose call no observation has answered
    yet is next. A `submit` there is `done Submitted`, with its message as the submission; a
-   `bash` or `read_output` there is `act` on that call. Calls after a `submit` in the same
-   response never run.
+   `bash` there is `act` on that call; a `read_output` there is `observe` with the page, computed
+   from the log by `OutputRead.read` (§9). Calls after a `submit` in the same response never run.
 3. **When every call is answered**, `sample` — unless `stepLimit` is set and the log already
    holds that many responses, in which case `done LimitsExceeded`. The limit is checked before
    the model call, as mini does.
 
 `act executor workspace call` runs the `bash` call's script in the workspace through the
-executor and returns the `Output` as JSON. A `read_output` call instead resolves the reference
-against `workspace.log`; both run drivers provide the full current log before each act. A
-missing reference or an out-of-range offset returns an error observation. The action is never
-given a `submit`: `next` ends the run first.
+executor and returns the `Output` as JSON. It is never given a `submit`: `next` ends the run
+first.
 
 *One response, from the model to the next sample.*
 
@@ -165,8 +143,6 @@ flowchart TD
   A -->|"submit"| D2["done Submitted"]
   A -->|"bash"| X["act: run the script, record the Output"]
   X --> A
-  A -->|"read_output"| O["act: recover a page from the recorded log"]
-  O --> A
   A -->|"none left"| L{"step limit reached?"}
   L -->|yes| D3["done LimitsExceeded"]
   L -->|no| S
@@ -191,10 +167,6 @@ the run and is gone when a branch is resumed later.
 - A run ends with the `submit` tool, not a sentinel line in a command's output; the two prompt
   sentences and the last line of the format-error message say so.
 - Tool schemas are strict.
-- `read_output` recovers full recorded command output from bounded previews; no separate spill
-  directory is required. The current log carries the content across forks and container restarts.
-- Opening and format-error instructions allow `read_output` without `bash` when omitted output
-  is needed; `bash` remains the default for commands and file work.
 - Observations are JSON values rendered by Lean, so non-ASCII text is not escaped and the fields
   are `output`, `exit_code`, and `error`, rather than mini's `returncode` and `exception_info`.
 - A non-string `command` is a format error, not run the way Python's `Popen` would happen to run
@@ -204,11 +176,28 @@ the run and is gone when a branch is resumed later.
 - Error texts are plain, not Python's exception messages.
 - The environment is a snapshot of the working directory, not a persistent machine.
 - No per-model cost accounting, so mini's `cost_limit` is not enforced.
+- With `recoverOutput` on: the `read_output` tool, two sentences, and a warning (§9).
 
-The added tool and changed long-output view intentionally change model-cache keys. Existing
-state objects remain readable. Historical cache replay requires the original tool list,
-view, and model identity; the existing cache mechanism is unchanged.
-No history pruning, conversation summaries, time
-feedback, or change to submission and `ask_user` policy is part of output recovery.
-The reliability of this recovery contract is tested independently of Vero performance;
-benchmark results do not determine whether the model must use the recovery tool.
+## 9. Reading a long output back: `read_output`
+
+Off by default, and then nothing above changes. On (`Config.recoverOutput`, `--recover-output`
+on the command line), the agent can see the part of a command's output the view cut:
+
+- The **warning** on a cut output names the call: `Output too long. read_output shows any lines
+  of the whole of it; this call's id is call_…`. The id is also the tool message's
+  `tool_call_id`, but a model given only that has been seen to guess.
+- **`read_output {call_id, offset, limit}`** is answered by `next` from the log, as
+  `Directive.observe`: nothing runs, no snapshot is taken, and the state records the page as an
+  ordinary observation with the parent's workspace. The output is the most recent observation
+  with that id whose content is a command's `Output`, so an id a provider reuses across turns
+  names the latest; a fork reads its ancestors' outputs and nothing else, since it reads its own
+  log.
+- The **page** is `{"text": "…", "lines": "2500-2502 of 5000"}`: whole lines while they fit in
+  `outputLimit` characters, or the first line alone, cut, and said so. A page is not an `Output`
+  — its field is `text`, not `output` — so the view shows it as recorded rather than cutting it
+  again. An unknown id, an offset past the end, or bad arguments give `{"error": "…"}`, an
+  observation like any other; malformed arguments are a format error, as for `bash`.
+- The two sentences of mini's texts that require a bash call in every response say a tool call
+  instead, since a response may be a `read_output` alone (`withRecovery`). That, and the tool,
+  are the whole difference: with the flag off, the prompts, tools and observations are mini's to
+  the byte, and the response cache keys do not move.

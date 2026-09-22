@@ -85,8 +85,16 @@ def taskMessage (task : String) (mode : Mode) (uname : Uname) : String :=
     "Environment: " ++
       uname.system ++ " " ++ uname.release ++ " " ++ uname.version ++ " " ++ uname.machine]
 
+/-- MiniVero's own mechanics paragraph names the bash tool; with `read_output` offered, it
+says so too. -/
+def withRecovery (recover : Bool) (text : String) : String :=
+  if !recover then text else
+    text.replace "Use repository-relative paths."
+      "When a command's output was too long and only its beginning and end were shown, read_output shows any lines of the whole of it. Use repository-relative paths."
+
 def initialLog (config : Config) (mode : Mode) (uname : Uname) : Log :=
-  #[.message (.system systemMessage), .message (.user (taskMessage config.task mode uname))]
+  #[.message (.system systemMessage),
+    .message (.user (withRecovery config.recoverOutput (taskMessage config.task mode uname)))]
 
 /-- MiniVero currently uses MiniSwe's linear model context. Experimental context
 management must be evaluated separately before changing the baseline. -/
@@ -100,7 +108,8 @@ def agent (executor : Executor) (config : Config := defaultConfig) : Agent :=
       ("agent", "mini-vero"), ("version", "1"),
       ("step_limit", (config.stepLimit : Lean.Json)),
       ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
-      ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json))]
+      ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
+      ("recover_output", (config.recoverOutput : Lean.Json))]
   }
 
 end Alaya.Agent.MiniVero

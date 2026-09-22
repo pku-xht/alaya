@@ -58,7 +58,7 @@ D=example/trajectory
 M=xmcp:closeai/gpt-5.4-mini
 
 # The root: the task statement and the skeleton, pinned to the image.
-root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agent mini-swe \
+root=$(alaya root "$(cat example/bija/TASK.txt)" example/bija/skeleton --agent mini-swe \
   --image ghcr.io/astral-sh/uv:python3.12-alpine3.23 --data $D)
 
 # The first branch, to its submission.
@@ -103,13 +103,10 @@ intervention state selected, taken by `screenshot.py`:
 example/screenshot.py $PWD/example/report.html example/trajectory.png 1280 780 9de33216c587
 ```
 
-The model cache is keyed by the complete request and model identity. Removing a branch and
-resuming its parent can reuse recorded draws only when that request format still matches.
-Current MiniSwe adds `read_output` and changes long-output previews, so its requests do not
-match this historical archive. Cache replay requires the original tool list, view, and model
-identity; no archive-specific runner is included. Normal `alaya resume`
-may contact the configured provider on a cache miss, including when requesting a new draw
-from a state that already has a turn child.
+The model cache is part of the data directory, so removing a branch with `alaya rm` and
+resuming its parent again replays the recorded turns from the cache, without a request to the
+provider. Continuing from a state that already has a turn child is a new draw, and needs the
+provider and `XMCP_API_KEY`.
 
 ## What the run says about the agent
 
