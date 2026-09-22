@@ -189,7 +189,7 @@ ends the run. -/
 inductive Action where
   | bash (id : String) (command : String)
   | readOutput (id : String) (arguments : Lean.Json)
-  | ask (id : String) (question : String)
+  | ask (id : String) (question : Question)
   | submit (id : String) (message : String)
   deriving Inhabited
 

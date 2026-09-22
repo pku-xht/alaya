@@ -26,6 +26,22 @@ def argsSuite : Suite := suite "cli.args" #[
     assertEqual "data" (args.getD "data" "") "d"
     assertEqual "alias" (args.getD "note" "") "note text",
 
+  test "reply text after -- stays positional even when it looks like an option" do
+    for answer in #["", "--data", "-m", "--", "--json", "--instruction-file",
+        "  answer\n--data another-directory\n原文  "] do
+      let args := parse ["reply", "--data", "run directory", "--", "question-hash", answer]
+      assertEqual "exact reply arguments" args.positional #["reply", "question-hash", answer]
+      assertEqual "only the real data flag" args.flags #[("data", "run directory")],
+
+  test "-- keeps earlier flags and switches and treats its whole tail literally" do
+    let args := parse ["waiting", "-m", "a note", "--json", "--", "--data", "-m", "", "--"]
+    assertEqual "tail unchanged" args.positional #["waiting", "--data", "-m", "", "--"]
+    assertEqual "earlier options" args.flags #[("note", "a note"), ("json", "")]
+    assertEqual "separator at start" (parse ["--", "--data", "-m", ""]).positional
+      #["--data", "-m", ""]
+    assertEqual "separator at end" (parse ["waiting", "--"]).positional #["waiting"]
+    assertEqual "separator alone" (parse ["--"]).positional #[],
+
   test "a repeated flag keeps every value, and get? takes the last" do
     let args := parse ["--model", "a:1", "--model", "b:2", "--count", "4"]
     assertEqual "all" (args.all "model") #["a:1", "b:2"]

@@ -11,7 +11,8 @@ is.
 
 A `--flag` that is last on the line, or followed by another `--flag`, is a *switch*: it is
 recorded with an empty value, so `--force` needs no value. The price of that rule is that a flag
-value may not itself begin with `--`.
+value may not itself begin with `--`. A standalone `--` ends option parsing: every
+remaining token is positional, including flag-like tokens and empty strings.
 -/
 
 namespace Alaya.Cli
@@ -23,8 +24,8 @@ structure Args where
   flags : Array (String × String)
   deriving Repr, Inhabited
 
-/-- Splits `argv`. `aliases` maps a short token to the flag name it stands for, as in
-`[("-m", "note")]`. -/
+/-- Splits `argv`, treating everything after `--` as positional. `aliases` maps a short token
+to the flag name it stands for, as in `[("-m", "note")]`. -/
 def parse (argv : List String) (aliases : List (String × String) := []) : Args := Id.run do
   let mut positional : Array String := #[]
   let mut flags : Array (String × String) := #[]
@@ -32,6 +33,9 @@ def parse (argv : List String) (aliases : List (String × String) := []) : Args 
   while true do
     match rest with
     | [] => break
+    | "--" :: more =>
+      positional := positional ++ more.toArray
+      break
     | token :: more =>
       let name? :=
         if token.startsWith "--" && token.length > 2 then some (token.drop 2).toString

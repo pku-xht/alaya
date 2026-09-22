@@ -171,34 +171,42 @@ def suite : Suite := Testing.suite "ask_user" #[
             | .configuration message => contains message "ask_user" && contains message "true or false"
             | _ => false,
 
-  test "each question type preserves wording and gives its own answer instructions without OTHER" do
+  test "each question form preserves its type, wording, and options without OTHER" do
     let question := "  Which rule applies?\nContext: α < β.  "
     let candidates := #[" Keep α ", "Change β\nwith evidence"]
-    let rendered ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question (args question candidates))
+    let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question (args question candidates))
+    assertEqual "multiple-choice type" form.questionType QuestionType.multipleChoice
+    assertEqual "original question" form.text question
+    assertEqual "original choices" form.options candidates
+    let rendered := form.render
     check (rendered.startsWith question) "the question and context must retain their original wording"
     check (contains rendered "\n1.  Keep α \n2. Change β\nwith evidence")
       "numbered candidates must retain their wording"
-    check (contains rendered "Select zero or more options" && contains rendered "JSON array" && contains rendered "[]")
-      "multiple choice must permit an explicit empty selection and explain the reply format"
     check (!contains rendered "OTHER") "multiple choice must not append a custom-answer candidate"
     match parseActions (response #[ask "q" (args question candidates)]) false true with
     | .actions actions =>
       match actions[0]? with
-      | some (MiniSwe.Action.ask "q" text) => assertEqual "waiting text" text rendered
+      | some (MiniSwe.Action.ask "q" parsed) =>
+        assertEqual "waiting type" parsed.questionType form.questionType
+        assertEqual "waiting choices" parsed.options candidates
+        assertEqual "waiting text" parsed.text question
       | _ => fail "expected the question directive's action"
     | _ => fail "valid choices should parse"
-    for (questionType, hint) in #[("yes_no", "Reply yes or no."),
-        ("open_ended", "Reply in your own words.")] do
+    for (questionType, expectedType) in #[("yes_no", QuestionType.yesNo),
+        ("open_ended", QuestionType.openEnded)] do
       let arguments := args question #[] questionType
-      let text ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
-      check (text.startsWith question) s!"{questionType} must preserve the question"
-      check (contains text hint) s!"{questionType} must state its answer format"
-      check (!contains text "\n1." && !contains text "OTHER")
-        s!"{questionType} must not invent candidate choices"
+      let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
+      assertEqual "question type" form.questionType expectedType
+      assertEqual "original question" form.text question
+      assertEqual "no model-defined choices" form.options #[]
+      check (!contains form.render "OTHER") s!"{questionType} must not invent a custom-answer choice"
       match parseActions (response #[ask "q" arguments]) false true with
       | .actions actions =>
         match actions[0]? with
-        | some (MiniSwe.Action.ask "q" waitingText) => assertEqual "waiting text" waitingText text
+        | some (MiniSwe.Action.ask "q" parsed) =>
+          assertEqual "waiting type" parsed.questionType expectedType
+          assertEqual "waiting text" parsed.text question
+          assertEqual "waiting options" parsed.options #[]
         | _ => fail s!"expected the {questionType} question action"
       | _ => fail s!"valid {questionType} question should parse",
 
@@ -246,13 +254,14 @@ def suite : Suite := Testing.suite "ask_user" #[
 
   test "typed questions record empty, partial, full, yes/no, and open replies after reconstruction" do
     let cases : Array (String × Lean.Json × Array String) := #[
-      -- Answer instructions are not a validator: the core reply protocol keeps any supplied text.
       ("yes_no", args "Keep the public API?\nContext: callers depend on it." #[] "yes_no",
-        #["yes", "no", "  Not a yes/no token.\nKeep this reply unchanged.\n"]),
+        #["yes", "no"]),
       ("multiple_choice", args "Which changes should be included?\nSelect all that apply."
-        #["Keep α", "Check β\nwith evidence", "Document γ"], #["[]", "[1, 3]", "[1, 2, 3]"]),
+        #["Keep α", "Check β\nwith evidence",
+          "Document γ with a detailed explanation of the public API, compatibility constraints, boundary cases, and expected output."],
+        #["[]", "[1, 3]", "[1, 2, 3]", " [3, 1] \n"]),
       ("open_ended", args "How should we handle the boundary case?" #[] "open_ended",
-        #["Keep the public API.\nPreserve the literal \"[]\" in the response.\n理由：边界条件不同。\n"])]
+        #["Keep the public API.\nPreserve the literal \"[]\" in the response.\n理由：边界条件不同。\n", "[]"])]
     for family in Families.all do
       for (questionType, arguments, answers) in cases do
         let base := (← scratch) / s!"{family.name}-{questionType}"
@@ -277,8 +286,15 @@ def suite : Suite := Testing.suite "ask_user" #[
         let some question := questionState.question? | fail "missing recorded question"
         assertEqual "call id" question.callId "q"
         let expected ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
-        assertEqual "recorded question wording" question.text expected
-        check (!contains question.text "OTHER") "the waiting record must not add a custom option"
+        assertEqual "recorded question wording" question.text expected.text
+        assertEqual "recorded question type" question.questionType expected.questionType
+        assertEqual "recorded question options" question.options expected.options
+        check (!contains question.toQuestion.render "OTHER") "the waiting record must not add a custom option"
+        -- The log's call summary is truncated, so `show` must render the complete question
+        -- separately, including long choices and the requested answer format.
+        let shown ← assertOk <| showLines store waitingHash
+        assertEqual "show retains complete question, long options, and answer format"
+          (shown.find? (·.startsWith "question ")) (some ("question " ++ expected.render))
         assertEqual "waiting workspace" questionState.workspace (← assertOk <| getState store root).workspace
         assertEqual "unanswered question count" (← assertOk <| waiting store).size 1
         assertEqual "unanswered question has no reply children" (← assertOk <| children store waitingHash).size 0
@@ -288,9 +304,15 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "only question sampled" (← requests.get).size 1
         -- Changing the source file cannot disable the capability on a recorded run.
         IO.FS.writeFile configPath (Lean.Json.mkObj [("family", family.name), ("ask_user", false)]).pretty
+        -- Reopening the store must reconstruct the form before enforcing its answer rules.
+        let reopened ← assertOk <| Store.create (base / "states")
+        let some persistedQuestion := (← assertOk <| getState reopened waitingHash).question?
+          | fail "the persisted question disappeared"
+        assertEqual "reopened type" persistedQuestion.questionType expected.questionType
+        assertEqual "reopened choices" persistedQuestion.options expected.options
         let mut replyHashes : Array Hash := #[]
         for answer in answers do
-          let answered ← assertOk <| reply store waitingHash answer
+          let answered ← assertOk <| reply reopened waitingHash answer
           check (!replyHashes.contains answered) "different answers must create distinct reply branches"
           replyHashes := replyHashes.push answered
           let state ← assertOk <| getState store answered
@@ -326,6 +348,88 @@ def suite : Suite := Testing.suite "ask_user" #[
         let displayed ← assertOk <| Result.fromExcept Error.storage
           (reportQuestion.getObjVal? "question" >>= (·.getObjValAs? String "text"))
         assertEqual "report question" displayed question.text,
+
+  test "reply rejects invalid closed answers without writing a state or clearing waiting" do
+    let cases : Array (String × Lean.Json × Array String × String) := #[
+      ("yes_no", args "Keep the public API?" #[] "yes_no",
+        #["", "maybe", "yes/no", "YES", " yes ", "no\n", "yes\nwith another instruction", "no, because it is inconvenient",
+          "true", "false", "1", "0", "\"yes\"", "[]", "[1]", "{}", "null"], "yes"),
+      ("multiple_choice", args "Which changes apply?" #["first", "second", "third"],
+        #["", "1", "true", "null", "{}", "\"[1]\"", "[", "[1,]", "[1] trailing",
+          "[1.5]", "[-1]", "[0]", "[4]", "[999999999999999999999999999]", "[1, 1]",
+          "[1, \"2\"]", "[true]", "[null]", "[[1]]", "[{}]"], "[]")]
+    for family in Families.all do
+      for (questionType, arguments, invalid, valid) in cases do
+        let base := (← scratch) / s!"{family.name}-{questionType}"
+        IO.FS.createDirAll base
+        let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name), ("ask_user", true)])
+        let store ← assertOk <| Store.create (base / "states")
+        let workspaces ← Testing.workspaces
+        let project := base / "project"
+        IO.FS.createDirAll project
+        let (executor, calls) ← countingExecutor
+        let (model, requests) ← scripted #[response #[ask "q" arguments], response #[submit]]
+        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
+        let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
+          project (some "task") (agent := built.config)
+        let stopped ← assertOk <| resume rt "scripted" root (fun _ => pure ())
+        let reopened ← assertOk <| Store.create (base / "states")
+        let before ← assertOk <| allStates reopened
+        let original := (← assertOk <| getState reopened stopped).toJson.compress
+        for answer in invalid do
+          assertError s!"invalid {questionType} answer {repr answer}" (reply reopened stopped answer) fun
+            | .configuration _ => true
+            | _ => false
+          assertEqual "no new stored state" (← assertOk <| allStates reopened) before
+          assertEqual "no reply child" (← assertOk <| children reopened stopped).size 0
+          assertEqual "question state is unchanged" (← assertOk <| getState reopened stopped).toJson.compress original
+          let pending ← assertOk <| waiting reopened
+          assertEqual "question is still waiting" pending.size 1
+          assertEqual "same question is waiting" (pending[0]?.map (·.1)) (some stopped)
+          assertEqual "answer validation never samples" (← requests.get).size 1
+          assertEqual "answer validation never executes" (← calls.get) 0
+        let answered ← assertOk <| reply reopened stopped valid
+        assertEqual "one committed reply" (← assertOk <| children reopened stopped).size 1
+        check (← assertOk <| waiting reopened).isEmpty "a valid submitted answer closes waiting"
+        let final ← assertOk <| resume { rt with store := reopened } "scripted" answered (fun _ => pure ())
+        assertEqual "continuation after correction" ((← assertOk <| getState reopened final).outcome?.map (·.status))
+          (some "Submitted")
+        assertEqual "one question and one continuation" (← requests.get).size 2,
+
+  test "stored question forms reject malformed metadata and retain legacy open text" do
+    let seed : State := { parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .question, appended := #[], question? := some { callId := "legacy", text := "Explain the change." } }
+    let legacyJson := seed.toJson.setObjVal! "question"
+      (.mkObj [("call_id", "legacy"), ("text", "Explain the change.")])
+    let legacy ← assertOk <| Result.fromExcept Error.storage (State.fromJson legacyJson)
+    let some legacyQuestion := legacy.question? | fail "legacy question missing"
+    assertEqual "legacy defaults to open text" legacyQuestion.questionType QuestionType.openEnded
+    assertEqual "legacy has no options" legacyQuestion.options #[]
+    let questionJson (kind : Lean.Json) (options : Lean.Json) : Lean.Json :=
+      .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", kind), ("options", options)]
+    let malformed : Array Lean.Json := #[
+      .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", "yes_no")],
+      .mkObj [("call_id", "q"), ("text", "Choose."), ("options", .arr #[])],
+      questionJson "unknown" (.arr #[]), questionJson .null (.arr #[]),
+      questionJson "yes_no" (.arr #[.str "yes", .str "no"]),
+      questionJson "open_ended" (.arr #[.str "candidate"]),
+      questionJson "multiple_choice" (.arr #[]),
+      questionJson "multiple_choice" (.arr #[.str "only"]),
+      questionJson "multiple_choice" (.arr #[.str "same", .str " same "]),
+      questionJson "multiple_choice" (.arr #[.str "valid", .str " \n"]),
+      questionJson "multiple_choice" (.arr #[.str "valid", .num 2]),
+      questionJson "multiple_choice" (.str "not an array"),
+      questionJson "yes_no" .null]
+    for question in malformed do
+      match State.fromJson (seed.toJson.setObjVal! "question" question) with
+      | .error _ => pure ()
+      | .ok _ => fail s!"malformed stored form was accepted: {question.compress}"
+    let store ← assertOk <| Store.create ((← scratch) / "legacy-states")
+    let waitingHash ← assertOk <| putState store legacy
+    let text := "  Neither answer is suitable.\nKeep this legacy text unchanged.\n"
+    let answered ← assertOk <| reply store waitingHash text
+    match (← assertOk <| getState store answered).appended.toList with
+    | [.observation "legacy" (.str raw)] => assertEqual "legacy reply stays verbatim" raw text
+    | _ => fail "legacy open question lost its raw reply",
 
   test "a question consumes its model turn and a reply does not reset the step limit" do
     let config : Config := { askUser := true, stepLimit := 1 }

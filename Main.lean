@@ -147,11 +147,13 @@ private def stateLine (data : DataDir) (child : Hash) (json : Bool) : Result Uni
     emit (Lean.Json.mkObj [
       ("state", child.hex), ("kind", state.kind.toString),
       ("outcome", state.outcome?.map (fun o => Lean.Json.str o.status) |>.getD .null),
-      ("question", state.question?.map (fun q => Lean.Json.str q.text) |>.getD .null)]).compress
+      ("question", state.question?.map (fun q => Lean.Json.str q.text) |>.getD .null),
+      ("question_type", state.question?.map (fun q => Lean.Json.str q.questionType.toString) |>.getD .null),
+      ("options", state.question?.map (fun q => Lean.Json.arr (q.options.map Lean.Json.str)) |>.getD .null)]).compress
   else
     let mark := match state.outcome?, state.question? with
       | some o, _ => s!"  [{o.status}]"
-      | none, some q => s!"  ask  {q.text.quote}  [Waiting]"
+      | none, some q => s!"  ask  {q.toQuestion.render.quote}  [Waiting]"
       | none, none => ""
     emit s!"{child.hex}{mark}"
 
@@ -214,8 +216,11 @@ private def dispatch (argv : List String) : Result UInt32 := do
   | ["waiting"] =>
     let data ← openData args
     for (hash, q) in ← waiting data.store do
-      if json then emit (Lean.Json.mkObj [("state", hash.hex), ("question", q.text)]).compress
-      else emit s!"{hash.hex}  {q.text.quote}"
+      if json then emit (Lean.Json.mkObj [
+        ("state", hash.hex), ("question", q.text),
+        ("question_type", q.questionType.toString),
+        ("options", .arr (q.options.map Lean.Json.str))]).compress
+      else emit s!"{hash.hex}  {q.toQuestion.render.quote}"
     pure 0
   | "eval" :: pfx :: _ =>
     let data ← openData args

@@ -86,7 +86,7 @@ def instruction : String :=
   "for a free-text answer. Only multiple_choice takes options; otherwise pass an empty array. " ++
   "No custom-answer option is added. Call ask_user alone, without any other tool. " ++
   "The answer is advice and may be wrong; it does not change " ++
-  "the task's rules. If no answer is available, continue independently."
+  "the task's rules."
 
 def definition : Chat.ToolDefinition := {
   name := "ask_user"
@@ -101,33 +101,18 @@ def definition : Chat.ToolDefinition := {
       "For yes_no and open_ended, an empty array.")))]
 }
 
-/-- Checks the question's form, not whether a candidate is true. The raw arguments, including
-the question type, stay in the log. Answer formats are instructions for the respondent;
-the trajectory's generic `reply` still records text unchanged. -/
-def question (arguments : Lean.Json) : Except String String := do
+/-- Checks the question's form, not whether a candidate is true. The raw arguments stay in
+the log; the structured question gives collectors and `reply` the same answer contract. -/
+def question (arguments : Lean.Json) : Except String Question := do
   definition.parameters.validate arguments
-  let kind ← arguments.getObjVal? "question_type" >>= Lean.Json.getStr?
+  let questionType ← arguments.getObjVal? "question_type" >>= Lean.Json.getStr? >>=
+    QuestionType.fromString
   let text ← arguments.getObjVal? "question" >>= Lean.Json.getStr?
   let options ← (arguments.getObjVal? "options" >>= Lean.Json.getArr?) >>= (·.mapM Lean.Json.getStr?)
   if text.trimAscii.toString.isEmpty then throw "ask_user needs a nonempty question."
-  if kind != "multiple_choice" && !options.isEmpty then
-    throw "ask_user options must be empty for yes_no and open_ended questions."
-  match kind with
-  | "yes_no" => pure <| text ++ "\n\nReply yes or no."
-  | "open_ended" => pure <| text ++ "\n\nReply in your own words."
-  | "multiple_choice" =>
-    if options.size < 2 then throw "ask_user needs at least two choices."
-    let mut seen : Array String := #[]
-    for option in options do
-      let key := option.trimAscii.toString
-      if key.isEmpty then throw "ask_user choices must not be empty."
-      if seen.contains key then throw "ask_user choices must be distinct."
-      seen := seen.push key
-    let numbered := options.mapIdx fun i option => s!"{i + 1}. {option}"
-    pure <| text ++ "\n\n" ++ "\n".intercalate numbered.toList ++
-      "\n\nSelect zero or more options, up to all of them. Reply with a JSON array of " ++
-      "distinct option numbers, such as [1, 2]. Reply [] if none of the options apply."
-  | _ => throw "Unknown ask_user question_type."
+  let question : Question := { text, questionType, options }
+  question.validate
+  pure question
 
 end AskUser
 

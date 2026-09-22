@@ -164,10 +164,17 @@ def interventionNotice (i : Intervention) : String :=
 
 /-- A question the agent asked a person and is waiting on. `callId` is the asking tool call,
 so the eventual answer can be recorded as its result. -/
-structure Question where
+structure Question extends Agent.Question where
   callId : String
-  text : String
   deriving Inhabited, BEq, Repr
+
+def Question.toJson (question : Question) : Lean.Json :=
+  question.toQuestion.toJson.setObjVal! "call_id" question.callId
+
+def Question.fromJson (json : Lean.Json) : Except String Question := do
+  let callId ← json.getObjVal? "call_id" >>= Lean.Json.getStr?
+  let toQuestion ← Agent.Question.fromJson json
+  pure { callId, toQuestion }
 
 /-- A grader's verdict on a state. A separate axis from `Outcome`, which says how a *run*
 ended: a submitted run can fail its grader and a run that hit the step limit can pass it. -/
@@ -289,8 +296,7 @@ def toJson (state : State) : Lean.Json :=
     ("evaluation", state.evaluation?.map evaluationToJson |>.getD .null),
     ("intervention", state.intervention?.map (fun i => .mkObj [
       ("message", i.message), ("changed", .arr (i.changed.map Lean.Json.str))]) |>.getD .null),
-    ("question", state.question?.map (fun q => .mkObj [
-      ("call_id", q.callId), ("text", q.text)]) |>.getD .null)]
+    ("question", state.question?.map Question.toJson |>.getD .null)]
 
 def fromJson (json : Lean.Json) : Except String State := do
   let version ← json.getObjVal? "v" >>= Lean.Json.getNat?
@@ -323,12 +329,9 @@ def fromJson (json : Lean.Json) : Except String State := do
       pure (some ({ message, changed } : Intervention))
     | _ => pure none
   let question? ← match json.getObjVal? "question" with
-    | .ok (.obj _) =>
-      let q := (json.getObjVal? "question").toOption.get!
-      let callId ← q.getObjVal? "call_id" >>= Lean.Json.getStr?
-      let text ← q.getObjVal? "text" >>= Lean.Json.getStr?
-      pure (some ({ callId, text } : Question))
-    | _ => pure none
+    | .ok .null => pure none
+    | .error _ => pure none
+    | .ok q => some <$> Question.fromJson q
   pure { parent?, workspace, kind, appended, outcome?, note?, image?, agent?, evaluation?
          intervention?, question? }
 
@@ -449,8 +452,9 @@ private partial def follow (rt : Runtime) (log : Log) (appended : Log) (workspac
   match rt.agent.next log with
   | .sample => pure (appended, workspace, none, .continue)
   | .done outcome => pure (appended, workspace, none, .outcome outcome)
-  | .ask callId text =>
-    let question : Question := { callId, text }
+  | .ask callId toQuestion =>
+    Result.fromExcept Error.configuration toQuestion.validate
+    let question : Question := { callId, toQuestion }
     pure (appended, workspace, some question, .question question)
   | .act call =>
     let content ← rt.agent.act { dir := rt.workDir } call
@@ -674,13 +678,14 @@ def tell (store : Store) (hash : Hash) (message : String) : Result Hash := do
     intervention? := some intervention
     image? := parent.image? }
 
-/-- Answers the question `hash` is waiting on: a child whose one event is the observation of the
-asking call, carrying `text` verbatim. -/
+/-- Validates an answer before creating a reply child. Its one event is the observation of
+the asking call, carrying the valid `text` verbatim. -/
 def reply (store : Store) (hash : Hash) (text : String) : Result Hash := do
   let parent ← getState store hash
   let question ← match parent.question? with
     | some q => pure q
     | none => throw <| .configuration "this state is not waiting for an answer"
+  Result.fromExcept Error.configuration (question.toQuestion.validateReply text)
   putState store {
     parent? := some hash, workspace := parent.workspace, kind := .reply
     appended := #[.observation question.callId (.str text)]
@@ -830,7 +835,7 @@ def showLines (store : Store) (hash : Hash) (view? : Option View := none) :
   if let some o := state.outcome? then
     lines := lines.push s!"outcome  {o.status}"
     if o.submission != "" then lines := lines.push s!"submission:\n{o.submission}"
-  if let some q := state.question? then lines := lines.push s!"question {q.text}"
+  if let some q := state.question? then lines := lines.push s!"question {q.toQuestion.render}"
   if let some i := state.intervention? then lines := lines.push s!"message  {i.message}"
   lines := lines.push "--- log ---"
   for event in log do

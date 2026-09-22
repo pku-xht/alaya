@@ -289,10 +289,15 @@ records it as a `question` state:
 
 - `appended` holds the response and the observations of the calls *before* the ask; the calls
   after it never ran;
-- `question? = { callId, text }` names the asking call and carries the text for the person;
+- `question? = { callId, text, questionType, options }` names the asking call and carries
+  the prompt and answer controls for the person;
 - `resume`, `step`, `commit`, and `tell` refuse the state until it is answered.
 
-`alaya reply HASH TEXT` records the answer as a `reply` child: the parent's workspace, and one
+`alaya reply HASH TEXT` validates the answer against the recorded question type before
+writing any state. Yes/no requires `yes` or `no`; multiple choice requires a JSON array of
+distinct option numbers from 1 through the number of candidates (`[]` selects none).
+Open-ended questions accept text. An invalid reply leaves the question waiting and writes
+no child. A valid answer is recorded as a `reply` child: the parent's workspace, and one
 appended event, `Event.observation callId TEXT`, the answer as the asking call's result,
 verbatim. The next turn from the reply child continues with the calls that were still pending,
 exactly as if the tool had returned the person's words.
@@ -349,13 +354,14 @@ flowchart LR
 Everything above is a command, so a program — a supervising agent, say — can play the person's
 part by running `alaya` as a subprocess. `resume` and `step` exit with status `0` when the run
 ended and `3` when it stopped at a question; with `--json` each state they print is one object
-with `state`, `kind`, `outcome`, and `question`, and `waiting --json` prints `{state, question}`
-per open question. The loop is: resume; on exit 3 read the question, decide, `reply`; resume
+with `state`, `kind`, `outcome`, `question`, `question_type`, and `options`;
+`waiting --json` prints `{state, question, question_type, options}` per open question.
+The loop is: resume; on exit 3 read the question, decide, `reply`; resume
 from the reply's hash.
 
 ```sh
 alaya resume "$hash" --model M --json
-# {"state":"c61754…","kind":"question","outcome":null,"question":"Should I keep the old API?"}
+# {"state":"c61754…","kind":"question","outcome":null,"question":"Should I keep the old API?","question_type":"open_ended","options":[]}
 # exit status 3
 reply=$(alaya reply c61754 "Keep it; add the new one beside it.")
 alaya resume "$reply" --model M --json
@@ -570,7 +576,7 @@ equal hashes.
 | `agent` | object or null | on a root, the agent's complete configuration (§8) |
 | `evaluation` | object or null | `{grader, returncode, elapsed_ms, output, evidence, summary}` on an evaluation |
 | `intervention` | object or null | `{message, changed: ["M path", "+ path", "- path", …]}` on a state that carried a notice |
-| `question` | object or null | `{call_id, text}` on a waiting state |
+| `question` | object or null | `{call_id, text, question_type, options}` on a waiting state |
 
 An **event** is one of:
 

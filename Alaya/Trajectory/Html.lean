@@ -178,7 +178,9 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
       | none => .null
       | some o => .mkObj [("status", o.status), ("submission", o.submission)]),
     ("evaluation", evaluation),
-    ("question", state.question?.map (fun q => Lean.Json.mkObj [("callId", q.callId), ("text", q.text)])
+    ("question", state.question?.map (fun q => Lean.Json.mkObj [
+      ("callId", q.callId), ("text", q.text), ("displayText", q.toQuestion.render),
+      ("questionType", q.questionType.toString), ("options", .arr (q.options.map Lean.Json.str))])
       |>.getD .null),
     ("intervention", state.intervention?.map (fun i => Lean.Json.mkObj [
       ("message", i.message), ("changed", .arr (i.changed.map Lean.Json.str))]) |>.getD .null),
@@ -902,7 +904,7 @@ function select(hash) {
   if (state.image) rows.push(['image', state.image]);
   if (state.agent) rows.push(['agent', JSON.stringify(state.agent)]);
   if (state.outcome) rows.push(['outcome', state.outcome.status]);
-  if (state.question) rows.push(['question', state.question.text]);
+  if (state.question) rows.push(['question', state.question.displayText || state.question.text]);
   if (state.intervention) rows.push(['message', state.intervention.message]);
   for (const [k, v] of rows) {
     const row = el('tr');

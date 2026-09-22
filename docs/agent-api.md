@@ -119,7 +119,7 @@ flowchart LR
 ## 3. Directives and actions
 
 What happens next is decided from the log alone: `next : Log -> Directive` is pure and total, so
-a resumed run behaves exactly as the run it continues. The four directives are everything a
+a resumed run behaves exactly as the run it continues. The five directives are everything a
 run consists of:
 
 ```lean
@@ -127,13 +127,18 @@ inductive Directive where
   | sample                                          -- draw the next response from view log
   | act (call : Chat.ToolCall)                      -- run one tool call
   | observe (callId : String) (content : Lean.Json) -- record a result computed from the log
-  | ask (callId : String) (question : String)       -- ask a person and wait for the answer
+  | ask (callId : String) (question : Question)     -- ask a person and wait for a valid answer
   | done (outcome : Outcome)                        -- the run is over
 ```
 
 `ask` is how an agent asks a person something. The trajectory records the question and stops;
 the person's answer arrives later as the observation of the asking call, and the log continues
-as if the tool had returned.
+as if the tool had returned. `Question` contains the question text, its `questionType`
+(`yesNo`, `multipleChoice`, or `openEnded`), and the candidate `options`. The default is
+an open-ended question. The trajectory stores these fields and validates replies against
+the recorded form before creating an observation: yes/no accepts only `yes` or `no`;
+multiple choice accepts a JSON array of distinct, in-range, one-based option numbers,
+including `[]`; open-ended replies retain their text unchanged.
 
 `observe` is how an agent answers a tool call itself, from the log: `next` computes the result
 and the loop records it as the call's observation, with nothing run and no snapshot taken, so

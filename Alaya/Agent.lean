@@ -1,11 +1,12 @@
 import Alaya.Model
+import Alaya.Agent.Question
 
 /-! The agent API: the log of events, the view of it the model is sent, and the operations a
 trajectory drives an agent with. See `docs/agent-api.md`. -/
 
 namespace Alaya.Agent
 
-open Alaya (Result)
+open Alaya (Result Error)
 
 /-- The context a sample is conditioned on: the output of a view. -/
 abbrev Dialogue := Array Chat.Message
@@ -43,7 +44,7 @@ inductive Directive where
   the agent keeps for itself. Nothing runs and the workspace is not snapshotted. -/
   | observe (callId : String) (content : Lean.Json)
   /-- Stop and wait for a person; their answer is recorded as the observation of `callId`. -/
-  | ask (callId : String) (question : String)
+  | ask (callId : String) (question : Question)
   | done (outcome : Outcome)
   deriving Inhabited
 
@@ -105,7 +106,7 @@ end Log
 /-- How a reference run ended: with an outcome, or at a question a person has to answer. -/
 inductive Stop where
   | outcome (outcome : Outcome)
-  | question (callId : String) (question : String)
+  | question (callId : String) (question : Question)
   deriving Inhabited
 
 /-- The reference loop: follows the agent's directives until it stops, recording every event.
@@ -114,7 +115,9 @@ partial def run (agent : Agent) (workspace : Workspace) (sample : Dialogue -> Re
     (log : Log) : Result (Log × Stop) := do
   match agent.next log with
   | .done outcome => pure (log, .outcome outcome)
-  | .ask callId question => pure (log, .question callId question)
+  | .ask callId question =>
+    Result.fromExcept Error.configuration question.validate
+    pure (log, .question callId question)
   | .sample =>
     let response ← sample (agent.view log)
     run agent workspace sample (log.push (.response response))
