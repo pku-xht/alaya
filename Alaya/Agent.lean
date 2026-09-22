@@ -38,6 +38,10 @@ structure Outcome where
 inductive Directive where
   | sample
   | act (call : Chat.ToolCall)
+  /-- Record `content` as the observation of `callId`: the result of a tool call that `next`
+  answered from the log alone, without the workspace — a page of an earlier output, a value
+  the agent keeps for itself. Nothing runs and the workspace is not snapshotted. -/
+  | observe (callId : String) (content : Lean.Json)
   /-- Stop and wait for a person; their answer is recorded as the observation of `callId`. -/
   | ask (callId : String) (question : String)
   | done (outcome : Outcome)
@@ -117,5 +121,7 @@ partial def run (agent : Agent) (workspace : Workspace) (sample : Dialogue -> Re
   | .act call =>
     let content ← agent.act workspace call
     run agent workspace sample (log.push (.observation call.id content))
+  | .observe callId content =>
+    run agent workspace sample (log.push (.observation callId content))
 
 end Alaya.Agent

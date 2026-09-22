@@ -60,7 +60,46 @@ def argsSuite : Suite := suite "cli.args" #[
       | _ => false
     assertError "empty" ((parse ["--model"]).require "model" "hint") fun
       | .configuration m => m.startsWith "--model needs a value"
-      | _ => false
+      | _ => false,
+
+  test "a task file's middle reaches the first serialized model request as it is" do
+    let path := (← scratch) / "MINIVERO_TASK.md"
+    let contents := String.ofList (List.replicate 6500 '界') ++
+      "\nDONE: implement every API and prove every fixed specification.\n" ++
+      String.ofList (List.replicate 6500 '🦉') ++ "\n"
+    IO.FS.writeFile path contents
+    let task ← assertOk ((parse ["--task-file", path.toString]).taskOf "usage")
+    assertEqual "verbatim, trailing newline included" task contents
+    let uname : Uname := { system := "Linux", release := "test", version := "test", machine := "test" }
+    let logs := #[Agent.MiniSwe.initialLog { task } uname,
+      Agent.MiniVero.initialLog { task } .proof uname,
+      Agent.MiniVero.initialLog { task } .codeproof uname]
+    for log in logs do
+      let request : Chat.Request := { messages := Agent.MiniSwe.view { task } log, tools := Agent.MiniSwe.tools { task } }
+      let json := request.toJson .native
+      let .ok messages := json.getObjValAs? (Array Lean.Json) "messages"
+        | fail "serialized request is missing messages"
+      let .ok content := messages[1]!.getObjValAs? String "content"
+        | fail "serialized request is missing initial task"
+      check ((content.splitOn contents).length == 2) "the whole file must occur once in the first model input",
+
+  test "a task is given as text or as a file, one of the two, and the file must be readable UTF-8" do
+    let configuration (label : String) (result : Result String) (expected : String -> Bool) : TestM Unit :=
+      assertError label result fun
+        | .configuration m => expected m
+        | _ => false
+    assertEqual "text" (← assertOk ((parse ["--task", "fix it"]).taskOf "usage")) "fix it"
+    -- The project may come before or after the flag; the value is the next token whatever it is.
+    for argv in [["root", "--task", "fix it", "./proj"], ["root", "./proj", "--task", "fix it"]] do
+      assertEqual "positional" (parse argv).positional #["root", "./proj"]
+    configuration "neither" ((parse []).taskOf "usage") (· == "usage")
+    configuration "both" ((parse ["--task", "a", "--task-file", "f"]).taskOf "usage") (·.startsWith "give either")
+    configuration "empty text" ((parse ["--task"]).taskOf "usage") (·.startsWith "--task needs a value")
+    configuration "missing value" ((parse ["--task-file"]).taskOf "usage") (·.startsWith "--task-file needs a value")
+    let path := (← scratch) / "missing"
+    configuration "missing file" ((parse ["--task-file", path.toString]).taskOf "usage") (·.startsWith "cannot read")
+    IO.FS.writeBinFile path ⟨#[255, 254]⟩
+    configuration "invalid UTF-8" ((parse ["--task-file", path.toString]).taskOf "usage") (·.endsWith "is not valid UTF-8")
 ]
 
 def endpointSuite : Suite := suite "cli.endpoint" #[

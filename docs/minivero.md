@@ -57,7 +57,7 @@ MiniVero defaults to 200 model turns and a 600-second shell-command timeout. The
 
 MiniVero currently uses MiniSwe's linear history unchanged. Every earlier message remains in the model context, while the complete raw trajectory is also retained for reports, evaluation, and later analysis. This is the baseline used for experiments.
 
-MiniSwe still truncates a single tool output of at least 10,000 characters to its beginning and end before placing it in the model context. No multi-turn compaction or summary is applied before the baseline is evaluated.
+MiniSwe still truncates a single tool output of at least 10,000 characters to its beginning and end before placing it in the model context. With `--recover-output`, the agent can read the cut part back through `read_output` (`docs/miniswe.md` §9), and its mechanics paragraph says so; without, nothing differs. No multi-turn compaction or summary is applied before the baseline is evaluated.
 
 ## Running
 

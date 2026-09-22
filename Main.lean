@@ -55,7 +55,7 @@ private def executorFor (args : Cli.Args) (image? : Option String) (config : Exe
     if args.isSet "image" then
       throw <| .configuration <|
         "this trajectory runs on the host: it was created without --image, and its prompt " ++
-        "describes the host. Start a new one with `alaya root TASK PROJECT --image IMAGE`"
+        "describes the host. Start a new one with `alaya root --task TEXT PROJECT --image IMAGE`"
     pure (Executor.onHost config)
   | some pinned =>
     let settings ← Executor.Docker.settingsFor args pinned
@@ -69,7 +69,8 @@ private def executorFor (args : Cli.Args) (image? : Option String) (config : Exe
           "a continuation has to run the same bits its earlier turns did"
     Executor.Docker.executor settings config
 
-/-- An agent the command line can name with `--agent`. -/
+/-- An agent the command line can name with `--agent`. Each is built for the command line it
+was named on: `--recover-output` turns on `read_output` for either. -/
 private structure AgentSpec where
   name : String
   /-- The opening log of a run for a task, on a machine described by `uname`. The command
@@ -82,17 +83,17 @@ private structure AgentSpec where
   view : Agent.View
   tools : Array Chat.ToolDefinition
 
-private def miniSwe : AgentSpec :=
-  let config : Agent.MiniSwe.Config := { task := "" }
+private def miniSwe (args : Cli.Args) : AgentSpec :=
+  let config : Agent.MiniSwe.Config := { task := "", recoverOutput := args.isSet "recover-output" }
   { name := "mini-swe"
     initialLog := fun _ task uname => pure (Agent.MiniSwe.initialLog { config with task } uname)
     executorConfig := config.executor
     build := fun executor => Agent.MiniSwe.agent executor config
-    view := Agent.MiniSwe.view
-    tools := Agent.MiniSwe.tools }
+    view := Agent.MiniSwe.view config
+    tools := Agent.MiniSwe.tools config }
 
-private def miniVero : AgentSpec :=
-  let config := Agent.MiniVero.defaultConfig
+private def miniVero (args : Cli.Args) : AgentSpec :=
+  let config := { Agent.MiniVero.defaultConfig with recoverOutput := args.isSet "recover-output" }
   { name := "mini-vero"
     initialLog := fun args task uname => do
       let known := " or ".intercalate (Agent.MiniVero.Mode.all.map toString)
@@ -102,14 +103,15 @@ private def miniVero : AgentSpec :=
       | none => throw <| .configuration s!"unknown mode: {name} (use {known})"
     executorConfig := config.executor
     build := fun executor => Agent.MiniVero.agent executor config
-    view := Agent.MiniVero.view
-    tools := Agent.MiniVero.tools }
+    view := Agent.MiniVero.view config
+    tools := Agent.MiniVero.tools config }
 
-private def agents : Array AgentSpec := #[miniSwe, miniVero]
+private def agents (args : Cli.Args) : Array AgentSpec := #[miniSwe args, miniVero args]
 
 /-- The agent named by `--agent`. Required wherever an agent's prompts, tools, or view matter:
 `root`, `resume`, `step`, `html`, and `show --view`. -/
 private def agentOf (args : Cli.Args) : Result AgentSpec := do
+  let agents := agents args
   let known := ", ".intercalate (agents.map (·.name)).toList
   let name ← args.require "agent" s!"one of {known}"
   match agents.find? (·.name == name) with
@@ -163,7 +165,7 @@ private def rootProject (args : Cli.Args) (data : DataDir)
   | some _, some _ =>
     throw <| .configuration "give either a PROJECT directory or --path PATH, not both"
   | none, none =>
-    throw <| .configuration "alaya root TASK (PROJECT | --path PATH --image IMAGE)"
+    throw <| .configuration "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH --image IMAGE)"
 
 private def modelSpecOf (args : Cli.Args) : String := args.getD "model" ""
 
@@ -194,9 +196,10 @@ private def dispatch (argv : List String) : Result UInt32 := do
   let args := Cli.parse argv (aliases := [("-m", "note")])
   let json := args.isSet "json"
   match args.positional.toList with
-  | "root" :: task :: rest =>
+  | "root" :: rest =>
     if rest.length > 1 then
-      throw <| .configuration "alaya root TASK (PROJECT | --path PATH --image IMAGE)"
+      throw <| .configuration "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH --image IMAGE)"
+    let task ← args.taskOf "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH --image IMAGE)"
     -- Before the data directory is created: inside the project it would become part of it.
     if let some project := rest.head? then
       Workspaces.refuseOverlap "snapshot" project #[← args.valueD "data" ".alaya"]
@@ -305,7 +308,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | _ =>
     throw <| .configuration <|
-      "usage: alaya (root TASK (PROJECT | --path P --image I) --agent A [--mode M] | resume HASH --agent A --model P:M | " ++
+      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent A [--mode M] [--recover-output] | resume HASH --agent A --model P:M | " ++
       "step HASH --agent A --model P:M | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++

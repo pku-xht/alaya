@@ -9,7 +9,8 @@
   the log, the agent's **next**;
 - the agent acts in a **workspace**, a directory the trajectory fills from a state's snapshot
   and snapshots again after each act; a tool call is run by the agent's **act**, which returns
-  the observation to record;
+  the observation to record — or answered by `next` itself, from the log, when it needs no
+  workspace;
 - the **tools** offered to the model are fixed for the agent.
 
 An agent is a value of the record `Agent` holding these; `Alaya.Agent.MiniSwe` (`docs/miniswe.md`)
@@ -125,6 +126,7 @@ run consists of:
 inductive Directive where
   | sample                                          -- draw the next response from view log
   | act (call : Chat.ToolCall)                      -- run one tool call
+  | observe (callId : String) (content : Lean.Json) -- record a result computed from the log
   | ask (callId : String) (question : String)       -- ask a person and wait for the answer
   | done (outcome : Outcome)                        -- the run is over
 ```
@@ -132,6 +134,13 @@ inductive Directive where
 `ask` is how an agent asks a person something. The trajectory records the question and stops;
 the person's answer arrives later as the observation of the asking call, and the log continues
 as if the tool had returned.
+
+`observe` is how an agent answers a tool call itself, from the log: `next` computes the result
+and the loop records it as the call's observation, with nothing run and no snapshot taken, so
+the state keeps its parent's workspace. It is for tools whose result is a function of what was
+already recorded — a page of an earlier command's output (`docs/miniswe.md` §9), a value the
+agent keeps for itself and edits through tools. The view sees an ordinary observation and
+decides how, and whether, the model sees it.
 
 ```lean
 structure Workspace where
@@ -176,6 +185,9 @@ flowchart TD
   NEXT -->|"act call"| A1["content := agent.act workspace call"]
   A1 --> A2["log.push (observation call.id content)"]
   A2 --> NEXT
+
+  NEXT -->|"observe callId content"| O1["log.push (observation callId content)"]
+  O1 --> NEXT
 
   NEXT -->|"ask callId question"| SU["Stop.question: a person must answer"]
   NEXT -->|"done outcome"| DO["Stop.outcome"]

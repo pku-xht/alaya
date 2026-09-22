@@ -1,5 +1,6 @@
 import Alaya.Agent
 import Alaya.Executor
+import Alaya.Agent.OutputRead
 
 /-! A port of mini-SWE-agent's default tool-calling agent as an `Alaya.Agent.Agent`. See
 `docs/miniswe.md`. -/
@@ -25,6 +26,11 @@ structure Config where
   maxConsecutiveFormatErrors : Nat := 3
   /-- How commands are run. -/
   executor : Executor.Config := defaultExecutor
+  /-- Offer `read_output`, which shows any lines of a long output the view cut to its head and
+  tail. Off, the agent is mini to the byte: its tools, its prompts, its observations. On, the
+  tool is offered and the two sentences that require a bash call in every response say "a
+  tool call" instead (`withRecovery`). -/
+  recoverOutput : Bool := false
   deriving Inhabited
 
 /-! ## Prompts
@@ -58,10 +64,20 @@ def instanceMessage (task system release version machine : String) : String :=
     system ++ " " ++ release ++ " " ++ version ++ " " ++ machine ++
     (if system == "Darwin" then instanceSuffixDarwin else instanceSuffixOther)
 
+/-- The one thing recovery changes in mini's texts: a response must hold a tool call, not a
+bash call, since it may be a `read_output` alone. -/
+def withRecovery (recover : Bool) (text : String) : String :=
+  if !recover then text else
+    let text := text.replace "Your response MUST include AT LEAST ONE bash tool call"
+      "Your response MUST include AT LEAST ONE tool call: bash, or read_output to see more of an earlier command's output"
+    text.replace "Every response needs to use the 'bash' tool at least once to execute commands."
+      "Every response needs at least one tool call: 'bash' to execute commands, or 'read_output' to see more of an earlier command's output."
+
 /-- The opening log of a run: the system prompt and the task. -/
 def initialLog (config : Config) (uname : Uname) : Log :=
   #[.message (.system systemMessage),
-    .message (.user (instanceMessage config.task uname.system uname.release uname.version uname.machine))]
+    .message (.user (withRecovery config.recoverOutput
+      (instanceMessage config.task uname.system uname.release uname.version uname.machine)))]
 
 /-! ## Tools -/
 
@@ -80,7 +96,8 @@ def submitTool : Chat.ToolDefinition := {
 }
 
 /-- The tools offered on every sample. -/
-def tools : Array Chat.ToolDefinition := #[bashTool, submitTool]
+def tools (config : Config) : Array Chat.ToolDefinition :=
+  #[bashTool, submitTool] ++ (if config.recoverOutput then #[OutputRead.tool] else #[])
 
 /-! ## The view of an observation -/
 
@@ -88,8 +105,10 @@ def tools : Array Chat.ToolDefinition := #[bashTool, submitTool]
 def outputLimit : Nat := 10000
 
 /-- The tool message for an execution result: the recorded `Output` as JSON, with `output`
-cut to its first and last `outputLimit / 2` characters when it is `outputLimit` or longer. -/
-def observation (o : Output) : Lean.Json :=
+cut to its first and last `outputLimit / 2` characters when it is `outputLimit` or longer.
+With `read_output` offered (`recovery?` is then the call's id), the warning says how to see
+the rest: a model given only `tool_call_id` in the envelope has been seen to guess the id. -/
+def observation (o : Output) (recovery? : Option String := none) : Lean.Json :=
   let length := o.output.length
   let fields : List (String × Lean.Json) :=
     if length < outputLimit then [("output", o.output)]
@@ -98,7 +117,9 @@ def observation (o : Output) : Lean.Json :=
       [("output_head", String.ofList (o.output.toList.take half)),
        ("output_tail", String.ofList (o.output.toList.drop (length - half))),
        ("elided_chars", (length - outputLimit : Nat)),
-       ("warning", "Output too long.")]
+       ("warning", match recovery? with
+         | none => "Output too long."
+         | some id => s!"Output too long. read_output shows any lines of the whole of it; this call's id is {id}.")]
   let fields := fields ++ [("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null)]
   let fields := match o.error? with
     | some error => fields ++ [("error", Lean.Json.str error)]
@@ -112,7 +133,9 @@ def endHint : String :=
   "If you want to end the task, call the `submit` tool\nwithout any other tool call."
 
 /-- The user turn a malformed response is answered with. -/
-def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : Option String) : String :=
+def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : Option String)
+    (recover : Bool := false) : String :=
+  withRecovery recover <|
   let truncated := match finishReason? with
     | some "length" => true
     | some "tool_calls" => !hasToolCalls
@@ -132,11 +155,14 @@ def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : O
 /-- One parsed tool call: a shell script to run, or the call that ends the run. -/
 inductive Action where
   | bash (id : String) (command : String)
+  /-- A `read_output` call: answered from the log, so its arguments travel with it. -/
+  | readOutput (id : String) (arguments : Lean.Json)
   | submit (id : String) (message : String)
   deriving Inhabited
 
 def Action.id : Action -> String
   | .bash id _ => id
+  | .readOutput id _ => id
   | .submit id _ => id
 
 /-- A parsed model turn: its actions, or a format-error message to send back as a user turn. -/
@@ -144,12 +170,13 @@ inductive Parsed where
   | actions (actions : Array Action)
   | formatError (message : String)
 
-/-- Reads a response's tool calls; the first call with a problem makes the turn a format error. -/
-def parseActions (response : Chat.Response) : Parsed := Id.run do
+/-- Reads a response's tool calls; the first call with a problem makes the turn a format error.
+`read_output` is a known tool only when it is offered. -/
+def parseActions (response : Chat.Response) (recover : Bool := false) : Parsed := Id.run do
   if response.toolCalls.isEmpty then
     return .formatError <| formatErrorMessage
       "No tool calls found in the response. Every response MUST include at least one tool call."
-      false response.finishReason?
+      false response.finishReason? recover
   let mut actions : Array Action := #[]
   for call in response.toolCalls do
     let problem? : Option String :=
@@ -158,6 +185,11 @@ def parseActions (response : Chat.Response) : Parsed := Id.run do
           (match Lean.Json.parse raw with | .error e => e | .ok _ => "invalid JSON") ++ ".")
       else match call.name with
         | "submit" => none
+        | "read_output" =>
+          if !recover then some "Unknown tool 'read_output'." else
+          match OutputRead.parse call.arguments with
+          | .ok _ => none
+          | .error message => some message
         | "bash" =>
           match call.arguments.getObjVal? "command" with
           | .ok (.str _) => none
@@ -165,8 +197,9 @@ def parseActions (response : Chat.Response) : Parsed := Id.run do
           | .error _ => some "Missing 'command' argument in bash tool call."
         | other => some s!"Unknown tool '{other}'."
     if let some problem := problem? then
-      return .formatError (formatErrorMessage problem true response.finishReason?)
+      return .formatError (formatErrorMessage problem true response.finishReason? recover)
     match call.name with
+    | "read_output" => actions := actions.push (.readOutput call.id call.arguments)
     | "submit" =>
       let message := match call.arguments.getObjVal? "message" with
         | .ok (.str m) => m
@@ -182,28 +215,29 @@ def parseActions (response : Chat.Response) : Parsed := Id.run do
 /-! ## The agent: view, control, action -/
 
 /-- The view: a malformed response is shown as the format error, as a user turn; an observation
-as `observation` of the recorded `Output`. -/
-def view (log : Log) : Dialogue :=
+as `observation` of the recorded `Output`. A page of `read_output` is not an `Output` and is
+shown as recorded. -/
+def view (config : Config) (log : Log) : Dialogue :=
   log.map fun
     | .message m => m
     | .response r =>
-      match parseActions r with
+      match parseActions r config.recoverOutput with
       | .actions _ => .assistant r.content? r.toolCalls r.reasoning?
       | .formatError message => .user message
     | .observation id content =>
       let json := match Output.fromJson? content with
-        | some output => observation output
+        | some output => observation output (if config.recoverOutput then some id else none)
         | none => content
       .tool id (.str json.pretty)
 
 /-- How many format-error responses end the log with no clean turn between them. A person's
 message in between does not reset the count; an observation does, since it means a turn ran. -/
-private def trailingFormatErrors (log : Log) : Nat := Id.run do
+private def trailingFormatErrors (config : Config) (log : Log) : Nat := Id.run do
   let mut count := 0
   for event in log.reverse do
     match event with
     | .response r =>
-      match parseActions r with
+      match parseActions r config.recoverOutput with
       | .formatError _ => count := count + 1
       | .actions _ => return count
     | .observation _ _ => return count
@@ -218,10 +252,10 @@ def next (config : Config) (log : Log) : Directive :=
   match log.lastResponse? with
   | none => sampleOrStop
   | some response =>
-    match parseActions response with
+    match parseActions response config.recoverOutput with
     | .formatError _ =>
       if config.maxConsecutiveFormatErrors > 0 &&
-          trailingFormatErrors log >= config.maxConsecutiveFormatErrors
+          trailingFormatErrors config log >= config.maxConsecutiveFormatErrors
       then .done { status := "RepeatedFormatError" }
       else sampleOrStop
     | .actions actions =>
@@ -229,6 +263,7 @@ def next (config : Config) (log : Log) : Directive :=
       match actions.find? (fun action => pending.any (·.id == action.id)) with
       | none => sampleOrStop
       | some (.submit _ message) => .done { status := "Submitted", submission := message }
+      | some (.readOutput id arguments) => .observe id (OutputRead.read log arguments outputLimit)
       | some (.bash id _) =>
         match pending.find? (·.id == id) with
         | some call => .act call
@@ -248,9 +283,10 @@ def agent (executor : Executor) (config : Config) : Agent := {
   identity := .mkObj [
     ("agent", "mini-swe"), ("step_limit", (config.stepLimit : Lean.Json)),
     ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
-    ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json))]
-  tools
-  view
+    ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
+    ("recover_output", (config.recoverOutput : Lean.Json))]
+  tools := tools config
+  view := view config
   next := next config
   act := act executor
 }

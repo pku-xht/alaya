@@ -18,7 +18,7 @@ a restic repository and named by its snapshot ID (§5).
 
 ```sh
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
-root=$(alaya root "make the test suite pass" ./project --agent mini-swe --image python:3.12-slim)
+root=$(alaya root --task "make the test suite pass" ./project --agent mini-swe --image python:3.12-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
 
 alaya show adbac1          # the state: kind, parent, workspace snapshot, note, image, then its log
@@ -513,7 +513,7 @@ links, extended attributes. The identifier is the restic snapshot ID.
 A snapshot or a checkout of a directory that overlaps the run's own storage — the repository,
 `D/states`, `D/cache` — is refused before anything is touched: the one would capture the
 storage, and the other deletes what the snapshot does not hold, which is the storage. So
-`alaya checkout STATE .` beside `.alaya`, and `alaya root TASK .` with the default data
+`alaya checkout STATE .` beside `.alaya`, and `alaya root --task T .` with the default data
 directory, are errors that say to move one of the two.
 
 Every operation is one `restic` process with `--no-cache --insecure-no-password`: the repository
@@ -536,110 +536,6 @@ project with Mathlib — 7.2 GB in 121,433 files, an Apple M5 Pro's internal vol
 
 *What is on disk: the data directory, and what a state object refers to.*
 
-```mermaid
-flowchart TD
-  alayaRoot[".alaya/"]
-  statesDir["states/, one file per state"]
-  resticDir["restic/, workspace snapshots"]
-  modelCacheDir["cache/, model response cache"]
-  workDir["work/, agent's working directory"]
-  alayaRoot --> statesDir
-  alayaRoot --> resticDir
-  alayaRoot --> modelCacheDir
-  alayaRoot --> workDir
-
-  stateObj["state object: hash.json, JSON"]
-  parentState["parent state object"]
-  snapshot["restic snapshot, the workspace"]
-  statesDir --> stateObj
-  resticDir --> snapshot
-  stateObj -->|parent, its hash| parentState
-  stateObj -->|workspace, a snapshot ID| snapshot
-
-  cacheEntry["cache/v1/hash.json: key + responses[]"]
-  modelCacheDir --> cacheEntry
-
-  subgraph Notes[" "]
-    direction TB
-    rmNote["rm deletes state files and keeps the snapshots the surviving states name"]
-    workNote["work/ is re-materialized at every checkout, and holds nothing durable"]
-  end
-```
-
-```
-$ ls .alaya
-cache  restic  restic-scratch  states  work
-$ ls .alaya/states | head -2
-4f2c8b1e0a33….json
-adbac197aea8….json
-```
-
-## 6. The state object
-
-A state object is compact JSON. Field order is canonical (sorted keys), so equal states have
-equal hashes.
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `v` | 1 | schema version; a reader refuses any other |
-| `parent` | hex or null | the parent state |
-| `workspace` | hex | the workspace: a snapshot ID (§5) |
-| `kind` | string | one of the kinds in §1 |
-| `appended` | array of events | what this state adds to the parent's log |
-| `outcome` | `{status, submission}` or null | when this state ended the run |
-| `note` | string or null | provenance |
-| `image` | string or null | the pinned container image, inherited |
-| `evaluation` | object or null | `{grader, returncode, elapsed_ms, output, evidence, summary}` on an evaluation |
-| `intervention` | object or null | `{message, changed: ["M path", "+ path", "- path", …]}` on a state that carried a notice |
-| `question` | object or null | `{call_id, text}` on a waiting state |
-
-An **event** is one of:
-
-```json
-{"type": "message", "message": {"role": "system"|"user", "content": "…"}}
-{"type": "message", "message": {"role": "assistant", "content": …, "reasoning": …, "tool_calls": [call…]}}
-{"type": "message", "message": {"role": "tool", "tool_call_id": "…", "content": <json>}}
-{"type": "response", "response": {"content", "tool_calls": [call…], "reasoning", "finish_reason", "usage": {"input", "output", "total"}}}
-{"type": "observation", "call_id": "…", "content": <json>}
-```
-
-where a **call** is `{"id", "name", "arguments": <json>, "invalid_arguments": string|null}` —
-`invalid_arguments` keeps the raw text when the provider's arguments were not JSON, so the
-dialogue sent back to the model is byte-identical to what it produced. An observation's
-`content` is whatever the agent's `act` returned; the trajectory never reads it.
-
-`alaya show HASH` prints a state's fields and its full log in a readable form; with `--view` and an
-agent it also prints the dialogue that agent's view makes of the log, which is what the model is
-sent from that state:
-
-```sh
-alaya show 4f2c8b
-alaya show 4f2c8b --view --agent mini-swe
-alaya diff adbac1 4f2c8b        # the workspace changes between two states, one path per line
-```
-
-## 7. The model cache entry
-
-`D/cache/v1/<hash>.json`, where `hash` is Lean's generic hash of the cache key:
-
-```json
-{
-  "version": 1,
-  "key": "<compress {model: <identity>, structured_output: <mode>, request: <Request.toJson>}>",
-  "responses": [
-    {"content": …, "tool_calls": [call…], "usage": {…}, "finish_reason": …, "reasoning_content": …},
-    …
-  ]
-}
-```
-
-`responses[i]` is draw `i` of that request under that model identity. The stored key is checked
-against the file name on load, and a corrupt entry reads as empty and is replaced on the next
-successful sample. The key contains the full
-request, so anything that changes what the model is sent — the view, the tool list, the model
-identity including options such as reasoning echo — changes the key, and a forest recorded under
-one will not replay under another.
-
 ```
 $ ls .alaya/cache/v1 | head -2
 1180723829451067366.json
@@ -652,8 +548,8 @@ an entry is only ever appended to.
 ## 8. Commands
 
 ```
-alaya root TASK PROJECT --agent A [--image IMAGE]      create a root from a project directory
-alaya root TASK --agent A --image IMAGE --path PATH    …or from a path inside the image
+alaya root --task TEXT PROJECT --agent A [--image IMAGE]   create a root from a project directory
+alaya root --task-file FILE --agent A --image IMAGE --path PATH   …or from a path inside the image
 alaya resume HASH --agent A --model P:M                grow one continuation until it ends or asks
 alaya step   HASH --agent A --model P:M                advance exactly one turn
 alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a checkout; record the verdict
@@ -669,8 +565,17 @@ alaya html [FILE] --agent A [--hide DIR]         write the forest as one self-co
 alaya rm HASH                                    delete a subtree and the snapshots only it used
 ```
 
+`root` takes the task as `--task TEXT` or `--task-file FILE`, one of the two. The file is read
+on the host — relative to the current directory, whatever image the run uses — as it is, not
+trimmed or rewritten, and must be UTF-8; a missing or unreadable file is an error before
+anything is created, not an empty task. Either way the task is saved in the opening log and the
+root's note, so the first request carries all of it without a tool read: a task specification
+too long for a command's output preview reaches the model whole, its middle included.
+
 Every command takes `--data D` and `--json` where it prints states. `--agent A` names the agent
-where its prompts, tools, or view matter: `mini-swe` or `mini-vero`. `root` takes `--image`,
+where its prompts, tools, or view matter: `mini-swe` or `mini-vero`, and `--recover-output`
+beside it offers either agent the `read_output` tool (`docs/miniswe.md` §9) — on every command
+of a run, since the tools and the view are the agent's. `root` takes `--image`,
 `--container-user`, and `--network`, and for `mini-vero` a required `--mode proof|codeproof`
 (`docs/minivero.md`); `resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
@@ -695,3 +600,5 @@ need separate data directories: the work directory and the cache are not shared 
   after the grader ran, and nothing continues from it.
 - A waiting state grows only by `reply`.
 - The trajectory reads no observation's content and knows no tool's name.
+- A tool call `next` answers from the log (`Directive.observe`) is recorded as an observation
+  like any other; the state's workspace is its parent's.

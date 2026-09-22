@@ -63,6 +63,7 @@ def goldenSuite : Suite := suite "mini.golden" #[
     check (!contains (instanceMessage "t" "Linux" "r" "v" "m") "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
       "the prompt does not",
 
+
   iotest "an observation is the recorded output as JSON, cut when long" do
     let field (json : Lean.Json) (key : String) : Option Lean.Json := (json.getObjVal? key).toOption
     let short := observation { output := "hello\n", exitCode? := some 0 }
@@ -115,9 +116,44 @@ private def responseWith (calls : Array Chat.ToolCall) (finish := "tool_calls") 
 
 private def actionSummary : Action -> String × String
   | .bash id command => (id, command)
+  | .readOutput id _ => (id, "read_output")
   | .submit id message => (id, "submit:" ++ message)
 
 def parseSuite : Suite := suite "mini.parse" #[
+  test "with recovery off the agent is mini to the byte; on, two sentences and a tool differ" do
+    let off : Config := { task := "t" }
+    let on : Config := { task := "t", recoverOutput := true }
+    assertEqual "tools off" ((tools off).map (·.name)) #["bash", "submit"]
+    assertEqual "tools on" ((tools on).map (·.name)) #["bash", "submit", "read_output"]
+    let opening (config : Config) : String :=
+      match (initialLog config testUname)[1]? with
+      | some (Event.message (Chat.Message.user text)) => text
+      | _ => ""
+    assertStringEq "opening off" (opening off)
+      (instanceMessage "t" testUname.system testUname.release testUname.version testUname.machine)
+    let delta := (opening on).replace
+      "Your response MUST include AT LEAST ONE tool call: bash, or read_output to see more of an earlier command's output"
+      "Your response MUST include AT LEAST ONE bash tool call"
+    assertStringEq "opening on differs in one sentence" delta (opening off)
+    check (contains (formatErrorMessage "e" true (some "stop") true) "'read_output'") "the repair text names it"
+    assertStringEq "repair off is unchanged" (formatErrorMessage "e" true (some "stop") false)
+      (formatErrorMessage "e" true (some "stop"))
+    -- On, a long output's warning names the call to read it back by; off, it is mini's.
+    let long := Output.toJson { output := String.ofList (List.replicate 20000 'x'), exitCode? := some 0 }
+    let warning (config : Config) : String :=
+      match (view config #[.observation "call_7" long]).back? with
+      | some (Chat.Message.tool _ (.str shown)) =>
+        match Lean.Json.parse shown with
+        | .ok json => (json.getObjVal? "warning" >>= Lean.Json.getStr?).toOption.getD ""
+        | .error _ => ""
+      | _ => ""
+    assertStringEq "warning off" (warning off) "Output too long."
+    check (contains (warning on) "this call's id is call_7") s!"the warning should name the call: {warning on}"
+    -- Off, the tool is unknown, as any other unlisted tool is.
+    match parseActions (responseWith #[call "r" "read_output" "x"]) with
+    | .formatError message => check (contains message "Unknown tool 'read_output'") "unknown when off"
+    | .actions _ => fail "read_output should be unknown when recovery is off",
+
   iotest "bash tool schema is mini's, in strict mode" do
     -- mini's BASH_TOOL plus the `additionalProperties: false` every strict object carries
     -- (Json.compress emits keys in sorted order).
@@ -201,7 +237,7 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
   let (log, stop) ← assertOk <| Agent.run mini { dir := work } sample (initialLog config testUname)
   let env ← assertOk <| (← workspaces).snapshot work
   match stop with
-  | .outcome outcome => pure (view log, env, outcome)
+  | .outcome outcome => pure (view config log, env, outcome)
   | .question _ q => fail s!"unexpected question: {q}"
 
 def runSuite : Suite := suite "mini.run" #[
@@ -421,7 +457,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let state ← assertOk (getState rt.store told)
     check (state.kind == .message) "a tell is a message state"
     check (state.workspace == (← assertOk (getState rt.store root)).workspace) "a tell keeps the workspace"
-    match (view (← assertOk (logOf rt.store told))).back? with
+    match (view { task := "t" } (← assertOk (logOf rt.store told))).back? with
     | some (.user notice) =>
       check (contains notice "Please re-run your checks.") "the notice carries the message verbatim"
       check (contains notice "<intervention>") "the notice is enveloped"
@@ -439,7 +475,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     IO.FS.removeDirAll (project / "toFile")
     IO.FS.writeFile (project / "toFile") "now a file"
     let child ← assertOk <| commit rt.store rt.workspaces root project (some "retyped")
-    let page ← assertOk <| Html.dataJson rt.store rt.workspaces view tools
+    let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view { task := "t" }) (tools { task := "t" })
     let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
     let some state := states.find? fun s =>
         (s.getObjVal? "hash" >>= Lean.Json.getStr?).toOption == some child.hex
@@ -512,7 +548,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let root ← mkRoot rt (← emptyProject)
     let first ← assertOk <| stepOnce rt "test:model" root
     let second ← assertOk <| stepOnce rt "test:model" first
-    let page ← assertOk <| Html.dataJson rt.store rt.workspaces view tools
+    let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view { task := "t" }) (tools { task := "t" })
     let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
     let envelope ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "request")
     -- Assemble the context as the page does: every state's `wire` from the root down.
@@ -522,7 +558,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
       | none => fail s!"state {hash.hex} missing from the report"
     let assembled := envelope.setObjVal! "messages"
       (.arr ((← wireOf root) ++ (← wireOf first) ++ (← wireOf second)))
-    let sent : Chat.Request := { messages := view (← assertOk (logOf rt.store second)), tools }
+    let sent : Chat.Request := { messages := view { task := "t" } (← assertOk (logOf rt.store second)), tools := tools { task := "t" } }
     assertStringEq "request" assembled.compress sent.toJson.compress
     check ((← wireOf second).size == 1) "the format-error state adds exactly one wire message",
 

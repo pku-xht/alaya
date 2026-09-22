@@ -13,7 +13,7 @@ change behaviour are listed in §7.
 ```lean
 def agent (executor : Executor) (config : Config) : Agent := {
   identity := { agent := "mini-swe", step_limit, max_consecutive_format_errors, timeout_seconds }
-  tools := #[bashTool, submitTool]
+  tools := #[bashTool, submitTool]            -- and read_output, when config.recoverOutput
   view
   next := next config
   act := act executor }
@@ -46,6 +46,11 @@ submission sentinel, which name the `submit` tool. The opening log is frozen int
 (every property required, no others). `submit` replaces mini's convention of ending a run when a
 command prints a sentinel line, which would require whoever runs the agent to read tool output;
 here the end of a run is a tool call, visible in the log's structure.
+
+With `recoverOutput` on, a third tool is offered. **`read_output`** takes `call_id`, the id of an
+earlier `bash` call, and `offset` and `limit`, a range of lines counting from 1, and shows those
+lines of that call's full output — the view shows a long output cut to its head and tail (§5),
+while the log holds all of it. See §9.
 
 ## 4. Reading a response: `parseActions`
 
@@ -115,7 +120,8 @@ flowchart LR
    observation does, since it means a turn ran.
 2. **After a response with actions.** The first action whose call no observation has answered
    yet is next. A `submit` there is `done Submitted`, with its message as the submission; a
-   `bash` there is `act` on that call. Calls after a `submit` in the same response never run.
+   `bash` there is `act` on that call; a `read_output` there is `observe` with the page, computed
+   from the log by `OutputRead.read` (§9). Calls after a `submit` in the same response never run.
 3. **When every call is answered**, `sample` — unless `stepLimit` is set and the log already
    holds that many responses, in which case `done LimitsExceeded`. The limit is checked before
    the model call, as mini does.
@@ -170,3 +176,28 @@ the run and is gone when a branch is resumed later.
 - Error texts are plain, not Python's exception messages.
 - The environment is a snapshot of the working directory, not a persistent machine.
 - No per-model cost accounting, so mini's `cost_limit` is not enforced.
+- With `recoverOutput` on: the `read_output` tool, two sentences, and a warning (§9).
+
+## 9. Reading a long output back: `read_output`
+
+Off by default, and then nothing above changes. On (`Config.recoverOutput`, `--recover-output`
+on the command line), the agent can see the part of a command's output the view cut:
+
+- The **warning** on a cut output names the call: `Output too long. read_output shows any lines
+  of the whole of it; this call's id is call_…`. The id is also the tool message's
+  `tool_call_id`, but a model given only that has been seen to guess.
+- **`read_output {call_id, offset, limit}`** is answered by `next` from the log, as
+  `Directive.observe`: nothing runs, no snapshot is taken, and the state records the page as an
+  ordinary observation with the parent's workspace. The output is the most recent observation
+  with that id whose content is a command's `Output`, so an id a provider reuses across turns
+  names the latest; a fork reads its ancestors' outputs and nothing else, since it reads its own
+  log.
+- The **page** is `{"text": "…", "lines": "2500-2502 of 5000"}`: whole lines while they fit in
+  `outputLimit` characters, or the first line alone, cut, and said so. A page is not an `Output`
+  — its field is `text`, not `output` — so the view shows it as recorded rather than cutting it
+  again. An unknown id, an offset past the end, or bad arguments give `{"error": "…"}`, an
+  observation like any other; malformed arguments are a format error, as for `bash`.
+- The two sentences of mini's texts that require a bash call in every response say a tool call
+  instead, since a response may be a `read_output` alone (`withRecovery`). That, and the tool,
+  are the whole difference: with the flag off, the prompts, tools and observations are mini's to
+  the byte, and the response cache keys do not move.

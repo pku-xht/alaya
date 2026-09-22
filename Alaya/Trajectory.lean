@@ -450,6 +450,10 @@ private partial def follow (rt : Runtime) (log : Log) (appended : Log) (workspac
     let workspace ← rt.workspaces.snapshot rt.workDir
     let event := Event.observation call.id content
     follow rt (log.push event) (appended.push event) workspace
+  | .observe callId content =>
+    -- Nothing ran: the workspace is as it was, and the state keeps its identifier.
+    let event := Event.observation callId content
+    follow rt (log.push event) (appended.push event) workspace
 
 /-- Runs one model turn from `parent` (whose log is `log` and workspace is `workspace`, already
 materialized into `rt.workDir`), records it as a new child state, and returns the child, its log,

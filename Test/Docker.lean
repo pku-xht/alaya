@@ -64,10 +64,10 @@ private def workspace : TestM System.FilePath := do
 
 /-- A runtime driving the mini agent in the container. -/
 private def runtime (settings : Docker.Settings) (work : System.FilePath) (store : Trajectory.Store)
-    (model : Model) : TestM Runtime := do
+    (model : Model) (agentConfig : Agent.MiniSwe.Config := miniConfig) : TestM Runtime := do
   let executor ← assertOk (Docker.executor settings config)
   pure { store, workspaces := ← workspaces, workDir := work, executor, model
-         agent := Agent.MiniSwe.agent executor miniConfig }
+         agent := Agent.MiniSwe.agent executor agentConfig }
 
 def suite : Suite := Testing.suite "docker" #[
   test "pins the image to exact bits and reads uname from it, not the host" <| withDocker
@@ -211,6 +211,43 @@ def suite : Suite := Testing.suite "docker" #[
         assertEqual "image inherited" state.image? (some settings.image)
       finally
         rt.executor.close,
+
+  test "read_output survives closing and recreating the execution container" <| withDocker
+    fun settings => do
+      let work ← workspace
+      let project := (← scratch) / "proj"
+      IO.FS.createDirAll project
+      let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+      let model ← scripted #[toolResponse "awk 'BEGIN {for(i=0;i<6000;i++) printf \"a\"; printf \"MIDDLE\"; for(i=0;i<6000;i++) printf \"z\"}'"]
+      let first ← runtime settings work store model
+      let saved ← try
+        let root ← assertOk <| createRoot store (← workspaces) #[] project (image? := some settings.image)
+        assertOk <| stepOnce first "produce" root
+      finally first.executor.close
+      let log ← assertOk <| logOf store saved
+      let some produced := log.findSome? (fun
+          | .observation id content => if (Output.fromJson? content).isSome then some id else none
+          | _ => none)
+        | fail "expected the command's output"
+      IO.FS.removeDirAll work
+      IO.FS.createDirAll work
+      let reopened ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+      let readCall : Chat.ToolCall := {
+        id := "read", name := "read_output"
+        arguments := .mkObj [("call_id", produced), ("offset", 1), ("limit", 1)] }
+      let reading ← scripted #[{ toolCalls := #[readCall] }]
+      let second ← runtime settings work reopened reading { miniConfig with recoverOutput := true }
+      try
+        -- Start an actual replacement container before reading through the resumed driver.
+        assertEqual "new container starts" (← second.executor.bash work "true").exitCode? (some 0)
+        let child ← assertOk <| stepOnce second "read" saved
+        let page? := (← assertOk <| logOf reopened child).reverse.findSome? fun
+          | .observation "read" content => (content.getObjVal? "text" >>= Lean.Json.getStr?).toOption
+          | _ => none
+        -- One line of 12,006 characters, cut to a page: its middle, which the view elided, is there.
+        assertEqual "the page is the line, cut" (page?.map (·.length)) (some Agent.MiniSwe.outputLimit)
+        check (page?.any fun text => (text.splitOn "MIDDLE").length == 2) "the elided middle is readable"
+      finally second.executor.close,
 
   test "a missing image is a configuration error naming it" <| withDocker
     fun _ => do
