@@ -8,13 +8,13 @@ namespace MiniVeroTests
 open Testing Alaya
 open Alaya.Agent
 
-private def config : MiniVero.Config := { MiniVero.defaultConfig with task := "TASK_CODEPROOF" }
+private def config : MiniVero.Config := {}
 
 private def contains (text needle : String) : Bool :=
   (text.splitOn needle).length > 1
 
 private def openingText (task : String) (mode : MiniVero.Mode := .codeproof) : TestM String := do
-  let log := MiniVero.initialLog { config with task } mode
+  let log := MiniVero.initialLog { config with mode } task
     { system := "Linux", release := "", version := "", machine := "x86_64" }
   match log[1]? with
   | some (Event.message (Chat.Message.user text)) => pure text
@@ -120,15 +120,15 @@ def suite : Suite := Testing.suite "mini-vero" #[
     | .sample => pure ()
     | _ => fail "should continue after compiler feedback",
   test "submit is terminal but is not claimed to be a passing evaluation" do
-    let agent := MiniVero.agent (Executor.onHost config.executor) config
+    let agent := MiniVero.agent (Executor.onHost config.base.executor) config
     let log : Log := #[.response { toolCalls := #[{
       id := "s", name := "submit", arguments := .mkObj [("message", "done")] }] }]
     match agent.next log with
     | .done outcome => assertEqual "status" outcome.status "Submitted"
     | _ => fail "expected submission",
   test "the step limit is enforced and long output stays in the raw log" do
-    let cfg : MiniVero.Config := { config with stepLimit := 1 }
-    let agent := MiniVero.agent (Executor.onHost cfg.executor) cfg
+    let cfg : MiniVero.Config := { config with base := { config.base with stepLimit := 1 } }
+    let agent := MiniVero.agent (Executor.onHost cfg.base.executor) cfg
     let call : Chat.ToolCall := { id := "c", name := "bash", arguments := .mkObj [("command", "lake build")] }
     let raw := String.ofList (List.replicate 12000 'x')
     let log : Log := #[.response { toolCalls := #[call] },

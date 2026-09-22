@@ -57,10 +57,10 @@ The skeleton is a project directory, so it seeds a trajectory directly; `TASK.tx
 statement, kept here so every run is given the same one. From the repository root:
 
 ```sh
-root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agent mini-swe \
+root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agent agents/mini-swe-default.json \
   --image ghcr.io/astral-sh/uv:python3.12-alpine3.23)
 
-alaya resume "$root" --agent mini-swe --model dgx:gpt-oss-120b
+alaya resume "$root" --model dgx:gpt-oss-120b
 
 alaya eval <final-hash> --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800
 # <hash>  fail 1 155/232  (61377 ms)

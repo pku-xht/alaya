@@ -158,12 +158,18 @@ than throwing, so that a run survives a failed command.
 
 ```lean
 structure Agent where
-  identity : Lean.Json                   -- who this is and how it is configured, for provenance
+  identity : Lean.Json                   -- its configuration: what a root records
   tools : Array Chat.ToolDefinition      -- offered on every sample
   view : View
   next : Log -> Directive
   act : Workspace -> Chat.ToolCall -> Result Lean.Json
 ```
+
+The tools themselves live in `Alaya.Agent.Tools`, each defined on its own — schema, argument
+reading, and what answers a call — with no knowledge of any agent; an agent composes them.
+`Alaya.Agent.Families` is how the command line gets an agent: a *family* (`mini-swe`,
+`mini-vero`) reads a JSON configuration into an `Instance` — its opening log, tools, view and
+`build` — and the root records the configuration (`docs/trajectory-schema.md` §8).
 
 `Agent.run agent workspace sample log` is the reference loop: follow `next` until it stops, sampling from
 `view log` and pushing every event. It returns the final log and a `Stop`: an `outcome`, or a

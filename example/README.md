@@ -16,15 +16,15 @@ the agent so, and a grader scoring a state the agent could never continue from.
 ## What it shows
 
 ```
-c65e69cce522  root      the task and the skeleton of the Bija project
+76d880264177  root      the task and the skeleton of the Bija project
   ...         10 turns  the agent reads SPEC.md, writes src/bija/cli.py, runs sample programs
-  adfc3ed05434  turn    three sample programs still fail to parse
-    4766611d3c43  submit   [Submitted] "I'm out of time for a complete spec pass"
-      3d504a99cf8b  eval   [fail 29/232]
-    9de33216c587  commit   a person fixes three parser bugs by hand and tells the agent
+  dba0adb1cd03  turn    three sample programs still fail to parse
+    87fc41d3653f  submit   [Submitted] "I'm out of time for a complete spec pass"
+      5f64ce1f762d  eval   [fail 29/232]
+    e5b6526f4f78  commit   a person fixes three parser bugs by hand and tells the agent
       ...           4 turns  the agent rewrites the file and breaks it
-      27a96c1f4d92  submit   [Submitted] "Partially updated src/bija/cli.py"
-        51a3f547c757  eval   [fail 0/232]
+      11b903989e82  submit   [Submitted] "Partially updated src/bija/cli.py"
+        e786d0c2fe1e  eval   [fail 0/232]
 ```
 
 The first branch is the agent's own run: eleven model turns, ending in a submission that the
@@ -58,29 +58,29 @@ D=example/trajectory
 M=xmcp:closeai/gpt-5.4-mini
 
 # The root: the task statement and the skeleton, pinned to the image.
-root=$(alaya root "$(cat example/bija/TASK.txt)" example/bija/skeleton --agent mini-swe \
+root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agent agents/mini-swe-default.json \
   --image ghcr.io/astral-sh/uv:python3.12-alpine3.23 --data $D)
 
 # The first branch, to its submission.
-alaya resume $root --agent mini-swe --model $M --data $D
-# ... 4766611d3c43  [Submitted]
+alaya resume $root --model $M --data $D
+# ... 87fc41d3653f  [Submitted]
 
 # Grade it against the reference suite.
-alaya eval 4766611d3c43 --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800 --data $D
-# 3d504a99cf8b  fail 1 29/232  (76971 ms)
+alaya eval 87fc41d3653f --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800 --data $D
+# 5f64ce1f762d  fail 1 29/232  (76971 ms)
 
 # The intervention: check out the last turn before the submission, edit by hand, commit with a message.
-alaya checkout adfc3ed05434 /tmp/fix --data $D
+alaya checkout dba0adb1cd03 /tmp/fix --data $D
 $EDITOR /tmp/fix/src/bija/cli.py
-alaya commit adfc3ed05434 /tmp/fix -m "Hand fix: expression-first statements, literal keywords, depth" \
+alaya commit dba0adb1cd03 /tmp/fix -m "Hand fix: expression-first statements, literal keywords, depth" \
   --tell "I fixed three parser bugs in src/bija/cli.py by hand. ..." --data $D
-# 9de33216c587
+# e5b6526f4f78
 
 # The second branch, from the intervention, and its verdict.
-alaya resume 9de33216c587 --agent mini-swe --model $M --data $D
-# ... 27a96c1f4d92  [Submitted]
-alaya eval 27a96c1f4d92 --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800 --data $D
-# 51a3f547c757  fail 1 0/232  (6993 ms)
+alaya resume e5b6526f4f78 --model $M --data $D
+# ... 11b903989e82  [Submitted]
+alaya eval 11b903989e82 --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800 --data $D
+# e786d0c2fe1e  fail 1 0/232  (6993 ms)
 ```
 
 ## Reading it
@@ -88,11 +88,11 @@ alaya eval 27a96c1f4d92 --grader 'example/bija/grade.py {checkout} {out}' --time
 ```sh
 D=example/trajectory
 alaya tree --data $D                                  # the tree above
-alaya show 9de33216c587 --data $D                     # the intervention: message, log, workspace
-alaya diff adfc3ed05434 9de33216c587 --data $D        # what the person changed
-alaya show 3d504a99cf8b --data $D                     # the verdict and the grader's output
-alaya checkout 3d504a99cf8b /tmp/evidence --evidence --data $D   # verdict.json, junit.xml, pytest.txt
-alaya html example/report.html --agent mini-swe --hide .venv --hide __pycache__ --data $D
+alaya show e5b6526f4f78 --data $D                     # the intervention: message, log, workspace
+alaya diff dba0adb1cd03 e5b6526f4f78 --data $D        # what the person changed
+alaya show 5f64ce1f762d --data $D                     # the verdict and the grader's output
+alaya checkout 5f64ce1f762d /tmp/evidence --evidence --data $D   # verdict.json, junit.xml, pytest.txt
+alaya html example/report.html --hide .venv --hide __pycache__ --data $D
 ```
 
 The archive holds only the durable parts of the data directory (`docs/trajectory-schema.md`
@@ -100,7 +100,7 @@ The archive holds only the durable parts of the data directory (`docs/trajectory
 intervention state selected, taken by `screenshot.py`:
 
 ```sh
-example/screenshot.py $PWD/example/report.html example/trajectory.png 1280 780 9de33216c587
+example/screenshot.py $PWD/example/report.html example/trajectory.png 1280 780 e5b6526f4f78
 ```
 
 The model cache is part of the data directory, so removing a branch with `alaya rm` and

@@ -17,7 +17,7 @@ private def imageReference : String := "alpine:3"
 
 /-- Mini's command settings, with a short timeout. -/
 private def miniConfig : Agent.MiniSwe.Config :=
-  { task := "t", executor := { Agent.MiniSwe.defaultExecutor with timeoutSeconds := 5 } }
+  { executor := { Agent.MiniSwe.defaultExecutor with timeoutSeconds := 5 } }
 
 private def config : Executor.Config := miniConfig.executor
 
@@ -157,7 +157,7 @@ def suite : Suite := Testing.suite "docker" #[
       let rt ← runtime settings work store model
       try
         let uname ← assertOk (Docker.uname settings)
-        let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig uname) project
+        let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
           (some "t") (some settings.image)
         let child ← assertOk <| stepOnce rt "test:model" root
         let state ← assertOk (getState store child)
@@ -199,7 +199,7 @@ def suite : Suite := Testing.suite "docker" #[
       let rt ← runtime settings work store model
       try
         let uname ← assertOk (Docker.uname settings)
-        let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig uname) project
+        let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
           (some "t") (some settings.image)
         let child ← assertOk <| stepOnce rt "test:model" root
         -- The grader is a host program over a checkout; the container is not involved.

@@ -47,7 +47,7 @@ specifies the state object, the store layout, the workspace snapshots kept in a 
 repository, the model cache entry, and every `alaya` command.
 
 [`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agent.MiniSwe` is the port of
-mini-SWE-agent as one agent: the original's prompts, `bash` tool, and protocol for reading a
+mini-SWE-agent as one agent: the original's prompts, cut from its `mini.yaml`, its `bash` tool, and protocol for reading a
 response and answering a malformed one, realized through the agent API with Lean-native
 rendering, and commands run on the host or in a container.
 

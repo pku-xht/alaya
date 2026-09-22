@@ -222,6 +222,9 @@ structure State where
   evaluation? : Option Evaluation := none
   /-- The pinned container image, inherited from the root; `none` on the host. -/
   image? : Option String := none
+  /-- On a root: the agent that runs this trajectory, as its complete configuration — `family`
+  and the family's fields — so that every later command builds the same agent. -/
+  agent? : Option Lean.Json := none
   /-- What a person said and changed, on a `message` or `intervention` state that carried a
   message. The notice in `appended` is `interventionNotice` of it. -/
   intervention? : Option Intervention := none
@@ -282,6 +285,7 @@ def toJson (state : State) : Lean.Json :=
     ("outcome", state.outcome?.map outcomeToJson |>.getD .null),
     ("note", state.note?.map Lean.Json.str |>.getD .null),
     ("image", state.image?.map Lean.Json.str |>.getD .null),
+    ("agent", state.agent?.getD .null),
     ("evaluation", state.evaluation?.map evaluationToJson |>.getD .null),
     ("intervention", state.intervention?.map (fun i => .mkObj [
       ("message", i.message), ("changed", .arr (i.changed.map Lean.Json.str))]) |>.getD .null),
@@ -304,6 +308,9 @@ def fromJson (json : Lean.Json) : Except String State := do
     | .error _ => pure none
   let note? := (json.getObjVal? "note" >>= Lean.Json.getStr?).toOption
   let image? := (json.getObjVal? "image" >>= Lean.Json.getStr?).toOption
+  let agent? := match json.getObjVal? "agent" with
+    | .ok (.obj _) => (json.getObjVal? "agent").toOption
+    | _ => none
   let evaluation? ← match json.getObjVal? "evaluation" with
     | .ok .null => pure none
     | .ok e => some <$> evaluationFromJson e
@@ -322,7 +329,7 @@ def fromJson (json : Lean.Json) : Except String State := do
       let text ← q.getObjVal? "text" >>= Lean.Json.getStr?
       pure (some ({ callId, text } : Question))
     | _ => pure none
-  pure { parent?, workspace, kind, appended, outcome?, note?, image?, evaluation?
+  pure { parent?, workspace, kind, appended, outcome?, note?, image?, agent?, evaluation?
          intervention?, question? }
 
 end State
@@ -594,9 +601,21 @@ def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePat
 /-- Creates a root state from the initial project directory: the agent's opening log — its
 prompts — and a snapshot of `project`. -/
 def createRoot (store : Store) (workspaces : Workspaces) (log : Log) (project : System.FilePath)
-    (note? : Option String := none) (image? : Option String := none) : Result Hash := do
+    (note? : Option String := none) (image? : Option String := none)
+    (agent : Lean.Json := .null) : Result Hash := do
   let workspace ← workspaces.snapshot project
-  putState store { parent? := none, workspace, kind := .root, appended := log, note?, image? }
+  putState store { parent? := none, workspace, kind := .root, appended := log, note?, image?
+                   agent? := if agent.isNull then none else some agent }
+
+/-- The root of the tree `hash` is in. -/
+partial def rootOf (store : Store) (hash : Hash) : Result Hash := do
+  match (← getState store hash).parent? with
+  | some parent => rootOf store parent
+  | none => pure hash
+
+/-- The agent configuration the run of `hash` was created with, from its root. -/
+def agentOf (store : Store) (hash : Hash) : Result (Option Lean.Json) := do
+  pure (← getState store (← rootOf store hash)).agent?
 
 /-- A state a person may build on: anything but an evaluation, which is a leaf, or a state
 waiting for an answer, which `reply` alone grows. An ended run is fine: fixing something after a
@@ -710,7 +729,11 @@ private def observationText : Lean.Json -> String
 
 private def label (state : State) : String :=
   match state.kind with
-  | .root => "root  " ++ flatten (state.note?.getD "")
+  | .root =>
+    let family := match state.agent?.bind fun a => (a.getObjVal? "family" >>= Lean.Json.getStr?).toOption with
+      | some family => s!"[{family}]  "
+      | none => ""
+    "root  " ++ family ++ flatten (state.note?.getD "")
   | .turn | .question =>
     let calls := state.calls
     let first := match calls[0]? with
@@ -787,6 +810,7 @@ def showLines (store : Store) (hash : Hash) (view? : Option View := none) :
     s!"workspace {state.workspace.hex}"]
   if let some note := state.note? then lines := lines.push s!"note     {note}"
   if let some image := state.image? then lines := lines.push s!"image    {image}"
+  if let some agent := state.agent? then lines := lines.push s!"agent    {agent.compress}"
   if let some e := state.evaluation? then
     lines := lines.push s!"grader   {e.grader}"
     lines := lines.push s!"verdict  {if e.passed then "pass" else "fail"} (rc={e.returncode}, {e.elapsedMs} ms)"
