@@ -5,8 +5,8 @@ import Alaya
 
 /-! Tests of the mini-SWE-agent port, and of the trajectory tree driven by it. The prompt
 fixtures (`Test/MiniFixtures.lean`) are rendered by mini's own jinja templates, so the prompts
-are checked against upstream to the byte, except for the port's `submit` tool and its optional
-recorded-output recovery policy. End-to-end cases drive the real agent over a snapshotted workspace with
+are checked against upstream to the byte, except where the port names its `submit` tool in place
+of mini's output sentinel. End-to-end cases drive the real agent over a snapshotted workspace with
 a scripted model. -/
 
 namespace MiniTests
@@ -36,17 +36,11 @@ private def miniSubmitInstruction (indent : String) : String :=
   "Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n" ++
   indent ++ "Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>"
 
-/-- Adapt the upstream fixture only for submission and the optional recovery policy.
-Everything outside these explicit differences must still match to the byte. -/
+/-- A fixture rendered by mini's templates, with the sentences that name the submission sentinel
+replaced by the port's, which name the `submit` tool. Everything else must match to the byte. -/
 private def portOf (miniText : String) : String :=
   let step1 := miniText.replace (miniSubmitInstruction "   ") (submitInstruction "   ")
-  let step2 := step1.replace (miniSubmitInstruction "  ") (submitInstruction "  ")
-  let step3 := step2.replace "You are operating in an environment where" "When using bash:"
-  let step4 := step3.replace "At least one tool call with your command" "At least one tool call"
-  let step5 := step4.replace "Your response MUST include AT LEAST ONE bash tool call"
-    Alaya.Agent.OutputRead.usageGuidance
-  step5.replace "Every action is executed in a new subshell."
-    "Each bash call is executed in a new subshell."
+  step1.replace (miniSubmitInstruction "  ") (submitInstruction "  ")
 
 /-- A fixed `uname`, so prompts do not depend on the machine the tests run on. -/
 private def testUname : Uname :=
@@ -59,33 +53,16 @@ def goldenSuite : Suite := suite "mini.golden" #[
     if systemMessage != "You are a helpful assistant that can interact with a computer." then
       throw <| IO.userError "system message drift",
 
-  test "instance message (Darwin) preserves mini outside submission and recovery guidance" do
+  test "instance message (Darwin) is mini's, with the submit tool in place of the sentinel" do
     assertStringEq "instance"
       (instanceMessage "Fix the bug in foo.py" "Darwin" "23.5.0" "Darwin Kernel Version 23.5.0" "arm64")
       (portOf MiniFixtures.instanceDarwin)
-    -- The sentinel replacement is real; recovery guidance is checked separately below.
+    -- The replacement is real: the fixture and the prompt differ exactly there.
     check (contains MiniFixtures.instanceDarwin "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
       "the fixture names the sentinel"
     check (!contains (instanceMessage "t" "Linux" "r" "v" "m") "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
       "the prompt does not",
 
-  test "opening and repair prompts keep bash default and permit recovery-only turns" do
-    let prompts := #[
-      instanceMessage "t" "Linux" "r" "v" "m",
-      instanceMessage "t" "Darwin" "r" "v" "m",
-      Alaya.Agent.OutputRead.tool.description,
-      formatErrorMessage "read_output requires an integer 'limit' from 1 to 10000." true (some "stop"),
-      formatErrorMessage "irrelevant" false (some "length"),
-      formatErrorMessage "irrelevant" false (some "tool_calls")]
-    for prompt in prompts do
-      check (contains prompt "Use bash by default") "normal work must still default to bash"
-      check (contains prompt "only when omitted text from a recorded output is needed")
-        "recovery must be driven by an information need"
-      check (contains prompt "read_output may be the only tool call") "no companion bash call is required"
-      check (contains prompt "you do not have to reach EOF") "recovery must remain partial and optional"
-      for obsolete in #["MUST include AT LEAST ONE bash", "Every response needs to use the 'bash'",
-        "exactly one bash tool call", "Every action is executed in a new subshell"] do
-        check (!contains prompt obsolete) s!"conflicting guidance: {obsolete}",
 
   iotest "an observation is the recorded output as JSON, cut when long" do
     let field (json : Lean.Json) (key : String) : Option Lean.Json := (json.getObjVal? key).toOption
@@ -99,7 +76,7 @@ def goldenSuite : Suite := suite "mini.golden" #[
     -- Unicode passes through as text, not as escapes.
     if field (observation { output := "café ✓ 😀", exitCode? := some 0 }) "output" != some "café ✓ 😀" then
       throw <| IO.userError "unicode should be kept as is"
-    -- Above the limit the output is replaced by its head and tail and a count of the elision.
+    -- At the limit the output is replaced by its head and tail and a count of the elision.
     let long := observation { output := String.ofList (List.replicate 12000 'z'), exitCode? := some 0 }
     if (field long "output").isSome then throw <| IO.userError "long output must be cut"
     if field long "elided_chars" != some 2000 then throw <| IO.userError s!"elided: {long.compress}"
@@ -139,10 +116,44 @@ private def responseWith (calls : Array Chat.ToolCall) (finish := "tool_calls") 
 
 private def actionSummary : Action -> String × String
   | .bash id command => (id, command)
-  | .readOutput id => (id, "read_output")
+  | .readOutput id _ => (id, "read_output")
   | .submit id message => (id, "submit:" ++ message)
 
 def parseSuite : Suite := suite "mini.parse" #[
+  test "with recovery off the agent is mini to the byte; on, two sentences and a tool differ" do
+    let off : Config := { task := "t" }
+    let on : Config := { task := "t", recoverOutput := true }
+    assertEqual "tools off" ((tools off).map (·.name)) #["bash", "submit"]
+    assertEqual "tools on" ((tools on).map (·.name)) #["bash", "submit", "read_output"]
+    let opening (config : Config) : String :=
+      match (initialLog config testUname)[1]? with
+      | some (Event.message (Chat.Message.user text)) => text
+      | _ => ""
+    assertStringEq "opening off" (opening off)
+      (instanceMessage "t" testUname.system testUname.release testUname.version testUname.machine)
+    let delta := (opening on).replace
+      "Your response MUST include AT LEAST ONE tool call: bash, or read_output to see more of an earlier command's output"
+      "Your response MUST include AT LEAST ONE bash tool call"
+    assertStringEq "opening on differs in one sentence" delta (opening off)
+    check (contains (formatErrorMessage "e" true (some "stop") true) "'read_output'") "the repair text names it"
+    assertStringEq "repair off is unchanged" (formatErrorMessage "e" true (some "stop") false)
+      (formatErrorMessage "e" true (some "stop"))
+    -- On, a long output's warning names the call to read it back by; off, it is mini's.
+    let long := Output.toJson { output := String.ofList (List.replicate 20000 'x'), exitCode? := some 0 }
+    let warning (config : Config) : String :=
+      match (view config #[.observation "call_7" long]).back? with
+      | some (Chat.Message.tool _ (.str shown)) =>
+        match Lean.Json.parse shown with
+        | .ok json => (json.getObjVal? "warning" >>= Lean.Json.getStr?).toOption.getD ""
+        | .error _ => ""
+      | _ => ""
+    assertStringEq "warning off" (warning off) "Output too long."
+    check (contains (warning on) "this call's id is call_7") s!"the warning should name the call: {warning on}"
+    -- Off, the tool is unknown, as any other unlisted tool is.
+    match parseActions (responseWith #[call "r" "read_output" "x"]) with
+    | .formatError message => check (contains message "Unknown tool 'read_output'") "unknown when off"
+    | .actions _ => fail "read_output should be unknown when recovery is off",
+
   iotest "bash tool schema is mini's, in strict mode" do
     -- mini's BASH_TOOL plus the `additionalProperties: false` every strict object carries
     -- (Json.compress emits keys in sorted order).
@@ -226,7 +237,7 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
   let (log, stop) ← assertOk <| Agent.run mini { dir := work } sample (initialLog config testUname)
   let env ← assertOk <| (← workspaces).snapshot work
   match stop with
-  | .outcome outcome => pure (view log, env, outcome)
+  | .outcome outcome => pure (view config log, env, outcome)
   | .question _ q => fail s!"unexpected question: {q}"
 
 def runSuite : Suite := suite "mini.run" #[
@@ -446,13 +457,38 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let state ← assertOk (getState rt.store told)
     check (state.kind == .message) "a tell is a message state"
     check (state.workspace == (← assertOk (getState rt.store root)).workspace) "a tell keeps the workspace"
-    match (view (← assertOk (logOf rt.store told))).back? with
+    match (view { task := "t" } (← assertOk (logOf rt.store told))).back? with
     | some (.user notice) =>
       check (contains notice "Please re-run your checks.") "the notice carries the message verbatim"
       check (contains notice "<intervention>") "the notice is enveloped"
     | _ => fail "expected the notice as the last user turn"
     let next ← assertOk <| stepOnce rt "test:model" told
     check ((← assertOk (getState rt.store next)).kind == .turn) "the run continues after a tell",
+
+  test "the report gives a file replaced by a directory, or the reverse, no text on the directory row" do
+    let rt ← cachedRuntime #[]
+    let project ← emptyProject
+    writeSpec project #[("toDir", "was a file"), ("toFile/inner.txt", "inner")]
+    let root ← mkRoot rt project
+    IO.FS.removeFile (project / "toDir")
+    writeSpec project #[("toDir/new.txt", "new")]
+    IO.FS.removeDirAll (project / "toFile")
+    IO.FS.writeFile (project / "toFile") "now a file"
+    let child ← assertOk <| commit rt.store rt.workspaces root project (some "retyped")
+    let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view { task := "t" }) (tools { task := "t" })
+    let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
+    let some state := states.find? fun s =>
+        (s.getObjVal? "hash" >>= Lean.Json.getStr?).toOption == some child.hex
+      | fail "the commit is missing from the report"
+    let changes ← assertOk <| Result.fromExcept Error.storage (state.getObjVal? "changes" >>= Lean.Json.getArr?)
+    let rows := changes.map fun c =>
+      ((c.getObjVal? "path" >>= Lean.Json.getStr?).toOption.getD "",
+       (c.getObjVal? "kind" >>= Lean.Json.getStr?).toOption.getD "",
+       (c.getObjVal? "old" >>= Lean.Json.getStr?).toOption,
+       (c.getObjVal? "new" >>= Lean.Json.getStr?).toOption)
+    assertEqual "rows" rows #[
+      ("toDir", "removed", some "was a file", none), ("toDir", "added", none, none),
+      ("toFile", "removed", none, none), ("toFile", "added", none, some "now a file")],
 
   test "commit --tell lists the changed paths in the notice" do
     let rt ← cachedRuntime #[]
@@ -512,7 +548,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let root ← mkRoot rt (← emptyProject)
     let first ← assertOk <| stepOnce rt "test:model" root
     let second ← assertOk <| stepOnce rt "test:model" first
-    let page ← assertOk <| Html.dataJson rt.store rt.workspaces view tools
+    let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view { task := "t" }) (tools { task := "t" })
     let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
     let envelope ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "request")
     -- Assemble the context as the page does: every state's `wire` from the root down.
@@ -522,7 +558,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
       | none => fail s!"state {hash.hex} missing from the report"
     let assembled := envelope.setObjVal! "messages"
       (.arr ((← wireOf root) ++ (← wireOf first) ++ (← wireOf second)))
-    let sent : Chat.Request := { messages := view (← assertOk (logOf rt.store second)), tools }
+    let sent : Chat.Request := { messages := view { task := "t" } (← assertOk (logOf rt.store second)), tools := tools { task := "t" } }
     assertStringEq "request" assembled.compress sent.toJson.compress
     check ((← wireOf second).size == 1) "the format-error state adds exactly one wire message",
 

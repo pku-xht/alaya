@@ -2,379 +2,119 @@ import Test.Framework
 import Test.DirectoryWorkspaces
 import Alaya
 
+/-! `read_output`: a page of an earlier command's full output, answered from the log without
+running anything. -/
+
 namespace OutputReadTests
 
 open Testing Alaya Alaya.Agent Alaya.Trajectory
 open Alaya.Agent.MiniSwe
 
-private def str (j : Lean.Json) (key : String) : String :=
-  (j.getObjVal? key >>= Lean.Json.getStr?).toOption.getD ""
+private def str (json : Lean.Json) (key : String) : String :=
+  (json.getObjVal? key >>= Lean.Json.getStr?).toOption.getD ""
 
-private def nat (j : Lean.Json) (key : String) : Nat :=
-  (j.getObjVal? key >>= Lean.Json.getNat?).toOption.getD 0
+private def arguments (callId : String) (offset limit : Nat) : Lean.Json :=
+  .mkObj [("call_id", callId), ("offset", offset), ("limit", limit)]
 
-private def arguments (ref : String) (offset limit : Nat) : Lean.Json :=
-  .mkObj [("ref", ref), ("offset", offset), ("limit", limit)]
+/-- 30,000 characters in 3,000 numbered lines: far past `outputLimit`, so the view keeps its
+head and tail and loses the middle. -/
+private def longOutput : String :=
+  "\n".intercalate ((List.range 3000).map fun i => s!"line {i + 1} " ++ String.ofList (List.replicate 4 'x')) ++ "\n"
 
-private def fullText : String :=
-  String.ofList (List.replicate 6000 '始') ++ "MID😀é\nexact middle" ++
-  String.ofList (List.replicate 16000 '终')
+private def bashCall (id : String) : Chat.ToolCall :=
+  { id, name := "bash", arguments := .mkObj [("command", "make")] }
 
-private def rawLog (text : String) : Log :=
-  #[.observation "original" ({ output := text, exitCode? := some 0 } : Output).toJson]
-
-private def readCall (ref : String) (offset limit : Nat) : Chat.ToolCall :=
-  { id := "page", name := "read_output", arguments := arguments ref offset limit }
-
-private def bashCall : Chat.ToolCall :=
-  { id := "original", name := "bash", arguments := .mkObj [("command", "produce output")] }
+private def readCall (id callId : String) (offset limit : Nat) : Chat.ToolCall :=
+  { id, name := "read_output", arguments := arguments callId offset limit }
 
 private def response (calls : Array Chat.ToolCall) : Chat.Response :=
   { toolCalls := calls, finishReason? := some "tool_calls" }
 
-private def fixed (r : Chat.Response) : Model := {
-  identity := .mkObj [("model", "scripted-output-read")]
-  sample := fun _ => pure { next := pure r }
-}
+/-- A log in which bash call `c1` produced `longOutput`. -/
+private def recorded : Log :=
+  #[.response (response #[bashCall "c1"]),
+    .observation "c1" (Output.toJson { output := longOutput, exitCode? := some 0 })]
 
-private def fakeExecutor (text : String := fullText) : Executor := {
-  exec := fun _ _ _ => pure { output := text, exitCode? := some 0 }
-  uname := pure { system := "Linux", release := "test", version := "test", machine := "test" }
-}
+private def config : Config := { task := "t", recoverOutput := true }
 
-private def getObservation (log : Log) (id : String) : TestM Lean.Json := do
-  match log.reverse.findSome? (fun | .observation i content => if i == id then some content else none | _ => none) with
-  | some content => pure content
-  | none => fail s!"missing observation {id}"
+private def testUname : Uname :=
+  { system := "Linux", release := "6.1.0", version := "#1 SMP", machine := "x86_64" }
 
-/-- A subprocess entry point used only by the test runner. No output text is supplied by the
-parent process: the child must reopen the trajectory and recover the page through its driver. -/
-def recoveryWorker (storePath workPath stateHex ref : String) : IO UInt32 := do
-  let recover : Result Hash := do
-    let store ← Trajectory.Store.create storePath
-    let workspaceDir := (System.FilePath.mk storePath).parent.getD "." / "restic"
-    let workspaces ← Workspaces.Restic.open workspaceDir
-    let original ← resolve store stateHex
-    let executor := fakeExecutor
-    let rt : Runtime := {
-      store, workspaces, workDir := workPath, executor,
-      agent := agent executor { task := "t" }, model := fixed (response #[readCall ref 6000 18]) }
-    let child ← stepOnce rt "new-process-read" original
-    let log : Log ← logOf store child
-    let page? := log.reverse.findSome? fun
-      | .observation "page" content => some content
-      | _ => none
-    let some page := page? | throw <| Error.protocol "new process did not record a page"
-    if str page "content" != String.ofList (fullText.toList.drop 6000 |>.take 18) then
-      throw <| Error.protocol "new process did not recover the original middle"
-    pure child
-  let child ← recover.toUserIO
-  IO.println child.hex
-  pure 0
+private def scripted (responses : Array Chat.Response) : IO Model := do
+  let index ← IO.mkRef 0
+  pure {
+    identity := .mkObj [("model", "scripted")]
+    sample := fun _ => pure { next := do
+      let i ← Result.fromIO Error.cache <| index.modifyGet fun i => (i, i + 1)
+      match responses[i]? with
+      | some response => pure response
+      | none => throw <| Error.protocol "scripted model exhausted" } }
 
-def suite : Suite := Testing.suite "output-read" #[
-  test "preview reference recovers the omitted middle without changing raw JSON" do
-    let raw : Output := { output := fullText, exitCode? := some 0 }
-    let shown := observation raw
-    check ((shown.getObjVal? "truncated" >>= Lean.Json.getBool?).toOption == some true) "truncation marked"
-    check ((shown.getObjVal? "displayed_ranges").toOption ==
-      some (.arr #[.arr #[0, 5000], .arr #[((fullText.length - 5000 : Nat) : Lean.Json), (fullText.length : Lean.Json)]]))
-      "exact head and tail ranges"
-    let ref := str shown "output_ref"
-    assertEqual "content identity" ref (OutputRead.reference fullText)
-    let page := OutputRead.read (rawLog fullText) (arguments ref 6000 18)
-    assertEqual "exact middle" (str page "content") (String.ofList (fullText.toList.drop 6000 |>.take 18))
-    assertEqual "original JSON still full" (str raw.toJson "output") fullText
-    assertEqual "raw structured consumer" (Output.fromJson? raw.toJson) (some raw)
-    match view #[.observation "page" page] with
-    | #[.tool "page" (.str text)] => assertEqual "page is not reprocessed" text page.pretty
-    | _ => fail "expected unchanged page"
-    let fullPage := OutputRead.read (rawLog fullText) (arguments ref 5000 OutputRead.pageLimit)
-    match view #[.observation "full-page" fullPage] with
-    | #[.tool "full-page" (.str text)] =>
-      check (text.length > outputLimit) "page metadata makes the serialized payload exceed the preview limit"
-      let .ok decoded := Lean.Json.parse text | fail "page is not valid serialized JSON"
-      assertEqual "maximum Unicode page survives the view intact" (str decoded "content")
-        (String.ofList (fullText.toList.drop 5000 |>.take OutputRead.pageLimit))
-    | _ => fail "expected intact maximum-size page",
+def suite : Suite := Testing.suite "read_output" #[
+  iotest "a page is the lines asked for, and the view shows it whole" do
+    let page := OutputRead.read recorded (arguments "c1" 1500 3) outputLimit
+    if str page "text" != "line 1500 xxxx\nline 1501 xxxx\nline 1502 xxxx" then
+      throw <| IO.userError s!"wrong page: {page}"
+    if str page "lines" != "1500-1502 of 3000" then throw <| IO.userError s!"wrong range: {page}"
+    -- Shown as recorded: a page has no `output` field to be cut like a command's result.
+    let log := recorded ++ #[.response (response #[readCall "r" "c1" 1500 3]), .observation "r" page]
+    match (view config log).back? with
+    | some (.tool "r" (.str shown)) =>
+      if shown != page.pretty then throw <| IO.userError "the view changed the page"
+    | _ => throw <| IO.userError "the page is not the last tool message of the view",
 
-  test "pages reach EOF exactly with Unicode and a very long single line" do
-    let text := String.join (List.replicate 7001 "😀中é") ++ "THE_END"
-    let log := rawLog text
-    let ref := OutputRead.reference text
-    let mut offset := 0
-    let mut joined := ""
-    let mut pages := 0
-    while offset < text.length do
-      let page := OutputRead.read log (arguments ref offset 997)
-      let content := str page "content"
-      check (!content.isEmpty && content.length <= 997) "each page makes bounded progress"
-      joined := joined ++ content
-      offset := nat page "end_offset"
-      pages := pages + 1
-      if offset < text.length then assertEqual "next offset" (nat page "next_offset") offset
-      else
-        check ((page.getObjVal? "next_offset").toOption == some .null) "terminal next offset is null"
-        assertEqual "EOF" (page.getObjVal? "eof" >>= Lean.Json.getBool?).toOption (some true)
-    assertEqual "all characters recovered" joined text
-    check (pages > 20) "multiple full pages"
-    let endPage := OutputRead.read log (arguments ref text.length 1)
-    assertEqual "reading at EOF" (str endPage "content") ""
-    assertEqual "at EOF flag" (endPage.getObjVal? "eof" >>= Lean.Json.getBool?).toOption (some true),
+  iotest "a page is at most outputLimit characters, whole lines, or one line cut" do
+    let page := OutputRead.read recorded (arguments "c1" 1 3000) outputLimit
+    let text := str page "text"
+    if text.length > outputLimit then throw <| IO.userError "page over the limit"
+    if !(text.endsWith "xxxx") then throw <| IO.userError "a line was split"
+    let oneLine : Log := #[.observation "big" (Output.toJson
+      { output := String.ofList (List.replicate 20000 'y'), exitCode? := some 0 })]
+    let cut := OutputRead.read oneLine (arguments "big" 1 1) outputLimit
+    if (str cut "text").length != outputLimit then throw <| IO.userError "the long line was not cut"
+    if !(str cut "lines").endsWith s!"the line cut to {outputLimit} characters" then
+      throw <| IO.userError s!"the cut is not said: {str cut "lines"}",
 
-  test "unknown reference historical lost output and invalid ranges are honest errors" do
-    let ref := OutputRead.reference fullText
-    let missing := OutputRead.read #[] (arguments ref 0 10)
-    check ((str missing "error").startsWith "Full output unavailable") "missing full text reported"
-    let legacy : Log := #[.observation "old" (.mkObj [("output_head", "head"), ("output_tail", "tail"), ("elided_chars", 9000)])]
-    let lost := OutputRead.read legacy (arguments ref 0 10)
-    check (!(str lost "error").isEmpty) "cannot fabricate lost historical middle"
-    for args in #[arguments ref 0 0, arguments ref 0 10001, arguments ref (fullText.length + 1) 1,
-      .mkObj [("ref", ref), ("offset", (-1 : Int)), ("limit", 3)]] do
-      let page := OutputRead.read (rawLog fullText) args
-      check (!(str page "error").isEmpty) "bad request is explicit"
-      check (!(page.getObjVal? "content").isOk) "no fabricated page",
+  iotest "an unknown call, an offset past the end, or bad arguments are error observations" do
+    for (args, expected) in [
+        (arguments "nope" 1 1, "no bash call with id nope"),
+        (arguments "c1" 3001 1, "past its end"),
+        (arguments "c1" 0 1, "counting from 1"),
+        (.mkObj [("call_id", "c1"), ("offset", 1)], "needs 'limit'")] do
+      let page := OutputRead.read recorded args outputLimit
+      if ((str page "error").splitOn expected).length < 2 then
+        throw <| IO.userError s!"expected an error about {expected}, got {page}",
 
-  test "short and exact-limit outputs stay complete while MiniSwe accepts read_output alone" do
-    for text in #["", "short 😀\n", String.ofList (List.replicate 10000 'x')] do
-      let shown := observation { output := text, exitCode? := some 0 }
-      assertEqual "complete output" (str shown "output") text
-      check (!(shown.getObjVal? "output_ref").isOk) "no unnecessary output reference"
-    let c := readCall (OutputRead.reference fullText) 6000 10
-    match parseActions (response #[c]) with
-    | .actions #[.readOutput "page"] => pure ()
-    | _ => fail "read_output should be accepted by mini-swe"
-    match next { task := "t" } #[.response (response #[c])] with
-    | .act call => assertEqual "next read" call.name "read_output"
-    | _ => fail "read_output should act",
+  iotest "an id a provider reuses names the most recent output" do
+    let log := recorded ++ #[.response (response #[bashCall "c1"]),
+      .observation "c1" (Output.toJson { output := "later\n", exitCode? := some 0 })]
+    if str (OutputRead.read log (arguments "c1" 1 1) outputLimit) "text" != "later" then
+      throw <| IO.userError "did not read the latest",
 
-  test "the reference loop supplies retained output to a later read without a store" do
-    let samples ← IO.mkRef 0
-    let ref := OutputRead.reference fullText
-    let replies := #[response #[bashCall], response #[readCall ref 6000 10],
-      response #[{ id := "done", name := "submit", arguments := .mkObj [("message", "done")] }]]
-    let sample : Dialogue -> Result Chat.Response := fun _ => do
-      let i ← Result.fromIO Error.storage (samples.modifyGet fun n => (n, n + 1))
-      pure replies[i]!
-    let (log, _) ← assertOk <| Agent.run (agent fakeExecutor { task := "t" })
-      { dir := ← scratch } sample #[]
-    assertEqual "reference loop page" (str (← getObservation log "page") "content")
-      (String.ofList (fullText.toList.drop 6000 |>.take 10)),
-
-  test "omitted output need not be read before another command or submission" do
-    for anotherCommand in #[false, true] do
-      let samples ← IO.mkRef 0
-      let executions ← IO.mkRef 0
-      let executor : Executor := { fakeExecutor with exec := fun _ _ _ => do
-        executions.modify (· + 1)
-        pure { output := fullText, exitCode? := some 0 } }
-      let submit : Chat.ToolCall := {
-        id := "done", name := "submit", arguments := .mkObj [("message", "done without rereading")] }
-      let replies := #[response #[bashCall]] ++
-        (if anotherCommand then #[response #[{ bashCall with id := "later" }]] else #[]) ++
-        #[response #[submit]]
-      let sample : Dialogue -> Result Chat.Response := fun _ => do
-        let i ← Result.fromIO Error.storage (samples.modifyGet fun n => (n, n + 1))
-        let some reply := replies[i]? | throw <| .protocol "unexpected forced continuation"
-        pure reply
-      let (log, stop) ← assertOk <| Agent.run (agent executor { task := "t" })
-        { dir := ← scratch } sample #[]
-      match stop with
-      | .outcome outcome => assertEqual "submission accepted" outcome.status "Submitted"
-      | .question _ _ => fail "output recovery must not require an answer"
-      assertEqual "only selected model turns" (← samples.get) replies.size
-      assertEqual "only selected commands" (← executions.get) (if anotherCommand then 2 else 1)
-      check (!(log.calls.any (·.name == "read_output"))) "no recovery call was injected"
-      assertEqual "unread raw output preserved" (str (← getObservation log "original") "output") fullText,
-
-  test "mini-vero inherits optional recovery in both modes and still submits immediately" do
-    for mode in #[MiniVero.Mode.proof, MiniVero.Mode.codeproof] do
-      for recover in #[false, true] do
-        let cfg : MiniVero.Config := { MiniVero.defaultConfig with task := "original Vero task" }
-        let initial := MiniVero.initialLog cfg mode default
-        let samples ← IO.mkRef 0
-        let submit : Chat.ToolCall := {
-          id := "done", name := "submit", arguments := .mkObj [("message", "finished")] }
-        let replies := #[response #[bashCall]] ++
-          (if recover then #[response #[readCall (OutputRead.reference fullText) 6000 18]] else #[]) ++
-          #[response #[submit]]
-        let sample : Dialogue -> Result Chat.Response := fun _ => do
-          let i ← Result.fromIO Error.storage (samples.modifyGet fun n => (n, n + 1))
-          let some reply := replies[i]? | throw <| .protocol "unexpected Vero continuation"
-          pure reply
-        let (log, stop) ← assertOk <| Agent.run (MiniVero.agent fakeExecutor cfg)
-          { dir := ← scratch } sample initial
-        match stop with
-        | .outcome outcome => assertEqual "submission accepted" outcome.status "Submitted"
-        | .question _ _ => fail "recovery must not change Vero into a question"
-        assertEqual "only selected model turns" (← samples.get) replies.size
-        assertEqual "only the model's chosen recovery calls" (log.calls.filter (·.name == "read_output")).size
-          (if recover then 1 else 0)
-        if recover then
-          assertEqual "Vero gets the exact middle" (str (← getObservation log "page") "content")
-            (String.ofList (fullText.toList.drop 6000 |>.take 18))
-        match (MiniVero.view log)[1]? with
-        | some (Chat.Message.user text) =>
-          assertEqual "original mode-specific opening preserved" text
-            (MiniVero.taskMessage cfg.task mode default)
-        | _ => fail "missing Vero opening",
-
-  test "a sibling cannot recover another branch's output even with its reference" do
-    let base ← scratch
-    let project := base / "project"
+  test "the trajectory records a read without running anything or snapshotting" do
+    let store ← assertOk <| Store.create ((← scratch) / "states")
+    let workspaces ← Testing.workspaces
+    let project := (← scratch) / "proj"
     IO.FS.createDirAll project
-    let store ← assertOk <| Trajectory.Store.create (base / "states")
-    let rt : Runtime := {
-      store, workspaces := ← workspaces, workDir := base / "work", executor := fakeExecutor,
-      agent := agent fakeExecutor { task := "t" }, model := fixed (response #[bashCall]) }
-    let root ← assertOk <| createRoot store (← workspaces) #[] project
-    let ancestor ← assertOk <| stepOnce rt "shared-output" root
-    let leftText := fullText ++ "\nLEFT_ONLY"
-    let leftExecutor := fakeExecutor leftText
-    let leftRuntime : Runtime := { rt with
-      executor := leftExecutor
-      agent := agent leftExecutor { task := "t" }
-      model := fixed (response #[{ bashCall with id := "left-output" }]) }
-    let left ← assertOk <| stepOnce leftRuntime "left" ancestor
-    let rightExecutor := fakeExecutor "RIGHT_ONLY"
-    let rightRuntime : Runtime := { rt with
-      executor := rightExecutor
-      agent := agent rightExecutor { task := "t" }
-      model := fixed (response #[{ bashCall with id := "right-output" }]) }
-    let right ← assertOk <| stepOnce rightRuntime "right" ancestor
-    for branch in #[left, right] do
-      assertEqual "branches share the same parent" (← assertOk (getState store branch)).parent? (some ancestor)
-    let privateOutput ← getObservation (← assertOk <| logOf store left) "left-output"
-    let privateRef := str (observation ((Output.fromJson? privateOutput).get!)) "output_ref"
-    let readPrivate := { (readCall privateRef (fullText.length + 1) 9) with id := "private-page" }
-    let readAncestor := { (readCall (OutputRead.reference fullText) 6000 18) with id := "ancestor-page" }
-    let reading : Runtime := { rt with model := fixed (response #[readPrivate, readAncestor]) }
-    let leftRead ← assertOk <| stepOnce reading "read-left" left
-    let rightRead ← assertOk <| stepOnce reading "read-right" right
-    let expected := String.ofList (fullText.toList.drop 6000 |>.take 18)
-    let leftLog ← assertOk <| logOf store leftRead
-    let rightLog ← assertOk <| logOf store rightRead
-    assertEqual "producer branch can recover" (str (← getObservation leftLog "private-page") "content") "LEFT_ONLY"
-    let denied ← getObservation rightLog "private-page"
-    check ((str denied "error").startsWith "Full output unavailable") "sibling reference must be unavailable"
-    check (!(denied.getObjVal? "content").isOk) "no sibling content may be returned"
-    for log in #[leftLog, rightLog] do
-      assertEqual "common ancestor remains readable" (str (← getObservation log "ancestor-page") "content") expected,
-
-  test "a new process resumes and recovers output without the original execution directory" do
-    let base ← IO.FS.realPath (← scratch)
-    let project := base / "project"
-    let work := base / "work"
-    IO.FS.createDirAll project
-    IO.FS.writeFile (project / "fixture.txt") "workspace retained across process restart\n"
-    let store ← assertOk <| Trajectory.Store.create (base / "states")
-    let workspaces ← assertOk <| Workspaces.Restic.open (base / "restic")
-    let rt : Runtime := {
-      store, workspaces, workDir := work, executor := fakeExecutor,
-      agent := agent fakeExecutor { task := "t" }, model := fixed (response #[bashCall]) }
-    let root ← assertOk <| createRoot store workspaces #[] project
-    let original ← assertOk <| stepOnce rt "original-process" root
-    IO.FS.removeDirAll work
-    let child ← IO.Process.output {
-      cmd := (← IO.appPath).toString,
-      args := #["--output-recovery-worker", store.dir.toString, (base / "new-work").toString,
-        original.hex, OutputRead.reference fullText] }
-    check (child.exitCode == 0) s!"recovery subprocess failed: {child.stderr}"
-    let resumed ← assertOk <| resolve store child.stdout.trimAscii.toString
-    assertEqual "new process continued the recorded state"
-      (← assertOk (getState store resumed)).parent? (some original)
-    let page ← getObservation (← assertOk <| logOf store resumed) "page"
-    assertEqual "subprocess persisted the exact middle" (str page "content")
-      (String.ofList (fullText.toList.drop 6000 |>.take 18)),
-
-  test "fork and resume reopen storage with the identical output after deleting execution files" do
-    let base ← scratch
-    let project := base / "project"
-    let work := base / "work"
-    IO.FS.createDirAll project
+    IO.FS.writeFile (project / "a.txt") "a"
+    let work := (← scratch) / "work"
     IO.FS.createDirAll work
-    let store ← assertOk <| Trajectory.Store.create (base / "states")
-    let rt : Runtime := {
-      store, workspaces := ← workspaces, workDir := work, executor := fakeExecutor,
-      agent := agent fakeExecutor { task := "t" }, model := fixed (response #[bashCall]) }
-    let root ← assertOk <| createRoot store (← workspaces) #[] project
-    let original ← assertOk <| stepOnce rt "original" root
-    let originalLog ← assertOk <| logOf store original
-    let ref := str (observation ((Output.fromJson? (← getObservation originalLog "original")).get!)) "output_ref"
-    IO.FS.removeDirAll work
-    let reopened ← assertOk <| Trajectory.Store.create (base / "states")
-    let reading : Runtime := { rt with store := reopened, model := fixed (response #[readCall ref 6000 10]) }
-    let left ← assertOk <| stepOnce reading "left" original
-    let right ← assertOk <| stepOnce reading "right" original
-    check (left != right) "two fork children"
-    for branch in #[left, right] do
-      assertEqual "page on fork" (str (← getObservation (← assertOk <| logOf reopened branch) "page") "content")
-        (String.ofList (fullText.toList.drop 6000 |>.take 10))
-    let finishing : Runtime := { reading with model := fixed (response #[{
-      id := "done", name := "submit", arguments := .mkObj [("message", "finished")] }]) }
-    let ended ← assertOk <| resume finishing "resume" right (fun _ => pure ())
-    assertEqual "resumed outcome" ((← assertOk (getState reopened ended)).outcome?.map (·.status)) (some "Submitted"),
-
-  test "failed state persistence never sends a preview claiming recoverable output" do
-    let base ← scratch
-    let project := base / "project"
-    let work := base / "work"
-    IO.FS.createDirAll project
-    IO.FS.createDirAll work
-    let store ← assertOk <| Trajectory.Store.create (base / "states")
-    let root ← assertOk <| createRoot store (← workspaces) #[] project
-    let calls ← IO.mkRef 0
-    let model : Model := { identity := .null, sample := fun request => do
-      Result.fromIO Error.storage <| calls.modify (· + 1)
-      if !request.messages.isEmpty then throw <| .protocol "unexpected later preview"
-      pure { next := pure (response #[bashCall]) } }
-    let breakingExecutor : Executor := { fakeExecutor with exec := fun _ _ _ => do
-      IO.FS.rename store.dir (base / "saved-states")
-      IO.FS.writeFile store.dir "block state writes after command execution"
-      pure { output := fullText, exitCode? := some 0 } }
-    let rt : Runtime := {
-      store, workspaces := ← workspaces, workDir := work, executor := breakingExecutor,
-      agent := agent breakingExecutor { task := "t" }, model }
-    try
-      assertError "persistence failure" (resume rt "failure" root (fun _ => pure ()))
-        (fun | .storage _ => true | _ => false)
-    finally
-      IO.FS.removeFile store.dir
-      IO.FS.rename (base / "saved-states") store.dir
-    assertEqual "only pre-execution request" (← calls.get) 1
-    assertEqual "no output state published" (← assertOk <| allStates store) #[root],
-
-  test "new tool schema separates cache keys and read-only replay never calls a provider" do
-    let calls ← IO.mkRef 0
-    let source : Model := {
-      identity := .mkObj [("model", "cache-policy-test")]
-      sample := fun _ => do
-        Result.fromIO Error.cache <| calls.modify (· + 1)
-        pure { next := pure { content? := some "cached" } } }
-    let directory := (← scratch) / "cache"
-    let oldRequest : Chat.Request := {
-      messages := view (rawLog "short output"), tools := #[bashTool, submitTool] }
-    let recording ← assertOk <| Cache.persistent source { directory }
-    let first ← assertOk <| do (← recording.sample oldRequest).next
-    assertEqual "recorded result" first.content? (some "cached")
-    let replay ← assertOk <| Cache.persistent source { directory, readOnly := true }
-    let cached ← assertOk <| do (← replay.sample oldRequest).next
-    assertEqual "same old request hits" cached.content? (some "cached")
-    assertError "new schema must not impersonate old request"
-      (do (← replay.sample { oldRequest with tools }).next)
-      (fun | .cache _ => true | _ => false)
-    assertEqual "no read-only provider calls" (← calls.get) 1,
-
-  test "missing or corrupt state blocks recovery explicitly" do
-    let base ← scratch
-    let project := base / "project"
-    IO.FS.createDirAll project
-    let store ← assertOk <| Trajectory.Store.create (base / "states")
-    let root ← assertOk <| createRoot store (← workspaces) (rawLog fullText) project
-    IO.FS.writeFile (store.dir / (root.hex ++ ".json")) "corrupt"
-    assertError "corrupt state" (logOf store root) (fun | .storage _ => true | _ => false)
-    IO.FS.removeFile (store.dir / (root.hex ++ ".json"))
-    assertError "missing state" (logOf store root) (fun | .storage _ => true | _ => false)
+    -- The executor fails if asked to run anything: a read must not reach it.
+    let executor : Executor := { exec := fun _ _ _ => throw (IO.userError "ran a command"), uname := pure default }
+    let model ← scripted #[response #[readCall "r" "c1" 2 2], response #[bashCall "c2"]]
+    let rt : Runtime := { store, workspaces, workDir := work, executor, model
+                          agent := agent executor config }
+    let root ← assertOk <| createRoot store workspaces (initialLog config testUname ++ recorded) project
+    let child ← assertOk <| stepOnce rt "test" root
+    let state ← assertOk <| getState store child
+    assertEqual "same workspace" state.workspace (← assertOk <| getState store root).workspace
+    match state.appended.back? with
+    | some (.observation "r" page) => assertEqual "page" (str page "text") "line 2 xxxx\nline 3 xxxx"
+    | _ => fail "expected the page as the last event"
+    -- A fork from the child still reads the ancestor's output; nothing was copied.
+    let log ← assertOk <| logOf store child
+    assertEqual "ancestor readable" (str (OutputRead.read log (arguments "c1" 3000 1) outputLimit) "lines")
+      "3000-3000 of 3000"
 ]
 
 end OutputReadTests

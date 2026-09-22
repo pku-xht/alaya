@@ -446,9 +446,13 @@ private partial def follow (rt : Runtime) (log : Log) (appended : Log) (workspac
     let question : Question := { callId, text }
     pure (appended, workspace, some question, .question question)
   | .act call =>
-    let content ← rt.agent.act { dir := rt.workDir, log } call
+    let content ← rt.agent.act { dir := rt.workDir } call
     let workspace ← rt.workspaces.snapshot rt.workDir
     let event := Event.observation call.id content
+    follow rt (log.push event) (appended.push event) workspace
+  | .observe callId content =>
+    -- Nothing ran: the workspace is as it was, and the state keeps its identifier.
+    let event := Event.observation callId content
     follow rt (log.push event) (appended.push event) workspace
 
 /-- Runs one model turn from `parent` (whose log is `log` and workspace is `workspace`, already

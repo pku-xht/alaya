@@ -75,7 +75,7 @@ def argsSuite : Suite := suite "cli.args" #[
       Agent.MiniVero.initialLog { task } .proof uname,
       Agent.MiniVero.initialLog { task } .codeproof uname]
     for log in logs do
-      let request : Chat.Request := { messages := Agent.MiniSwe.view log, tools := Agent.MiniSwe.tools }
+      let request : Chat.Request := { messages := Agent.MiniSwe.view { task } log, tools := Agent.MiniSwe.tools { task } }
       let json := request.toJson .native
       let .ok messages := json.getObjValAs? (Array Lean.Json) "messages"
         | fail "serialized request is missing messages"

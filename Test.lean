@@ -13,11 +13,5 @@ import Test.OutputRead
 only the cases whose `suite/case` name contains the substring. -/
 
 def main (args : List String) : IO UInt32 := do
-  match args with
-  | ["--output-recovery-worker", storePath, workPath, state, ref] =>
-    OutputReadTests.recoveryWorker storePath workPath state ref
-  | "--output-recovery-worker" :: _ =>
-    throw <| IO.userError "usage: tests --output-recovery-worker STORE WORK STATE OUTPUT_REF"
-  | _ =>
-    let suites := #[LegacyTests.suite, Sha256Tests.suite, StoreTests.suite] ++ MiniTests.suites ++ CliTests.suites ++ #[MiniVeroTests.suite, WorkspacesTests.pathSuite, WorkspacesTests.suite, WorkspacesTests.resticSuite, WorkspacesTests.trajectorySuite, DockerTests.suite, OutputReadTests.suite]
-    Testing.runSuites suites args.head?
+  let suites := #[LegacyTests.suite, Sha256Tests.suite, StoreTests.suite] ++ MiniTests.suites ++ CliTests.suites ++ #[MiniVeroTests.suite, WorkspacesTests.pathSuite, WorkspacesTests.suite, WorkspacesTests.resticSuite, WorkspacesTests.trajectorySuite, OutputReadTests.suite, DockerTests.suite]
+  Testing.runSuites suites args.head?
