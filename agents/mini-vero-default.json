@@ -7,5 +7,6 @@
     "timeout_seconds": 600,
     "env": [["PAGER", "cat"], ["MANPAGER", "cat"], ["LESS", "-R"], ["PIP_PROGRESS_BAR", "off"], ["TQDM_DISABLE", "1"]]
   },
-  "recover_output": false
+  "recover_output": false,
+  "ask_user": false
 }

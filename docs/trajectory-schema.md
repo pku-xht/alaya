@@ -66,7 +66,7 @@ driven by `resume` or `step`.
 | Kind | Created by | `appended` | `workspace` |
 | --- | --- | --- | --- |
 | `root` | `alaya root` | the agent's opening prompts | the project as given |
-| `turn` | one model turn | the response, and the observation of each call it made | the workspace after those calls ran |
+| `turn` | one model turn, or a stop after a reply | the response and observations; empty for a stop before sampling | the workspace after those calls ran, or the parent's when none ran |
 | `question` | a model turn whose call asked a person | the response, and the observations of the calls before the ask | the workspace after those calls ran |
 | `reply` | `alaya reply` | one observation: the person's answer to the question, verbatim | the parent's |
 | `intervention` | `alaya commit` | nothing, or one notice when `--tell` is given | the directory the person edited |
@@ -76,6 +76,10 @@ driven by `resume` or `step`.
 Two kinds constrain what may follow them. A `question` waits: only `reply` may be its child until
 one exists. An `evaluation` is a leaf: it is a verdict on its parent, not a point a run can go on
 from.
+
+After a reply, the agent may already be done, for example when the question consumed its
+last allowed model turn. The driver then records a terminal `turn` with empty `appended`,
+the parent's workspace and the agent's outcome, without calling the model.
 
 Besides the three parts, a state carries what the run needs to continue and what a reader wants
 to know: the container `image?`, set on the root and inherited; on the root, the `agent?` configuration the run is continued with (§8); a `note?` of provenance (the model spec for a turn, the task for a root, the note for
@@ -156,12 +160,12 @@ alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash    # turns until the run e
 ### Which draw
 
 A model request does not have one answer; it has a sequence of draws, and the model cache (§7)
-stores that sequence per request, indexed from 0. Every turn child of a state was sampled from
+stores that sequence per request, indexed from 0. Every sampled child of a state came from
 the *same* request — the parent's log viewed the same way, with the same tools — so the children
-of a state are, in order, draws 0, 1, 2, … of one sequence.
+with a response are, in order, draws 0, 1, 2, … of one sequence.
 
 The trajectory therefore never decides "new" or "reuse" itself. It counts the parent's children
-of kind `turn` or `question` — call the count `n` — and asks the cache for draws `0` to `n`
+whose `appended` contains a model response — call the count `n` — and asks the cache for draws `0` to `n`
 (`nextN (n+1)`), then uses draw `n`. The cache does the rest:
 
 - if its entry already holds draw `n`, it returns it without a provider call;
@@ -169,6 +173,7 @@ of kind `turn` or `question` — call the count `n` — and asks the cache for d
 
 Children a person makes — `reply`, `message`, `intervention` — and evaluations are not counted:
 they asked the model nothing, and counting them would skip a draw the cache holds.
+A terminal `turn` recorded after a reply without sampling is likewise not counted.
 
 *Which draw a continuation receives, by what the state already has under it.*
 
@@ -682,8 +687,8 @@ need separate data directories: the work directory and the cache are not shared 
   hash ever changes.
 - `logOf state` is the concatenation of `appended` from the root; the request the model was
   sent to produce a turn is `agent.view (logOf parent)` with `agent.tools`.
-- Continuing from a state with `n` turn-or-question children asks for draw `n`; other children
-  never consume a draw.
+- Sampling from a state with `n` children containing a model response asks for draw `n`;
+  children without a response never consume a draw.
 - A state's workspace is the snapshot taken after its last act; an evaluation's is the checkout
   after the grader ran, and nothing continues from it.
 - A waiting state grows only by `reply`.

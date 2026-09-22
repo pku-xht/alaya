@@ -31,23 +31,22 @@ structure Config where
   tool is offered and the two sentences that require a bash call in every response say "a
   tool call" instead (`withRecovery`). -/
   recoverOutput : Bool := false
-  /-- Offer a choice question with an always-available custom answer. -/
+  /-- Offer yes/no, multiple-choice, and open-ended questions. -/
   askUser : Bool := false
   deriving Inhabited
 
 /-- The configuration as JSON: the shape of `agents/mini-swe-default.json`, and what a root
 records. -/
 def Config.toJson (config : Config) : Lean.Json :=
-  let fields : List (String × Lean.Json) := [
+  .mkObj [
     ("family", "mini-swe"),
     ("step_limit", (config.stepLimit : Lean.Json)),
     ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
     ("executor", .mkObj [
       ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
       ("env", .arr (config.executor.env.map fun (name, value) => .arr #[.str name, .str value]))]),
-    ("recover_output", (config.recoverOutput : Lean.Json))]
-  -- Keep the canonical identity of existing question-disabled roots unchanged.
-  .mkObj <| fields ++ (if config.askUser then [("ask_user", Lean.Json.bool true)] else [])
+    ("recover_output", (config.recoverOutput : Lean.Json)),
+    ("ask_user", (config.askUser : Lean.Json))]
 
 /-- Reads a configuration; a field left out is `defaults`', and an unknown one is an error. -/
 def Config.fromJson (json : Lean.Json) (defaults : Config := {}) : Except String Config := do

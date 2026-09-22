@@ -2,7 +2,7 @@ import Test.Framework
 import Test.DirectoryWorkspaces
 import Alaya
 
-/-! The optional choice-question tool, from configuration through a recorded reply and fork.
+/-! The optional typed-question tool, from configuration through recorded replies and forks.
 All model responses are scripted; an executor that counts calls detects unwanted side effects. -/
 
 namespace AskUserTests
@@ -16,8 +16,10 @@ private def testUname : Uname :=
   { system := "Linux", release := "test", version := "test", machine := "test" }
 
 private def args (question : String := "Which interpretation?\nThe examples disagree.")
-    (options : Array String := #["Use the written specification", "Use the examples"]) : Lean.Json :=
-  .mkObj [("question", question), ("options", .arr (options.map Lean.Json.str))]
+    (options : Array String := #["Use the written specification", "Use the examples"])
+    (questionType : String := "multiple_choice") : Lean.Json :=
+  .mkObj [("question_type", questionType), ("question", question),
+    ("options", .arr (options.map Lean.Json.str))]
 
 private def ask (id : String := "q") (arguments : Lean.Json := args) : Chat.ToolCall :=
   { id, name := "ask_user", arguments }
@@ -66,12 +68,13 @@ private def expectSample (directive : Directive) : TestM Unit := do
   | .sample => pure ()
   | _ => fail "expected another model sample"
 
-private def checkQuestionView (dialogue : Dialogue) (answer : String) : TestM Unit := do
+private def checkQuestionView (dialogue : Dialogue) (answer : String)
+    (expectedArguments : Lean.Json := args) : TestM Unit := do
   let question := dialogue.findSome? fun
     | .assistant _ calls _ => calls.find? (·.id == "q")
     | _ => none
   let some question := question | fail "the question must remain an assistant tool call"
-  assertEqual "original question arguments" question.arguments.compress args.compress
+  assertEqual "original question arguments" question.arguments.compress expectedArguments.compress
   check (!(dialogue.any fun
     | .user text => contains text "Tool call error:"
     | _ => false)) "a valid question must not become a format error"
@@ -91,6 +94,13 @@ def suite : Suite := Testing.suite "ask_user" #[
         (.mkObj [("family", family.name), ("ask_user", false)])
       assertEqual "default tools" (minimal.tools.map (·.name)) #["bash", "submit"]
       assertEqual "explicit off config" off.config.compress minimal.config.compress
+      assertEqual "default serializes ask_user false"
+        (minimal.config.getObjValAs? Bool "ask_user").toOption (some false)
+      let defaultPath : System.FilePath := "agents" / s!"{family.name}-default.json"
+      let defaultText ← IO.FS.readFile defaultPath
+      let defaultJson ← assertOk <| Result.fromExcept Error.configuration (Lean.Json.parse defaultText)
+      assertEqual "default JSON explicitly contains ask_user false"
+        (defaultJson.getObjValAs? Bool "ask_user").toOption (some false)
       let request (spec : Families.Instance) : Lean.Json :=
         ({ messages := spec.view (spec.initialLog "task" testUname), tools := spec.tools } : Chat.Request).toJson
       assertEqual "explicit off opening" (request off).compress (request minimal).compress
@@ -161,38 +171,64 @@ def suite : Suite := Testing.suite "ask_user" #[
             | .configuration message => contains message "ask_user" && contains message "true or false"
             | _ => false,
 
-  test "choices preserve wording, use one-based numbers, and always include OTHER" do
+  test "each question type preserves wording and gives its own answer instructions without OTHER" do
     let question := "  Which rule applies?\nContext: α < β.  "
     let candidates := #[" Keep α ", "Change β\nwith evidence"]
     let rendered ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question (args question candidates))
     check (rendered.startsWith question) "the question and context must retain their original wording"
-    check (contains rendered "\n1.  Keep α \n2. Change β\nwith evidence\nOTHER:")
-      "numbered candidates must retain their wording and end with the automatic custom choice"
-    check (contains rendered "none of these" && contains rendered "insufficient information")
-      "the custom answer must cover unsuitable choices and insufficient context"
+    check (contains rendered "\n1.  Keep α \n2. Change β\nwith evidence")
+      "numbered candidates must retain their wording"
+    check (contains rendered "Select zero or more options" && contains rendered "JSON array" && contains rendered "[]")
+      "multiple choice must permit an explicit empty selection and explain the reply format"
+    check (!contains rendered "OTHER") "multiple choice must not append a custom-answer candidate"
     match parseActions (response #[ask "q" (args question candidates)]) false true with
     | .actions actions =>
       match actions[0]? with
       | some (MiniSwe.Action.ask "q" text) => assertEqual "waiting text" text rendered
       | _ => fail "expected the question directive's action"
-    | _ => fail "valid choices should parse",
+    | _ => fail "valid choices should parse"
+    for (questionType, hint) in #[("yes_no", "Reply yes or no."),
+        ("open_ended", "Reply in your own words.")] do
+      let arguments := args question #[] questionType
+      let text ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
+      check (text.startsWith question) s!"{questionType} must preserve the question"
+      check (contains text hint) s!"{questionType} must state its answer format"
+      check (!contains text "\n1." && !contains text "OTHER")
+        s!"{questionType} must not invent candidate choices"
+      match parseActions (response #[ask "q" arguments]) false true with
+      | .actions actions =>
+        match actions[0]? with
+        | some (MiniSwe.Action.ask "q" waitingText) => assertEqual "waiting text" waitingText text
+        | _ => fail s!"expected the {questionType} question action"
+      | _ => fail s!"valid {questionType} question should parse",
 
-  test "malformed choices and mixed calls are rejected before any command can run" do
+  test "invalid question types, arguments, and mixed calls cannot run a command" do
     let malformed : Array Lean.Json := #[
       .null,
-      .mkObj [("options", .arr #[.str "a", .str "b"])],
-      .mkObj [("question", 7), ("options", .arr #[.str "a", .str "b"])],
+      .mkObj [("question", "q"), ("options", .arr #[.str "a", .str "b"])],
+      .mkObj [("question_type", "multiple_choice"), ("options", .arr #[.str "a", .str "b"])],
+      .mkObj [("question_type", "multiple_choice"), ("question", "q")],
+      (args).setObjVal! "question_type" "unknown",
+      (args).setObjVal! "question_type" "",
+      (args).setObjVal! "question_type" Lean.Json.null,
+      (args).setObjVal! "question_type" 7,
+      (args).setObjVal! "question" 7,
       args " \n\t" #["a", "b"],
-      .mkObj [("question", "q")],
-      .mkObj [("question", "q"), ("options", "a,b")],
-      .mkObj [("question", "q"), ("options", .arr #[.str "a", .num 2])],
+      args " \n\t" #[] "yes_no", args " \n\t" #[] "open_ended",
+      (args).setObjVal! "options" "a,b",
+      (args).setObjVal! "options" (.arr #[.str "a", .num 2]),
       args "q" #[], args "q" #["a"], args "q" #["a", " \t"],
       args "q" #["a", "a"], args "q" #["a", " a "],
+      args "q" #["yes", "no"] "yes_no",
+      args "q" #["one"] "yes_no",
+      args "q" #["a", "b"] "open_ended",
+      args "q" #["one"] "open_ended",
       (args).setObjVal! "unexpected" true]
     let cases := malformed.map (fun json => response #[ask "q" json]) ++ #[
       response #[bash, ask], response #[ask, bash], response #[ask, submit],
+      response #[submit, ask],
       response #[ask, ask "second"],
-      response #[{ (ask) with invalidArguments? := some "{\"question\":" }]]
+      response #[{ (ask) with invalidArguments? := some "{\"question_type\":" }]]
     for bad in cases do
       match parseActions bad false true with
       | .formatError _ => pure ()
@@ -208,74 +244,88 @@ def suite : Suite := Testing.suite "ask_user" #[
       | .question _ _ => fail "an invalid question must not wait for an answer"
       assertEqual "executor calls" (← calls.get) 0,
 
-  test "a recorded question accepts verbatim custom and numeric reply forks after agent reconstruction" do
+  test "typed questions record empty, partial, full, yes/no, and open replies after reconstruction" do
+    let cases : Array (String × Lean.Json × Array String) := #[
+      -- Answer instructions are not a validator: the core reply protocol keeps any supplied text.
+      ("yes_no", args "Keep the public API?\nContext: callers depend on it." #[] "yes_no",
+        #["yes", "no", "  Not a yes/no token.\nKeep this reply unchanged.\n"]),
+      ("multiple_choice", args "Which changes should be included?\nSelect all that apply."
+        #["Keep α", "Check β\nwith evidence", "Document γ"], #["[]", "[1, 3]", "[1, 2, 3]"]),
+      ("open_ended", args "How should we handle the boundary case?" #[] "open_ended",
+        #["Keep the public API.\nPreserve the literal \"[]\" in the response.\n理由：边界条件不同。\n"])]
     for family in Families.all do
-      let base := (← scratch) / family.name
-      IO.FS.createDirAll base
-      let configPath := base / "agent.json"
-      IO.FS.writeFile configPath (Lean.Json.mkObj [("family", family.name), ("ask_user", true)]).pretty
-      let built ← assertOk <| Families.fromFile configPath
-      let store ← assertOk <| Store.create (base / "states")
-      let workspaces ← Testing.workspaces
-      let project := base / "project"
-      IO.FS.createDirAll project
-      IO.FS.writeFile (project / "untouched.txt") "original\n"
-      let (executor, calls) ← countingExecutor
-      let (model, requests) ← scripted #[response #[ask], response #[submit], response #[submit]]
-      let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
-      let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-        project (some "task") (agent := built.config)
-      let waitingHash ← assertOk <| resume rt "scripted" root (fun _ => pure ())
-      let questionState ← assertOk <| getState store waitingHash
-      assertEqual "waiting kind" questionState.kind Kind.question
-      let some question := questionState.question? | fail "missing recorded question"
-      assertEqual "call id" question.callId "q"
-      check (contains question.text "1. Use the written specification" && contains question.text "OTHER:")
-        "the waiting record must expose the candidate choices"
-      assertEqual "waiting workspace" questionState.workspace (← assertOk <| getState store root).workspace
-      assertEqual "open question count" (← assertOk <| waiting store).size 1
-      assertError "cannot step while waiting" (stepOnce rt "scripted" waitingHash) fun
-        | .configuration _ => true
-        | _ => false
-      assertEqual "only question sampled" (← requests.get).size 1
-      -- Changing the source file cannot disable the capability on a recorded run.
-      IO.FS.writeFile configPath (Lean.Json.mkObj [("family", family.name), ("ask_user", false)]).pretty
-      let answers := #["OTHER: Neither option fits.\nKeep the public API.\n理由：边界条件不同。\n", "2"]
-      let mut replyHashes : Array Hash := #[]
-      for answer in answers do
-        let answered ← assertOk <| reply store waitingHash answer
-        replyHashes := replyHashes.push answered
-        let state ← assertOk <| getState store answered
-        assertEqual "reply parent" state.parent? (some waitingHash)
-        assertEqual "reply workspace" state.workspace questionState.workspace
-        check state.agent?.isNone "the reply must inherit configuration rather than duplicate it"
-        match state.appended.toList with
-        | [.observation "q" (.str raw)] => assertEqual "raw answer" raw answer
-        | _ => fail "a reply must append exactly the original answer as the asking call's observation"
-        let some recorded ← assertOk <| agentOf store answered | fail "missing root configuration"
-        assertEqual "recorded root config" recorded.compress built.config.compress
-        let restored ← assertOk <| Families.instanceOf recorded
-        checkQuestionView (restored.view (← assertOk <| logOf store answered)) answer
-        let rebuilt : Runtime := { rt with agent := restored.build executor }
-        let final ← assertOk <| resume rebuilt "scripted" answered (fun _ => pure ())
-        let finalState ← assertOk <| getState store final
-        assertEqual "resumed submission" (finalState.outcome?.map (·.status)) (some "Submitted")
-        assertEqual "final workspace" finalState.workspace questionState.workspace
-        let some request := (← requests.get).back? | fail "missing continuation request"
-        checkQuestionView request.messages answer
-      assertEqual "two distinct reply branches" (← assertOk <| children store waitingHash).size 2
-      check (replyHashes[0]? != replyHashes[1]?) "different answers must be different states"
-      check (← assertOk <| waiting store).isEmpty "answered question must no longer be listed as open"
-      assertEqual "one question and two continuations" (← requests.get).size 3
-      assertEqual "no command ran for asking or replying" (← calls.get) 0
-      let report ← assertOk <| Html.dataJson store workspaces built.view built.tools
-      let states ← assertOk <| Result.fromExcept Error.storage (report.getObjVal? "states" >>= Lean.Json.getArr?)
-      let some reportQuestion := states.find? fun json =>
-          (json.getObjValAs? String "hash").toOption == some waitingHash.hex
-        | fail "the waiting question is missing from the HTML report data"
-      let displayed ← assertOk <| Result.fromExcept Error.storage
-        (reportQuestion.getObjVal? "question" >>= (·.getObjValAs? String "text"))
-      assertEqual "report question" displayed question.text,
+      for (questionType, arguments, answers) in cases do
+        let base := (← scratch) / s!"{family.name}-{questionType}"
+        IO.FS.createDirAll base
+        let configPath := base / "agent.json"
+        IO.FS.writeFile configPath (Lean.Json.mkObj [("family", family.name), ("ask_user", true)]).pretty
+        let built ← assertOk <| Families.fromFile configPath
+        let store ← assertOk <| Store.create (base / "states")
+        let workspaces ← Testing.workspaces
+        let project := base / "project"
+        IO.FS.createDirAll project
+        IO.FS.writeFile (project / "untouched.txt") "original\n"
+        let (executor, calls) ← countingExecutor
+        let continuations := (List.replicate answers.size (response #[submit])).toArray
+        let (model, requests) ← scripted (#[response #[ask "q" arguments]] ++ continuations)
+        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
+        let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
+          project (some "task") (agent := built.config)
+        let waitingHash ← assertOk <| resume rt "scripted" root (fun _ => pure ())
+        let questionState ← assertOk <| getState store waitingHash
+        assertEqual "waiting kind" questionState.kind Kind.question
+        let some question := questionState.question? | fail "missing recorded question"
+        assertEqual "call id" question.callId "q"
+        let expected ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
+        assertEqual "recorded question wording" question.text expected
+        check (!contains question.text "OTHER") "the waiting record must not add a custom option"
+        assertEqual "waiting workspace" questionState.workspace (← assertOk <| getState store root).workspace
+        assertEqual "unanswered question count" (← assertOk <| waiting store).size 1
+        assertEqual "unanswered question has no reply children" (← assertOk <| children store waitingHash).size 0
+        assertError "cannot step while waiting" (stepOnce rt "scripted" waitingHash) fun
+          | .configuration _ => true
+          | _ => false
+        assertEqual "only question sampled" (← requests.get).size 1
+        -- Changing the source file cannot disable the capability on a recorded run.
+        IO.FS.writeFile configPath (Lean.Json.mkObj [("family", family.name), ("ask_user", false)]).pretty
+        let mut replyHashes : Array Hash := #[]
+        for answer in answers do
+          let answered ← assertOk <| reply store waitingHash answer
+          check (!replyHashes.contains answered) "different answers must create distinct reply branches"
+          replyHashes := replyHashes.push answered
+          let state ← assertOk <| getState store answered
+          assertEqual "reply kind" state.kind Kind.reply
+          assertEqual "reply parent" state.parent? (some waitingHash)
+          assertEqual "reply workspace" state.workspace questionState.workspace
+          check state.question?.isNone "an answer, including [], must not still be a waiting question"
+          check state.agent?.isNone "the reply must inherit configuration rather than duplicate it"
+          match state.appended.toList with
+          | [.observation "q" (.str raw)] => assertEqual "raw answer" raw answer
+          | _ => fail "a reply must append exactly the original answer as the asking call's observation"
+          check (← assertOk <| waiting store).isEmpty
+            "an explicit answer, including [], must differ from not answering"
+          let some recorded ← assertOk <| agentOf store answered | fail "missing root configuration"
+          assertEqual "recorded root config" recorded.compress built.config.compress
+          let restored ← assertOk <| Families.instanceOf recorded
+          checkQuestionView (restored.view (← assertOk <| logOf store answered)) answer arguments
+          let rebuilt : Runtime := { rt with agent := restored.build executor }
+          let final ← assertOk <| resume rebuilt "scripted" answered (fun _ => pure ())
+          let finalState ← assertOk <| getState store final
+          assertEqual "resumed submission" (finalState.outcome?.map (·.status)) (some "Submitted")
+          assertEqual "final workspace" finalState.workspace questionState.workspace
+          let some request := (← requests.get).back? | fail "missing continuation request"
+          checkQuestionView request.messages answer arguments
+        assertEqual "distinct reply branches" (← assertOk <| children store waitingHash).size answers.size
+        assertEqual "one question and one continuation per answer" (← requests.get).size (answers.size + 1)
+        assertEqual "no command ran for asking or replying" (← calls.get) 0
+        let report ← assertOk <| Html.dataJson store workspaces built.view built.tools
+        let states ← assertOk <| Result.fromExcept Error.storage (report.getObjVal? "states" >>= Lean.Json.getArr?)
+        let some reportQuestion := states.find? fun json =>
+            (json.getObjValAs? String "hash").toOption == some waitingHash.hex
+          | fail "the waiting question is missing from the HTML report data"
+        let displayed ← assertOk <| Result.fromExcept Error.storage
+          (reportQuestion.getObjVal? "question" >>= (·.getObjValAs? String "text"))
+        assertEqual "report question" displayed question.text,
 
   test "a question consumes its model turn and a reply does not reset the step limit" do
     let config : Config := { askUser := true, stepLimit := 1 }
@@ -287,7 +337,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     match stop with
     | .question "q" _ => pure ()
     | _ => fail "the last allowed model turn may still ask its question"
-    let answered := log.push (.observation "q" (.str "2"))
+    let answered := log.push (.observation "q" (.str "[2]"))
     let (_, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a) answered
     match stop with
     | .outcome outcome => assertEqual "limit after reply" outcome.status "LimitsExceeded"
@@ -315,7 +365,7 @@ def suite : Suite := Testing.suite "ask_user" #[
           project (some "task") (agent := built.config)
         let stopped ← assertOk <| resume rt "scripted" root (fun _ => pure ())
         check (← assertOk <| getState store stopped).question?.isSome "the allowed model turn asks"
-        let answered ← assertOk <| reply store stopped "2"
+        let answered ← assertOk <| reply store stopped "[2]"
         let some recorded ← assertOk <| agentOf store answered | fail "missing recorded configuration"
         let restored ← assertOk <| Families.instanceOf recorded
         let rebuilt := { rt with agent := restored.build executor }
@@ -340,19 +390,20 @@ def suite : Suite := Testing.suite "ask_user" #[
     let prose := Event.response { content? := some "no tool", finishReason? := some "stop" }
     expectSample (next config #[bad])
     expectDone (next config #[prose, .message (.user "try again"), bad]) "RepeatedFormatError"
-    let answered : Log := #[prose, .response (response #[ask]), .observation "q" (.str "OTHER: explain")]
+    let answered : Log := #[prose, .response (response #[ask]), .observation "q" (.str "[]")]
     expectSample (next config (answered.push bad))
     expectDone (next config (answered ++ #[bad, bad])) "RepeatedFormatError"
     expectSample (next { config with maxConsecutiveFormatErrors := 0 } #[bad, bad, bad]),
 
   test "asking and output recovery compose without running a command" do
     let config : Config := { askUser := true, recoverOutput := true }
+    let arguments := args "Which part of the output should be inspected next?" #[] "open_ended"
     let output := "\n".intercalate ((List.range 3000).map fun i => s!"line {i + 1} xxxx") ++ "\n"
     let history : Log := #[.response (response #[bash]),
       .observation "b" (Output.toJson { output, exitCode? := some 0 })]
     let readCall : Chat.ToolCall := { id := "r", name := "read_output", arguments := .mkObj [("call_id", "b"), ("offset", 1500), ("limit", 2)] }
     let (executor, calls) ← countingExecutor
-    let (model, _) ← scripted #[response #[ask], response #[readCall], response #[submit]]
+    let (model, _) ← scripted #[response #[ask "q" arguments], response #[readCall], response #[submit]]
     let a := agent executor config
     let (log, firstStop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
       (initialLog config "task" testUname ++ history)
@@ -360,7 +411,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     | .question "q" _ => pure ()
     | _ => fail "the recovery-enabled agent should ask normally"
     let (finalLog, finalStop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-      (log.push (.observation "q" (.str "OTHER: inspect the middle lines")))
+      (log.push (.observation "q" (.str "Inspect the middle lines.\nKeep the output unchanged.")))
     match finalStop with
     | .outcome outcome => assertEqual "submitted after reading" outcome.status "Submitted"
     | _ => fail "expected submission after output recovery"
@@ -369,7 +420,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       | _ => none
     assertEqual "recovered lines" page (some "line 1500 xxxx\nline 1501 xxxx")
     let dialogue := view config finalLog
-    checkQuestionView dialogue "OTHER: inspect the middle lines"
+    checkQuestionView dialogue "Inspect the middle lines.\nKeep the output unchanged." arguments
     check (dialogue.any fun
       | .tool "b" (.str shown) => contains shown "read_output" && contains shown "id is b"
       | _ => false) "output truncation must retain its recovery hint"

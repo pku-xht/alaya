@@ -256,7 +256,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let some first := roots[0]? | throw <| .configuration "nothing to report: the data directory holds no states"
     let spec ← recordedAgent data.store args first
     for root in roots do
-      if (← agentOf data.store root).map (·.compress) != some spec.config.compress then
+      if (← recordedAgent data.store args root).config.compress != spec.config.compress then
         throw <| .configuration <|
           s!"the roots of {data.path} were created with different agents; a report renders one " ++
           "agent's runs, so give each its own data directory"
