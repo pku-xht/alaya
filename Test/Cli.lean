@@ -146,14 +146,17 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
 private def compressed (json : Lean.Json) : String := json.compress
 
 def agentsSuite : Suite := suite "cli.agents" #[
-  test "each family's default configuration reads back as itself" do
+  test "each family's default file reads back as itself, complete" do
     for family in Agent.Families.all do
-      let built ← assertOk <| Agent.Families.instanceOf family.defaults
-      assertEqual s!"{family.name} defaults" (compressed built.config) (compressed family.defaults),
+      let path := ("agents" : System.FilePath) / s!"{family.name}-default.json"
+      let built ← assertOk <| Agent.Families.fromFile path
+      let .ok onDisk := Lean.Json.parse (← IO.FS.readFile path) | fail s!"{path} is not JSON"
+      assertEqual s!"{family.name} defaults" (compressed built.config) (compressed onDisk)
+      -- A file naming only the family is the same agent: the file lists every default.
+      let minimal ← assertOk <| Agent.Families.instanceOf (.mkObj [("family", family.name)])
+      assertEqual s!"{family.name} minimal" (compressed minimal.config) (compressed onDisk),
 
   test "a configuration may leave fields out, but not misname or mistype one" do
-    let minimal ← assertOk <| Agent.Families.instanceOf (.mkObj [("family", "mini-vero")])
-    assertEqual "defaults filled in" (compressed minimal.config) (compressed Agent.Families.miniVero.defaults)
     let refused (label : String) (json : Lean.Json) (expected : String) : TestM Unit :=
       assertError label (Agent.Families.instanceOf json) fun
         | .configuration m => (m.splitOn expected).length > 1
@@ -163,23 +166,14 @@ def agentsSuite : Suite := suite "cli.agents" #[
     refused "typo" (.mkObj [("family", "mini-swe"), ("step_limt", 1)]) "unknown field 'step_limt'"
     refused "type" (.mkObj [("family", "mini-swe"), ("recover_output", "yes")]) "must be true or false"
     refused "mode" (.mkObj [("family", "mini-vero"), ("mode", "both")]) "unknown mode"
-    refused "nested" (.mkObj [("family", "mini-swe"), ("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'",
-
-  test "--set overlays a field by its dotted path, as JSON when the value parses" do
-    let mut json := Agent.Families.miniVero.defaults
-    for setting in ["step_limit=5", "recover_output=true", "executor.timeout_seconds=9", "mode=codeproof",
-        "executor.env=[[\"A\",\"1\"]]"] do
-      json ← assertOk <| Agent.Families.overlay json setting
-    let built ← assertOk <| Agent.Families.instanceOf json
-    let field (path : List String) : String :=
-      (path.foldl (fun j key => j.bind fun j => (j.getObjVal? key).toOption) (some built.config)).map compressed |>.getD "absent"
-    assertEqual "step_limit" (field ["step_limit"]) "5"
-    assertEqual "recover_output" (field ["recover_output"]) "true"
-    assertEqual "timeout" (field ["executor", "timeout_seconds"]) "9"
-    assertEqual "mode" (field ["mode"]) "\"codeproof\""
-    assertEqual "env" (field ["executor", "env"]) "[[\"A\",\"1\"]]"
-    assertEqual "tools follow" (built.tools.map (·.name)) #["bash", "submit", "read_output"]
-    assertError "no =" (Agent.Families.overlay json "step_limit") fun | .configuration _ => true | _ => false,
+    refused "nested" (.mkObj [("family", "mini-swe"), ("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
+    let file := (← scratch) / "arm.json"
+    IO.FS.writeFile file "{\"family\": \"mini-vero\", \"mode\": \"codeproof\", \"recover_output\": true}"
+    let built ← assertOk <| Agent.Families.fromFile file
+    assertEqual "tools follow the file" (built.tools.map (·.name)) #["bash", "submit", "read_output"]
+    assertError "missing file" (Agent.Families.fromFile ((← scratch) / "none.json")) fun
+      | .configuration m => m.startsWith "cannot read"
+      | _ => false,
 
   test "a root records its agent, and every state of the run finds it there" do
     let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")

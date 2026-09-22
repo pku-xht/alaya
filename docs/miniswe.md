@@ -33,8 +33,8 @@ host, or a container the trajectory pinned — and the **configuration**, a JSON
 
 A field left out is its default; a misspelt one is an error. The task is not configuration: it
 is what `root --task` gives, and `initialLog config task uname` places it. The command line
-names a configuration at `root` (`--agent mini-swe-default`, or a file; `docs/trajectory-schema.md`
-§8) and the root records it.
+names a configuration file at `root` (`--agent agents/mini-swe-default.json`;
+`docs/trajectory-schema.md` §8) and the root records it.
 
 The tools are not this agent's: `Alaya.Agent.Tools` defines each on its own — its schema for the
 model, how its arguments are read, and what answers a call — with no knowledge of which agent
@@ -191,8 +191,8 @@ the run and is gone when a branch is resumed later.
 
 ## 9. Reading a long output back: `read_output`
 
-Off by default, and then nothing above changes. On (`recover_output` in the configuration,
-`--set recover_output=true` at `root`), the agent can see the part of a command's output the
+Off by default, and then nothing above changes. On (`recover_output` in the configuration
+file), the agent can see the part of a command's output the
 view cut:
 
 - The **warning** on a cut output names the call: `Output too long. read_output shows any lines

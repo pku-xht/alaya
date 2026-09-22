@@ -6,9 +6,10 @@ something you can branch, replay, evaluate, intervene in, and read back.
 
 The trajectory is the same for every agent. Wherever an agent's prompts, tools, or view matter —
 creating a root, taking a turn, rendering what the model was sent — the command line names the
-agent with `--agent` when the root is created — a configuration, `mini-swe-default`
-(`docs/miniswe.md`, which the examples below use) or `mini-vero-default` (`docs/minivero.md`) or
-a JSON file of your own (§8) — and the root records it, so no later command asks again. Everything else — evaluating, intervening, replying,
+agent with `--agent` when the root is created — a JSON configuration file, such as
+`agents/mini-swe-default.json` (`docs/miniswe.md`, which the examples below use) or
+`agents/mini-vero-default.json` (`docs/minivero.md`) (§8) — and the root records it, so no later
+command asks again. Everything else — evaluating, intervening, replying,
 inspecting — is agent-independent and takes no such flag.
 
 ## 1. States
@@ -19,7 +20,7 @@ a restic repository and named by its snapshot ID (§5).
 
 ```sh
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
-root=$(alaya root --task "make the test suite pass" ./project --agent mini-swe-default --image python:3.12-slim)
+root=$(alaya root --task "make the test suite pass" ./project --agent agents/mini-swe-default.json --image python:3.12-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
 
 alaya show adbac1          # the state: kind, parent, workspace snapshot, note, image, then its log
@@ -625,11 +626,10 @@ an entry is only ever appended to.
 ## 8. Commands
 
 ```
-alaya root --task TEXT PROJECT --agent A [--set K=V]... [--image IMAGE]   create a root from a project directory
-alaya root --task-file FILE --agent A --image IMAGE --path PATH   …or from a path inside the image
+alaya root --task TEXT PROJECT --agent FILE [--image IMAGE]   create a root from a project directory
+alaya root --task-file FILE --agent FILE --image IMAGE --path PATH   …or from a path inside the image
 alaya resume HASH --model P:M                    grow one continuation until it ends or asks
 alaya step   HASH --model P:M                    advance exactly one turn
-alaya agents                                     the agent families and their default configurations
 alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a checkout; record the verdict
 alaya commit HASH DIR [-m NOTE] [--tell TEXT]    record a hand-edited workspace as a child
 alaya tell   HASH TEXT                           send the agent a message, as a child
@@ -655,17 +655,15 @@ Every command takes `--data D` and `--json` where it prints states.
 **The agent.** An agent is a *family* — `mini-swe` (`docs/miniswe.md`) or `mini-vero`
 (`docs/minivero.md`) — and a *configuration*: a JSON object with a `family` field and the
 family's own fields, every one of which may be left out for its default, and none of which may
-be misspelt. `agents/` in the repository holds configurations; `mini-swe-default.json` and
-`mini-vero-default.json` are the families' defaults, built into the program and printed by
-`alaya agents`, and the documentation of the fields. `root --agent A` names one — a built-in by
-name, `mini-swe-default`, or any JSON file by path — and each `--set path=value` overlays a
-field (`--set mode=codeproof`, `--set recover_output=true`, `--set executor.timeout_seconds=900`;
-the value is JSON when it parses, text otherwise). The complete configuration is recorded in
-the root (§6, `agent`), shown by `show` and, by family, by `tree`, and every later command —
-`step`, `resume`, `html`, `show --view` — builds the agent from it, so a run is continued by
-the agent that started it. Given `--agent` again, such a command refuses a configuration other
-than the recorded one, as `resume` refuses another `--image`. A variant of an agent for an
-experiment is a file in `agents/`, named for what it changes.
+be misspelt. A configuration is a file: `root --agent FILE` names it, and that is the one way to
+configure an agent. `agents/` in the repository holds the families' defaults,
+`mini-swe-default.json` and `mini-vero-default.json`, complete, which is the documentation of
+the fields; a variant for an experiment is a copy with a field changed, named for what it
+changes. The complete configuration is recorded in the root (§6, `agent`), shown by `show` and,
+by family, by `tree`, and every later command — `step`, `resume`, `html`, `show --view` — builds
+the agent from it, so a run is continued by the agent that started it. Given `--agent` again,
+such a command refuses a file describing another configuration, as `resume` refuses another
+`--image`.
 
 `root` takes `--image`, `--container-user`, and `--network`; `resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`

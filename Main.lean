@@ -69,36 +69,20 @@ private def executorFor (args : Cli.Args) (image? : Option String) (config : Exe
           "a continuation has to run the same bits its earlier turns did"
     Executor.Docker.executor settings config
 
-/-- The agent configuration `--agent` names: a family's built-in defaults by name
-(`mini-swe-default`), or a JSON file; then each `--set path=value` overlaid. -/
-private def configuredAgent (args : Cli.Args) : Result Lean.Json := do
-  let known := ", ".intercalate (Agent.Families.all.map (·.name ++ "-default")).toList
-  let name ← args.require "agent" s!"{known}, or a JSON file"
-  let base ← match Agent.Families.all.find? (fun f => f.name ++ "-default" == name) with
-    | some family => pure family.defaults
-    | none =>
-      let text ← match ← (Result.fromIO Error.configuration (IO.FS.readFile name)).toBaseIO with
-        | .ok text => pure text
-        | .error _ => throw <| .configuration s!"--agent: {name} is not {known}, and no such file can be read"
-      match Lean.Json.parse text with
-      | .ok json => pure json
-      | .error message => throw <| .configuration s!"--agent: {name} is not JSON: {message}"
-  (args.all "set").foldlM Agent.Families.overlay base
-
-/-- The agent of an existing run: what its root recorded. `--agent` and `--set` are for
-`root`; given again, they must describe the same agent, as `--image` must name the same
-image, or the command refuses. -/
+/-- The agent of an existing run: what its root recorded. `--agent` is for `root`; given
+again, it must describe the same agent, as `--image` must name the same image, or the command
+refuses. -/
 private def recordedAgent (store : Store) (args : Cli.Args) (hash : Hash) :
     Result Agent.Families.Instance := do
   let some recorded ← agentOf store hash
     | throw <| .configuration "this run's root records no agent: it is from an earlier alaya"
   let built ← Agent.Families.instanceOf recorded
   if args.isSet "agent" then
-    let requested ← Agent.Families.instanceOf (← configuredAgent args)
+    let requested ← Agent.Families.fromFile (← args.require "agent" "a JSON file")
     if requested.config.compress != built.config.compress then
       throw <| .configuration <|
-        "this run was created with another agent configuration; --agent and --set are for " ++
-        s!"`root`. It records: {built.config.compress}"
+        "this run was created with another agent configuration; --agent is for `root`. " ++
+        s!"It records: {built.config.compress}"
   pure built
 
 private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args) (start : Hash)
@@ -189,7 +173,8 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let data ← openData args
     let settings? ← (← Executor.Docker.settings? args).mapM (·.pin)
     let (uname, image?) ← rootEnvironment settings?
-    let spec ← Agent.Families.instanceOf (← configuredAgent args)
+    let spec ← Agent.Families.fromFile (← args.require "agent"
+      s!"a JSON configuration, e.g. agents/mini-swe-default.json; the families are {Agent.Families.names}")
     let log := spec.initialLog task uname
     let project ← rootProject args data settings? rest.head?
     let hash ← createRoot data.store data.workspaces log project (some task) image? spec.config
@@ -279,11 +264,6 @@ private def dispatch (argv : List String) : Result UInt32 := do
     Result.fromIO Error.storage (IO.FS.writeFile out page)
     emit s!"wrote {out} ({page.length} bytes)"
     pure 0
-  | ["agents"] =>
-    for family in Agent.Families.all do
-      emit s!"{family.name}-default"
-      emit family.defaults.pretty
-    pure 0
   | ["tree"] =>
     let data ← openData args
     emitLines (← treeLines data.store)
@@ -305,8 +285,8 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | _ =>
     throw <| .configuration <|
-      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent A [--set K=V]... | resume HASH --model P:M | " ++
-      "step HASH --model P:M | agents | " ++
+      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent FILE | resume HASH --model P:M | " ++
+      "step HASH --model P:M | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++
       "html [FILE] [--hide DIR] | " ++

@@ -5,12 +5,11 @@ import Alaya.Agent.MiniVero
 The agent families the command line can run, and how a configuration names one.
 
 An agent is a **family** and a **configuration**: a JSON object with a `family` field and the
-family's own fields, read by the family's `Config.fromJson`. `agents/*.json` in the repository
-are configurations — `mini-swe-default.json` and `mini-vero-default.json` are each family's
-defaults, and the documentation of its fields — and the two defaults are built into the
-program, so `--agent mini-swe-default` needs no path. Whatever a root was created with, its
-complete configuration is what the root records (`Trajectory.State.agent?`), and every later
-command rebuilds the agent from that.
+family's own fields, read by the family's `Config.fromJson`. A configuration is a file, named
+by `root --agent`; `agents/*.json` in the repository are the families' defaults, and the
+documentation of their fields. Whatever a root was created with, its complete configuration is
+what the root records (`Trajectory.State.agent?`), and every later command rebuilds the agent
+from that.
 -/
 
 namespace Alaya.Agent.Families
@@ -31,18 +30,10 @@ structure Instance where
 
 structure Family where
   name : String
-  /-- The family's default configuration, as `agents/<name>-default.json`. -/
-  defaults : Lean.Json
   make : Lean.Json -> Except String Instance
-
-private def parsed (text : String) : Lean.Json :=
-  match Lean.Json.parse text with
-  | .ok json => json
-  | .error _ => .null
 
 def miniSwe : Family := {
   name := "mini-swe"
-  defaults := parsed (include_str "../../agents/mini-swe-default.json")
   make := fun json => do
     let config ← MiniSwe.Config.fromJson json
     pure {
@@ -55,7 +46,6 @@ def miniSwe : Family := {
 
 def miniVero : Family := {
   name := "mini-vero"
-  defaults := parsed (include_str "../../agents/mini-vero-default.json")
   make := fun json => do
     let config ← MiniVero.Config.fromJson json
     pure {
@@ -83,25 +73,13 @@ def instanceOf (json : Lean.Json) : Result Instance := do
   | .ok built => pure built
   | .error message => throw <| .configuration s!"{name} configuration: {message}"
 
-/-- `json` with the value at a dotted `path` replaced, objects created along the way. -/
-partial def set (json : Lean.Json) (path : List String) (value : Lean.Json) : Lean.Json :=
-  match path with
-  | [] => value
-  | key :: rest =>
-    let fields := match json with | .obj fields => fields | _ => {}
-    let inner := fields.get? key |>.getD .null
-    .obj (fields.insert key (set inner rest value))
-
-/-- A `--set path=value`: the value is JSON when it parses, the text otherwise, so `step_limit=5`,
-`recover_output=true`, `mode=proof` and `executor.env=[["A","1"]]` all read as meant. -/
-def overlay (json : Lean.Json) (setting : String) : Result Lean.Json := do
-  match setting.splitOn "=" with
-  | [] | [_] => throw <| .configuration s!"--set takes path=value, not '{setting}'"
-  | path :: rest =>
-    let text := "=".intercalate rest
-    let value := match Lean.Json.parse text with
-      | .ok value => value
-      | .error _ => .str text
-    pure (set json (path.splitOn ".") value)
+/-- The agent a configuration file names. -/
+def fromFile (path : System.FilePath) : Result Instance := do
+  let text ← match ← (Result.fromIO Error.configuration (IO.FS.readFile path)).toBaseIO with
+    | .ok text => pure text
+    | .error _ => throw <| .configuration s!"cannot read the agent configuration {path}"
+  match Lean.Json.parse text with
+  | .ok json => instanceOf json
+  | .error message => throw <| .configuration s!"{path} is not JSON: {message}"
 
 end Alaya.Agent.Families
