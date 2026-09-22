@@ -42,9 +42,9 @@ based on mini's texts, rendered from its `mini.yaml`. The submission instruction
 alone when omitted output is needed for the next decision. The opening log is frozen into the
 root state; changing these instructions does not rewrite an existing root's opening messages.
 
-For file-based tasks, `root --instruction-file FILE` appends the file verbatim to `config.task`
-before constructing this log. The first request includes it in full; it is not read through a
-tool observation. See [complete task instructions](task-instructions.md).
+`config.task` is what `root` was given as `--task TEXT` or `--task-file FILE`
+(`docs/trajectory-schema.md` §8); the first request includes it in full, so a task kept in a file
+is not read through a tool observation.
 
 ## 3. Tools
 

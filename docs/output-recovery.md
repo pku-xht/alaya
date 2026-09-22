@@ -5,12 +5,10 @@ read any omitted part from the recorded observation. The trajectory already stor
 executor output, so recovery reuses that content rather than creating another spill directory
 or workspace snapshot.
 
-`root --instruction-file FILE` puts a task file directly into the opening user message, so
-completion conditions do not depend on the model reading a long file through a tool preview.
-The file is appended verbatim to the positional task, and the combined text is recorded in
-the root before any model request. Without the option, task construction is unchanged.
-See [complete task instructions](task-instructions.md) for host-path handling, errors, and
-how to inspect the saved opening message.
+`root --task-file FILE` puts a task file directly into the opening user message, so completion
+conditions do not depend on the model reading a long file through a tool preview. The file is
+read verbatim and recorded in the root before any model request (`docs/trajectory-schema.md`
+§8).
 
 MiniVero shares MiniSwe's tools, view, and execution loop, so it also offers `read_output`.
 Its Vero mode, prompt sections, limits, and submission behavior are unchanged.

@@ -18,7 +18,7 @@ a restic repository and named by its snapshot ID (§5).
 
 ```sh
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
-root=$(alaya root "make the test suite pass" ./project --agent mini-swe --image python:3.12-slim)
+root=$(alaya root --task "make the test suite pass" ./project --agent mini-swe --image python:3.12-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
 
 alaya show adbac1          # the state: kind, parent, workspace snapshot, note, image, then its log
@@ -513,7 +513,7 @@ links, extended attributes. The identifier is the restic snapshot ID.
 A snapshot or a checkout of a directory that overlaps the run's own storage — the repository,
 `D/states`, `D/cache` — is refused before anything is touched: the one would capture the
 storage, and the other deletes what the snapshot does not hold, which is the storage. So
-`alaya checkout STATE .` beside `.alaya`, and `alaya root TASK .` with the default data
+`alaya checkout STATE .` beside `.alaya`, and `alaya root --task T .` with the default data
 directory, are errors that say to move one of the two.
 
 Every operation is one `restic` process with `--no-cache --insecure-no-password`: the repository
@@ -672,8 +672,8 @@ an entry is only ever appended to.
 ## 8. Commands
 
 ```
-alaya root TASK PROJECT --agent A [--image IMAGE] [--instruction-file FILE]   create a root from a project directory
-alaya root TASK --agent A --image IMAGE --path PATH [--instruction-file FILE] …or from a path inside the image
+alaya root --task TEXT PROJECT --agent A [--image IMAGE]   create a root from a project directory
+alaya root --task-file FILE --agent A --image IMAGE --path PATH   …or from a path inside the image
 alaya resume HASH --agent A --model P:M                grow one continuation until it ends or asks
 alaya step   HASH --agent A --model P:M                advance exactly one turn
 alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a checkout; record the verdict
@@ -689,15 +689,16 @@ alaya html [FILE] --agent A [--hide DIR]         write the forest as one self-co
 alaya rm HASH                                    delete a subtree and the snapshots only it used
 ```
 
-`root --instruction-file FILE` reads a UTF-8 file on the host and appends its exact contents to
-`TASK` with two newlines. The combined task is saved in the opening log and root note, so the
-first request includes the entire file without a tool read. Without the option, the original
-task path is unchanged. A missing value, unreadable file, or invalid UTF-8 fails before root
-creation. See [complete task instructions](task-instructions.md).
+`root` takes the task as `--task TEXT` or `--task-file FILE`, one of the two. The file is read
+on the host — relative to the current directory, whatever image the run uses — as it is, not
+trimmed or rewritten, and must be UTF-8; a missing or unreadable file is an error before
+anything is created, not an empty task. Either way the task is saved in the opening log and the
+root's note, so the first request carries all of it without a tool read: a task specification
+too long for a command's output preview reaches the model whole, its middle included.
 
 Every command takes `--data D` and `--json` where it prints states. `--agent A` names the agent
 where its prompts, tools, or view matter: `mini-swe` or `mini-vero`. `root` takes `--image`,
-`--container-user`, `--network`, and `--instruction-file`, and for `mini-vero` a required `--mode proof|codeproof`
+`--container-user`, and `--network`, and for `mini-vero` a required `--mode proof|codeproof`
 (`docs/minivero.md`); `resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
 takes `--timeout` (default 900 s) for the grader and `--force`. The image is resolved to a digest at `root`

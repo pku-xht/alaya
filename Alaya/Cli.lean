@@ -103,14 +103,21 @@ def Args.float? (args : Args) (name : String) : Result (Option Float) :=
 def Args.floatD (args : Args) (name : String) (fallback : Float) : Result Float :=
   return (← args.float? name).getD fallback
 
-/-- Append an explicitly supplied UTF-8 instruction file verbatim to the root task. This is
-read on the host before the first model request, not through a bounded shell observation. -/
-def Args.taskWithInstructions (args : Args) (task : String) : Result String := do
-  if !args.isSet "instruction-file" then return task
-  let path ← args.require "instruction-file" "a UTF-8 file to include in the initial task"
-  let bytes ← Result.fromIO Error.configuration (IO.FS.readBinFile path)
-  let some instructions := String.fromUTF8? bytes
-    | throw <| .configuration "--instruction-file must contain valid UTF-8"
-  pure (task ++ "\n\n" ++ instructions)
+/-- The task of a new root: `--task TEXT`, or the contents of `--task-file FILE`, one of the
+two. The file is read on the host, as it is — a file a shell would have to quote, and an error
+rather than an empty task when it is missing. `usage` is what to say when neither is given. -/
+def Args.taskOf (args : Args) (usage : String) : Result String := do
+  match args.isSet "task", args.isSet "task-file" with
+  | true, true => throw <| .configuration "give either --task TEXT or --task-file FILE, not both"
+  | true, false => args.require "task" "the task text"
+  | false, true =>
+    let path ← args.require "task-file" "a UTF-8 file holding the task"
+    let bytes ← match ← (Result.fromIO Error.configuration (IO.FS.readBinFile path)).toBaseIO with
+      | .ok bytes => pure bytes
+      | .error _ => throw <| .configuration s!"cannot read the task file {path}"
+    match String.fromUTF8? bytes with
+    | some task => pure task
+    | none => throw <| .configuration s!"the task file {path} is not valid UTF-8"
+  | false, false => throw <| .configuration usage
 
 end Alaya.Cli

@@ -58,7 +58,7 @@ D=example/trajectory
 M=xmcp:closeai/gpt-5.4-mini
 
 # The root: the task statement and the skeleton, pinned to the image.
-root=$(alaya root "$(cat example/bija/TASK.txt)" example/bija/skeleton --agent mini-swe \
+root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agent mini-swe \
   --image ghcr.io/astral-sh/uv:python3.12-alpine3.23 --data $D)
 
 # The first branch, to its submission.
