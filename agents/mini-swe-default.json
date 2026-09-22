@@ -1,0 +1,10 @@
+{
+  "family": "mini-swe",
+  "step_limit": 0,
+  "max_consecutive_format_errors": 3,
+  "executor": {
+    "timeout_seconds": 30,
+    "env": [["PAGER", "cat"], ["MANPAGER", "cat"], ["LESS", "-R"], ["PIP_PROGRESS_BAR", "off"], ["TQDM_DISABLE", "1"]]
+  },
+  "recover_output": false
+}

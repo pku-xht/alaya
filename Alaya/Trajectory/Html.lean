@@ -173,6 +173,7 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
     ("workspace", state.workspace.hex),
     ("note", state.note?.map Lean.Json.str |>.getD .null),
     ("image", state.image?.map Lean.Json.str |>.getD .null),
+    ("agent", state.agent?.getD .null),
     ("outcome", match state.outcome? with
       | none => .null
       | some o => .mkObj [("status", o.status), ("submission", o.submission)]),
@@ -899,6 +900,7 @@ function select(hash) {
   const rows = [['hash', hash], ['parent', state.parent || '(root)'], ['workspace', state.workspace]];
   if (state.note) rows.push(['note', state.note]);
   if (state.image) rows.push(['image', state.image]);
+  if (state.agent) rows.push(['agent', JSON.stringify(state.agent)]);
   if (state.outcome) rows.push(['outcome', state.outcome.status]);
   if (state.question) rows.push(['question', state.question.text]);
   if (state.intervention) rows.push(['message', state.intervention.message]);

@@ -1,10 +1,10 @@
 # MiniVero
 
-`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Use it with `--agent mini-vero` for root, step, resume, HTML, and `show --view` commands; `root` also takes `--mode proof` or `--mode codeproof`, Vero's evaluation mode for the run.
+`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Its configuration is MiniSwe's with one more field, `mode`: `proof` or `codeproof`, Vero's evaluation mode for the run (`agents/mini-vero-default.json`; `alaya root --agent mini-vero-default --set mode=codeproof …`). The root records it, and every later command builds the agent from the record.
 
 ## How it is built
 
-MiniVero is a specialization of the mini-SWE-agent port: it reuses MiniSwe's `bash` and `submit` tools, its action parsing and format-error protocol, its executor, and its control loop, and replaces the two prompts and the identity. Alaya supplies the trajectory store, CAS snapshots, HTML reports, and external evaluation.
+MiniVero is a specialization of the mini-SWE-agent port: it reuses the `bash` and `submit` tools (`Alaya.Agent.Tools`), MiniSwe's action parsing and format-error protocol, its executor, and its control loop, and replaces the two prompts and the identity. Alaya supplies the trajectory store, CAS snapshots, HTML reports, and external evaluation.
 
 ## What the model is sent
 
@@ -13,7 +13,7 @@ A run opens with two messages, frozen into the root state:
 - a system message naming the agent, which also says that Vero's independent grader decides correctness;
 - one user message built by `MiniVero.taskMessage`, holding, in this order:
     1. Vero's own opening framing — the sandbox is the current working directory, and the grader reads the sandbox state after the agent stops;
-    2. the instance text passed on the command line, which is the `MINIVERO_TASK.md` written by `vero-codegen` for this benchmark and this mode;
+    2. the instance text given to `root` as `--task-file`, which is the `MINIVERO_TASK.md` written by `vero-codegen` for this benchmark and this mode;
     3. the rule sections, quoted from Vero's instruction templates;
     4. this agent's mechanics — repository-relative paths, no shell state between calls, one `submit` call — and the executor's `uname`.
 
@@ -57,7 +57,7 @@ MiniVero defaults to 200 model turns and a 600-second shell-command timeout. The
 
 MiniVero currently uses MiniSwe's linear history unchanged. Every earlier message remains in the model context, while the complete raw trajectory is also retained for reports, evaluation, and later analysis. This is the baseline used for experiments.
 
-MiniSwe still truncates a single tool output of at least 10,000 characters to its beginning and end before placing it in the model context. With `--recover-output`, the agent can read the cut part back through `read_output` (`docs/miniswe.md` §9), and its mechanics paragraph says so; without, nothing differs. No multi-turn compaction or summary is applied before the baseline is evaluated.
+MiniSwe still truncates a single tool output of at least 10,000 characters to its beginning and end before placing it in the model context. With `recover_output` set, the agent can read the cut part back through `read_output` (`docs/miniswe.md` §9), and its mechanics paragraph says so; without, nothing differs. No multi-turn compaction or summary is applied before the baseline is evaluated.
 
 ## Running
 
@@ -79,9 +79,9 @@ python run.py prepare --run RUN --benchmark BENCHMARK --mode proof|codeproof
 Run against an already rendered Vero source directory:
 
 ```bash
-alaya root "$(cat /path/to/source/MINIVERO_TASK.md)" /path/to/source --agent mini-vero --mode codeproof --data /path/to/audit
-alaya step STATE --agent mini-vero --model PROVIDER:MODEL --data /path/to/audit --json
-alaya html /path/to/report.html --agent mini-vero --data /path/to/audit
+alaya root --task-file /path/to/source/MINIVERO_TASK.md /path/to/source --agent mini-vero-default --set mode=codeproof --data /path/to/audit
+alaya step STATE --model PROVIDER:MODEL --data /path/to/audit --json
+alaya html /path/to/report.html --data /path/to/audit
 ```
 
 `../vero-codegen` contains the experimental runner, task-contract generation, Docker image builder, Vero grading adapter, and integration tests. Vero itself remains the source of benchmark definitions and grading rules.

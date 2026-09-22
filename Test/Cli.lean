@@ -1,4 +1,5 @@
 import Test.Framework
+import Test.DirectoryWorkspaces
 import Alaya
 
 /-! Command-line parsing and the DGX Spark endpoint syntax. -/
@@ -71,11 +72,11 @@ def argsSuite : Suite := suite "cli.args" #[
     let task ← assertOk ((parse ["--task-file", path.toString]).taskOf "usage")
     assertEqual "verbatim, trailing newline included" task contents
     let uname : Uname := { system := "Linux", release := "test", version := "test", machine := "test" }
-    let logs := #[Agent.MiniSwe.initialLog { task } uname,
-      Agent.MiniVero.initialLog { task } .proof uname,
-      Agent.MiniVero.initialLog { task } .codeproof uname]
+    let logs := #[Agent.MiniSwe.initialLog {} task uname,
+      Agent.MiniVero.initialLog { mode := .proof } task uname,
+      Agent.MiniVero.initialLog { mode := .codeproof } task uname]
     for log in logs do
-      let request : Chat.Request := { messages := Agent.MiniSwe.view { task } log, tools := Agent.MiniSwe.tools { task } }
+      let request : Chat.Request := { messages := Agent.MiniSwe.view {} log, tools := Agent.MiniSwe.tools {} }
       let json := request.toJson .native
       let .ok messages := json.getObjValAs? (Array Lean.Json) "messages"
         | fail "serialized request is missing messages"
@@ -142,6 +143,61 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
       | _ => false
 ]
 
-def suites : Array Suite := #[argsSuite, endpointSuite]
+private def compressed (json : Lean.Json) : String := json.compress
+
+def agentsSuite : Suite := suite "cli.agents" #[
+  test "each family's default configuration reads back as itself" do
+    for family in Agent.Families.all do
+      let built ← assertOk <| Agent.Families.instanceOf family.defaults
+      assertEqual s!"{family.name} defaults" (compressed built.config) (compressed family.defaults),
+
+  test "a configuration may leave fields out, but not misname or mistype one" do
+    let minimal ← assertOk <| Agent.Families.instanceOf (.mkObj [("family", "mini-vero")])
+    assertEqual "defaults filled in" (compressed minimal.config) (compressed Agent.Families.miniVero.defaults)
+    let refused (label : String) (json : Lean.Json) (expected : String) : TestM Unit :=
+      assertError label (Agent.Families.instanceOf json) fun
+        | .configuration m => (m.splitOn expected).length > 1
+        | _ => false
+    refused "no family" (.mkObj [("step_limit", 1)]) "needs a \"family\""
+    refused "unknown family" (.mkObj [("family", "mini-swf")]) "unknown agent family"
+    refused "typo" (.mkObj [("family", "mini-swe"), ("step_limt", 1)]) "unknown field 'step_limt'"
+    refused "type" (.mkObj [("family", "mini-swe"), ("recover_output", "yes")]) "must be true or false"
+    refused "mode" (.mkObj [("family", "mini-vero"), ("mode", "both")]) "unknown mode"
+    refused "nested" (.mkObj [("family", "mini-swe"), ("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'",
+
+  test "--set overlays a field by its dotted path, as JSON when the value parses" do
+    let mut json := Agent.Families.miniVero.defaults
+    for setting in ["step_limit=5", "recover_output=true", "executor.timeout_seconds=9", "mode=codeproof",
+        "executor.env=[[\"A\",\"1\"]]"] do
+      json ← assertOk <| Agent.Families.overlay json setting
+    let built ← assertOk <| Agent.Families.instanceOf json
+    let field (path : List String) : String :=
+      (path.foldl (fun j key => j.bind fun j => (j.getObjVal? key).toOption) (some built.config)).map compressed |>.getD "absent"
+    assertEqual "step_limit" (field ["step_limit"]) "5"
+    assertEqual "recover_output" (field ["recover_output"]) "true"
+    assertEqual "timeout" (field ["executor", "timeout_seconds"]) "9"
+    assertEqual "mode" (field ["mode"]) "\"codeproof\""
+    assertEqual "env" (field ["executor", "env"]) "[[\"A\",\"1\"]]"
+    assertEqual "tools follow" (built.tools.map (·.name)) #["bash", "submit", "read_output"]
+    assertError "no =" (Agent.Families.overlay json "step_limit") fun | .configuration _ => true | _ => false,
+
+  test "a root records its agent, and every state of the run finds it there" do
+    let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+    let workspaces ← Testing.workspaces
+    let project := (← scratch) / "proj"
+    IO.FS.createDirAll project
+    let built ← assertOk <| Agent.Families.instanceOf (.mkObj [("family", "mini-swe"), ("step_limit", 7)])
+    let root ← assertOk <| Trajectory.createRoot store workspaces #[] project (some "t") (agent := built.config)
+    let child ← assertOk <| Trajectory.tell store root "hello"
+    assertEqual "root" ((← assertOk <| Trajectory.agentOf store root).map compressed) (some (compressed built.config))
+    assertEqual "child" ((← assertOk <| Trajectory.agentOf store child).map compressed) (some (compressed built.config))
+    check (← assertOk <| Trajectory.getState store child).agent?.isNone "a child carries no record itself"
+    let lines ← assertOk <| Trajectory.showLines store root
+    check (lines.any fun l => l.startsWith "agent    " && (l.splitOn "\"step_limit\":7").length > 1) "show prints it"
+    let tree ← assertOk <| Trajectory.treeLines store
+    check (tree.any fun l => (l.splitOn "root  [mini-swe]").length > 1) s!"tree names the family: {tree}"
+]
+
+def suites : Array Suite := #[argsSuite, endpointSuite, agentsSuite]
 
 end CliTests

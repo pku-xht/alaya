@@ -1,6 +1,7 @@
 import Alaya.Agent
 import Alaya.Executor
-import Alaya.Agent.OutputRead
+import Alaya.Agent.Tools
+import Alaya.Agent.Config
 
 /-! A port of mini-SWE-agent's default tool-calling agent as an `Alaya.Agent.Agent`. See
 `docs/miniswe.md`. -/
@@ -19,7 +20,6 @@ def defaultExecutor : Executor.Config := {
            ("PIP_PROGRESS_BAR", "off"), ("TQDM_DISABLE", "1")] }
 
 structure Config where
-  task : String
   /-- Maximum model calls; 0 disables the limit (as in mini.yaml). -/
   stepLimit : Nat := 0
   /-- Consecutive format errors tolerated before exiting; 0 disables. -/
@@ -33,36 +33,98 @@ structure Config where
   recoverOutput : Bool := false
   deriving Inhabited
 
+/-- The configuration as JSON: the shape of `agents/mini-swe-default.json`, and what a root
+records. -/
+def Config.toJson (config : Config) : Lean.Json :=
+  .mkObj [
+    ("family", "mini-swe"),
+    ("step_limit", (config.stepLimit : Lean.Json)),
+    ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
+    ("executor", .mkObj [
+      ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
+      ("env", .arr (config.executor.env.map fun (name, value) => .arr #[.str name, .str value]))]),
+    ("recover_output", (config.recoverOutput : Lean.Json))]
+
+/-- Reads a configuration; a field left out is `defaults`', and an unknown one is an error. -/
+def Config.fromJson (json : Lean.Json) (defaults : Config := {}) : Except String Config := do
+  let object ← ConfigJson.object json
+    #["family", "step_limit", "max_consecutive_format_errors", "executor", "recover_output"]
+  let executor ← match ← object.field? "executor" with
+    | none => pure defaults.executor
+    | some json => do
+      let object ← ConfigJson.object json #["timeout_seconds", "env"]
+      let env ← match ← object.field? "env" with
+        | none => pure defaults.executor.env
+        | some json => ConfigJson.pairs json
+      pure { timeoutSeconds := ← object.nat "timeout_seconds" defaults.executor.timeoutSeconds, env }
+  pure {
+    stepLimit := ← object.nat "step_limit" defaults.stepLimit
+    maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors
+    executor
+    recoverOutput := ← object.bool "recover_output" defaults.recoverOutput }
+
 /-! ## Prompts
 
-The strings jinja renders from `mini.yaml`, except for the two sentences that name mini's
-submission sentinel (`submitInstruction`). jinja strips one trailing newline, so none end in
-`\n`. -/
+The files in `MiniSwe/` are mini's templates from `mini.yaml` (vendored beside them, from
+SWE-agent/mini-swe-agent `04d809c`), cut where jinja substitutes or branches, byte for byte;
+`Test/Mini.lean` checks each against the vendored copy. Assembly does what jinja does: puts
+the task and the `uname` in, keeps the MacOS note when `system == "Darwin"` with the
+whitespace its `{%-`/`-%}` tags strip, and drops one trailing newline from a rendering. The
+one change of text is the port's: the sentences that name mini's submission sentinel say the
+`submit` tool (`sentinelToSubmit`). -/
 
-def systemMessage : String :=
-  "You are a helpful assistant that can interact with a computer."
+def systemTemplate : String := include_str "MiniSwe/system.md"
+def opening : String := include_str "MiniSwe/instance-opening.md"
+def rules : String := include_str "MiniSwe/instance-rules.md"
+def examples : String := include_str "MiniSwe/instance-examples.md"
+def darwinNote : String := include_str "MiniSwe/instance-darwin.md"
+def sedExamples : String := include_str "MiniSwe/instance-sed.md"
+def formatErrorCut : String := include_str "MiniSwe/format-error-cut.md"
+def formatErrorTemplate : String := include_str "MiniSwe/format-error.md"
 
-/-- The instruction for ending a run, as it appears twice in the instance prompt with two
-different continuation indents. -/
+/-- The pieces by file name, for the check against `mini.yaml`. -/
+def pieces : Array (String × String) := #[
+  ("system.md", systemTemplate), ("instance-opening.md", opening),
+  ("instance-rules.md", rules), ("instance-examples.md", examples),
+  ("instance-darwin.md", darwinNote), ("instance-sed.md", sedExamples),
+  ("format-error-cut.md", formatErrorCut), ("format-error.md", formatErrorTemplate)]
+
+/-- What jinja does to a rendering: one trailing newline goes. -/
+private def rendered (text : String) : String :=
+  if text.endsWith "\n" then (text.dropEnd 1).toString else text
+
+/-- Mini's instruction for ending a run, as it appears twice in the instance prompt with two
+different continuation indents, and the port's. -/
+def sentinelInstruction (indent : String) : String :=
+  "Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n" ++
+  indent ++ "Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>"
+
 def submitInstruction (indent : String) : String :=
   "Submit your changes and finish your work by calling the `submit` tool.\n" ++
   indent ++ "Do not combine it with any other tool call. <important>After this call, you cannot continue working on this task.</important>"
 
-private def instanceMiddle : String :=
-  "\n\nYou can execute bash commands and edit files to implement the necessary changes.\n\n## Recommended Workflow\n\nThis workflow should be done step-by-step so that you can iterate on your changes and any possible problems.\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n6. " ++ submitInstruction "   " ++ "\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n- " ++ submitInstruction "  " ++ "\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n[Makes bash tool call with {\"command\": \"ls -la\"} as arguments]\n</example_response>\n\n<system_information>\n"
+/-- The last line of mini's format-error message, and the port's. -/
+def sentinelHint : String :=
+  "If you want to end the task, please issue the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`\nwithout any other command."
 
-private def instanceSuffixDarwin : String :=
-  "\n</system_information>\n\n## Useful command examples\n\n### Create a new file:\n\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:<important>\nYou are on MacOS. For all the below examples, you need to use `sed -i ''` instead of `sed -i`.\n</important>```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n\n```bash\nanything\n```"
+def endHint : String :=
+  "If you want to end the task, call the `submit` tool\nwithout any other tool call."
 
-private def instanceSuffixOther : String :=
-  "\n</system_information>\n\n## Useful command examples\n\n### Create a new file:\n\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n\n```bash\nanything\n```"
+/-- The port's one change to mini's texts. -/
+def sentinelToSubmit (text : String) : String :=
+  let text := text.replace (sentinelInstruction "   ") (submitInstruction "   ")
+  let text := text.replace (sentinelInstruction "  ") (submitInstruction "  ")
+  text.replace sentinelHint endHint
+
+def systemMessage : String := rendered systemTemplate
 
 /-- The rendered instance (task) message. `system`/`release`/`version`/`machine` are the
 `uname` fields; the MacOS `sed` note is included exactly when `system == "Darwin"`. -/
 def instanceMessage (task system release version machine : String) : String :=
-  "Please solve this issue: " ++ task ++ instanceMiddle ++
-    system ++ " " ++ release ++ " " ++ version ++ " " ++ machine ++
-    (if system == "Darwin" then instanceSuffixDarwin else instanceSuffixOther)
+  let note := if system == "Darwin" then darwinNote.trimAscii.toString else ""
+  rendered <| sentinelToSubmit <|
+    opening ++ task ++ rules ++ system ++ " " ++ release ++ " " ++ version ++ " " ++ machine ++
+    examples.trimAsciiEnd.toString ++ note ++ sedExamples.trimAsciiStart.toString
 
 /-- The one thing recovery changes in mini's texts: a response must hold a tool call, not a
 bash call, since it may be a `read_output` alone. -/
@@ -74,65 +136,12 @@ def withRecovery (recover : Bool) (text : String) : String :=
       "Every response needs at least one tool call: 'bash' to execute commands, or 'read_output' to see more of an earlier command's output."
 
 /-- The opening log of a run: the system prompt and the task. -/
-def initialLog (config : Config) (uname : Uname) : Log :=
+def initialLog (config : Config) (task : String) (uname : Uname) : Log :=
   #[.message (.system systemMessage),
     .message (.user (withRecovery config.recoverOutput
-      (instanceMessage config.task uname.system uname.release uname.version uname.machine)))]
+      (instanceMessage task uname.system uname.release uname.version uname.machine)))]
 
-/-! ## Tools -/
-
-/-- Mini's `bash` tool. -/
-def bashTool : Chat.ToolDefinition := {
-  name := "bash"
-  description := "Execute a bash command"
-  parameters := .object #[("command", .string (description? := some "The bash command to execute"))]
-}
-
-/-- The tool that ends a run; its `message` becomes the submission. -/
-def submitTool : Chat.ToolDefinition := {
-  name := "submit"
-  description := "Finish the task. Call this once your changes are complete; nothing runs after it."
-  parameters := .object #[("message", .string (description? := some "A short summary of what you did"))]
-}
-
-/-- The tools offered on every sample. -/
-def tools (config : Config) : Array Chat.ToolDefinition :=
-  #[bashTool, submitTool] ++ (if config.recoverOutput then #[OutputRead.tool] else #[])
-
-/-! ## The view of an observation -/
-
-/-- How much of a command's output the model is shown; longer outputs show their head and tail. -/
-def outputLimit : Nat := 10000
-
-/-- The tool message for an execution result: the recorded `Output` as JSON, with `output`
-cut to its first and last `outputLimit / 2` characters when it is `outputLimit` or longer.
-With `read_output` offered (`recovery?` is then the call's id), the warning says how to see
-the rest: a model given only `tool_call_id` in the envelope has been seen to guess the id. -/
-def observation (o : Output) (recovery? : Option String := none) : Lean.Json :=
-  let length := o.output.length
-  let fields : List (String × Lean.Json) :=
-    if length < outputLimit then [("output", o.output)]
-    else
-      let half := outputLimit / 2
-      [("output_head", String.ofList (o.output.toList.take half)),
-       ("output_tail", String.ofList (o.output.toList.drop (length - half))),
-       ("elided_chars", (length - outputLimit : Nat)),
-       ("warning", match recovery? with
-         | none => "Output too long."
-         | some id => s!"Output too long. read_output shows any lines of the whole of it; this call's id is {id}.")]
-  let fields := fields ++ [("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null)]
-  let fields := match o.error? with
-    | some error => fields ++ [("error", Lean.Json.str error)]
-    | none => fields
-  .mkObj fields
-
-/-! ## Action parsing and format errors -/
-
-/-- The last line of the format-error message. -/
-def endHint : String :=
-  "If you want to end the task, call the `submit` tool\nwithout any other tool call."
-
-/-- The user turn a malformed response is answered with. -/
+/-- The user turn a malformed response is answered with: mini's `format_error_template`. -/
 def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : Option String)
     (recover : Bool := false) : String :=
   withRecovery recover <|
@@ -140,22 +149,25 @@ def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : O
     | some "length" => true
     | some "tool_calls" => !hasToolCalls
     | _ => false
-  if truncated then
-    "Your previous response reached the output token limit (finish_reason=" ++
-      finishReason?.getD "" ++
-      ") before you produced a tool call, so it was cut off. Respond more concisely and finish " ++
-      "with exactly one bash tool call. If you need to think more, do so briefly."
-  else
-    "Tool call error:\n\n<error>\n" ++ error ++ "\n</error>\n\n" ++
-    "Here is general guidance on how to submit correct toolcalls:\n\n" ++
-    "Every response needs to use the 'bash' tool at least once to execute commands.\n\n" ++
-    "Call the bash tool with your command as the argument:\n" ++
-    "- Tool: bash\n- Arguments: {\"command\": \"your_command_here\"}\n\n" ++ endHint
+  if truncated then formatErrorCut.replace "{{ finish_reason }}" (finishReason?.getD "")
+  else sentinelToSubmit (formatErrorTemplate.replace "{{error}}" error)
 
-/-- One parsed tool call: a shell script to run, or the call that ends the run. -/
+/-! ## Tools -/
+
+/-- How much of a command's output the model is shown; longer outputs show their head and tail. -/
+def outputLimit : Nat := 10000
+
+/-- The tools offered on every sample. -/
+def tools (config : Config) : Array Chat.ToolDefinition :=
+  #[Tools.Bash.definition, Tools.Submit.definition] ++
+    (if config.recoverOutput then #[Tools.ReadOutput.definition] else #[])
+
+/-! ## Reading a response -/
+
+/-- One parsed tool call: a command to run, a read answered from the log, or the call that
+ends the run. -/
 inductive Action where
   | bash (id : String) (command : String)
-  /-- A `read_output` call: answered from the log, so its arguments travel with it. -/
   | readOutput (id : String) (arguments : Lean.Json)
   | submit (id : String) (message : String)
   deriving Inhabited
@@ -179,44 +191,28 @@ def parseActions (response : Chat.Response) (recover : Bool := false) : Parsed :
       false response.finishReason? recover
   let mut actions : Array Action := #[]
   for call in response.toolCalls do
-    let problem? : Option String :=
+    let action : Except String Action :=
       if let some raw := call.invalidArguments? then
-        some ("Error parsing tool call arguments: " ++
+        .error ("Error parsing tool call arguments: " ++
           (match Lean.Json.parse raw with | .error e => e | .ok _ => "invalid JSON") ++ ".")
       else match call.name with
-        | "submit" => none
+        | "submit" => .ok (.submit call.id (Tools.Submit.message call.arguments))
+        | "bash" => (Tools.Bash.command call.arguments).map (.bash call.id ·)
         | "read_output" =>
-          if !recover then some "Unknown tool 'read_output'." else
-          match OutputRead.parse call.arguments with
-          | .ok _ => none
-          | .error message => some message
-        | "bash" =>
-          match call.arguments.getObjVal? "command" with
-          | .ok (.str _) => none
-          | .ok _ => some "The 'command' argument of the bash tool must be a string."
-          | .error _ => some "Missing 'command' argument in bash tool call."
-        | other => some s!"Unknown tool '{other}'."
-    if let some problem := problem? then
+          if !recover then .error "Unknown tool 'read_output'."
+          else (Tools.ReadOutput.parse call.arguments).map fun _ => .readOutput call.id call.arguments
+        | other => .error s!"Unknown tool '{other}'."
+    match action with
+    | .error problem =>
       return .formatError (formatErrorMessage problem true response.finishReason? recover)
-    match call.name with
-    | "read_output" => actions := actions.push (.readOutput call.id call.arguments)
-    | "submit" =>
-      let message := match call.arguments.getObjVal? "message" with
-        | .ok (.str m) => m
-        | _ => ""
-      actions := actions.push (.submit call.id message)
-    | _ =>
-      let command := match call.arguments.getObjVal? "command" with
-        | .ok (.str c) => c
-        | _ => ""
-      actions := actions.push (.bash call.id command)
+    | .ok action => actions := actions.push action
   return .actions actions
 
 /-! ## The agent: view, control, action -/
 
 /-- The view: a malformed response is shown as the format error, as a user turn; an observation
-as `observation` of the recorded `Output`. A page of `read_output` is not an `Output` and is
-shown as recorded. -/
+as `Tools.Bash.observation` of the recorded `Output`. A page of `read_output` is not an
+`Output` and is shown as recorded. -/
 def view (config : Config) (log : Log) : Dialogue :=
   log.map fun
     | .message m => m
@@ -226,7 +222,8 @@ def view (config : Config) (log : Log) : Dialogue :=
       | .formatError message => .user message
     | .observation id content =>
       let json := match Output.fromJson? content with
-        | some output => observation output (if config.recoverOutput then some id else none)
+        | some output => Tools.Bash.observation output outputLimit
+            (if config.recoverOutput then some id else none)
         | none => content
       .tool id (.str json.pretty)
 
@@ -263,7 +260,8 @@ def next (config : Config) (log : Log) : Directive :=
       match actions.find? (fun action => pending.any (·.id == action.id)) with
       | none => sampleOrStop
       | some (.submit _ message) => .done { status := "Submitted", submission := message }
-      | some (.readOutput id arguments) => .observe id (OutputRead.read log arguments outputLimit)
+      | some (.readOutput id arguments) =>
+        .observe id (Tools.ReadOutput.read log arguments outputLimit)
       | some (.bash id _) =>
         match pending.find? (·.id == id) with
         | some call => .act call
@@ -272,19 +270,13 @@ def next (config : Config) (log : Log) : Directive :=
 /-- Runs one `bash` call in the workspace through the executor and records the `Output`. -/
 def act (executor : Executor) (workspace : Agent.Workspace) (call : Chat.ToolCall) :
     Result Lean.Json := do
-  let command ← match call.name, call.arguments.getObjVal? "command" with
-    | "bash", .ok (.str command) => pure command
-    | _, _ => throw <| .configuration s!"not a runnable bash call: {call.name}"
-  let output ← Result.fromIO Error.storage (executor.bash workspace.dir command)
-  pure output.toJson
+  match call.name, Tools.Bash.command call.arguments with
+  | "bash", .ok command => Tools.Bash.act executor workspace command
+  | _, _ => throw <| .configuration s!"not a runnable bash call: {call.name}"
 
 /-- The mini agent over an executor. -/
 def agent (executor : Executor) (config : Config) : Agent := {
-  identity := .mkObj [
-    ("agent", "mini-swe"), ("step_limit", (config.stepLimit : Lean.Json)),
-    ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
-    ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
-    ("recover_output", (config.recoverOutput : Lean.Json))]
+  identity := config.toJson
   tools := tools config
   view := view config
   next := next config

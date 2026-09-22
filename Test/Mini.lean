@@ -15,6 +15,7 @@ open Testing
 open Alaya
 open Alaya.Agent (Dialogue Outcome Event Log Stop)
 open Alaya.Agent.MiniSwe
+open Alaya.Agent.Tools.Bash (observation)
 open Alaya.Trajectory
 
 private def contains (haystack needle : String) : Bool :=
@@ -66,18 +67,18 @@ def goldenSuite : Suite := suite "mini.golden" #[
 
   iotest "an observation is the recorded output as JSON, cut when long" do
     let field (json : Lean.Json) (key : String) : Option Lean.Json := (json.getObjVal? key).toOption
-    let short := observation { output := "hello\n", exitCode? := some 0 }
+    let short := observation { output := "hello\n", exitCode? := some 0 } outputLimit
     if field short "output" != some "hello\n" || field short "exit_code" != some 0 then
       throw <| IO.userError s!"short observation: {short.compress}"
     if (field short "error").isSome then throw <| IO.userError "no error field when nothing went wrong"
-    let failed := observation { output := "partial", error? := some "'sleep 30' timed out after 1 seconds" }
+    let failed := observation { output := "partial", error? := some "'sleep 30' timed out after 1 seconds" } outputLimit
     if field failed "exit_code" != some .null || (field failed "error").isNone then
       throw <| IO.userError s!"failed observation: {failed.compress}"
     -- Unicode passes through as text, not as escapes.
-    if field (observation { output := "café ✓ 😀", exitCode? := some 0 }) "output" != some "café ✓ 😀" then
+    if field (observation { output := "café ✓ 😀", exitCode? := some 0 } outputLimit) "output" != some "café ✓ 😀" then
       throw <| IO.userError "unicode should be kept as is"
     -- At the limit the output is replaced by its head and tail and a count of the elision.
-    let long := observation { output := String.ofList (List.replicate 12000 'z'), exitCode? := some 0 }
+    let long := observation { output := String.ofList (List.replicate 12000 'z'), exitCode? := some 0 } outputLimit
     if (field long "output").isSome then throw <| IO.userError "long output must be cut"
     if field long "elided_chars" != some 2000 then throw <| IO.userError s!"elided: {long.compress}"
     match field long "output_head", field long "output_tail" with
@@ -85,7 +86,7 @@ def goldenSuite : Suite := suite "mini.golden" #[
       if h.length != 5000 || t.length != 5000 then throw <| IO.userError "head and tail are 5000 each"
     | _, _ => throw <| IO.userError "expected output_head and output_tail"
     -- Just under the limit is shown whole.
-    let under := observation { output := String.ofList (List.replicate 9999 'z'), exitCode? := some 0 }
+    let under := observation { output := String.ofList (List.replicate 9999 'z'), exitCode? := some 0 } outputLimit
     if (field under "output").isNone then throw <| IO.userError "9999 characters are shown whole",
 
   iotest "a format error explains the problem, or the cut-off when the provider reports one" do
@@ -121,12 +122,12 @@ private def actionSummary : Action -> String × String
 
 def parseSuite : Suite := suite "mini.parse" #[
   test "with recovery off the agent is mini to the byte; on, two sentences and a tool differ" do
-    let off : Config := { task := "t" }
-    let on : Config := { task := "t", recoverOutput := true }
+    let off : Config := {}
+    let on : Config := { recoverOutput := true }
     assertEqual "tools off" ((tools off).map (·.name)) #["bash", "submit"]
     assertEqual "tools on" ((tools on).map (·.name)) #["bash", "submit", "read_output"]
     let opening (config : Config) : String :=
-      match (initialLog config testUname)[1]? with
+      match (initialLog config "t" testUname)[1]? with
       | some (Event.message (Chat.Message.user text)) => text
       | _ => ""
     assertStringEq "opening off" (opening off)
@@ -154,12 +155,27 @@ def parseSuite : Suite := suite "mini.parse" #[
     | .formatError message => check (contains message "Unknown tool 'read_output'") "unknown when off"
     | .actions _ => fail "read_output should be unknown when recovery is off",
 
+  test "every prompt piece is in mini.yaml, byte for byte, and is the file on disk" do
+    -- The templates are block scalars indented four spaces; dedented, each piece is a substring.
+    let yaml ← IO.FS.readFile ("Alaya" / "Agent" / "MiniSwe" / "mini.yaml")
+    let dedented := "\n".intercalate ((yaml.splitOn "\n").map fun line =>
+      if line.startsWith "    " then (line.drop 4).toString else line)
+    for (file, piece) in pieces do
+      check (!piece.isEmpty) s!"{file} is empty"
+      check (contains dedented piece) s!"{file} is not a piece of mini.yaml"
+      -- Lake does not rebuild a module when a file it takes with `include_str` changes.
+      let onDisk ← IO.FS.readFile ("Alaya" / "Agent" / "MiniSwe" / file)
+      check (onDisk == piece) s!"{file} changed after Alaya.Agent.MiniSwe was built: touch the module and rebuild"
+    -- The pieces are cut where jinja substitutes, so the placeholders are exactly at the cuts.
+    check (!contains rules "{{") "the rules piece should hold no placeholder"
+    check (contains formatErrorTemplate "{{error}}") "the format-error piece keeps its placeholder",
+
   iotest "bash tool schema is mini's, in strict mode" do
     -- mini's BASH_TOOL plus the `additionalProperties: false` every strict object carries
     -- (Json.compress emits keys in sorted order).
     let expected := "{\"function\":{\"description\":\"Execute a bash command\",\"name\":\"bash\",\"parameters\":{\"additionalProperties\":false,\"properties\":{\"command\":{\"description\":\"The bash command to execute\",\"type\":\"string\"}},\"required\":[\"command\"],\"type\":\"object\"}},\"type\":\"function\"}"
-    if bashTool.toJson.compress != expected then
-      throw <| IO.userError s!"tool schema drift:\n{bashTool.toJson.compress}",
+    if Alaya.Agent.Tools.Bash.definition.toJson.compress != expected then
+      throw <| IO.userError s!"tool schema drift:\n{Alaya.Agent.Tools.Bash.definition.toJson.compress}",
 
   test "no tool calls is a format error" do
     match parseActions { content? := some "just prose", finishReason? := some "stop" } with
@@ -234,7 +250,7 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
   let mini := agent (Executor.onHost config.executor) config
   let sample (dialogue : Dialogue) : Result Chat.Response := do
     (← model.sample { messages := dialogue, tools := mini.tools }).next
-  let (log, stop) ← assertOk <| Agent.run mini { dir := work } sample (initialLog config testUname)
+  let (log, stop) ← assertOk <| Agent.run mini { dir := work } sample (initialLog config "t" testUname)
   let env ← assertOk <| (← workspaces).snapshot work
   match stop with
   | .outcome outcome => pure (view config log, env, outcome)
@@ -242,7 +258,7 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
 
 def runSuite : Suite := suite "mini.run" #[
   test "a two-step run edits the workspace and submits" do
-    let (dialogue, env, outcome) ← runAgent { task := "t" } #[
+    let (dialogue, env, outcome) ← runAgent {} #[
       responseWith #[call "c1" "bash" "echo hello > a.txt"],
       responseWith #[submitCall "c2" "my patch\n"]]
     assertEqual "outcome" outcome { status := "Submitted", submission := "my patch\n" }
@@ -252,7 +268,7 @@ def runSuite : Suite := suite "mini.run" #[
     | some (Chat.Message.tool "c1" content) =>
       assertStringEq "observation content"
         (match content with | .str s => s | j => j.compress)
-        (observation { output := "", exitCode? := some 0 }).pretty
+        (observation { output := "", exitCode? := some 0 } outputLimit).pretty
     | _ => fail "expected a tool observation at index 3"
     -- The live workspace and the snapshot both reflect the edit.
     assertEqual "workspace file" (← IO.FS.readFile ((← scratch) / "work" / "a.txt")) "hello\n"
@@ -261,7 +277,7 @@ def runSuite : Suite := suite "mini.run" #[
       (some (some "hello\n")),
 
   test "multiple tool calls in one turn run in order and both observe" do
-    let (dialogue, _, outcome) ← runAgent { task := "t" } #[
+    let (dialogue, _, outcome) ← runAgent {} #[
       responseWith #[call "c1" "bash" "mkdir sub", call "c2" "bash" "echo x > sub/f.txt"],
       responseWith #[submitCall "c3"]]
     assertEqual "submitted" outcome.status "Submitted"
@@ -270,7 +286,7 @@ def runSuite : Suite := suite "mini.run" #[
     assertEqual "nested file written" (← IO.FS.readFile ((← scratch) / "work" / "sub" / "f.txt")) "x\n",
 
   test "a submit ends the turn: calls after it in the same response never run" do
-    let (_, env, outcome) ← runAgent { task := "t" } #[
+    let (_, env, outcome) ← runAgent {} #[
       responseWith #[call "c1" "bash" "echo a > a.txt", submitCall "s" "done",
                      call "c2" "bash" "echo b > b.txt"]]
     assertEqual "submitted" outcome.status "Submitted"
@@ -278,7 +294,7 @@ def runSuite : Suite := suite "mini.run" #[
     check (← assertOk ((← workspaces).readFile? env "b.txt")).isNone "the call after submit did not",
 
   test "a format error is appended and the offending turn is dropped" do
-    let (dialogue, _, outcome) ← runAgent { task := "t" } #[
+    let (dialogue, _, outcome) ← runAgent {} #[
       { content? := some "I forgot to call a tool", finishReason? := some "stop" },
       responseWith #[submitCall "c1"]]
     assertEqual "submitted after recovery" outcome.status "Submitted"
@@ -290,7 +306,7 @@ def runSuite : Suite := suite "mini.run" #[
 
   test "repeated format errors exit" do
     let bad : Chat.Response := { content? := some "no tool", finishReason? := some "stop" }
-    let (dialogue, _, outcome) ← runAgent { task := "t", maxConsecutiveFormatErrors := 3 }
+    let (dialogue, _, outcome) ← runAgent { maxConsecutiveFormatErrors := 3 }
       #[bad, bad, bad, bad]
     assertEqual "exit status" outcome.status "RepeatedFormatError"
     -- system, instance, then three user error messages.
@@ -298,12 +314,12 @@ def runSuite : Suite := suite "mini.run" #[
 
   test "the step limit stops the run" do
     let loopCmd := responseWith #[call "c" "bash" "echo working"]
-    let (_, _, outcome) ← runAgent { task := "t", stepLimit := 2 }
+    let (_, _, outcome) ← runAgent { stepLimit := 2 }
       #[loopCmd, loopCmd, loopCmd, loopCmd]
     assertEqual "exit status" outcome.status "LimitsExceeded",
 
   test "a command timeout is reported as an exception observation" do
-    let (dialogue, _, _) ← runAgent { task := "t", executor := { defaultExecutor with timeoutSeconds := 1 } } #[
+    let (dialogue, _, _) ← runAgent { executor := { defaultExecutor with timeoutSeconds := 1 } } #[
       responseWith #[call "c1" "bash" "sleep 30"],
       responseWith #[submitCall "c2"]]
     match dialogue[3]? with
@@ -318,7 +334,7 @@ def runSuite : Suite := suite "mini.run" #[
       toolCalls := #[{ id := "c1", name := "bash", arguments := .null,
                        invalidArguments? := some "{\"command\": \"ls" }],
       finishReason? := some "length" }
-    let (dialogue, _, outcome) ← runAgent { task := "t" } #[bad, responseWith #[submitCall "c2"]]
+    let (dialogue, _, outcome) ← runAgent {} #[bad, responseWith #[submitCall "c2"]]
     assertEqual "submitted after recovery" outcome.status "Submitted"
     -- system, instance, user(truncation notice), assistant(submit); the bad turn is dropped.
     assertEqual "dialogue length" dialogue.size 4
@@ -329,7 +345,7 @@ def runSuite : Suite := suite "mini.run" #[
 
   test "the view keeps the record whole and shows the model a truncation" do
     let long := String.ofList (List.replicate 12000 'x')
-    let (dialogue, _, _) ← runAgent { task := "t" } #[
+    let (dialogue, _, _) ← runAgent {} #[
       responseWith #[call "c1" "bash" s!"printf '%s' {long}"],
       responseWith #[submitCall "c2"]]
     match dialogue[3]? with
@@ -389,7 +405,7 @@ def execSuite : Suite := suite "mini.exec" #[
 
 /-- A scripted model wrapped in the persistent cache, so draw indexing and replay behave exactly
 as the real stack does — the mechanism `resume`/fork rely on — driving the mini agent. -/
-private def cachedRuntime (responses : Array Chat.Response) (config : Config := { task := "t" }) :
+private def cachedRuntime (responses : Array Chat.Response) (config : Config := {}) :
     TestM Runtime := do
   let model ← scriptedModel responses
   let cached ← assertOk <| Cache.persistent model { directory := (← scratch) / "cache" }
@@ -402,7 +418,7 @@ private def cachedRuntime (responses : Array Chat.Response) (config : Config := 
 /-- A root for the test task over `project`. -/
 private def mkRoot (rt : Runtime) (project : System.FilePath) (image? : Option String := none) :
     TestM Hash :=
-  assertOk <| createRoot rt.store rt.workspaces (initialLog { task := "t" } testUname) project (some "t") image?
+  assertOk <| createRoot rt.store rt.workspaces (initialLog {} "t" testUname) project (some "t") image? (agent := ({} : Config).toJson)
 
 /-- A directory standing in for a hidden test set. -/
 private def testsDir : TestM System.FilePath := do
@@ -429,7 +445,7 @@ private def askTool : Chat.ToolDefinition := {
 
 private def askingAgent (executor : Executor) : Agent.Agent := {
   identity := .mkObj [("agent", "asking-test-agent")]
-  tools := #[bashTool, askTool]
+  tools := #[Alaya.Agent.Tools.Bash.definition, askTool]
   view := fun log => log.map fun
     | .message m => m
     | .response r => .assistant r.content? r.toolCalls r.reasoning?
@@ -457,7 +473,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let state ← assertOk (getState rt.store told)
     check (state.kind == .message) "a tell is a message state"
     check (state.workspace == (← assertOk (getState rt.store root)).workspace) "a tell keeps the workspace"
-    match (view { task := "t" } (← assertOk (logOf rt.store told))).back? with
+    match (view {} (← assertOk (logOf rt.store told))).back? with
     | some (.user notice) =>
       check (contains notice "Please re-run your checks.") "the notice carries the message verbatim"
       check (contains notice "<intervention>") "the notice is enveloped"
@@ -475,7 +491,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     IO.FS.removeDirAll (project / "toFile")
     IO.FS.writeFile (project / "toFile") "now a file"
     let child ← assertOk <| commit rt.store rt.workspaces root project (some "retyped")
-    let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view { task := "t" }) (tools { task := "t" })
+    let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view {}) (tools {})
     let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
     let some state := states.find? fun s =>
         (s.getObjVal? "hash" >>= Lean.Json.getStr?).toOption == some child.hex
@@ -548,7 +564,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let root ← mkRoot rt (← emptyProject)
     let first ← assertOk <| stepOnce rt "test:model" root
     let second ← assertOk <| stepOnce rt "test:model" first
-    let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view { task := "t" }) (tools { task := "t" })
+    let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view {}) (tools {})
     let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
     let envelope ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "request")
     -- Assemble the context as the page does: every state's `wire` from the root down.
@@ -558,7 +574,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
       | none => fail s!"state {hash.hex} missing from the report"
     let assembled := envelope.setObjVal! "messages"
       (.arr ((← wireOf root) ++ (← wireOf first) ++ (← wireOf second)))
-    let sent : Chat.Request := { messages := view { task := "t" } (← assertOk (logOf rt.store second)), tools := tools { task := "t" } }
+    let sent : Chat.Request := { messages := view {} (← assertOk (logOf rt.store second)), tools := tools {} }
     assertStringEq "request" assembled.compress sent.toJson.compress
     check ((← wireOf second).size == 1) "the format-error state adds exactly one wire message",
 

@@ -69,58 +69,41 @@ private def executorFor (args : Cli.Args) (image? : Option String) (config : Exe
           "a continuation has to run the same bits its earlier turns did"
     Executor.Docker.executor settings config
 
-/-- An agent the command line can name with `--agent`. Each is built for the command line it
-was named on: `--recover-output` turns on `read_output` for either. -/
-private structure AgentSpec where
-  name : String
-  /-- The opening log of a run for a task, on a machine described by `uname`. The command
-  line is there for options of the agent's own, as `--mode` is for `mini-vero`. -/
-  initialLog : Cli.Args -> String -> Uname -> Result Agent.Log
-  /-- How the agent's shell commands are run. -/
-  executorConfig : Executor.Config
-  /-- The agent over an executor. -/
-  build : Executor -> Agent.Agent
-  view : Agent.View
-  tools : Array Chat.ToolDefinition
+/-- The agent configuration `--agent` names: a family's built-in defaults by name
+(`mini-swe-default`), or a JSON file; then each `--set path=value` overlaid. -/
+private def configuredAgent (args : Cli.Args) : Result Lean.Json := do
+  let known := ", ".intercalate (Agent.Families.all.map (·.name ++ "-default")).toList
+  let name ← args.require "agent" s!"{known}, or a JSON file"
+  let base ← match Agent.Families.all.find? (fun f => f.name ++ "-default" == name) with
+    | some family => pure family.defaults
+    | none =>
+      let text ← match ← (Result.fromIO Error.configuration (IO.FS.readFile name)).toBaseIO with
+        | .ok text => pure text
+        | .error _ => throw <| .configuration s!"--agent: {name} is not {known}, and no such file can be read"
+      match Lean.Json.parse text with
+      | .ok json => pure json
+      | .error message => throw <| .configuration s!"--agent: {name} is not JSON: {message}"
+  (args.all "set").foldlM Agent.Families.overlay base
 
-private def miniSwe (args : Cli.Args) : AgentSpec :=
-  let config : Agent.MiniSwe.Config := { task := "", recoverOutput := args.isSet "recover-output" }
-  { name := "mini-swe"
-    initialLog := fun _ task uname => pure (Agent.MiniSwe.initialLog { config with task } uname)
-    executorConfig := config.executor
-    build := fun executor => Agent.MiniSwe.agent executor config
-    view := Agent.MiniSwe.view config
-    tools := Agent.MiniSwe.tools config }
+/-- The agent of an existing run: what its root recorded. `--agent` and `--set` are for
+`root`; given again, they must describe the same agent, as `--image` must name the same
+image, or the command refuses. -/
+private def recordedAgent (store : Store) (args : Cli.Args) (hash : Hash) :
+    Result Agent.Families.Instance := do
+  let some recorded ← agentOf store hash
+    | throw <| .configuration "this run's root records no agent: it is from an earlier alaya"
+  let built ← Agent.Families.instanceOf recorded
+  if args.isSet "agent" then
+    let requested ← Agent.Families.instanceOf (← configuredAgent args)
+    if requested.config.compress != built.config.compress then
+      throw <| .configuration <|
+        "this run was created with another agent configuration; --agent and --set are for " ++
+        s!"`root`. It records: {built.config.compress}"
+  pure built
 
-private def miniVero (args : Cli.Args) : AgentSpec :=
-  let config := { Agent.MiniVero.defaultConfig with recoverOutput := args.isSet "recover-output" }
-  { name := "mini-vero"
-    initialLog := fun args task uname => do
-      let known := " or ".intercalate (Agent.MiniVero.Mode.all.map toString)
-      let name ← args.require "mode" known
-      match Agent.MiniVero.Mode.ofString? name with
-      | some mode => pure (Agent.MiniVero.initialLog { config with task } mode uname)
-      | none => throw <| .configuration s!"unknown mode: {name} (use {known})"
-    executorConfig := config.executor
-    build := fun executor => Agent.MiniVero.agent executor config
-    view := Agent.MiniVero.view config
-    tools := Agent.MiniVero.tools config }
-
-private def agents (args : Cli.Args) : Array AgentSpec := #[miniSwe args, miniVero args]
-
-/-- The agent named by `--agent`. Required wherever an agent's prompts, tools, or view matter:
-`root`, `resume`, `step`, `html`, and `show --view`. -/
-private def agentOf (args : Cli.Args) : Result AgentSpec := do
-  let agents := agents args
-  let known := ", ".intercalate (agents.map (·.name)).toList
-  let name ← args.require "agent" s!"one of {known}"
-  match agents.find? (·.name == name) with
-  | some spec => pure spec
-  | none => throw <| .configuration s!"unknown agent: {name} (use {known})"
-
-private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args)
+private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args) (start : Hash)
     (image? : Option String) : Result Runtime := do
-  let spec ← agentOf args
+  let spec ← recordedAgent data.store args start
   let modelSpec ← args.require "model" "e.g. --model yunwu:gpt-5.6-luna"
   let temperature ← args.floatD "temperature" 0.0
   let model ← buildModel modelSpec temperature data.cache (← Provider.Options.ofArgs args)
@@ -206,16 +189,16 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let data ← openData args
     let settings? ← (← Executor.Docker.settings? args).mapM (·.pin)
     let (uname, image?) ← rootEnvironment settings?
-    let spec ← agentOf args
-    let log ← spec.initialLog args task uname
+    let spec ← Agent.Families.instanceOf (← configuredAgent args)
+    let log := spec.initialLog task uname
     let project ← rootProject args data settings? rest.head?
-    let hash ← createRoot data.store data.workspaces log project (some task) image?
+    let hash ← createRoot data.store data.workspaces log project (some task) image? spec.config
     emit hash.hex
     pure 0
   | "resume" :: pfx :: _ =>
     let data ← openData args
     let start ← resolve data.store pfx
-    let rt ← runtimeFor data (← openWork data) args (← getState data.store start).image?
+    let rt ← runtimeFor data (← openWork data) args start (← getState data.store start).image?
     try
       let final ← resume rt (modelSpecOf args) start (stateLine data · json)
       if !json then
@@ -228,7 +211,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
   | "step" :: pfx :: _ =>
     let data ← openData args
     let parent ← resolve data.store pfx
-    let rt ← runtimeFor data (← openWork data) args (← getState data.store parent).image?
+    let rt ← runtimeFor data (← openWork data) args parent (← getState data.store parent).image?
     try
       let child ← stepOnce rt (modelSpecOf args) parent
       stateLine data child json
@@ -283,10 +266,23 @@ private def dispatch (argv : List String) : Result UInt32 := do
     -- Repeatable, and each may list several: --hide .venv --hide __pycache__,.pytest_cache
     let hidden := (args.all "hide").foldl (init := #[]) fun paths value =>
       paths ++ (value.splitOn ",").toArray.filter (!·.isEmpty)
-    let spec ← agentOf args
+    -- The page has one view and one tool list, so the forest's roots must agree on the agent.
+    let roots ← (← allStates data.store).filterM fun h => do pure (← getState data.store h).parent?.isNone
+    let some first := roots[0]? | throw <| .configuration "nothing to report: the data directory holds no states"
+    let spec ← recordedAgent data.store args first
+    for root in roots do
+      if (← agentOf data.store root).map (·.compress) != some spec.config.compress then
+        throw <| .configuration <|
+          s!"the roots of {data.path} were created with different agents; a report renders one " ++
+          "agent's runs, so give each its own data directory"
     let page ← Html.report data.store data.workspaces s!"alaya {data.path}" spec.view spec.tools hidden
     Result.fromIO Error.storage (IO.FS.writeFile out page)
     emit s!"wrote {out} ({page.length} bytes)"
+    pure 0
+  | ["agents"] =>
+    for family in Agent.Families.all do
+      emit s!"{family.name}-default"
+      emit family.defaults.pretty
     pure 0
   | ["tree"] =>
     let data ← openData args
@@ -294,8 +290,9 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | ["show", pfx] =>
     let data ← openData args
-    let view? ← if args.isSet "view" then some <$> (·.view) <$> agentOf args else pure none
-    emitLines (← showLines data.store (← resolve data.store pfx) view?)
+    let hash ← resolve data.store pfx
+    let view? ← if args.isSet "view" then some <$> (·.view) <$> recordedAgent data.store args hash else pure none
+    emitLines (← showLines data.store hash view?)
     pure 0
   | ["diff", a, b] =>
     let data ← openData args
@@ -308,12 +305,12 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | _ =>
     throw <| .configuration <|
-      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent A [--mode M] [--recover-output] | resume HASH --agent A --model P:M | " ++
-      "step HASH --agent A --model P:M | " ++
+      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent A [--set K=V]... | resume HASH --model P:M | " ++
+      "step HASH --model P:M | agents | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++
-      "html [FILE] --agent A [--hide DIR] | " ++
-      "show HASH [--view --agent A] | diff A B | rm HASH) " ++
+      "html [FILE] [--hide DIR] | " ++
+      "show HASH [--view] | diff A B | rm HASH) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++
       "[--timeout S] [--force]"
 

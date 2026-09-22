@@ -6,8 +6,9 @@ something you can branch, replay, evaluate, intervene in, and read back.
 
 The trajectory is the same for every agent. Wherever an agent's prompts, tools, or view matter —
 creating a root, taking a turn, rendering what the model was sent — the command line names the
-agent with `--agent`: `mini-swe` (`docs/miniswe.md`), which the examples below use, or
-`mini-vero` (`docs/minivero.md`). Everything else — evaluating, intervening, replying,
+agent with `--agent` when the root is created — a configuration, `mini-swe-default`
+(`docs/miniswe.md`, which the examples below use) or `mini-vero-default` (`docs/minivero.md`) or
+a JSON file of your own (§8) — and the root records it, so no later command asks again. Everything else — evaluating, intervening, replying,
 inspecting — is agent-independent and takes no such flag.
 
 ## 1. States
@@ -18,7 +19,7 @@ a restic repository and named by its snapshot ID (§5).
 
 ```sh
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
-root=$(alaya root --task "make the test suite pass" ./project --agent mini-swe --image python:3.12-slim)
+root=$(alaya root --task "make the test suite pass" ./project --agent mini-swe-default --image python:3.12-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
 
 alaya show adbac1          # the state: kind, parent, workspace snapshot, note, image, then its log
@@ -76,7 +77,7 @@ one exists. An `evaluation` is a leaf: it is a verdict on its parent, not a poin
 from.
 
 Besides the three parts, a state carries what the run needs to continue and what a reader wants
-to know: the container `image?`, set on the root and inherited; a `note?` of provenance (the model spec for a turn, the task for a root, the note for
+to know: the container `image?`, set on the root and inherited; on the root, the `agent?` configuration the run is continued with (§8); a `note?` of provenance (the model spec for a turn, the task for a root, the note for
 an intervention); the `outcome?` when the state ended the run; the `question?` a `question` is
 waiting on; the `intervention?` record behind a notice; and the `evaluation?` verdict.
 
@@ -144,8 +145,8 @@ flowchart TD
 ```
 
 ```sh
-alaya step 4f2c8b --agent mini-swe --model xmcp:ds/deepseek-v4-flash      # exactly one turn
-alaya resume 4f2c8b --agent mini-swe --model xmcp:ds/deepseek-v4-flash    # turns until the run ends or asks
+alaya step 4f2c8b --model xmcp:ds/deepseek-v4-flash      # exactly one turn
+alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash    # turns until the run ends or asks
 ```
 
 `step` prints the new child's hash; `resume` prints one line per new state and ends with
@@ -190,9 +191,9 @@ flowchart LR
 ```
 
 ```sh
-alaya step 2c7f0a --agent mini-swe --model M   # 2c7f0a has one turn child, e5a1c3 (draw 0),
+alaya step 2c7f0a --model M   # 2c7f0a has one turn child, e5a1c3 (draw 0),
                                                # so this is draw 1: a new sample, a fork
-alaya step 2c7f0a --agent mini-swe --model M   # draw 2
+alaya step 2c7f0a --model M   # draw 2
 alaya tree                                     # 2c7f0a now has three turn children, siblings
 ```
 
@@ -239,7 +240,7 @@ $EDITOR ./fix/src/app.py
 alaya commit 4f2c8b ./fix -m "fixed the fixture" \
   --tell "I fixed the identifier lookup in src/app.py; re-run the suite."
 # 9d0e11a2b7c4
-alaya resume 9d0e11 --agent mini-swe --model M   # the agent continues, having read the notice
+alaya resume 9d0e11 --model M   # the agent continues, having read the notice
 ```
 
 ```mermaid
@@ -263,7 +264,7 @@ continuation from the parent still receives the draw its turn children imply.
 ```sh
 alaya tell 2c7f0a "The failing test is the one to trust; do not edit tests/."
 # 3a9b7e2c1d40                                  a message child of 2c7f0a
-alaya resume 3a9b7e --agent mini-swe --model M
+alaya resume 3a9b7e --model M
 ```
 
 ```mermaid
@@ -317,7 +318,7 @@ Answering the same question twice makes two `reply` siblings, which is a fork on
 `alaya waiting` lists every question no child has answered.
 
 ```sh
-$ alaya resume 4f2c8b --agent mini-swe --model M
+$ alaya resume 4f2c8b --model M
 c61754d16c7a  ask  "Should I keep the old API?"  [Waiting]
 $ echo $?
 3
@@ -325,7 +326,7 @@ $ alaya waiting
 c61754d16c7a  "Should I keep the old API?"
 $ alaya reply c61754 "Keep it; add the new one beside it."
 8f2e6b0d4a17
-$ alaya resume 8f2e6b --agent mini-swe --model M
+$ alaya resume 8f2e6b --model M
 ```
 
 ```mermaid
@@ -347,11 +348,11 @@ per open question. The loop is: resume; on exit 3 read the question, decide, `re
 from the reply's hash.
 
 ```sh
-alaya resume "$hash" --agent mini-swe --model M --json
+alaya resume "$hash" --model M --json
 # {"state":"c61754…","kind":"question","outcome":null,"question":"Should I keep the old API?"}
 # exit status 3
 reply=$(alaya reply c61754 "Keep it; add the new one beside it.")
-alaya resume "$reply" --agent mini-swe --model M --json
+alaya resume "$reply" --model M --json
 ```
 
 ## 4. Evaluation
@@ -545,13 +546,90 @@ $ ls .alaya/cache/v1 | head -2
 The directory is safe to keep between runs and across trajectories in the same data directory:
 an entry is only ever appended to.
 
+## 6. The state object
+
+A state object is compact JSON. Field order is canonical (sorted keys), so equal states have
+equal hashes.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `v` | 1 | schema version; a reader refuses any other |
+| `parent` | hex or null | the parent state |
+| `workspace` | hex | the workspace: a snapshot ID (§5) |
+| `kind` | string | one of the kinds in §1 |
+| `appended` | array of events | what this state adds to the parent's log |
+| `outcome` | `{status, submission}` or null | when this state ended the run |
+| `note` | string or null | provenance |
+| `image` | string or null | the pinned container image, inherited |
+| `agent` | object or null | on a root, the agent's complete configuration (§8) |
+| `evaluation` | object or null | `{grader, returncode, elapsed_ms, output, evidence, summary}` on an evaluation |
+| `intervention` | object or null | `{message, changed: ["M path", "+ path", "- path", …]}` on a state that carried a notice |
+| `question` | object or null | `{call_id, text}` on a waiting state |
+
+An **event** is one of:
+
+```json
+{"type": "message", "message": {"role": "system"|"user", "content": "…"}}
+{"type": "message", "message": {"role": "assistant", "content": …, "reasoning": …, "tool_calls": [call…]}}
+{"type": "message", "message": {"role": "tool", "tool_call_id": "…", "content": <json>}}
+{"type": "response", "response": {"content", "tool_calls": [call…], "reasoning", "finish_reason", "usage": {"input", "output", "total"}}}
+{"type": "observation", "call_id": "…", "content": <json>}
+```
+
+where a **call** is `{"id", "name", "arguments": <json>, "invalid_arguments": string|null}` —
+`invalid_arguments` keeps the raw text when the provider's arguments were not JSON, so the
+dialogue sent back to the model is byte-identical to what it produced. An observation's
+`content` is whatever the agent's `act` returned; the trajectory never reads it.
+
+`alaya show HASH` prints a state's fields and its full log in a readable form; with `--view` it
+also prints the dialogue the run's agent makes of the log, which is what the model is sent from
+that state:
+
+```sh
+alaya show 4f2c8b
+alaya show 4f2c8b --view
+alaya diff adbac1 4f2c8b        # the workspace changes between two states, one path per line
+```
+
+## 7. The model cache entry
+
+`D/cache/v1/<hash>.json`, where `hash` is Lean's generic hash of the cache key:
+
+```json
+{
+  "version": 1,
+  "key": "<compress {model: <identity>, structured_output: <mode>, request: <Request.toJson>}>",
+  "responses": [
+    {"content": …, "tool_calls": [call…], "usage": {…}, "finish_reason": …, "reasoning_content": …},
+    …
+  ]
+}
+```
+
+`responses[i]` is draw `i` of that request under that model identity. The stored key is checked
+against the file name on load, and a corrupt entry reads as empty and is replaced on the next
+successful sample. The key contains the full
+request, so anything that changes what the model is sent — the view, the tool list, the model
+identity including options such as reasoning echo — changes the key, and a forest recorded under
+one will not replay under another.
+
+```
+$ ls .alaya/cache/v1 | head -2
+1180723829451067366.json
+5029385371209364131.json
+```
+
+The directory is safe to keep between runs and across trajectories in the same data directory:
+an entry is only ever appended to.
+
 ## 8. Commands
 
 ```
-alaya root --task TEXT PROJECT --agent A [--image IMAGE]   create a root from a project directory
+alaya root --task TEXT PROJECT --agent A [--set K=V]... [--image IMAGE]   create a root from a project directory
 alaya root --task-file FILE --agent A --image IMAGE --path PATH   …or from a path inside the image
-alaya resume HASH --agent A --model P:M                grow one continuation until it ends or asks
-alaya step   HASH --agent A --model P:M                advance exactly one turn
+alaya resume HASH --model P:M                    grow one continuation until it ends or asks
+alaya step   HASH --model P:M                    advance exactly one turn
+alaya agents                                     the agent families and their default configurations
 alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a checkout; record the verdict
 alaya commit HASH DIR [-m NOTE] [--tell TEXT]    record a hand-edited workspace as a child
 alaya tell   HASH TEXT                           send the agent a message, as a child
@@ -559,9 +637,9 @@ alaya reply  HASH TEXT                           answer the question a state is 
 alaya waiting                                    list every unanswered question
 alaya checkout HASH DIR [--evidence]             materialize a state's workspace (or an evaluation's evidence) into DIR
 alaya tree                                       show the whole forest
-alaya show HASH [--view --agent A]               metadata, the log, and optionally the view
+alaya show HASH [--view]                         metadata, the log, and optionally the view
 alaya diff A B                                   workspace changes between two states
-alaya html [FILE] --agent A [--hide DIR]         write the forest as one self-contained page
+alaya html [FILE] [--hide DIR]                   write the forest as one self-contained page
 alaya rm HASH                                    delete a subtree and the snapshots only it used
 ```
 
@@ -572,12 +650,24 @@ anything is created, not an empty task. Either way the task is saved in the open
 root's note, so the first request carries all of it without a tool read: a task specification
 too long for a command's output preview reaches the model whole, its middle included.
 
-Every command takes `--data D` and `--json` where it prints states. `--agent A` names the agent
-where its prompts, tools, or view matter: `mini-swe` or `mini-vero`, and `--recover-output`
-beside it offers either agent the `read_output` tool (`docs/miniswe.md` §9) — on every command
-of a run, since the tools and the view are the agent's. `root` takes `--image`,
-`--container-user`, and `--network`, and for `mini-vero` a required `--mode proof|codeproof`
-(`docs/minivero.md`); `resume` and `step` take `--model`,
+Every command takes `--data D` and `--json` where it prints states.
+
+**The agent.** An agent is a *family* — `mini-swe` (`docs/miniswe.md`) or `mini-vero`
+(`docs/minivero.md`) — and a *configuration*: a JSON object with a `family` field and the
+family's own fields, every one of which may be left out for its default, and none of which may
+be misspelt. `agents/` in the repository holds configurations; `mini-swe-default.json` and
+`mini-vero-default.json` are the families' defaults, built into the program and printed by
+`alaya agents`, and the documentation of the fields. `root --agent A` names one — a built-in by
+name, `mini-swe-default`, or any JSON file by path — and each `--set path=value` overlays a
+field (`--set mode=codeproof`, `--set recover_output=true`, `--set executor.timeout_seconds=900`;
+the value is JSON when it parses, text otherwise). The complete configuration is recorded in
+the root (§6, `agent`), shown by `show` and, by family, by `tree`, and every later command —
+`step`, `resume`, `html`, `show --view` — builds the agent from it, so a run is continued by
+the agent that started it. Given `--agent` again, such a command refuses a configuration other
+than the recorded one, as `resume` refuses another `--image`. A variant of an agent for an
+experiment is a file in `agents/`, named for what it changes.
+
+`root` takes `--image`, `--container-user`, and `--network`; `resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
 takes `--timeout` (default 900 s) for the grader and `--force`. The image is resolved to a digest at `root`
 and recorded; `resume` uses it and refuses an `--image` that resolves to anything else.

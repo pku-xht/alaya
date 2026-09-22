@@ -5,20 +5,7 @@ the trajectory machinery, model providers and executor are shared with MiniSwe. 
 namespace Alaya.Agent.MiniVero
 
 open Alaya (Executor Uname)
-open Alaya.Agent (Agent Log)
-
-abbrev Config := MiniSwe.Config
-
-def defaultConfig : Config := {
-  task := ""
-  stepLimit := 200
-  executor := { MiniSwe.defaultExecutor with timeoutSeconds := 600 }
-}
-
-def systemMessage : String :=
-  "You are MiniVero, a Lean 4 implementation and proof agent working in a Vero sandbox. " ++
-  "Work on the task using the provided bash tool and finish with the submit tool; " ++
-  "Vero's independent grader decides correctness."
+open Alaya.Agent (Agent Log Dialogue)
 
 /-- Vero's evaluation modes. A run is sent the grading rules of its own mode only, as Vero's
 per-mode instruction templates do. -/
@@ -37,6 +24,39 @@ def Mode.all : List Mode := [.proof, .codeproof]
 
 def Mode.ofString? (name : String) : Option Mode :=
   Mode.all.find? (·.toString == name)
+
+/-- MiniSwe's configuration, and Vero's evaluation mode. -/
+structure Config where
+  base : MiniSwe.Config := {
+    stepLimit := 200
+    executor := { MiniSwe.defaultExecutor with timeoutSeconds := 600 } }
+  mode : Mode := .proof
+  deriving Inhabited
+
+/-- The configuration as JSON: MiniSwe's fields with `family` `mini-vero`, and `mode`. -/
+def Config.toJson (config : Config) : Lean.Json :=
+  match config.base.toJson with
+  | .obj fields => .obj ((fields.insert "family" "mini-vero").insert "mode" (toString config.mode))
+  | other => other
+
+def Config.fromJson (json : Lean.Json) : Except String Config := do
+  let mode ← match json.getObjVal? "mode" with
+    | .error _ => pure Mode.proof
+    | .ok (.str name) =>
+      match Mode.ofString? name with
+      | some mode => pure mode
+      | none => throw s!"unknown mode: {name} (use {" or ".intercalate (Mode.all.map toString)})"
+    | .ok other => throw s!"'mode' must be a string, not {other.compress}"
+  -- The rest is MiniSwe's, read without the fields that are this family's.
+  let base ← match json with
+    | .obj fields => MiniSwe.Config.fromJson (.obj (fields.erase "mode")) ({} : Config).base
+    | other => MiniSwe.Config.fromJson other ({} : Config).base
+  pure { base, mode }
+
+def systemMessage : String :=
+  "You are MiniVero, a Lean 4 implementation and proof agent working in a Vero sandbox. " ++
+  "Work on the task using the provided bash tool and finish with the submit tool; " ++
+  "Vero's independent grader decides correctness."
 
 /-! ## Vero's instructions
 
@@ -92,24 +112,17 @@ def withRecovery (recover : Bool) (text : String) : String :=
     text.replace "Use repository-relative paths."
       "When a command's output was too long and only its beginning and end were shown, read_output shows any lines of the whole of it. Use repository-relative paths."
 
-def initialLog (config : Config) (mode : Mode) (uname : Uname) : Log :=
+def initialLog (config : Config) (task : String) (uname : Uname) : Log :=
   #[.message (.system systemMessage),
-    .message (.user (withRecovery config.recoverOutput (taskMessage config.task mode uname)))]
+    .message (.user (withRecovery config.base.recoverOutput (taskMessage task config.mode uname)))]
 
 /-- MiniVero currently uses MiniSwe's linear model context. Experimental context
 management must be evaluated separately before changing the baseline. -/
-abbrev view := MiniSwe.view
+def view (config : Config) : Log -> Dialogue := MiniSwe.view config.base
 
-abbrev tools := MiniSwe.tools
+def tools (config : Config) : Array Chat.ToolDefinition := MiniSwe.tools config.base
 
-def agent (executor : Executor) (config : Config := defaultConfig) : Agent :=
-  { MiniSwe.agent executor config with
-    identity := .mkObj [
-      ("agent", "mini-vero"), ("version", "1"),
-      ("step_limit", (config.stepLimit : Lean.Json)),
-      ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
-      ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
-      ("recover_output", (config.recoverOutput : Lean.Json))]
-  }
+def agent (executor : Executor) (config : Config := {}) : Agent :=
+  { MiniSwe.agent executor config.base with identity := config.toJson }
 
 end Alaya.Agent.MiniVero

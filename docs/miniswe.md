@@ -12,28 +12,39 @@ change behaviour are listed in §7.
 
 ```lean
 def agent (executor : Executor) (config : Config) : Agent := {
-  identity := { agent := "mini-swe", step_limit, max_consecutive_format_errors, timeout_seconds }
-  tools := #[bashTool, submitTool]            -- and read_output, when config.recoverOutput
-  view
+  identity := config.toJson                   -- the configuration, as the root records it
+  tools := tools config                       -- bash and submit; read_output when configured
+  view := view config
   next := next config
   act := act executor }
 ```
 
 Two things are fixed when the agent is built. The **executor** is where its commands run — the
-host, or a container the trajectory pinned — and the **configuration** holds its limits:
+host, or a container the trajectory pinned — and the **configuration**, a JSON object read by
+`Config.fromJson` (`agents/mini-swe-default.json` is its defaults, and the fields are):
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `task` | — | the task text placed in the opening prompt |
-| `stepLimit` | 0 | model calls before the run ends with `LimitsExceeded`; 0 is no limit |
-| `maxConsecutiveFormatErrors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
-| `executor` | 30 s, mini's environment overrides | how each command is run (`Executor.Config`) |
+| `family` | `mini-swe` | which agent this configures |
+| `step_limit` | 0 | model calls before the run ends with `LimitsExceeded`; 0 is no limit |
+| `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
+| `executor.timeout_seconds`, `executor.env` | 30, mini's overrides | how each command is run (`Executor.Config`) |
+| `recover_output` | false | offer `read_output` (§9) |
 
-The command line names the agent `--agent mini-swe`.
+A field left out is its default; a misspelt one is an error. The task is not configuration: it
+is what `root --task` gives, and `initialLog config task uname` places it. The command line
+names a configuration at `root` (`--agent mini-swe-default`, or a file; `docs/trajectory-schema.md`
+§8) and the root records it.
+
+The tools are not this agent's: `Alaya.Agent.Tools` defines each on its own — its schema for the
+model, how its arguments are read, and what answers a call — with no knowledge of which agent
+offers it. `bash` runs a command in the workspace through the executor and its observation is
+the `Output`; `submit` ends a run; `read_output` is answered from the log. MiniSwe composes them:
+which are offered, how a malformed call is worded, what the view shows.
 
 ## 2. The opening log
 
-`initialLog config uname` produces the two events a run starts from: the system message, and
+`initialLog config task uname` produces the two events a run starts from: the system message, and
 the instance message with the task and a line describing the machine — the `uname` of the
 executor, so a run pinned to an image is told about the image and not about the host. Both are
 mini's texts, rendered from its `mini.yaml`; the only change is the two sentences that named its
@@ -121,7 +132,7 @@ flowchart LR
 2. **After a response with actions.** The first action whose call no observation has answered
    yet is next. A `submit` there is `done Submitted`, with its message as the submission; a
    `bash` there is `act` on that call; a `read_output` there is `observe` with the page, computed
-   from the log by `OutputRead.read` (§9). Calls after a `submit` in the same response never run.
+   from the log by `Tools.ReadOutput.read` (§9). Calls after a `submit` in the same response never run.
 3. **When every call is answered**, `sample` — unless `stepLimit` is set and the log already
    holds that many responses, in which case `done LimitsExceeded`. The limit is checked before
    the model call, as mini does.
@@ -180,8 +191,9 @@ the run and is gone when a branch is resumed later.
 
 ## 9. Reading a long output back: `read_output`
 
-Off by default, and then nothing above changes. On (`Config.recoverOutput`, `--recover-output`
-on the command line), the agent can see the part of a command's output the view cut:
+Off by default, and then nothing above changes. On (`recover_output` in the configuration,
+`--set recover_output=true` at `root`), the agent can see the part of a command's output the
+view cut:
 
 - The **warning** on a cut output names the call: `Output too long. read_output shows any lines
   of the whole of it; this call's id is call_…`. The id is also the tool message's
