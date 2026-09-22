@@ -87,6 +87,12 @@ def directoryWorkspaces (root : System.FilePath) : Workspaces where
         let _ ← IO.Process.output { cmd := "chmod", args := #["-R", "u+w", entry.path.toString] }
         IO.FS.removeDirAll entry.path
 
+/-- A step that no time budget stopped: the tests that step give none. -/
+def stepped (result : Result (Option Hash)) : TestM Hash := do
+  match ← assertOk result with
+  | some child => pure child
+  | none => fail "the step was stopped by a time budget"
+
 /-- The test's own snapshot store, the same one however often it is asked for. -/
 def workspaces : TestM Workspaces := do
   pure (directoryWorkspaces ((← scratch) / "snapshots"))
