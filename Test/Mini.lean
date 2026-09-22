@@ -429,6 +429,31 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let next ← assertOk <| stepOnce rt "test:model" told
     check ((← assertOk (getState rt.store next)).kind == .turn) "the run continues after a tell",
 
+  test "the report gives a file replaced by a directory, or the reverse, no text on the directory row" do
+    let rt ← cachedRuntime #[]
+    let project ← emptyProject
+    writeSpec project #[("toDir", "was a file"), ("toFile/inner.txt", "inner")]
+    let root ← mkRoot rt project
+    IO.FS.removeFile (project / "toDir")
+    writeSpec project #[("toDir/new.txt", "new")]
+    IO.FS.removeDirAll (project / "toFile")
+    IO.FS.writeFile (project / "toFile") "now a file"
+    let child ← assertOk <| commit rt.store rt.workspaces root project (some "retyped")
+    let page ← assertOk <| Html.dataJson rt.store rt.workspaces view tools
+    let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
+    let some state := states.find? fun s =>
+        (s.getObjVal? "hash" >>= Lean.Json.getStr?).toOption == some child.hex
+      | fail "the commit is missing from the report"
+    let changes ← assertOk <| Result.fromExcept Error.storage (state.getObjVal? "changes" >>= Lean.Json.getArr?)
+    let rows := changes.map fun c =>
+      ((c.getObjVal? "path" >>= Lean.Json.getStr?).toOption.getD "",
+       (c.getObjVal? "kind" >>= Lean.Json.getStr?).toOption.getD "",
+       (c.getObjVal? "old" >>= Lean.Json.getStr?).toOption,
+       (c.getObjVal? "new" >>= Lean.Json.getStr?).toOption)
+    assertEqual "rows" rows #[
+      ("toDir", "removed", some "was a file", none), ("toDir", "added", none, none),
+      ("toFile", "removed", none, none), ("toFile", "added", none, some "now a file")],
+
   test "commit --tell lists the changed paths in the notice" do
     let rt ← cachedRuntime #[]
     let root ← mkRoot rt (← emptyProject)
