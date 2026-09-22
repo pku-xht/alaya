@@ -118,6 +118,7 @@ private def responseWith (calls : Array Chat.ToolCall) (finish := "tool_calls") 
 private def actionSummary : Action -> String × String
   | .bash id command => (id, command)
   | .readOutput id _ => (id, "read_output")
+  | .ask id question => (id, "ask_user:" ++ question)
   | .submit id message => (id, "submit:" ++ message)
 
 def parseSuite : Suite := suite "mini.parse" #[

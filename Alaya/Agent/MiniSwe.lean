@@ -31,12 +31,14 @@ structure Config where
   tool is offered and the two sentences that require a bash call in every response say "a
   tool call" instead (`withRecovery`). -/
   recoverOutput : Bool := false
+  /-- Offer a choice question with an always-available custom answer. -/
+  askUser : Bool := false
   deriving Inhabited
 
 /-- The configuration as JSON: the shape of `agents/mini-swe-default.json`, and what a root
 records. -/
 def Config.toJson (config : Config) : Lean.Json :=
-  .mkObj [
+  let fields : List (String × Lean.Json) := [
     ("family", "mini-swe"),
     ("step_limit", (config.stepLimit : Lean.Json)),
     ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
@@ -44,11 +46,13 @@ def Config.toJson (config : Config) : Lean.Json :=
       ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
       ("env", .arr (config.executor.env.map fun (name, value) => .arr #[.str name, .str value]))]),
     ("recover_output", (config.recoverOutput : Lean.Json))]
+  -- Keep the canonical identity of existing question-disabled roots unchanged.
+  .mkObj <| fields ++ (if config.askUser then [("ask_user", Lean.Json.bool true)] else [])
 
 /-- Reads a configuration; a field left out is `defaults`', and an unknown one is an error. -/
 def Config.fromJson (json : Lean.Json) (defaults : Config := {}) : Except String Config := do
   let object ← ConfigJson.object json
-    #["family", "step_limit", "max_consecutive_format_errors", "executor", "recover_output"]
+    #["family", "step_limit", "max_consecutive_format_errors", "executor", "recover_output", "ask_user"]
   let executor ← match ← object.field? "executor" with
     | none => pure defaults.executor
     | some json => do
@@ -61,7 +65,8 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) : Except String
     stepLimit := ← object.nat "step_limit" defaults.stepLimit
     maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors
     executor
-    recoverOutput := ← object.bool "recover_output" defaults.recoverOutput }
+    recoverOutput := ← object.bool "recover_output" defaults.recoverOutput
+    askUser := ← object.bool "ask_user" defaults.askUser }
 
 /-! ## Prompts
 
@@ -135,15 +140,30 @@ def withRecovery (recover : Bool) (text : String) : String :=
     text.replace "Every response needs to use the 'bash' tool at least once to execute commands."
       "Every response needs at least one tool call: 'bash' to execute commands, or 'read_output' to see more of an earlier command's output."
 
+/-- Allow a question turn in the opening and format-error prompts when the tool is offered. -/
+def withAsk (enabled : Bool) (text : String) : String :=
+  if !enabled then text else
+    let text := text.replace "Your response MUST include AT LEAST ONE bash tool call"
+      "Your response MUST include AT LEAST ONE tool call"
+    let text := text.replace "Every response needs to use the 'bash' tool at least once to execute commands."
+      "Every response needs at least one tool call."
+    let text := text.replace "Your response MUST include AT LEAST ONE tool call: bash, or read_output to see more of an earlier command's output"
+      "Your response MUST include AT LEAST ONE tool call"
+    let text := text.replace "Every response needs at least one tool call: 'bash' to execute commands, or 'read_output' to see more of an earlier command's output."
+      "Every response needs at least one tool call."
+    let text := text.replace "exactly one bash tool call" "exactly one tool call"
+    text ++ "\n\n" ++ Tools.AskUser.instruction
+
 /-- The opening log of a run: the system prompt and the task. -/
 def initialLog (config : Config) (task : String) (uname : Uname) : Log :=
   #[.message (.system systemMessage),
-    .message (.user (withRecovery config.recoverOutput
-      (instanceMessage task uname.system uname.release uname.version uname.machine)))]
+    .message (.user (withAsk config.askUser (withRecovery config.recoverOutput
+      (instanceMessage task uname.system uname.release uname.version uname.machine))))]
 
 /-- The user turn a malformed response is answered with: mini's `format_error_template`. -/
 def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : Option String)
-    (recover : Bool := false) : String :=
+    (recover : Bool := false) (askUser : Bool := false) : String :=
+  withAsk askUser <|
   withRecovery recover <|
   let truncated := match finishReason? with
     | some "length" => true
@@ -160,7 +180,8 @@ def outputLimit : Nat := 10000
 /-- The tools offered on every sample. -/
 def tools (config : Config) : Array Chat.ToolDefinition :=
   #[Tools.Bash.definition, Tools.Submit.definition] ++
-    (if config.recoverOutput then #[Tools.ReadOutput.definition] else #[])
+    (if config.recoverOutput then #[Tools.ReadOutput.definition] else #[]) ++
+    (if config.askUser then #[Tools.AskUser.definition] else #[])
 
 /-! ## Reading a response -/
 
@@ -169,12 +190,14 @@ ends the run. -/
 inductive Action where
   | bash (id : String) (command : String)
   | readOutput (id : String) (arguments : Lean.Json)
+  | ask (id : String) (question : String)
   | submit (id : String) (message : String)
   deriving Inhabited
 
 def Action.id : Action -> String
   | .bash id _ => id
   | .readOutput id _ => id
+  | .ask id _ => id
   | .submit id _ => id
 
 /-- A parsed model turn: its actions, or a format-error message to send back as a user turn. -/
@@ -184,11 +207,15 @@ inductive Parsed where
 
 /-- Reads a response's tool calls; the first call with a problem makes the turn a format error.
 `read_output` is a known tool only when it is offered. -/
-def parseActions (response : Chat.Response) (recover : Bool := false) : Parsed := Id.run do
+def parseActions (response : Chat.Response) (recover : Bool := false)
+    (askUser : Bool := false) : Parsed := Id.run do
   if response.toolCalls.isEmpty then
     return .formatError <| formatErrorMessage
       "No tool calls found in the response. Every response MUST include at least one tool call."
-      false response.finishReason? recover
+      false response.finishReason? recover askUser
+  if askUser && response.toolCalls.any (·.name == "ask_user") && response.toolCalls.size != 1 then
+    return .formatError <| formatErrorMessage "ask_user must be called alone."
+      true response.finishReason? recover askUser
   let mut actions : Array Action := #[]
   for call in response.toolCalls do
     let action : Except String Action :=
@@ -201,10 +228,13 @@ def parseActions (response : Chat.Response) (recover : Bool := false) : Parsed :
         | "read_output" =>
           if !recover then .error "Unknown tool 'read_output'."
           else (Tools.ReadOutput.parse call.arguments).map fun _ => .readOutput call.id call.arguments
+        | "ask_user" =>
+          if !askUser then .error "Unknown tool 'ask_user'."
+          else (Tools.AskUser.question call.arguments).map (.ask call.id ·)
         | other => .error s!"Unknown tool '{other}'."
     match action with
     | .error problem =>
-      return .formatError (formatErrorMessage problem true response.finishReason? recover)
+      return .formatError (formatErrorMessage problem true response.finishReason? recover askUser)
     | .ok action => actions := actions.push action
   return .actions actions
 
@@ -217,7 +247,7 @@ def view (config : Config) (log : Log) : Dialogue :=
   log.map fun
     | .message m => m
     | .response r =>
-      match parseActions r config.recoverOutput with
+      match parseActions r config.recoverOutput config.askUser with
       | .actions _ => .assistant r.content? r.toolCalls r.reasoning?
       | .formatError message => .user message
     | .observation id content =>
@@ -234,7 +264,7 @@ private def trailingFormatErrors (config : Config) (log : Log) : Nat := Id.run d
   for event in log.reverse do
     match event with
     | .response r =>
-      match parseActions r config.recoverOutput with
+      match parseActions r config.recoverOutput config.askUser with
       | .formatError _ => count := count + 1
       | .actions _ => return count
     | .observation _ _ => return count
@@ -249,7 +279,7 @@ def next (config : Config) (log : Log) : Directive :=
   match log.lastResponse? with
   | none => sampleOrStop
   | some response =>
-    match parseActions response config.recoverOutput with
+    match parseActions response config.recoverOutput config.askUser with
     | .formatError _ =>
       if config.maxConsecutiveFormatErrors > 0 &&
           trailingFormatErrors config log >= config.maxConsecutiveFormatErrors
@@ -262,6 +292,7 @@ def next (config : Config) (log : Log) : Directive :=
       | some (.submit _ message) => .done { status := "Submitted", submission := message }
       | some (.readOutput id arguments) =>
         .observe id (Tools.ReadOutput.read log arguments outputLimit)
+      | some (.ask id question) => .ask id question
       | some (.bash id _) =>
         match pending.find? (·.id == id) with
         | some call => .act call

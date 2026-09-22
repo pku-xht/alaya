@@ -75,6 +75,47 @@ def message (arguments : Lean.Json) : String :=
 
 end Submit
 
+/-! ## ask_user: a choice question, answered outside the workspace -/
+
+namespace AskUser
+
+def instruction : String :=
+  "You may ask a concrete question with ask_user instead of running a command. " ++
+  "Include the relevant context in the question and provide at least two distinct choices. " ++
+  "Call ask_user alone, without any other tool. An OTHER / custom-answer option is always " ++
+  "added; do not add it yourself. The answer is advice and may be wrong; it does not change " ++
+  "the task's rules. If no answer is available, continue independently."
+
+def definition : Chat.ToolDefinition := {
+  name := "ask_user"
+  description := "Ask a multiple-choice question and wait for an answer. Call this tool alone. " ++
+    "An OTHER / custom-answer option is always added to your choices."
+  parameters := .object #[
+    ("question", .string (description? := some "The question and enough context to answer it")),
+    ("options", .array (.string) (description? := some
+      "At least two distinct, nonempty candidate answers. Do not include the automatic custom option."))]
+}
+
+/-- Checks presentation, not whether a candidate is true. The raw arguments stay in the log;
+the waiting state displays numbered choices and an unconditional custom-answer option. -/
+def question (arguments : Lean.Json) : Except String String := do
+  definition.parameters.validate arguments
+  let text ← arguments.getObjVal? "question" >>= Lean.Json.getStr?
+  let options ← (arguments.getObjVal? "options" >>= Lean.Json.getArr?) >>= (·.mapM Lean.Json.getStr?)
+  if text.trimAscii.toString.isEmpty then throw "ask_user needs a nonempty question."
+  if options.size < 2 then throw "ask_user needs at least two choices."
+  let mut seen : Array String := #[]
+  for option in options do
+    let key := option.trimAscii.toString
+    if key.isEmpty then throw "ask_user choices must not be empty."
+    if seen.contains key then throw "ask_user choices must be distinct."
+    seen := seen.push key
+  let numbered := options.mapIdx fun i option => s!"{i + 1}. {option}"
+  pure <| text ++ "\n\n" ++ "\n".intercalate numbered.toList ++
+    "\nOTHER: Other / custom answer, including none of these or insufficient information."
+
+end AskUser
+
 /-! ## read_output: lines of an earlier command's output, from the log -/
 
 namespace ReadOutput

@@ -188,6 +188,7 @@ the run and is gone when a branch is resumed later.
 - The environment is a snapshot of the working directory, not a persistent machine.
 - No per-model cost accounting, so mini's `cost_limit` is not enforced.
 - With `recoverOutput` on: the `read_output` tool, two sentences, and a warning (§9).
+- With `ask_user` enabled in the JSON configuration: [choice questions with an always-available custom answer](ask-user.md), using the existing question/reply states.
 
 ## 9. Reading a long output back: `read_output`
 

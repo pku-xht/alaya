@@ -53,6 +53,9 @@ The agent then inspects the Lean declarations and the compiler output, edits onl
 
 MiniVero defaults to 200 model turns and a 600-second shell-command timeout. The experiment runner can apply additional attempt and wall-clock limits.
 
+Set `"ask_user": true` to offer [choice questions with a custom-answer option](ask-user.md).
+This setting is inherited from MiniSwe and recorded in the root configuration.
+
 ## Context view
 
 MiniVero currently uses MiniSwe's linear history unchanged. Every earlier message remains in the model context, while the complete raw trajectory is also retained for reports, evaluation, and later analysis. This is the baseline used for experiments.

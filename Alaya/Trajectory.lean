@@ -111,7 +111,7 @@ def eventFromJson (json : Lean.Json) : Except String Event := do
 /-- What produced a state, for display and provenance. -/
 inductive Kind where
   | root
-  /-- One model turn: a response and the observations its tool calls produced. -/
+  /-- One model turn, or a stop recorded after a reply without another model sample. -/
   | turn
   /-- A person's workspace change, with the parent's log — plus a notice, when they left one. -/
   | intervention
@@ -464,16 +464,24 @@ private partial def follow (rt : Runtime) (log : Log) (appended : Log) (workspac
 
 /-- Runs one model turn from `parent` (whose log is `log` and workspace is `workspace`, already
 materialized into `rt.workDir`), records it as a new child state, and returns the child, its log,
-its workspace, and why the turn stopped, if it did. -/
+its workspace, and why the turn stopped, if it did. A reply may instead stop before sampling. -/
 def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspace : Hash) :
     Result (Hash × Log × Hash × Halt) := do
+  let parentState ← getState rt.store parent
+  -- `follow` stopped at the question before it could check what happens after the answer.
+  -- In particular, answering a question on the last allowed turn must not buy another draw.
+  if parentState.kind == .reply then
+    if let .done outcome := rt.agent.next log then
+      let child ← putState rt.store {
+        parent? := some parent, workspace, appended := #[], outcome? := some outcome
+        kind := .turn, note? := some note, image? := parentState.image? }
+      return (child, log, workspace, .outcome outcome)
   -- Draw index = the number of children that came from sampling.
   let mut childCount := 0
   for child in ← children rt.store parent do
-    let kind := (← getState rt.store child).kind
-    if kind == .turn || kind == .question then childCount := childCount + 1
+    if (← getState rt.store child).appended.responses > 0 then childCount := childCount + 1
   -- Children run in whatever the parent ran in; the image is a property of the trajectory.
-  let image? := (← getState rt.store parent).image?
+  let image? := parentState.image?
   let stream ← rt.model.sample { messages := rt.agent.view log, tools := rt.agent.tools }
   let responses ← stream.nextN (childCount + 1)
   let response ← match responses[childCount]? with
@@ -492,7 +500,7 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
 private def checkoutInto (sandbox : Sandbox) (workspace : Hash) : Result Unit :=
   sandbox.workspaces.materialize workspace sandbox.workDir
 
-/-- Advances exactly one model turn from `hash`, returning the new child state. -/
+/-- Advances one model turn, or records the agent's stop after a reply without sampling. -/
 def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result Hash := do
   let state ← getState rt.store hash
   Result.fromExcept Error.configuration state.continuable

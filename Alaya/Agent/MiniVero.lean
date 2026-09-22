@@ -114,7 +114,8 @@ def withRecovery (recover : Bool) (text : String) : String :=
 
 def initialLog (config : Config) (task : String) (uname : Uname) : Log :=
   #[.message (.system systemMessage),
-    .message (.user (withRecovery config.base.recoverOutput (taskMessage task config.mode uname)))]
+    .message (.user (MiniSwe.withAsk config.base.askUser
+      (withRecovery config.base.recoverOutput (taskMessage task config.mode uname))))]
 
 /-- MiniVero currently uses MiniSwe's linear model context. Experimental context
 management must be evaluated separately before changing the baseline. -/
