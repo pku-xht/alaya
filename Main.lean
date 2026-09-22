@@ -85,6 +85,11 @@ private def recordedAgent (store : Store) (args : Cli.Args) (hash : Hash) :
         s!"It records: {built.config.compress}"
   pure built
 
+/-- What `--time-budget SECONDS` gives this invocation, not recorded; 0 or absent is no limit. -/
+private def budgetOf (args : Cli.Args) : Result (Option Nat) := do
+  let seconds ← args.natD "time-budget" 0
+  pure (if seconds == 0 then none else some (seconds * 1000))
+
 private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args) (start : Hash)
     (image? : Option String) : Result Runtime := do
   let spec ← recordedAgent data.store args start
@@ -93,7 +98,7 @@ private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args) (star
   let model ← buildModel modelSpec temperature data.cache (← Provider.Options.ofArgs args)
   let executor ← executorFor args image? spec.executorConfig
   pure { store := data.store, workspaces := data.workspaces, workDir := work.path, executor, model
-         agent := spec.build executor }
+         agent := spec.build executor, budgetMs? := ← budgetOf args }
 
 /-- The `uname` a new trajectory's prompt is built from, and the image it is pinned to: read
 from the image when there is one, from the host otherwise. -/
@@ -138,6 +143,17 @@ private def modelSpecOf (args : Cli.Args) : String := args.getD "model" ""
 
 /-- Exit status when a run stopped at a question rather than an outcome. -/
 private def exitWaiting : UInt32 := 3
+
+/-- Exit status when a run stopped because this invocation's time budget was spent: it has not
+ended, and a later `resume` continues it. -/
+private def exitOutOfTime : UInt32 := 4
+
+/-- Says a continuation stopped for the time budget, with how much of it the run has used. -/
+private def outOfTime (data : DataDir) (hash : Hash) (json : Bool) : Result UInt32 := do
+  let used ← elapsedMs data.store hash
+  if json then emit (Lean.Json.mkObj [("state", hash.hex), ("time_budget_spent", true), ("run_time_ms", used)]).compress
+  else emit s!"time budget spent: {hash.hex} has run {seconds used}; resume it to continue"
+  pure exitOutOfTime
 
 /-- One line per new state: the hash with the outcome or the question it stopped at, or one
 JSON object with `--json`. -/
@@ -185,12 +201,13 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let start ← resolve data.store pfx
     let rt ← runtimeFor data (← openWork data) args start (← getState data.store start).image?
     try
-      let final ← resume rt (modelSpecOf args) start (stateLine data · json)
+      let stopped ← resume rt (modelSpecOf args) start (stateLine data · json)
+      if stopped.outOfTime then outOfTime data stopped.state json else
       if !json then
-        match (← getState data.store final).outcome? with
+        match (← getState data.store stopped.state).outcome? with
         | some o => emit s!"done: {o.status}"
         | none => pure ()
-      exitFor data final
+      exitFor data stopped.state
     finally
       Result.fromIO Error.storage rt.executor.close
   | "step" :: pfx :: _ =>
@@ -198,9 +215,11 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let parent ← resolve data.store pfx
     let rt ← runtimeFor data (← openWork data) args parent (← getState data.store parent).image?
     try
-      let child ← stepOnce rt (modelSpecOf args) parent
-      stateLine data child json
-      exitFor data child
+      match ← stepOnce rt (modelSpecOf args) parent with
+      | none => outOfTime data parent json
+      | some child =>
+        stateLine data child json
+        exitFor data child
     finally
       Result.fromIO Error.storage rt.executor.close
   | ["tell", pfx, text] =>
@@ -285,8 +304,8 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | _ =>
     throw <| .configuration <|
-      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent FILE | resume HASH --model P:M | " ++
-      "step HASH --model P:M | " ++
+      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent FILE | " ++
+      "resume HASH --model P:M [--time-budget S] | step HASH --model P:M [--time-budget S] | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++
       "html [FILE] [--hide DIR] | " ++
@@ -294,7 +313,8 @@ private def dispatch (argv : List String) : Result UInt32 := do
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++
       "[--timeout S] [--force]"
 
-/-- Exit 0 on success, 3 when a run stopped at a question (see `exitWaiting`), 1 on error. -/
+/-- Exit 0 on success, 3 when a run stopped at a question (`exitWaiting`), 4 when it stopped
+because the time budget was spent (`exitOutOfTime`), 1 on error. -/
 def main (args : List String) : IO UInt32 := do
   match ← (dispatch args).toBaseIO with
   | .ok code => pure code

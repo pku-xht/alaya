@@ -1,4 +1,5 @@
 import Test.Framework
+import Test.DirectoryWorkspaces
 import Alaya
 
 /-! Tests of the MiniVero port: the opening message it sends, and how it behaves on compiler
@@ -70,7 +71,8 @@ def suite : Suite := Testing.suite "mini-vero" #[
       ("framing.md", MiniVero.framing), ("rules.md", MiniVero.rules),
       ("grading-proof.md", MiniVero.gradingProof),
       ("grading-codeproof.md", MiniVero.gradingCodeproof),
-      ("done.md", MiniVero.doneCondition), ("anti-cheating.md", MiniVero.antiCheating)] do
+      ("done.md", MiniVero.doneCondition), ("anti-cheating.md", MiniVero.antiCheating),
+      ("checkpointing.md", MiniVero.checkpointing)] do
       let onDisk ← IO.FS.readFile (dir / file)
       check (onDisk.trimAsciiEnd.toString == compiled)
         s!"{file} changed after Alaya.Agent.MiniVero was built: touch the module and rebuild",
@@ -88,7 +90,8 @@ def suite : Suite := Testing.suite "mini-vero" #[
       "## Benchmark scale",
       "## Project layout",
       "## Your task in ",
-      "## Checkpointing",
+      "-minute work chunk",
+      "You can check elapsed time with ``date``",
       "## Reference — original upstream source",
       "upstream_source"] do
       check (!contains text absent) s!"the prompt should not carry {absent}",
@@ -116,14 +119,14 @@ def suite : Suite := Testing.suite "mini-vero" #[
     let output ← assertOk <| agent.act { dir := "." } call
     check ((output.getObjVal? "exit_code").toOption == some 1) "wrong exit code"
     let log : Log := #[.response { toolCalls := #[call] }, .observation "c" output]
-    match agent.next log with
+    match agent.next {} log with
     | .sample => pure ()
     | _ => fail "should continue after compiler feedback",
   test "submit is terminal but is not claimed to be a passing evaluation" do
     let agent := MiniVero.agent (Executor.onHost config.base.executor) config
     let log : Log := #[.response { toolCalls := #[{
       id := "s", name := "submit", arguments := .mkObj [("message", "done")] }] }]
-    match agent.next log with
+    match agent.next {} log with
     | .done outcome => assertEqual "status" outcome.status "Submitted"
     | _ => fail "expected submission",
   test "the step limit is enforced and long output stays in the raw log" do
@@ -133,7 +136,7 @@ def suite : Suite := Testing.suite "mini-vero" #[
     let raw := String.ofList (List.replicate 12000 'x')
     let log : Log := #[.response { toolCalls := #[call] },
       .observation "c" (Output.toJson { output := raw, exitCode? := some 0 })]
-    match agent.next log with
+    match agent.next {} log with
     | .done outcome => assertEqual "limit" outcome.status "LimitsExceeded"
     | _ => fail "missing limit"
     match (agent.view log)[1]? with
@@ -147,4 +150,103 @@ def suite : Suite := Testing.suite "mini-vero" #[
     | _ => fail "missing raw output",
 
 ]
+private def call (id name : String) (arguments : Lean.Json := .mkObj []) : Chat.ToolCall :=
+  { id, name, arguments }
+
+private def turn (calls : Array Chat.ToolCall) : Chat.Response :=
+  { toolCalls := calls, finishReason? := some "tool_calls" }
+
+private def scripted (responses : Array Chat.Response) : IO Model := do
+  let index ← IO.mkRef 0
+  pure {
+    identity := .mkObj [("model", "scripted")]
+    sample := fun _ => pure { next := do
+      let i ← Result.fromIO Error.cache <| index.modifyGet fun i => (i, i + 1)
+      match responses[i]? with
+      | some response => pure response
+      | none => throw <| Error.protocol "scripted model exhausted" } }
+
+/-- A MiniVero run over the given model responses, with a root over an empty project. -/
+private def runtime (responses : Array Chat.Response) (budgetMs? : Option Nat) :
+    TestM (Trajectory.Runtime × Hash) := do
+  let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+  let workspaces ← Testing.workspaces
+  let project := (← scratch) / "proj"
+  IO.FS.createDirAll project
+  let work := (← scratch) / "work"
+  IO.FS.createDirAll work
+  let executor := Executor.onHost config.base.executor
+  let rt : Trajectory.Runtime := { store, workspaces, workDir := work, executor, model := ← scripted responses
+                                   agent := MiniVero.agent executor config, budgetMs? }
+  let uname : Uname := { system := "Linux", release := "", version := "", machine := "x86_64" }
+  let root ← assertOk <| Trajectory.createRoot store workspaces (MiniVero.initialLog config "t" uname)
+    project (some "t") (agent := config.toJson)
+  pure (rt, root)
+
+def timeSuite : Suite := Testing.suite "mini-vero.time" #[
+  test "the opening asks the agent to pace itself by time_budget, not date, in Vero's place" do
+    let text ← openingText "TASK_CODEPROOF"
+    let offset (needle : String) : Nat := (text.splitOn needle)[0]!.length
+    check (contains text "## Checkpointing — work within your time budget") "the section is there"
+    check (contains text "Call the ``time_budget`` tool") "it names the tool"
+    check (contains text "Do not use ``date``") "it says not to use date"
+    check (offset "## Done condition" < offset "## Checkpointing" && offset "## Checkpointing" < offset "## Anti-cheating")
+      "after the Done condition, before Anti-cheating, as in Vero"
+    let off := MiniVero.initialLog { config with base := { config.base with timeBudget := false } } "t"
+      { system := "Linux", release := "", version := "", machine := "x86_64" }
+    match off[1]? with
+    | some (Event.message (Chat.Message.user plain)) =>
+      check (!contains plain "## Checkpointing") "off, there is no such section"
+    | _ => fail "missing task"
+    assertEqual "tools" ((MiniVero.tools config).map (·.name)) #["bash", "submit", "time_budget"],
+
+  test "time_budget records the seconds left, or that there is none, and runs nothing" do
+    let agent := MiniVero.agent (Executor.onHost config.base.executor) config
+    let log : Log := #[.response (turn #[call "t" "time_budget"])]
+    match agent.next { elapsedMs := 60500, budgetMs? := some 3600000 } log with
+    | .record "t" json => assertEqual "left" (json.getObjVal? "seconds_left" |>.toOption |>.map (·.compress)) (some "3539")
+    | _ => fail "expected the answer recorded"
+    match agent.next {} log with
+    | .record "t" json => check ((json.getObjVal? "seconds_left").toOption == some .null) "no budget, no number"
+    | _ => fail "expected the answer recorded",
+
+  test "mini-swe neither offers time_budget nor accepts it in its configuration" do
+    assertEqual "tools" ((MiniSwe.tools {}).map (·.name)) #["bash", "submit"]
+    match MiniSwe.parseActions (turn #[call "t" "time_budget"]) with
+    | .formatError message => check (contains message "Unknown tool 'time_budget'") "unknown"
+    | .actions _ => fail "mini-swe must not accept time_budget"
+    assertError "config" (Agent.Families.instanceOf (.mkObj [("family", "mini-swe"), ("time_budget", true)])) fun
+      | .configuration m => contains m "unknown field 'time_budget'"
+      | _ => false,
+
+  test "each step records its time, and the tool counts it against the budget" do
+    let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
+      turn #[call "t" "time_budget"], turn #[call "s" "submit"]] (some 3600000)
+    let first ← stepped <| Trajectory.stepOnce rt "m" root
+    let slept := (← assertOk <| Trajectory.getState rt.store first).elapsedMs?.getD 0
+    check (slept >= 200) s!"the step took the sleep, recorded {slept} ms"
+    let second ← stepped <| Trajectory.stepOnce rt "m" first
+    match (← assertOk <| Trajectory.getState rt.store second).appended.back? with
+    | some (.observation "t" json) =>
+      let left := (json.getObjVal? "seconds_left" >>= Lean.Json.getNat?).toOption.getD 0
+      check (left < 3600 && left + 5 >= 3600) s!"left {left} s of 3600 after {slept} ms"
+    | _ => fail "expected the answer as the last event"
+    check ((← assertOk <| Trajectory.elapsedMs rt.store second) >= slept) "the run's time adds up",
+
+  test "a spent budget stops resume before a step, writes nothing, and a later resume continues" do
+    let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
+      turn #[call "s" "submit" (.mkObj [("message", "done")])]] (some 100)
+    let stopped ← assertOk <| Trajectory.resume rt "m" root (fun _ => pure ())
+    check stopped.outOfTime "the budget stopped it"
+    check ((← assertOk <| Trajectory.getState rt.store stopped.state).outcome?.isNone) "the run has not ended"
+    let count := (← assertOk <| Trajectory.allStates rt.store).size
+    let again ← assertOk <| Trajectory.resume rt "m" stopped.state (fun _ => pure ())
+    check (again.outOfTime && again.state == stopped.state) "spent before a step: nothing more"
+    assertEqual "no state written" (← assertOk <| Trajectory.allStates rt.store).size count
+    assertEqual "step says so too" (← assertOk <| Trajectory.stepOnce rt "m" stopped.state) none
+    let final ← assertOk <| Trajectory.resume { rt with budgetMs? := none } "m" stopped.state (fun _ => pure ())
+    check (!final.outOfTime) "without a budget it runs on"
+    assertEqual "submitted" ((← assertOk <| Trajectory.getState rt.store final.state).outcome?.map (·.status)) (some "Submitted")
+]
+
 end MiniVeroTests

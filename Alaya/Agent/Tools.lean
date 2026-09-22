@@ -75,6 +75,25 @@ def message (arguments : Lean.Json) : String :=
 
 end Submit
 
+/-! ## time_budget: how long the run has left -/
+
+namespace TimeBudget
+
+def definition : Chat.ToolDefinition := {
+  name := "time_budget"
+  description := "How many seconds of this run's time budget are left. Use it, not `date`, " ++
+    "to pace yourself: the run may be resumed from a checkpoint, and the clock is not the budget."
+  parameters := .object #[]
+}
+
+/-- What a `time_budget` call records: the seconds left, or that there is no limit. -/
+def answer (session : Session) : Lean.Json :=
+  match session.secondsLeft? with
+  | some seconds => .mkObj [("seconds_left", (seconds : Lean.Json))]
+  | none => .mkObj [("seconds_left", .null), ("note", "this run has no time limit")]
+
+end TimeBudget
+
 /-! ## read_output: lines of an earlier command's output, from the log -/
 
 namespace ReadOutput

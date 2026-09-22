@@ -170,7 +170,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let file := (← scratch) / "arm.json"
     IO.FS.writeFile file "{\"family\": \"mini-vero\", \"mode\": \"codeproof\", \"recover_output\": true}"
     let built ← assertOk <| Agent.Families.fromFile file
-    assertEqual "tools follow the file" (built.tools.map (·.name)) #["bash", "submit", "read_output"]
+    assertEqual "tools follow the file" (built.tools.map (·.name)) #["bash", "submit", "read_output", "time_budget"]
     assertError "missing file" (Agent.Families.fromFile ((← scratch) / "none.json")) fun
       | .configuration m => m.startsWith "cannot read"
       | _ => false,

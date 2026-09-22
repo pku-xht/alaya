@@ -118,6 +118,7 @@ private def responseWith (calls : Array Chat.ToolCall) (finish := "tool_calls") 
 private def actionSummary : Action -> String × String
   | .bash id command => (id, command)
   | .readOutput id _ => (id, "read_output")
+  | .timeBudget id => (id, "time_budget")
   | .submit id message => (id, "submit:" ++ message)
 
 def parseSuite : Suite := suite "mini.parse" #[
@@ -136,8 +137,8 @@ def parseSuite : Suite := suite "mini.parse" #[
       "Your response MUST include AT LEAST ONE tool call: bash, or read_output to see more of an earlier command's output"
       "Your response MUST include AT LEAST ONE bash tool call"
     assertStringEq "opening on differs in one sentence" delta (opening off)
-    check (contains (formatErrorMessage "e" true (some "stop") true) "'read_output'") "the repair text names it"
-    assertStringEq "repair off is unchanged" (formatErrorMessage "e" true (some "stop") false)
+    check (contains (formatErrorMessage "e" true (some "stop") { recoverOutput := true }) "'read_output'") "the repair text names it"
+    assertStringEq "repair off is unchanged" (formatErrorMessage "e" true (some "stop") {})
       (formatErrorMessage "e" true (some "stop"))
     -- On, a long output's warning names the call to read it back by; off, it is mini's.
     let long := Output.toJson { output := String.ofList (List.replicate 20000 'x'), exitCode? := some 0 }
@@ -450,7 +451,7 @@ private def askingAgent (executor : Executor) : Agent.Agent := {
     | .message m => m
     | .response r => .assistant r.content? r.toolCalls r.reasoning?
     | .observation id content => .tool id content
-  next := fun log =>
+  next := fun _ log =>
     match log.pending[0]? with
     | none => .sample
     | some call =>
@@ -478,7 +479,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
       check (contains notice "Please re-run your checks.") "the notice carries the message verbatim"
       check (contains notice "<intervention>") "the notice is enveloped"
     | _ => fail "expected the notice as the last user turn"
-    let next ← assertOk <| stepOnce rt "test:model" told
+    let next ← stepped <| stepOnce rt "test:model" told
     check ((← assertOk (getState rt.store next)).kind == .turn) "the run continues after a tell",
 
   test "the report gives a file replaced by a directory, or the reverse, no text on the directory row" do
@@ -535,7 +536,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
                      call "b" "bash" "echo after > after.txt"],
       responseWith #[submitCall "c"]]
     let root ← mkRoot rt (← emptyProject)
-    let stopped ← assertOk <| resume rt "test:model" root (fun _ => pure ())
+    let stopped := (← assertOk <| resume rt "test:model" root (fun _ => pure ())).state
     let state ← assertOk (getState rt.store stopped)
     check (state.kind == .question) "the run stops at a question"
     assertEqual "question" state.question? (some { callId := "q1", text := "Exact wording or mine?" })
@@ -553,7 +554,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     | some (.observation "q1" (.str "Exact wording.")) => pure ()
     | _ => fail "the reply is the observation of the asking call, verbatim"
     check (← assertOk (waiting rt.store)).isEmpty "an answered question is not open"
-    let final ← assertOk <| resume rt "test:model" answered (fun _ => pure ())
+    let final := (← assertOk <| resume rt "test:model" answered (fun _ => pure ())).state
     check ((← assertOk (getState rt.store final)).outcome?.isSome)
       "the run continues to its outcome after the reply",
 
@@ -562,8 +563,8 @@ def trajectorySuite : Suite := suite "trajectory" #[
       responseWith #[call "a" "bash" "echo one", call "b" "bash" "echo two"],
       responseWith #[]]   -- a format error: the view substitutes a user turn, and the wire has it
     let root ← mkRoot rt (← emptyProject)
-    let first ← assertOk <| stepOnce rt "test:model" root
-    let second ← assertOk <| stepOnce rt "test:model" first
+    let first ← stepped <| stepOnce rt "test:model" root
+    let second ← stepped <| stepOnce rt "test:model" first
     let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view {}) (tools {})
     let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
     let envelope ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "request")
@@ -601,7 +602,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     let pinned := "example.test/img@sha256:0123456789abcdef"
     let root ← mkRoot rt (← emptyProject) (some pinned)
     assertEqual "root" (← assertOk (getState rt.store root)).image? (some pinned)
-    let child ← assertOk <| stepOnce rt "test:model" root
+    let child ← stepped <| stepOnce rt "test:model" root
     assertEqual "turn" (← assertOk (getState rt.store child)).image? (some pinned)
     let edited ← emptyProject
     let intervention ← assertOk <| commit rt.store rt.workspaces child edited (some "by hand")
@@ -615,11 +616,11 @@ def trajectorySuite : Suite := suite "trajectory" #[
       responseWith #[call "a" "bash" "echo junk > junk.txt"],
       responseWith #[call "b" "bash" "echo other > other.txt"]]
     let root ← mkRoot rt (← emptyProject)
-    let first ← assertOk <| stepOnce rt "test:model" root
+    let first ← stepped <| stepOnce rt "test:model" root
     check (← assertOk (rt.workspaces.readFile? (← assertOk (getState rt.store first)).workspace "junk.txt")).isSome
       "the first branch should have written junk.txt"
     -- Forking checks the root's workspace out again: the first branch's file must be gone.
-    let second ← assertOk <| stepOnce rt "test:model" root
+    let second ← stepped <| stepOnce rt "test:model" root
     let state ← assertOk (getState rt.store second)
     check (← assertOk (rt.workspaces.readFile? state.workspace "other.txt")).isSome
       "the second branch should have written other.txt"
@@ -640,7 +641,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
     -- the root does not see the tests.
     check (← assertOk (rt.workspaces.readFile? state.workspace "tests/extra.txt")).isSome
       "the evaluation's workspace holds what the grader did"
-    let child ← assertOk <| stepOnce rt "test:model" root
+    let child ← stepped <| stepOnce rt "test:model" root
     check (← assertOk (rt.workspaces.readFile? (← assertOk (getState rt.store child)).workspace "tests/extra.txt")).isNone
       "a grader's files must never reach a state the agent continues from"
     -- Nothing may continue from the evaluation.
@@ -697,7 +698,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
       responseWith #[call "c1" "bash" "echo hi > a.txt"],
       responseWith #[submitCall "c2" "done"]]
     let root ← mkRoot rt (← emptyProject)
-    let final ← assertOk <| resume rt "test:model" root (fun _ => pure ())
+    let final := (← assertOk <| resume rt "test:model" root (fun _ => pure ())).state
     let fstate ← assertOk <| getState rt.store final
     assertEqual "submitted" (fstate.outcome?.map (·.status)) (some "Submitted")
     assertEqual "submission" (fstate.outcome?.map (·.submission)) (some "done")
@@ -721,9 +722,9 @@ def trajectorySuite : Suite := suite "trajectory" #[
       responseWith #[call "c1" "bash" "echo hi > a.txt"],
       responseWith #[submitCall "c2"]]
     let root ← mkRoot rt (← emptyProject)
-    let first ← assertOk <| stepOnce rt "test:model" root
+    let first ← stepped <| stepOnce rt "test:model" root
     -- A second continuation from the root asks for draw 1: the scripted model's next response.
-    let sibling ← assertOk <| stepOnce rt "test:model" root
+    let sibling ← stepped <| stepOnce rt "test:model" root
     check (first != sibling) "a new continuation is a fresh sibling"
     assertEqual "two turn children" (← assertOk (children rt.store root)).size 2
     -- The scripted model is exhausted now, so any further sample would fail; a reply, tell, or

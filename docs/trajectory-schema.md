@@ -562,6 +562,7 @@ equal hashes.
 | `outcome` | `{status, submission}` or null | when this state ended the run |
 | `note` | string or null | provenance |
 | `image` | string or null | the pinned container image, inherited |
+| `elapsed_ms` | integer or null | on a model step (`turn`, `question`), its wall-clock time: from before the model call to after its last act and snapshot; a run's time is the sum from the root |
 | `agent` | object or null | on a root, the agent's complete configuration (§8) |
 | `evaluation` | object or null | `{grader, returncode, elapsed_ms, output, evidence, summary}` on an evaluation |
 | `intervention` | object or null | `{message, changed: ["M path", "+ path", "- path", …]}` on a state that carried a notice |
@@ -628,8 +629,8 @@ an entry is only ever appended to.
 ```
 alaya root --task TEXT PROJECT --agent FILE [--image IMAGE]   create a root from a project directory
 alaya root --task-file FILE --agent FILE --image IMAGE --path PATH   …or from a path inside the image
-alaya resume HASH --model P:M                    grow one continuation until it ends or asks
-alaya step   HASH --model P:M                    advance exactly one turn
+alaya resume HASH --model P:M [--time-budget S]  grow one continuation until it ends, asks, or spends S
+alaya step   HASH --model P:M [--time-budget S]  advance exactly one turn
 alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a checkout; record the verdict
 alaya commit HASH DIR [-m NOTE] [--tell TEXT]    record a hand-edited workspace as a child
 alaya tell   HASH TEXT                           send the agent a message, as a child
@@ -665,6 +666,15 @@ the agent from it, so a run is continued by the agent that started it. Given `--
 such a command refuses a file describing another configuration, as `resume` refuses another
 `--image`.
 
+**Time.** Every model step records its wall-clock time on its state (`elapsed_ms`, §6), and a
+run's time is the sum along its path from the root: `show` prints both, `tree` each step's.
+`resume` and `step` take `--time-budget SECONDS` (default 0, no limit), which is this
+invocation's alone and recorded nowhere. Before each step it checks the run's time against the
+budget; once spent, it writes nothing, says so, and exits with status 4, and a later `resume` —
+with a larger budget, or none — continues from the same state. The budget never cuts a step
+short, so a run can overrun it by one step. An agent that paces itself reads the time left from
+its session (`docs/agent-api.md` §3), as MiniVero's `time_budget` tool does (`docs/minivero.md`).
+
 `root` takes `--image`, `--container-user`, and `--network`; `resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
 takes `--timeout` (default 900 s) for the grader and `--force`. The image is resolved to a digest at `root`
@@ -673,7 +683,8 @@ A container runs with **no network** unless `--network` names one (`--network br
 Docker's default network): an agent with network access can go looking for its own reference
 solution, so an image should carry what a task legitimately needs.
 
-Exit status: 0 when a run ended, 3 when it stopped at a question, 1 on error. Concurrent runs
+Exit status: 0 when a run ended, 3 when it stopped at a question, 4 when it stopped because its
+time budget was spent, 1 on error. Concurrent runs
 need separate data directories: the work directory and the cache are not shared safely.
 
 ## 9. Invariants
@@ -688,5 +699,5 @@ need separate data directories: the work directory and the cache are not shared 
   after the grader ran, and nothing continues from it.
 - A waiting state grows only by `reply`.
 - The trajectory reads no observation's content and knows no tool's name.
-- A tool call `next` answers from the log (`Directive.observe`) is recorded as an observation
+- A tool call `next` answers itself (`Directive.record`) is recorded as an observation
   like any other; the state's workspace is its parent's.
