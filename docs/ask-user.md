@@ -140,3 +140,20 @@ it is not a substitute for an unavailable answer.
 
 This tool supplies the interaction. Answer collection, simulation, budgets and
 comparative grading remain the caller's policy.
+
+## Experimental scope
+
+This change adds a question-and-answer tool. Offering it does not establish that
+the model will seek help spontaneously, choose useful questions, or benefit from
+the answers.
+
+Two exploratory real-model runs on 2026-09-23, one on `primepy` and one on
+`toposort`, both used `xmcp:closeai/gpt-5.6-luna` with `ask_user` enabled and made
+zero `ask_user` calls. Two runs are insufficient for a statistical conclusion
+about spontaneous help-seeking or the tool's effectiveness.
+
+An explicitly prompted `ask_user` run is an integration test and must be reported
+separately from spontaneous help-seeking experiments. Its success would not
+establish a help-seeking policy or an improvement in task outcomes. Further
+experiments are needed to study when models seek help, how they choose question
+forms, answer quality, and the effect of answers on task outcomes.
