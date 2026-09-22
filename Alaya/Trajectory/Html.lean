@@ -15,7 +15,7 @@ namespace Alaya.Trajectory.Html
 
 open Alaya (Result Error)
 open Alaya.Agent (Event Log View)
-open Alaya.Workspaces (Change)
+open Alaya.Workspaces (Change ChangeKind)
 
 /-- Paths under these are listed but never carried, and never diffed line by line. -/
 private def uninteresting : Array String :=
@@ -72,13 +72,17 @@ private def changesJson (workspaces : Workspaces) (before? : Option Hash) (after
   let pathsWhere (keep : Change -> Bool) := (carried.filter keep).map (·.path)
   let old ← readTexts workspaces before? (pathsWhere (·.kind != .added))
   let new ← readTexts workspaces (some after) (pathsWhere (·.kind != .removed))
+  -- Texts are keyed by path, and a file replaced by a directory is two changes at one path:
+  -- each row takes only the texts its own kind and shape have.
   pure <| changes.map fun change =>
     let kind := match change.kind with
       | .added => "added" | .removed => "removed" | .modified => "modified"
+    let text (texts : Std.HashMap String String) (absent : ChangeKind) : Lean.Json :=
+      if change.directory || change.kind == absent then .null
+      else texts.get? change.path |>.map Lean.Json.str |>.getD .null
     .mkObj [
       ("path", change.path), ("kind", kind),
-      ("old", old.get? change.path |>.map Lean.Json.str |>.getD .null),
-      ("new", new.get? change.path |>.map Lean.Json.str |>.getD .null)]
+      ("old", text old .added), ("new", text new .removed)]
 
 private def callJson (call : Chat.ToolCall) : Lean.Json :=
   .mkObj [
