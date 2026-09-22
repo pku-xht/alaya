@@ -52,7 +52,7 @@ response and answering a malformed one, realized through the agent API with Lean
 rendering, and commands run on the host or in a container.
 
 [`docs/output-recovery.md`](docs/output-recovery.md) — complete task delivery through
-`root --instruction-file` and recoverable tool-output previews, with optional Unicode
+`root --task-file` and recoverable tool-output previews, with optional Unicode
 pagination over the recorded trajectory. The [review map](docs/output-recovery-review.md)
 separates reliability checks from the [frozen Vero comparison](docs/output-recovery-experiment.md).
 

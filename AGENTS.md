@@ -8,7 +8,7 @@
 - Agent contracts are in `docs/agent-api.md`; state storage and workspace snapshots
   are in `docs/trajectory-schema.md`.
 - Complete task delivery and optional tool-output recovery are specified in
-  `docs/task-instructions.md` and `docs/output-recovery.md`. Preserve raw observations
+  `docs/output-recovery.md`. Preserve raw observations
   and branch-local recovery when changing the model-facing view or run drivers.
 - Keep `example/trajectory.tar.gz` intact. Unpack experiments into ignored `tmp/`
   directories, and keep grading checkouts separate from resumable workspaces.

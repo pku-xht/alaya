@@ -13,7 +13,7 @@ A run opens with two messages, frozen into the root state:
 - a system message naming the agent, which also says that Vero's independent grader decides correctness;
 - one user message built by `MiniVero.taskMessage`, holding, in this order:
     1. Vero's own opening framing — the sandbox is the current working directory, and the grader reads the sandbox state after the agent stops;
-    2. the instance text passed on the command line, which is the `MINIVERO_TASK.md` written by `vero-codegen` for this benchmark and this mode;
+    2. the instance text given to `root` as `--task-file`, which is the `MINIVERO_TASK.md` written by `vero-codegen` for this benchmark and this mode;
     3. the rule sections, quoted from Vero's instruction templates;
     4. this agent's mechanics — repository-relative paths, no shell state between calls, one `submit` call — and the executor's `uname`.
 
@@ -84,15 +84,12 @@ python run.py prepare --run RUN --benchmark BENCHMARK --mode proof|codeproof
 Run against an already rendered Vero source directory:
 
 ```bash
-alaya root "Complete this Vero task." /path/to/source --instruction-file /path/to/source/MINIVERO_TASK.md --agent mini-vero --mode codeproof --data /path/to/audit
+alaya root --task-file /path/to/source/MINIVERO_TASK.md /path/to/source --agent mini-vero --mode codeproof --data /path/to/audit
 alaya step STATE --agent mini-vero --model PROVIDER:MODEL --data /path/to/audit --json
 alaya html /path/to/report.html --agent mini-vero --data /path/to/audit
 ```
 
 `../vero-codegen` contains the experimental runner, task-contract generation, Docker image builder, Vero grading adapter, and integration tests. Vero itself remains the source of benchmark definitions and grading rules.
-
-`--instruction-file` reads the host file verbatim into the opening task message, before the
-first model request. See [complete task instructions](task-instructions.md) for details.
 
 ```bash
 alaya eval STATE --data /path/to/audit --grader '/path/to/vero-python /path/to/vero-codegen/grade.py "{checkout}" "{out}" --run /path/to/run'

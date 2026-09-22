@@ -55,7 +55,7 @@ private def executorFor (args : Cli.Args) (image? : Option String) (config : Exe
     if args.isSet "image" then
       throw <| .configuration <|
         "this trajectory runs on the host: it was created without --image, and its prompt " ++
-        "describes the host. Start a new one with `alaya root TASK PROJECT --image IMAGE`"
+        "describes the host. Start a new one with `alaya root --task TEXT PROJECT --image IMAGE`"
     pure (Executor.onHost config)
   | some pinned =>
     let settings ← Executor.Docker.settingsFor args pinned
@@ -163,7 +163,7 @@ private def rootProject (args : Cli.Args) (data : DataDir)
   | some _, some _ =>
     throw <| .configuration "give either a PROJECT directory or --path PATH, not both"
   | none, none =>
-    throw <| .configuration "alaya root TASK (PROJECT | --path PATH --image IMAGE)"
+    throw <| .configuration "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH --image IMAGE)"
 
 private def modelSpecOf (args : Cli.Args) : String := args.getD "model" ""
 
@@ -194,13 +194,13 @@ private def dispatch (argv : List String) : Result UInt32 := do
   let args := Cli.parse argv (aliases := [("-m", "note")])
   let json := args.isSet "json"
   match args.positional.toList with
-  | "root" :: task :: rest =>
+  | "root" :: rest =>
     if rest.length > 1 then
-      throw <| .configuration "alaya root TASK (PROJECT | --path PATH --image IMAGE)"
+      throw <| .configuration "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH --image IMAGE)"
+    let task ← args.taskOf "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH --image IMAGE)"
     -- Before the data directory is created: inside the project it would become part of it.
     if let some project := rest.head? then
       Workspaces.refuseOverlap "snapshot" project #[← args.valueD "data" ".alaya"]
-    let task ← args.taskWithInstructions task
     let data ← openData args
     let settings? ← (← Executor.Docker.settings? args).mapM (·.pin)
     let (uname, image?) ← rootEnvironment settings?
@@ -306,14 +306,14 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | _ =>
     throw <| .configuration <|
-      "usage: alaya (root TASK (PROJECT | --path P --image I) --agent A [--mode M] | resume HASH --agent A --model P:M | " ++
+      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent A [--mode M] | resume HASH --agent A --model P:M | " ++
       "step HASH --agent A --model P:M | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++
       "html [FILE] --agent A [--hide DIR] | " ++
       "show HASH [--view --agent A] | diff A B | rm HASH) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++
-      "[--timeout S] [--force] [--instruction-file FILE]"
+      "[--timeout S] [--force]"
 
 /-- Exit 0 on success, 3 when a run stopped at a question (see `exitWaiting`), 1 on error. -/
 def main (args : List String) : IO UInt32 := do

@@ -9,7 +9,7 @@ acceptance criteria.
 
 | Requirement | Implementation and direct coverage |
 | --- | --- |
-| Complete initial instructions | `root --instruction-file` appends the host file verbatim before creating the opening log. `Test/Cli.lean` checks that a long instruction's middle completion condition and trailing newline appear intact and exactly once in the serialized first request, plus the unchanged default and explicit read/UTF-8 errors. |
+| Complete initial instructions | `root --task-file` reads the host file verbatim as the task before creating the opening log. `Test/Cli.lean` checks that a long instruction's middle completion condition and trailing newline appear intact and exactly once in the serialized first request, plus the unchanged default and explicit read/UTF-8 errors. |
 | Bounded preview with exact recovery | `MiniSwe.observation` limits only the displayed executor text; the original observation is unchanged. `read_output` provides a content hash, Unicode scalar ranges, and pages. `Test/OutputRead.lean` covers omitted-middle recovery, a maximum-size page through the view, long single-line/Unicode reconstruction to EOF, and errors. |
 | Recovery is optional | The notice offers chosen ranges when needed, with no instruction to read to EOF. Behavioral tests accept both `long output -> submit` and `long output -> bash -> submit` without injected recovery or continuation. |
 | Persistence and branch isolation | Forks can read ancestor observations. A sibling cannot read another branch's private output even when it knows the reference. A separate OS process reopens the state store and records a recovered page after removal of the old execution directory. The Docker test closes one container and starts another before recovery. |
@@ -24,7 +24,7 @@ does not bound executor memory or total model context.
 
 ## Review by responsibility
 
-1. `Alaya/Cli.lean` and `Main.lean`: read the optional instruction file before root creation;
+1. `Alaya/Cli.lean` and `Main.lean`: read the task, as text or from a file, before root creation;
    preserve existing workspace-overlap checks and agent/mode dispatch.
 2. `Alaya/Agent/MiniSwe.lean` and `Alaya/Agent/OutputRead.lean`: optional recovery, preview
    metadata, pagination, and errors.
