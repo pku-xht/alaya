@@ -124,7 +124,8 @@ flowchart LR
 
 ## 6. Control and action: `next` and `act`
 
-`next config log` decides from the log alone:
+`next config session log` decides from the log alone; MiniSwe reads the session only to answer
+`time_budget`, which only MiniVero offers:
 
 1. **After a malformed response.** If the trailing responses are `maxConsecutiveFormatErrors`
    format errors in a row, `done RepeatedFormatError`; otherwise `sample` again — the view
@@ -132,7 +133,7 @@ flowchart LR
    observation does, since it means a turn ran.
 2. **After a response with actions.** The first action whose call no observation has answered
    yet is next. A `submit` there is `done Submitted`, with its message as the submission; a
-   `bash` there is `act` on that call; a `read_output` there is `observe` with the page, computed
+   `bash` there is `act` on that call; a `read_output` there is `record` with the page, computed
    from the log by `Tools.ReadOutput.read` (§9). Calls after a `submit` in the same response never run.
 3. **When every call is answered**, `sample` — unless `stepLimit` is set and the log already
    holds that many responses, in which case `done LimitsExceeded`. The limit is checked before
@@ -201,7 +202,7 @@ view cut:
   of the whole of it; this call's id is call_…`. The id is also the tool message's
   `tool_call_id`, but a model given only that has been seen to guess.
 - **`read_output {call_id, offset, limit}`** is answered by `next` from the log, as
-  `Directive.observe`: nothing runs, no snapshot is taken, and the state records the page as an
+  `Directive.record`: nothing runs, no snapshot is taken, and the state records the page as an
   ordinary observation with the parent's workspace. The output is the most recent observation
   with that id whose content is a command's `Output`, so an id a provider reuses across turns
   names the latest; a fork reads its ancestors' outputs and nothing else, since it reads its own

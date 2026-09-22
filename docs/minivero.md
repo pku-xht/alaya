@@ -1,6 +1,6 @@
 # MiniVero
 
-`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Its configuration is MiniSwe's with one more field, `mode`: `proof` or `codeproof`, Vero's evaluation mode for the run (`agents/mini-vero-default.json`; a codeproof run is a copy of it with `"mode": "codeproof"`). The root records it, and every later command builds the agent from the record.
+`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Its configuration is MiniSwe's with two more fields, `time_budget` (below) and `mode`: `proof` or `codeproof`, Vero's evaluation mode for the run (`agents/mini-vero-default.json`; a codeproof run is a copy of it with `"mode": "codeproof"`). The root records it, and every later command builds the agent from the record.
 
 ## How it is built
 
@@ -17,7 +17,7 @@ A run opens with two messages, frozen into the root state:
     3. the rule sections, quoted from Vero's instruction templates;
     4. this agent's mechanics — repository-relative paths, no shell state between calls, one `submit` call — and the executor's `uname`.
 
-The rule sections are: `Marker grammar`, `Oracle commands`, the `Grading` section of the run's mode, `Done condition`, `Anti-cheating`, and the two scoring facts under `Scoring`. A run is sent the grading rules of its own mode only, as Vero's per-mode templates do: a `proof` run never reads about `unsat_`/`sat_` stubs or Part A, which its sandbox does not have.
+The rule sections are: `Marker grammar`, `Oracle commands`, the `Grading` section of the run's mode, `Done condition`, `Checkpointing` (adapted; with `time_budget` on), `Anti-cheating`, and the two scoring facts under `Scoring`. A run is sent the grading rules of its own mode only, as Vero's per-mode templates do: a `proof` run never reads about `unsat_`/`sat_` stubs or Part A, which its sandbox does not have.
 
 ## Where Vero's text lives
 
@@ -31,6 +31,7 @@ The quoted sections are not string literals. Each is a Markdown file in `Alaya/A
 | `grading-codeproof.md` | `codeproof.md.j2` | `Grading (codeproof mode)` |
 | `done.md` | `base.md.j2` | `Done condition` |
 | `anti-cheating.md` | `base.md.j2` | `Anti-cheating` |
+| `checkpointing.md` | `base.md.j2` | `Checkpointing`, **adapted** for `time_budget` (see Pacing) — the one file not Vero's to the byte |
 
 The files are cut where Vero's templates branch (`{% if %}`, `{% block %}`), and the branching is done in Lean: `MiniVero.taskMessage` lists the sections of a run and joins them with blank lines, choosing `grading mode` by a `match` on `MiniVero.Mode`. Text that is conditional is thus a file of its own and a Lean expression that includes it or not; a section that may be absent would be an `Option String` in that list.
 
@@ -55,6 +56,30 @@ MiniVero defaults to 200 model turns and a 600-second shell-command timeout. The
 
 Set `"ask_user": true` to offer [yes/no, multiple-choice, and open-ended questions](ask-user.md).
 This setting is inherited from MiniSwe and recorded in the root configuration.
+
+## Pacing: `time_budget`
+
+A Vero run may be given a time budget and checkpointed: `alaya resume STATE --time-budget
+SECONDS` stops before a step once the run has taken that long, and a later `resume` continues
+it from its last state (`docs/trajectory-schema.md` §8). With `time_budget` on — the default —
+MiniVero is offered the **`time_budget`** tool and asked to pace itself by it:
+
+- **The tool** takes no arguments and records `{"seconds_left": N}`: the budget less the run's
+  time, which is the sum of its steps' recorded times from the root and the current step so
+  far, so it is right after a resume, when the clock since the start is not. Without a budget
+  it records `{"seconds_left": null, "note": "this run has no time limit"}`. It is answered by
+  `next` from the session (`docs/agent-api.md` §3): nothing runs and nothing is snapshotted.
+- **The prompt** carries Vero's `Checkpointing` section, after the Done condition and before
+  Anti-cheating as in Vero's template, adapted in `MiniVero/checkpointing.md`. Vero's is for a
+  chunk of a known number of minutes and says to check elapsed time with `date`; here the
+  budget is given per resume, after the prompt is frozen, so the section says the run has a time
+  budget the `time_budget` tool reports, names that tool where Vero says `date`, and says why
+  not `date`: the run may resume from a checkpoint. Chunk is run throughout; the rest —
+  keep the build green, one slot at a time, never leave a slot half-written, wind down before
+  the end — is Vero's.
+
+The budget is checked between steps and never cuts one short, so a run can overrun it by a
+step. MiniSwe offers neither the tool nor the section, and its configuration has no such field.
 
 ## Context view
 

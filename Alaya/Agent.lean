@@ -35,18 +35,34 @@ structure Outcome where
   submission : String := ""
   deriving Repr, BEq, Inhabited
 
-/-- What the loop should do next, decided from the log alone. -/
+/-- What the loop should do next, decided from the log and the session. -/
 inductive Directive where
   | sample
+  /-- Run one tool call in the workspace; the workspace is snapshotted and the result recorded. -/
   | act (call : Chat.ToolCall)
-  /-- Record `content` as the observation of `callId`: the result of a tool call that `next`
-  answered from the log alone, without the workspace — a page of an earlier output, a value
-  the agent keeps for itself. Nothing runs and the workspace is not snapshotted. -/
-  | observe (callId : String) (content : Lean.Json)
-  /-- Stop and wait for a person; their answer is recorded as the observation of `callId`. -/
+  /-- Record `content` as the observation of `callId`: the result of a tool call the agent
+  computed itself, without the workspace — a page of an earlier output, the time left. Nothing
+  runs and the workspace is not snapshotted. -/
+  | record (callId : String) (content : Lean.Json)
+  /-- Stop and wait for a person; their reply is recorded as the observation of `callId`. -/
   | ask (callId : String) (question : Question)
   | done (outcome : Outcome)
   deriving Inhabited
+
+/-- What the driver knows about this invocation that the log does not. `next` is given it;
+`view` is not, since what the model was sent must be rebuilt from the log alone — whatever
+`next` decides from it that the model sees becomes an event. -/
+structure Session where
+  /-- How long this trajectory has run: its recorded steps from the root, and the current one
+  so far. -/
+  elapsedMs : Nat := 0
+  /-- This invocation's time budget; `none` when it was given none. -/
+  budgetMs? : Option Nat := none
+  deriving Inhabited, Repr
+
+/-- Whole seconds of the budget left, never negative; `none` when there is no budget. -/
+def Session.secondsLeft? (session : Session) : Option Nat :=
+  session.budgetMs?.map fun budget => (budget - session.elapsedMs) / 1000
 
 /-- The directory an agent's tools act in. -/
 structure Workspace where
@@ -58,7 +74,7 @@ structure Agent where
   identity : Lean.Json
   tools : Array Chat.ToolDefinition
   view : View
-  next : Log -> Directive
+  next : Session -> Log -> Directive
   /-- Runs one tool call in the workspace and returns the observation to record. -/
   act : Workspace -> Chat.ToolCall -> Result Lean.Json
 
@@ -110,21 +126,22 @@ inductive Stop where
   deriving Inhabited
 
 /-- The reference loop: follows the agent's directives until it stops, recording every event.
-A trajectory drives the same steps but persists each turn as a state. -/
+A trajectory drives the same steps but persists each turn as a state, and times them; here the
+session is fixed. -/
 partial def run (agent : Agent) (workspace : Workspace) (sample : Dialogue -> Result Chat.Response)
-    (log : Log) : Result (Log × Stop) := do
-  match agent.next log with
+    (log : Log) (session : Session := {}) : Result (Log × Stop) := do
+  match agent.next session log with
   | .done outcome => pure (log, .outcome outcome)
   | .ask callId question =>
     Result.fromExcept Error.configuration question.validate
     pure (log, .question callId question)
   | .sample =>
     let response ← sample (agent.view log)
-    run agent workspace sample (log.push (.response response))
+    run agent workspace sample (log.push (.response response)) session
   | .act call =>
     let content ← agent.act workspace call
-    run agent workspace sample (log.push (.observation call.id content))
-  | .observe callId content =>
-    run agent workspace sample (log.push (.observation callId content))
+    run agent workspace sample (log.push (.observation call.id content)) session
+  | .record callId content =>
+    run agent workspace sample (log.push (.observation callId content)) session
 
 end Alaya.Agent

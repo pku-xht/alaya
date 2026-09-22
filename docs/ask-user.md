@@ -105,6 +105,11 @@ still apply. Both the model context and HTML report retain the question and repl
 If the question used the last allowed model turn, continuing its reply records
 `LimitsExceeded` without another model call.
 
+With `--time-budget`, the recorded model-step time carries through a reply.
+Time spent waiting for a person is not a model step and does not consume that
+budget. Pass the intended total budget again when resuming; if it is already
+spent, Alaya stops without another model call.
+
 ```bash
 alaya root --task-file /path/to/source/MINIVERO_TASK.md /path/to/source \
   --agent mini-vero-questions.json --data /path/to/run

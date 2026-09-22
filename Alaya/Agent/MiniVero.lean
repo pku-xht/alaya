@@ -5,7 +5,7 @@ the trajectory machinery, model providers and executor are shared with MiniSwe. 
 namespace Alaya.Agent.MiniVero
 
 open Alaya (Executor Uname)
-open Alaya.Agent (Agent Log Dialogue)
+open Alaya.Agent (Agent Log Dialogue Session)
 
 /-- Vero's evaluation modes. A run is sent the grading rules of its own mode only, as Vero's
 per-mode instruction templates do. -/
@@ -29,14 +29,17 @@ def Mode.ofString? (name : String) : Option Mode :=
 structure Config where
   base : MiniSwe.Config := {
     stepLimit := 200
-    executor := { MiniSwe.defaultExecutor with timeoutSeconds := 600 } }
+    executor := { MiniSwe.defaultExecutor with timeoutSeconds := 600 }
+    timeBudget := true }
   mode : Mode := .proof
   deriving Inhabited
 
-/-- The configuration as JSON: MiniSwe's fields with `family` `mini-vero`, and `mode`. -/
+/-- The configuration as JSON: MiniSwe's fields with `family` `mini-vero`, `mode`, and
+`time_budget` — whether the agent is offered the tool and asked to pace itself by it. -/
 def Config.toJson (config : Config) : Lean.Json :=
   match config.base.toJson with
-  | .obj fields => .obj ((fields.insert "family" "mini-vero").insert "mode" (toString config.mode))
+  | .obj fields => .obj (((fields.insert "family" "mini-vero").insert "mode" (toString config.mode))
+      |>.insert "time_budget" (config.base.timeBudget : Lean.Json))
   | other => other
 
 def Config.fromJson (json : Lean.Json) : Except String Config := do
@@ -47,11 +50,16 @@ def Config.fromJson (json : Lean.Json) : Except String Config := do
       | some mode => pure mode
       | none => throw s!"unknown mode: {name} (use {" or ".intercalate (Mode.all.map toString)})"
     | .ok other => throw s!"'mode' must be a string, not {other.compress}"
+  let defaults := ({} : Config).base
+  let timeBudget ← match json.getObjVal? "time_budget" with
+    | .error _ => pure defaults.timeBudget
+    | .ok (.bool b) => pure b
+    | .ok other => throw s!"'time_budget' must be true or false, not {other.compress}"
   -- The rest is MiniSwe's, read without the fields that are this family's.
   let base ← match json with
-    | .obj fields => MiniSwe.Config.fromJson (.obj (fields.erase "mode")) ({} : Config).base
-    | other => MiniSwe.Config.fromJson other ({} : Config).base
-  pure { base, mode }
+    | .obj fields => MiniSwe.Config.fromJson (.obj ((fields.erase "mode").erase "time_budget")) defaults
+    | other => MiniSwe.Config.fromJson other defaults
+  pure { base := { base with timeBudget }, mode }
 
 def systemMessage : String :=
   "You are MiniVero, a Lean 4 implementation and proof agent working in a Vero sandbox. " ++
@@ -74,6 +82,11 @@ def gradingCodeproof : String := quoted (include_str "MiniVero/grading-codeproof
 def doneCondition : String := quoted (include_str "MiniVero/done.md")
 def antiCheating : String := quoted (include_str "MiniVero/anti-cheating.md")
 
+/-- Vero's `Checkpointing` section, adapted: its chunk of a known number of minutes is a time
+budget the `time_budget` tool reports, and it names that tool where Vero says `date`. Unlike
+the files above, not Vero's to the byte (`docs/minivero.md` lists the changes). -/
+def checkpointing : String := quoted (include_str "MiniVero/checkpointing.md")
+
 def grading : Mode -> String
   | .proof => gradingProof
   | .codeproof => gradingCodeproof
@@ -92,13 +105,13 @@ def mechanics : String :=
 
 /-- The opening task message: the sections of this run, a blank line between them. Only
 `grading` depends on the mode. -/
-def taskMessage (task : String) (mode : Mode) (uname : Uname) : String :=
-  "\n\n".intercalate [
+def taskMessage (task : String) (mode : Mode) (uname : Uname) (pacing : Bool := false) : String :=
+  "\n\n".intercalate <| [
     framing,
     "Solve this Vero task:\n\n" ++ task,
     rules,
     grading mode,
-    doneCondition,
+    doneCondition] ++ (if pacing then [checkpointing] else []) ++ [
     antiCheating,
     scoring,
     mechanics,
@@ -115,7 +128,8 @@ def withRecovery (recover : Bool) (text : String) : String :=
 def initialLog (config : Config) (task : String) (uname : Uname) : Log :=
   #[.message (.system systemMessage),
     .message (.user (MiniSwe.withAsk config.base.askUser
-      (withRecovery config.base.recoverOutput (taskMessage task config.mode uname))))]
+      (withRecovery config.base.recoverOutput
+        (taskMessage task config.mode uname config.base.timeBudget))))]
 
 /-- MiniVero currently uses MiniSwe's linear model context. Experimental context
 management must be evaluated separately before changing the baseline. -/

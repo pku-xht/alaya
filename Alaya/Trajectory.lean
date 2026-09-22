@@ -11,7 +11,7 @@ command line drives it with. See `docs/trajectory-schema.md`. -/
 namespace Alaya.Trajectory
 
 open Alaya (Result Error Output Executor)
-open Alaya.Agent (Agent Event Log Dialogue Outcome Directive View)
+open Alaya.Agent (Agent Event Log Dialogue Outcome Directive View Session)
 
 /-! ## Event serialization -/
 
@@ -232,6 +232,9 @@ structure State where
   /-- On a root: the agent that runs this trajectory, as its complete configuration — `family`
   and the family's fields — so that every later command builds the same agent. -/
   agent? : Option Lean.Json := none
+  /-- On a model step (`turn`, `question`): its wall-clock time, from before the model call to
+  after its last act and snapshot. A run's time is the sum along its path from the root. -/
+  elapsedMs? : Option Nat := none
   /-- What a person said and changed, on a `message` or `intervention` state that carried a
   message. The notice in `appended` is `interventionNotice` of it. -/
   intervention? : Option Intervention := none
@@ -293,6 +296,7 @@ def toJson (state : State) : Lean.Json :=
     ("note", state.note?.map Lean.Json.str |>.getD .null),
     ("image", state.image?.map Lean.Json.str |>.getD .null),
     ("agent", state.agent?.getD .null),
+    ("elapsed_ms", state.elapsedMs?.map (fun ms => (ms : Lean.Json)) |>.getD .null),
     ("evaluation", state.evaluation?.map evaluationToJson |>.getD .null),
     ("intervention", state.intervention?.map (fun i => .mkObj [
       ("message", i.message), ("changed", .arr (i.changed.map Lean.Json.str))]) |>.getD .null),
@@ -317,6 +321,7 @@ def fromJson (json : Lean.Json) : Except String State := do
   let agent? := match json.getObjVal? "agent" with
     | .ok (.obj _) => (json.getObjVal? "agent").toOption
     | _ => none
+  let elapsedMs? := (json.getObjVal? "elapsed_ms" >>= Lean.Json.getNat?).toOption
   let evaluation? ← match json.getObjVal? "evaluation" with
     | .ok .null => pure none
     | .ok e => some <$> evaluationFromJson e
@@ -332,8 +337,8 @@ def fromJson (json : Lean.Json) : Except String State := do
     | .ok .null => pure none
     | .error _ => pure none
     | .ok q => some <$> Question.fromJson q
-  pure { parent?, workspace, kind, appended, outcome?, note?, image?, agent?, evaluation?
-         intervention?, question? }
+  pure { parent?, workspace, kind, appended, outcome?, note?, image?, agent?, elapsedMs?
+         evaluation?, intervention?, question? }
 
 end State
 
@@ -386,6 +391,14 @@ partial def logOf (store : Store) (hash : Hash) : Result Log := do
     | none => pure #[]
   pure (ancestors ++ state.appended)
 
+/-- How long the run up to `hash` has taken: its model steps' times, from the root. -/
+partial def elapsedMs (store : Store) (hash : Hash) : Result Nat := do
+  let state ← getState store hash
+  let before ← match state.parent? with
+    | some parent => elapsedMs store parent
+    | none => pure 0
+  pure (before + state.elapsedMs?.getD 0)
+
 /-- The transitive subtree rooted at `hash` (inclusive). -/
 partial def subtree (store : Store) (hash : Hash) : Result (Array Hash) := do
   let kids ← children store hash
@@ -429,10 +442,19 @@ structure Sandbox where
   workDir : System.FilePath
   executor : Executor
 
-/-- The live run: a sandbox, the model, and the agent being driven. -/
+/-- The live run: a sandbox, the model, the agent being driven, and this invocation's time
+budget, which is not recorded. -/
 structure Runtime extends Sandbox where
   model : Model
   agent : Agent
+  budgetMs? : Option Nat := none
+
+private def nowMs : Result Nat := Result.fromIO Error.storage IO.monoMsNow
+
+/-- The session `next` is given during a step that started at `started`, with `before` of the
+run already spent. -/
+private def sessionAt (rt : Runtime) (before started : Nat) : Result Session := do
+  pure { elapsedMs := before + ((← nowMs) - started), budgetMs? := rt.budgetMs? }
 
 /-- Why a turn handed control back to the driver. -/
 inductive Halt where
@@ -447,9 +469,9 @@ inductive Halt where
 /-- Follows the agent's directives after a sample until it wants to sample again or stops,
 recording each observation and snapshotting the workspace after each act. Returns the events
 appended, the final workspace, and why it stopped. -/
-private partial def follow (rt : Runtime) (log : Log) (appended : Log) (workspace : Hash) :
-    Result (Log × Hash × Option Question × Halt) := do
-  match rt.agent.next log with
+private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (appended : Log)
+    (workspace : Hash) : Result (Log × Hash × Option Question × Halt) := do
+  match rt.agent.next (← sessionAt rt before started) log with
   | .sample => pure (appended, workspace, none, .continue)
   | .done outcome => pure (appended, workspace, none, .outcome outcome)
   | .ask callId toQuestion =>
@@ -460,72 +482,96 @@ private partial def follow (rt : Runtime) (log : Log) (appended : Log) (workspac
     let content ← rt.agent.act { dir := rt.workDir } call
     let workspace ← rt.workspaces.snapshot rt.workDir
     let event := Event.observation call.id content
-    follow rt (log.push event) (appended.push event) workspace
-  | .observe callId content =>
+    follow rt before started (log.push event) (appended.push event) workspace
+  | .record callId content =>
     -- Nothing ran: the workspace is as it was, and the state keeps its identifier.
     let event := Event.observation callId content
-    follow rt (log.push event) (appended.push event) workspace
+    follow rt before started (log.push event) (appended.push event) workspace
 
 /-- Runs one model turn from `parent` (whose log is `log` and workspace is `workspace`, already
-materialized into `rt.workDir`), records it as a new child state, and returns the child, its log,
-its workspace, and why the turn stopped, if it did. A reply may instead stop before sampling. -/
-def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspace : Hash) :
-    Result (Hash × Log × Hash × Halt) := do
+materialized into `rt.workDir`, and `before` of whose run has been spent), records it as a new
+child state with its time, and returns the child, its log, its workspace, the run's time so
+far, and why the turn stopped, if it did. A reply may instead stop before sampling. -/
+def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspace : Hash)
+    (before : Nat) : Result (Hash × Log × Hash × Nat × Halt) := do
   let parentState ← getState rt.store parent
   -- `follow` stopped at the question before it could check what happens after the answer.
   -- In particular, answering a question on the last allowed turn must not buy another draw.
   if parentState.kind == .reply then
-    if let .done outcome := rt.agent.next log then
+    if let .done outcome := rt.agent.next { elapsedMs := before, budgetMs? := rt.budgetMs? } log then
       let child ← putState rt.store {
         parent? := some parent, workspace, appended := #[], outcome? := some outcome
         kind := .turn, note? := some note, image? := parentState.image? }
-      return (child, log, workspace, .outcome outcome)
+      return (child, log, workspace, before, .outcome outcome)
   -- Draw index = the number of children that came from sampling.
   let mut childCount := 0
   for child in ← children rt.store parent do
     if (← getState rt.store child).appended.responses > 0 then childCount := childCount + 1
   -- Children run in whatever the parent ran in; the image is a property of the trajectory.
   let image? := parentState.image?
+  let started ← nowMs
   let stream ← rt.model.sample { messages := rt.agent.view log, tools := rt.agent.tools }
   let responses ← stream.nextN (childCount + 1)
   let response ← match responses[childCount]? with
     | some response => pure response
     | none => throw <| .protocol "model returned too few responses"
   let event := Event.response response
-  let (appended, workspace, question?, halt) ← follow rt (log.push event) #[event] workspace
+  let (appended, workspace, question?, halt) ← follow rt before started (log.push event) #[event] workspace
   let outcome? := match halt with | .outcome o => some o | _ => none
+  let elapsed := (← nowMs) - started
   let child ← putState rt.store {
     parent? := some parent, workspace, appended, outcome?, question?
     kind := if question?.isSome then .question else .turn
-    note? := some note, image? }
-  pure (child, log ++ appended, workspace, halt)
+    note? := some note, image?, elapsedMs? := some elapsed }
+  pure (child, log ++ appended, workspace, before + elapsed, halt)
 
 /-- Materializes `workspace` into `rt.workDir`, replacing whatever is there. -/
 private def checkoutInto (sandbox : Sandbox) (workspace : Hash) : Result Unit :=
   sandbox.workspaces.materialize workspace sandbox.workDir
 
-/-- Advances one model turn, or records the agent's stop after a reply without sampling. -/
-def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result Hash := do
+/-- Whether a run that has taken `elapsed` may take another step under the budget. The budget is
+checked before a step and never cuts one short, so a run can overrun it by one step. -/
+private def withinBudget (rt : Runtime) (elapsed : Nat) : Bool :=
+  match rt.budgetMs? with
+  | some budget => elapsed < budget
+  | none => true
+
+/-- Advances one model turn, or records the agent's stop after a reply without sampling.
+Returns `none` when the time budget is already spent, and then nothing is written. -/
+def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result (Option Hash) := do
   let state ← getState rt.store hash
   Result.fromExcept Error.configuration state.continuable
+  let before ← elapsedMs rt.store hash
+  if !withinBudget rt before then return none
   checkoutInto rt.toSandbox state.workspace
-  let (child, _, _, _) ← advance rt note hash (← logOf rt.store hash) state.workspace
-  pure child
+  let (child, _, _, _, _) ← advance rt note hash (← logOf rt.store hash) state.workspace before
+  pure (some child)
 
-/-- Grows a continuation from `hash` until the run ends or stops at a question, returning the
-state it stopped at. -/
+/-- Where a continuation stopped: the state it reached, and whether it stopped there because
+the time budget was spent, not because the run ended or asked. -/
+structure Stopped where
+  state : Hash
+  outOfTime : Bool := false
+
+/-- Grows a continuation from `hash` until the run ends, stops at a question, or spends the time
+budget, and returns where it stopped. Running out of time writes nothing: the last state is
+where a later `resume` continues. -/
 partial def resume (rt : Runtime) (note : String) (hash : Hash)
-    (onStep : Hash -> Result Unit) : Result Hash := do
+    (onStep : Hash -> Result Unit) : Result Stopped := do
   let start ← getState rt.store hash
   Result.fromExcept Error.configuration start.continuable
+  let before ← elapsedMs rt.store hash
+  if !withinBudget rt before then return { state := hash, outOfTime := true }
   checkoutInto rt.toSandbox start.workspace
-  let rec go (parent : Hash) (log : Log) (workspace : Hash) : Result Hash := do
-    let (child, log, workspace, halt) ← advance rt note parent log workspace
+  let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed : Nat) : Result Stopped := do
+    let (child, log, workspace, elapsed, halt) ← advance rt note parent log workspace elapsed
     onStep child
     match halt with
-    | .continue => go child log workspace
-    | _ => pure child
-  go hash (← logOf rt.store hash) start.workspace
+    | .continue =>
+      if withinBudget rt elapsed then go child log workspace elapsed
+      else pure { state := child, outOfTime := true }
+    | _ => pure { state := child }
+  go hash (← logOf rt.store hash) start.workspace before
 
 /-! ## Evaluation -/
 
@@ -772,6 +818,9 @@ private def outcomeSuffix (state : State) : String :=
   | some o => s!"  [{o.status}]"
   | none => ""
 
+/-- Milliseconds as seconds with one decimal: `12.3 s`. -/
+def seconds (ms : Nat) : String := s!"{ms / 1000}.{(ms % 1000) / 100} s"
+
 /-- Renders the whole forest as indented lines, each `<short-hash> <label> [outcome]`. -/
 partial def treeLines (store : Store) : Result (Array String) := do
   let states ← allStates store
@@ -787,7 +836,8 @@ partial def treeLines (store : Store) : Result (Array String) := do
     if state.question?.isSome then
       let answered ← kids.anyM fun kid => do pure ((← getState store kid).kind == .reply)
       if !answered then waitingMark := "  [Waiting]"
-    let line := s!"{indent}{short hash}  {label state}{outcomeSuffix state}{waitingMark}"
+    let time := match state.elapsedMs? with | some ms => s!"  ({seconds ms})" | none => ""
+    let line := s!"{indent}{short hash}  {label state}{outcomeSuffix state}{waitingMark}{time}"
     let mut lines := #[line]
     for kid in kids do
       lines := lines ++ (← render kid (depth + 1))
@@ -824,6 +874,9 @@ def showLines (store : Store) (hash : Hash) (view? : Option View := none) :
   if let some note := state.note? then lines := lines.push s!"note     {note}"
   if let some image := state.image? then lines := lines.push s!"image    {image}"
   if let some agent := state.agent? then lines := lines.push s!"agent    {agent.compress}"
+  if let some ms := state.elapsedMs? then lines := lines.push s!"elapsed  {seconds ms}"
+  let total ← elapsedMs store hash
+  if total > 0 then lines := lines.push s!"run time {seconds total}, from the root"
   if let some e := state.evaluation? then
     lines := lines.push s!"grader   {e.grader}"
     lines := lines.push s!"verdict  {if e.passed then "pass" else "fail"} (rc={e.returncode}, {e.elapsedMs} ms)"

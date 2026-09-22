@@ -6,11 +6,11 @@
 - the agent's history is a **log** of events — messages, model responses, tool observations;
 - what the model is sent is a pure function of the log, the agent's **view**;
 - what happens next — sample, run a tool call, ask a person, stop — is a pure function of
-  the log, the agent's **next**;
+  the log and the **session**, what the driver knows of this invocation (its time), the
+  agent's **next**;
 - the agent acts in a **workspace**, a directory the trajectory fills from a state's snapshot
   and snapshots again after each act; a tool call is run by the agent's **act**, which returns
-  the observation to record — or answered by `next` itself, from the log, when it needs no
-  workspace;
+  the observation to record — or answered by `next` itself when it needs no workspace;
 - the **tools** offered to the model are fixed for the agent.
 
 An agent is a value of the record `Agent` holding these; `Alaya.Agent.MiniSwe` (`docs/miniswe.md`)
@@ -118,18 +118,29 @@ flowchart LR
 
 ## 3. Directives and actions
 
-What happens next is decided from the log alone: `next : Log -> Directive` is pure and total, so
-a resumed run behaves exactly as the run it continues. The five directives are everything a
-run consists of:
+What happens next is decided by `next : Session -> Log -> Directive`, a pure and total
+function of the log and the session:
 
 ```lean
+structure Session where
+  elapsedMs : Nat          -- how long the trajectory has run: its recorded steps, and this one so far
+  budgetMs? : Option Nat   -- this invocation's time budget; none when given none
+
 inductive Directive where
   | sample                                          -- draw the next response from view log
-  | act (call : Chat.ToolCall)                      -- run one tool call
-  | observe (callId : String) (content : Lean.Json) -- record a result computed from the log
+  | act (call : Chat.ToolCall)                      -- run it in the workspace, snapshot, record the result
+  | record (callId : String) (content : Lean.Json)  -- record a result the agent computed itself
   | ask (callId : String) (question : Question)     -- ask a person and wait for a valid answer
   | done (outcome : Outcome)                        -- the run is over
 ```
+
+The **session** is what the driver knows about this invocation that the log does not: how long
+the run has taken, which is on the states (`docs/trajectory-schema.md` §6), and the time budget
+the `resume` was given, which is recorded nowhere. An agent that ignores it — MiniSwe — decides
+from the log alone, and a resumed run behaves exactly as the run it continues; one that reads
+it can pace itself. `view` is not given it: what the model was sent must be rebuilt from the
+log alone, and whatever `next` decides from the session that the model sees is recorded as an
+event.
 
 `ask` is how an agent asks a person something. The trajectory records the question and stops;
 the person's answer arrives later as the observation of the asking call, and the log continues
@@ -140,12 +151,12 @@ the recorded form before creating an observation: yes/no accepts only `yes` or `
 multiple choice accepts a JSON array of distinct, in-range, one-based option numbers,
 including `[]`; open-ended replies retain their text unchanged.
 
-`observe` is how an agent answers a tool call itself, from the log: `next` computes the result
-and the loop records it as the call's observation, with nothing run and no snapshot taken, so
-the state keeps its parent's workspace. It is for tools whose result is a function of what was
-already recorded — a page of an earlier command's output (`docs/miniswe.md` §9), a value the
-agent keeps for itself and edits through tools. The view sees an ordinary observation and
-decides how, and whether, the model sees it.
+`record` is how an agent answers a tool call itself: `next` computes the result, from the log
+or the session, and the loop records it as the call's observation, with nothing run and no
+snapshot taken, so the state keeps its parent's workspace. It is for tools that need no
+workspace — a page of an earlier command's output (`docs/miniswe.md` §9), the time left
+(`docs/minivero.md`), a value the agent keeps for itself. The view sees an ordinary observation
+and decides how, and whether, the model sees it.
 
 ```lean
 structure Workspace where
@@ -166,7 +177,7 @@ structure Agent where
   identity : Lean.Json                   -- its configuration: what a root records
   tools : Array Chat.ToolDefinition      -- offered on every sample
   view : View
-  next : Log -> Directive
+  next : Session -> Log -> Directive
   act : Workspace -> Chat.ToolCall -> Result Lean.Json
 ```
 
@@ -186,7 +197,7 @@ an agent through `Agent.run` with a scripted `sample` and no store at all.
 
 ```mermaid
 flowchart TD
-  NEXT{"next log (pure)"}
+  NEXT{"next session log (pure)"}
 
   NEXT -->|sample| S1["dialogue := view log"]
   S1 --> S2["response := model.sample dialogue"]
@@ -197,7 +208,7 @@ flowchart TD
   A1 --> A2["log.push (observation call.id content)"]
   A2 --> NEXT
 
-  NEXT -->|"observe callId content"| O1["log.push (observation callId content)"]
+  NEXT -->|"record callId content"| O1["log.push (observation callId content)"]
   O1 --> NEXT
 
   NEXT -->|"ask callId question"| SU["Stop.question: a person must answer"]

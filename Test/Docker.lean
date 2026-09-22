@@ -159,7 +159,7 @@ def suite : Suite := Testing.suite "docker" #[
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
           (some "t") (some settings.image)
-        let child ← assertOk <| stepOnce rt "test:model" root
+        let child ← stepped <| stepOnce rt "test:model" root
         let state ← assertOk (getState store child)
         assertEqual "image inherited" state.image? (some settings.image)
         -- The container wrote it, the host snapshotted it.
@@ -201,7 +201,7 @@ def suite : Suite := Testing.suite "docker" #[
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
           (some "t") (some settings.image)
-        let child ← assertOk <| stepOnce rt "test:model" root
+        let child ← stepped <| stepOnce rt "test:model" root
         -- The grader is a host program over a checkout; the container is not involved.
         let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") child
           "test -f {checkout}/made.txt && cat {checkout}/made.txt"
@@ -222,7 +222,7 @@ def suite : Suite := Testing.suite "docker" #[
       let first ← runtime settings work store model
       let saved ← try
         let root ← assertOk <| createRoot store (← workspaces) #[] project (image? := some settings.image)
-        assertOk <| stepOnce first "produce" root
+        stepped <| stepOnce first "produce" root
       finally first.executor.close
       let log ← assertOk <| logOf store saved
       let some produced := log.findSome? (fun
@@ -240,7 +240,7 @@ def suite : Suite := Testing.suite "docker" #[
       try
         -- Start an actual replacement container before reading through the resumed driver.
         assertEqual "new container starts" (← second.executor.bash work "true").exitCode? (some 0)
-        let child ← assertOk <| stepOnce second "read" saved
+        let child ← stepped <| stepOnce second "read" saved
         let page? := (← assertOk <| logOf reopened child).reverse.findSome? fun
           | .observation "read" content => (content.getObjVal? "text" >>= Lean.Json.getStr?).toOption
           | _ => none
