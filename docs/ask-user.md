@@ -81,8 +81,12 @@ lake build
 python3 example/answer_questions.py --alaya .lake/build/bin/alaya --data /path/to/run
 ```
 
-Open the printed `http://127.0.0.1:PORT` address. The page shows the questions
-waiting in that data directory:
+The default address is `http://127.0.0.1:8765/`. Use `--port PORT` to choose another
+fixed port, for example when running a second answer server. If the chosen port
+is occupied, startup fails instead of switching ports. `--port 0` explicitly
+chooses a temporary free port; that address may change on restart.
+
+Open the printed address. The page shows the questions waiting in that data directory:
 
 - For yes/no, select one of the two buttons before submitting.
 - For multiple choice, check any number of options. Leaving every checkbox
@@ -120,8 +124,10 @@ accidentally submit a second answer to a question that is no longer waiting.
 Opening history, browsing files, or retrying failed reads also preserves input.
 
 The connection status shows whether updates are available. Disconnections are
-retried automatically, including after the local server restarts, without
-reloading the page or clearing an unfinished answer. An unavailable update source
+retried automatically, including after the local server restarts on the same
+port for the same data directory, without reloading the page or clearing an
+unfinished answer. Reuse the default port or the same explicit `--port` value
+when restarting; the page cannot discover a different port. An unavailable update source
 does not clear the existing questions. Answer submissions are never automatically
 retried. The server sends authenticated events at `/api/events`, checks for
 waiting-state changes once per second while clients are listening, and shares

@@ -384,7 +384,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--alaya", required=True, help="Alaya executable (use WSL/Linux)")
     parser.add_argument("--data", type=Path, required=True, help="Alaya data directory")
-    parser.add_argument("--port", type=int, default=0, help="Local port; 0 chooses a free port")
+    parser.add_argument("--port", type=int, default=8765,
+                        help="Local port (default: 8765); 0 chooses a temporary free port")
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
