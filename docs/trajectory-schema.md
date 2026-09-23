@@ -294,9 +294,11 @@ records it as a `question` state:
 - `resume`, `step`, `commit`, and `tell` refuse the state until it is answered.
 
 `alaya reply HASH TEXT` validates the answer against the recorded question type before
-writing any state. Yes/no requires `yes` or `no`; multiple choice requires a JSON array of
-distinct option numbers from 1 through the number of candidates (`[]` selects none).
-Open-ended questions accept text. An invalid reply leaves the question waiting and writes
+writing any state. Yes/no requires `yes` or `no`; single choice requires one integer
+from 1 through the number of model-provided candidates, or `none_of_above` for the
+system-provided **None of the above** option. The model must not include that reserved
+option in its candidates. Open-ended questions require nonblank text.
+An invalid reply leaves the question waiting and writes
 no child. A valid answer is recorded as a `reply` child: the parent's workspace, and one
 appended event, `Event.observation callId TEXT`, the answer as the asking call's result,
 verbatim. The next turn from the reply child continues with the calls that were still pending,
@@ -329,8 +331,8 @@ Answering the same question twice makes two `reply` siblings, which is a fork on
 `alaya waiting` lists every question no child has answered.
 
 `alaya reply-unavailable HASH` records `{"status":"unavailable"}` as the observation
-of the asking call for any question type. Normal answers remain JSON strings;
-unavailable is neither `no`, `[]`, nor empty text. The reply keeps the question's
+of the asking call for any currently supported question type. Normal answers remain JSON strings;
+unavailable is neither `no`, `none_of_above`, nor empty text. The reply keeps the question's
 workspace and follows the same continuation and budget rules. See
 [the answer page and read-only context commands](ask-user.md#answer-in-the-browser)
 for branch history and snapshot browsing.

@@ -96,7 +96,7 @@ class QuestionApplication:
                 or not STATE_HASH.fullmatch(question["state"])
                 or not isinstance(question.get("question"), str)
                 or question.get("question_type") not in
-                ("yes_no", "multiple_choice", "open_ended")
+                ("yes_no", "single_choice", "open_ended", "multiple_choice")
                 or not isinstance(question.get("options"), list)
                 or not all(isinstance(option, str) for option in question["options"])
             ):
@@ -202,9 +202,13 @@ class QuestionApplication:
         # Alaya's direct CLI still permits intentional reply forks.
         with self.lock:
             waiting = self._waiting()
-            if not any(question["state"] == state for question in waiting):
+            question = next((question for question in waiting if question["state"] == state), None)
+            if question is None:
                 self._publish("questions", {"questions": waiting})
                 raise ApiError(409, "This question is no longer waiting. The list updates automatically.")
+            if question["question_type"] == "multiple_choice":
+                raise ApiError(400, "This question uses a retired multiple-choice format. "
+                               "Start a new run to use single-choice questions.")
             reply = (self._run("reply-unavailable", state) if answer is None
                      else self._run("reply", state, answer)).strip()
             if not STATE_HASH.fullmatch(reply):

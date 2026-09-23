@@ -745,6 +745,7 @@ def replyUnavailable (store : Store) (hash : Hash) : Result Hash := do
   let question ← match parent.question? with
     | some q => pure q
     | none => throw <| .configuration "this state is not waiting for an answer"
+  Result.fromExcept Error.configuration question.toQuestion.validateAnswerable
   putState store {
     parent? := some hash, workspace := parent.workspace, kind := .reply
     appended := #[.observation question.callId (.mkObj [("status", "unavailable")])]

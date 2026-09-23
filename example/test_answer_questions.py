@@ -19,12 +19,12 @@ from answer_questions import MAX_BODY_BYTES, QuestionApplication, QuestionServer
 
 
 YES_NO = "a" * 64
-MULTIPLE = "b" * 64
+SINGLE = "b" * 64
 OPEN = "c" * 64
 REPLY = "d" * 64
 QUESTIONS = [
     {"state": YES_NO, "question": "Use this approach?", "question_type": "yes_no", "options": []},
-    {"state": MULTIPLE, "question": "Which apply?", "question_type": "multiple_choice", "options": ["One", "Two"]},
+    {"state": SINGLE, "question": "Which fits?", "question_type": "single_choice", "options": ["One", "Two"]},
     {"state": OPEN, "question": "Why?", "question_type": "open_ended", "options": []},
 ]
 
@@ -83,8 +83,22 @@ elif args[0] in ("reply", "reply-unavailable"):
     with (data / "calls.jsonl").open("a", encoding="utf-8") as calls:
         calls.write(json.dumps(value) + "\n")
     question = next(q for q in questions if q["state"] == state)
+    if question["question_type"] == "multiple_choice":
+        print("retired multiple-choice questions cannot receive new replies", file=sys.stderr)
+        sys.exit(1)
     if answer is not None and question["question_type"] == "yes_no" and answer not in ("yes", "no"):
         print("yes/no answers must be yes or no", file=sys.stderr)
+        sys.exit(1)
+    if answer is not None and question["question_type"] == "single_choice":
+        choices = {str(index) for index in range(1, len(question["options"]) + 1)}
+        if answer not in choices | {"none_of_above"}:
+            print("single-choice answers must select one option or none_of_above", file=sys.stderr)
+            sys.exit(1)
+    # Match JavaScript String.trim(), including NBSP and ideographic space but
+    # excluding Python-only whitespace such as NEL and record separators.
+    js_whitespace = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+    if answer is not None and question["question_type"] == "open_ended" and not answer.strip(js_whitespace):
+        print("open-ended answers must not be blank", file=sys.stderr)
         sys.exit(1)
     time.sleep(0.05)
     questions_file.write_text(json.dumps([q for q in questions if q["state"] != state]), encoding="utf-8")
@@ -276,11 +290,11 @@ class QuestionHttpTests(unittest.TestCase):
         (self.directory / "questions.json").write_text(json.dumps([question]), encoding="utf-8")
         status, body, _ = self.request()
         self.assertEqual((status, body), (200, {"questions": [question]}))
-        status, body, _ = self.request("POST", "/api/reply", {"state": question["state"], "answer": "[]"})
+        status, body, _ = self.request("POST", "/api/reply", {"state": question["state"], "answer": "1"})
         self.assertEqual((status, body), (200, {"reply": REPLY}))
 
     def test_valid_answers_and_verbatim_open_text(self):
-        answers = [(YES_NO, "no"), (MULTIPLE, "[]"), (OPEN, "Quotes '\"; $(literal)\n中文 <script>example</script>")]
+        answers = [(YES_NO, "no"), (SINGLE, "2"), (OPEN, "  Quotes '\"; $(literal)\n中文 <script>example</script>  ")]
         for state, answer in answers:
             with self.subTest(state=state):
                 status, body, _ = self.request("POST", "/api/reply", {"state": state, "answer": answer},
@@ -289,8 +303,8 @@ class QuestionHttpTests(unittest.TestCase):
         self.assertEqual(self.replies(), [{"state": state, "answer": answer} for state, answer in answers])
         self.assertEqual(self.request()[1], {"questions": []})
 
-    def test_open_answers_resembling_flags_and_empty_text(self):
-        answers = ["--data", "-m", "", "--"]
+    def test_open_answers_resembling_flags_and_nonblank_unicode(self):
+        answers = ["--data", "-m", "--", "\u0085", "\u001c", " \u00a0中文\u3000 "]
         questions = [dict(QUESTIONS[2], state=f"{index:064x}")
                      for index in range(1, len(answers) + 1)]
         (self.directory / "questions.json").write_text(json.dumps(questions), encoding="utf-8")
@@ -310,6 +324,56 @@ class QuestionHttpTests(unittest.TestCase):
         self.assertIn("yes or no", body["error"])
         self.assertEqual(self.request()[1], {"questions": QUESTIONS})
         self.assertEqual(self.request("POST", "/api/reply", {"state": YES_NO, "answer": "yes"})[0], 200)
+
+    def test_single_choice_none_of_above_is_a_real_answer(self):
+        value = {"state": SINGLE, "answer": "none_of_above"}
+        self.assertEqual(self.request("POST", "/api/reply", value)[:2], (200, {"reply": REPLY}))
+        self.assertEqual(self.replies(), [value])
+        self.assertEqual(self.request()[1], {"questions": [QUESTIONS[0], QUESTIONS[2]]})
+
+    def test_single_choice_rejects_arrays_empty_and_invalid_indices_without_removing_question(self):
+        for answer in ("[]", "[1]", "[1,2]", "", " ", "0", "3", "01", '"1"', "None of the above"):
+            with self.subTest(answer=answer):
+                status, body, _ = self.request("POST", "/api/reply", {"state": SINGLE, "answer": answer})
+                self.assertEqual(status, 400)
+                self.assertIn("select one", body["error"])
+                self.assertEqual(self.request()[1], {"questions": QUESTIONS})
+        self.assertEqual(self.request("POST", "/api/reply", {"state": SINGLE, "answer": "1"})[0], 200)
+
+    def test_blank_open_answers_preserve_waiting_and_do_not_publish_removal(self):
+        _, stream = self.open_events()
+        self.assertEqual(self.event(stream), ("questions", {"questions": QUESTIONS}))
+        for answer in ("", " \t\n\r", "\u00a0", "\u3000", "\ufeff\u2028\u2029"):
+            with self.subTest(answer=answer):
+                status, body, _ = self.request("POST", "/api/reply", {"state": OPEN, "answer": answer})
+                self.assertEqual(status, 400)
+                self.assertIn("must not be blank", body["error"])
+                self.assertEqual(self.request()[1], {"questions": QUESTIONS})
+        self.assertEqual(self.event(stream, include_heartbeat=True), (None, None))
+        value = {"state": OPEN, "answer": " \u00a0keep this\u3000 "}
+        self.assertEqual(self.request("POST", "/api/reply", value)[0], 200)
+        self.assertEqual(self.replies()[-1], value)
+
+    def test_legacy_questions_remain_read_only_beside_new_questions(self):
+        legacy = dict(QUESTIONS[1], state="e" * 64, question_type="multiple_choice")
+        mixed = [legacy, *QUESTIONS]
+        self.write_questions(mixed)
+        self.assertEqual(self.request()[1], {"questions": mixed})
+        _, stream = self.open_events()
+        self.assertEqual(self.event(stream), ("questions", {"questions": mixed}))
+        for value in ({"state": legacy["state"], "answer": "[]"},
+                      {"state": legacy["state"], "answer": "1"},
+                      {"state": legacy["state"], "status": "unavailable"}):
+            status, body, _ = self.request("POST", "/api/reply", value)
+            self.assertEqual(status, 400)
+            self.assertIn("retired", body["error"])
+        self.assertEqual(self.replies(), [])
+        self.assertEqual(self.request()[1], {"questions": mixed})
+        value = {"state": SINGLE, "answer": "none_of_above"}
+        self.assertEqual(self.request("POST", "/api/reply", value)[0], 200)
+        remaining = [legacy, QUESTIONS[0], QUESTIONS[2]]
+        self.assertEqual(self.event(stream), ("questions", {"questions": remaining}))
+        self.assertEqual(self.replies(), [value])
 
     def test_unavailable_is_distinct_for_every_form(self):
         expected = []
@@ -358,7 +422,7 @@ class QuestionHttpTests(unittest.TestCase):
 
     def test_context_refuses_mismatched_backend_response(self):
         (self.directory / "inspect-override.json").write_text(
-            json.dumps({"state": MULTIPLE, "workspace": "f" * 64}), encoding="utf-8")
+            json.dumps({"state": SINGLE, "workspace": "f" * 64}), encoding="utf-8")
         status, body, _ = self.request(path=f"/api/context?state={YES_NO}")
         self.assertEqual(status, 502)
         self.assertIn("unexpected state", body["error"])
@@ -409,6 +473,7 @@ class QuestionHttpTests(unittest.TestCase):
 
     def test_invalid_payload_never_calls_reply(self):
         for value in ([], {}, {"state": "bad", "answer": "yes"}, {"state": YES_NO, "answer": [1]},
+                      {"state": SINGLE, "answer": []}, {"state": SINGLE, "answer": [1]},
                       {"state": YES_NO, "answer": "yes", "extra": True},
                       {"state": YES_NO, "answer": "a\0b"}, {"state": YES_NO, "answer": "\ud800"}):
             with self.subTest(value=value):

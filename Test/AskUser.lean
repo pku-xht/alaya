@@ -17,7 +17,7 @@ private def testUname : Uname :=
 
 private def args (question : String := "Which interpretation?\nThe examples disagree.")
     (options : Array String := #["Use the written specification", "Use the examples"])
-    (questionType : String := "multiple_choice") : Lean.Json :=
+    (questionType : String := "single_choice") : Lean.Json :=
   .mkObj [("question_type", questionType), ("question", question),
     ("options", .arr (options.map Lean.Json.str))]
 
@@ -184,18 +184,22 @@ def suite : Suite := Testing.suite "ask_user" #[
             | .configuration message => contains message "ask_user" && contains message "true or false"
             | _ => false,
 
-  test "each question form preserves its type, wording, and options without OTHER" do
+  test "single choice adds a platform answer while retaining model candidates verbatim" do
     let question := "  Which rule applies?\nContext: α < β.  "
     let candidates := #[" Keep α ", "Change β\nwith evidence"]
     let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question (args question candidates))
-    assertEqual "multiple-choice type" form.questionType QuestionType.multipleChoice
+    assertEqual "single-choice type" form.questionType QuestionType.singleChoice
     assertEqual "original question" form.text question
     assertEqual "original choices" form.options candidates
     let rendered := form.render
     check (rendered.startsWith question) "the question and context must retain their original wording"
     check (contains rendered "\n1.  Keep α \n2. Change β\nwith evidence")
       "numbered candidates must retain their wording"
-    check (!contains rendered "OTHER") "multiple choice must not append a custom-answer candidate"
+    check (contains rendered "none_of_above. None of the above") "the platform adds its reserved answer"
+    assertEqual "one platform label" (rendered.splitOn "None of the above").length 2
+    check (contains rendered "Select exactly one answer") "the answer is single choice"
+    check (contains rendered "plain text none_of_above") "the reserved answer has an explicit encoding"
+    check (!contains rendered "OTHER") "single choice must not append a custom-answer input"
     match parseActions (response #[ask "q" (args question candidates)]) enabled with
     | .actions actions =>
       match actions[0]? with
@@ -213,6 +217,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       assertEqual "original question" form.text question
       assertEqual "no model-defined choices" form.options #[]
       check (!contains form.render "OTHER") s!"{questionType} must not invent a custom-answer choice"
+      check (!contains form.render "none_of_above") s!"{questionType} must not offer the reserved single-choice answer"
       match parseActions (response #[ask "q" arguments]) enabled with
       | .actions actions =>
         match actions[0]? with
@@ -227,8 +232,8 @@ def suite : Suite := Testing.suite "ask_user" #[
     let malformed : Array Lean.Json := #[
       .null,
       .mkObj [("question", "q"), ("options", .arr #[.str "a", .str "b"])],
-      .mkObj [("question_type", "multiple_choice"), ("options", .arr #[.str "a", .str "b"])],
-      .mkObj [("question_type", "multiple_choice"), ("question", "q")],
+      .mkObj [("question_type", "single_choice"), ("options", .arr #[.str "a", .str "b"])],
+      .mkObj [("question_type", "single_choice"), ("question", "q")],
       (args).setObjVal! "question_type" "unknown",
       (args).setObjVal! "question_type" "",
       (args).setObjVal! "question_type" Lean.Json.null,
@@ -265,16 +270,17 @@ def suite : Suite := Testing.suite "ask_user" #[
       | .question _ _ => fail "an invalid question must not wait for an answer"
       assertEqual "executor calls" (← calls.get) 0,
 
-  test "typed questions record empty, partial, full, yes/no, and open replies after reconstruction" do
+  test "typed questions record candidate, none-of-above, yes/no, and open replies after reconstruction" do
     let cases : Array (String × Lean.Json × Array String) := #[
       ("yes_no", args "Keep the public API?\nContext: callers depend on it." #[] "yes_no",
         #["yes", "no"]),
-      ("multiple_choice", args "Which changes should be included?\nSelect all that apply."
+      ("single_choice", args "Which change should be included?\nSelect one answer."
         #["Keep α", "Check β\nwith evidence",
           "Document γ with a detailed explanation of the public API, compatibility constraints, boundary cases, and expected output."],
-        #["[]", "[1, 3]", "[1, 2, 3]", " [3, 1] \n"]),
+        #["1", "2", "3", "none_of_above", " \t\r2 \n"]),
       ("open_ended", args "How should we handle the boundary case?" #[] "open_ended",
-        #["Keep the public API.\nPreserve the literal \"[]\" in the response.\n理由：边界条件不同。\n", "[]"])]
+        #["  Keep the public API.\nPreserve the literal \"[]\" in the response.\n理由：边界条件不同。\n",
+          "[]", String.ofList [Char.ofNat 0x200B]])]
     for family in Families.all do
       for (questionType, arguments, answers) in cases do
         let base := (← scratch) / s!"{family.name}-{questionType}"
@@ -332,13 +338,13 @@ def suite : Suite := Testing.suite "ask_user" #[
           assertEqual "reply kind" state.kind Kind.reply
           assertEqual "reply parent" state.parent? (some waitingHash)
           assertEqual "reply workspace" state.workspace questionState.workspace
-          check state.question?.isNone "an answer, including [], must not still be a waiting question"
+          check state.question?.isNone "an answer, including none_of_above, must not still be a waiting question"
           check state.agent?.isNone "the reply must inherit configuration rather than duplicate it"
           match state.appended.toList with
           | [.observation "q" (.str raw)] => assertEqual "raw answer" raw answer
           | _ => fail "a reply must append exactly the original answer as the asking call's observation"
           check (← assertOk <| waiting store).isEmpty
-            "an explicit answer, including [], must differ from not answering"
+            "an explicit answer, including none_of_above, must differ from not answering"
           let some recorded ← assertOk <| agentOf store answered | fail "missing root configuration"
           assertEqual "recorded root config" recorded.compress built.config.compress
           let restored ← assertOk <| Families.instanceOf recorded
@@ -366,7 +372,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     let unavailable := Lean.Json.mkObj [("status", "unavailable")]
     let cases : Array (String × Lean.Json × String) := #[
       ("yes_no", args "Keep the public API?" #[] "yes_no", "no"),
-      ("multiple_choice", args, "[]"),
+      ("single_choice", args, "none_of_above"),
       ("open_ended", args "What should change?" #[] "open_ended", unavailable.compress)]
     for family in Families.all do
       for (questionType, arguments, ordinaryAnswer) in cases do
@@ -405,7 +411,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         | _ => fail "unavailable must answer the original call exactly once"
         check (← assertOk <| waiting reopened).isEmpty "unavailable clears the waiting question"
         let ordinary ← assertOk <| reply reopened question ordinaryAnswer
-        check (ordinary != answered) "unavailable must differ from no, [], and literal JSON open text"
+        check (ordinary != answered) "unavailable must differ from no, none_of_above, and literal JSON open text"
         checkQuestionView (built.view (← assertOk <| logOf reopened ordinary)) ordinaryAnswer arguments
         let final ← resumed <| resume { rt with store := reopened } "scripted" answered (fun _ => pure ())
         assertEqual "continuation submitted" ((← assertOk <| getState reopened final).outcome?.map (·.status)) (some "Submitted")
@@ -462,15 +468,24 @@ def suite : Suite := Testing.suite "ask_user" #[
       assertEqual "limits prevent all samples" (← requests.get).size 0
       assertEqual "limits prevent commands" (← calls.get) 0,
 
-  test "reply rejects invalid closed answers without writing a state or clearing waiting" do
+  test "reply rejects invalid or blank answers without writing a state or clearing waiting" do
+    let blankCodepoints : Array Nat := #[0x0009, 0x000A, 0x000B, 0x000C, 0x000D,
+      0x0020, 0x00A0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005,
+      0x2006, 0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF]
+    let blanks := #["", " \n\t\r", String.ofList (blankCodepoints.toList.map Char.ofNat)] ++
+      blankCodepoints.map (fun n => String.ofList [Char.ofNat n])
     let cases : Array (String × Lean.Json × Array String × String) := #[
       ("yes_no", args "Keep the public API?" #[] "yes_no",
         #["", "maybe", "yes/no", "YES", " yes ", "no\n", "yes\nwith another instruction", "no, because it is inconvenient",
-          "true", "false", "1", "0", "\"yes\"", "[]", "[1]", "{}", "null"], "yes"),
-      ("multiple_choice", args "Which changes apply?" #["first", "second", "third"],
-        #["", "1", "true", "null", "{}", "\"[1]\"", "[", "[1,]", "[1] trailing",
-          "[1.5]", "[-1]", "[0]", "[4]", "[999999999999999999999999999]", "[1, 1]",
-          "[1, \"2\"]", "[true]", "[null]", "[[1]]", "[{}]"], "[]")]
+          "true", "false", "1", "0", "\"yes\"", "[]", "[1]", "{}", "null", "none_of_above"], "yes"),
+      ("single_choice", args "Which changes apply?" #["first", "second", "third"],
+        #["", " ", "true", "null", "{}", "\"1\"", "[]", "[1]", "[1, 2]", "[1, 1]",
+          "1.5", "1.0", "1e0", "1E+0", "+1", "-1", "0", "4", "999999999999999999999999999", "1 trailing", "01",
+          String.ofList [Char.ofNat 0x000B] ++ "1", "1" ++ String.ofList [Char.ofNat 0x00A0],
+          "\"none_of_above\"", "None of the above", "NONE_OF_ABOVE", " none_of_above ",
+          "{\"status\":\"unavailable\"}"], "none_of_above"),
+      ("open_ended", args "What should change?" #[] "open_ended", blanks,
+        String.ofList [Char.ofNat 0x00A0] ++ " Keep the API. \n" ++ String.ofList [Char.ofNat 0x3000])]
     for family in Families.all do
       for (questionType, arguments, invalid, valid) in cases do
         let base := (← scratch) / s!"{family.name}-{questionType}"
@@ -503,6 +518,9 @@ def suite : Suite := Testing.suite "ask_user" #[
           assertEqual "answer validation never executes" (← calls.get) 0
         let answered ← assertOk <| reply reopened stopped valid
         assertEqual "one committed reply" (← assertOk <| children reopened stopped).size 1
+        match (← assertOk <| getState reopened answered).appended.toList with
+        | [.observation "q" (.str raw)] => assertEqual "corrected answer remains verbatim" raw valid
+        | _ => fail "a corrected answer must retain its question call id"
         check (← assertOk <| waiting reopened).isEmpty "a valid submitted answer closes waiting"
         let final ← resumed <| resume { rt with store := reopened } "scripted" answered (fun _ => pure ())
         assertEqual "continuation after correction" ((← assertOk <| getState reopened final).outcome?.map (·.status))
@@ -525,12 +543,12 @@ def suite : Suite := Testing.suite "ask_user" #[
       questionJson "unknown" (.arr #[]), questionJson .null (.arr #[]),
       questionJson "yes_no" (.arr #[.str "yes", .str "no"]),
       questionJson "open_ended" (.arr #[.str "candidate"]),
-      questionJson "multiple_choice" (.arr #[]),
-      questionJson "multiple_choice" (.arr #[.str "only"]),
-      questionJson "multiple_choice" (.arr #[.str "same", .str " same "]),
-      questionJson "multiple_choice" (.arr #[.str "valid", .str " \n"]),
-      questionJson "multiple_choice" (.arr #[.str "valid", .num 2]),
-      questionJson "multiple_choice" (.str "not an array"),
+      questionJson "single_choice" (.arr #[]),
+      questionJson "single_choice" (.arr #[.str "only"]),
+      questionJson "single_choice" (.arr #[.str "same", .str " same "]),
+      questionJson "single_choice" (.arr #[.str "valid", .str " \n"]),
+      questionJson "single_choice" (.arr #[.str "valid", .num 2]),
+      questionJson "single_choice" (.str "not an array"),
       questionJson "yes_no" .null]
     for question in malformed do
       match State.fromJson (seed.toJson.setObjVal! "question" question) with
@@ -544,6 +562,104 @@ def suite : Suite := Testing.suite "ask_user" #[
     | [.observation "legacy" (.str raw)] => assertEqual "legacy reply stays verbatim" raw text
     | _ => fail "legacy open question lost its raw reply",
 
+  test "new retired-format calls remain format errors while only recorded answers mark history" do
+    let arguments := args "Which old alternatives apply?" #["first", "second"] "multiple_choice"
+    let bad := response #[ask "q" arguments]
+    for askEnabled in #[false, true] do
+      let config : Config := { askUser := askEnabled, maxConsecutiveFormatErrors := 2 }
+      let malformedView : Dialogue := MiniSwe.view config #[.response bad]
+      match malformedView[0]? with
+      | some (Chat.Message.user message) => check (contains message "Tool call error:") "new invalid calls need a repair"
+      | _ => fail "an unexecuted retired call must not become an assistant tool call"
+      expectSample (next config {} #[.response bad])
+      expectDone (next config {} #[.response bad, .response bad]) "RepeatedFormatError"
+      expectDone (next { config with stepLimit := 1 } {} #[.response bad]) "LimitsExceeded"
+      let (executor, calls) ← countingExecutor
+      let (model, requests) ← scripted #[bad, response #[submit]]
+      let a := agent executor { config with stepLimit := 2 }
+      let (_, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
+        (initialLog config "task" testUname)
+      match stop with
+      | .outcome outcome => assertEqual "repair can submit on its remaining turn" outcome.status "Submitted"
+      | .question _ _ => fail "the retired format cannot create a waiting question"
+      assertEqual "malformed call consumes one of two samples" (← requests.get).size 2
+      assertEqual "format repair executes no command" (← calls.get) 0
+      let unrelated : Log := #[.response bad, .observation "different" (.str "[]")]
+      expectSample (next config {} unrelated)
+      let intervening : Log := #[.response bad, .response (response #[]), .observation "q" (.str "[]")]
+      expectSample (next config {} intervening)
+      let interveningView : Dialogue := MiniSwe.view config intervening
+      match interveningView[0]? with
+      | some (Chat.Message.user _) => pure ()
+      | _ => fail "an answer after a later response must not rescue the retired call"
+      let historical : Log := #[.response bad, .observation "q" (.str "[]")]
+      checkQuestionView (view config historical) "[]" arguments
+      expectDone (next config {} historical) "LegacyQuestionFormat",
+
+  test "retired multiple choice stays readable but cannot answer or sample again" do
+    let arguments := args "Which old alternatives apply?"
+      #["Keep the old rule", "None of the above"] "multiple_choice"
+    match parseActions (response #[ask "q" arguments]) enabled with
+    | .formatError _ => pure ()
+    | _ => fail "new execution must reject the retired tool type"
+    let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.legacyQuestion arguments)
+    assertEqual "old form is not reinterpreted" form.questionType QuestionType.multipleChoice
+    check (contains form.render "read-only") "legacy display must explain that this form is retired"
+    check (!contains form.render "none_of_above") "legacy display must not append the new platform choice"
+    for family in Families.all do
+      let base := (← scratch) / family.name
+      IO.FS.createDirAll base
+      let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name), ("ask_user", true)])
+      let store ← assertOk <| Store.create (base / "states")
+      let workspaces ← Testing.workspaces
+      let project := base / "project"
+      IO.FS.createDirAll project
+      let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
+        project (some "task") (agent := built.config)
+      let workspace := (← assertOk <| getState store root).workspace
+      let old ← assertOk <| putState store {
+        parent? := some root, workspace, kind := .question,
+        appended := #[.response (response #[ask "q" arguments])]
+        question? := some { callId := "q", toQuestion := form } }
+      let original := (← assertOk <| getState store old).toJson.compress
+      let freshForm ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
+      let fresh ← assertOk <| putState store {
+        parent? := some root, workspace, kind := .question,
+        appended := #[.response (response #[ask "fresh" args])]
+        question? := some { callId := "fresh", toQuestion := freshForm } }
+      let reopened ← assertOk <| Store.create (base / "states")
+      let pending ← assertOk <| waiting reopened
+      assertEqual "old and new questions remain readable together" pending.size 2
+      check (pending.any (fun (hash, _) => hash == old)) "the old question remains discoverable"
+      check (pending.any (fun (hash, _) => hash == fresh)) "the current question remains discoverable"
+      let before ← assertOk <| allStates reopened
+      for text in #["[]", "[1]", "1", "none_of_above"] do
+        assertError "retired question cannot accept a new answer" (reply reopened old text) fun
+          | .configuration message => contains message "retired" && contains message "new run"
+          | _ => false
+      assertError "unavailable cannot bypass retired question policy" (replyUnavailable reopened old) fun
+        | .configuration message => contains message "retired"
+        | _ => false
+      assertEqual "rejected legacy replies write no state" (← assertOk <| allStates reopened) before
+      -- This fixture represents a reply already written by the historical format.
+      let answered ← assertOk <| putState reopened {
+        parent? := some old, workspace, kind := .reply,
+        appended := #[.observation "q" (.str "[]")] }
+      let log ← assertOk <| logOf reopened answered
+      checkQuestionView (built.view log) "[]" arguments
+      let (executor, calls) ← countingExecutor
+      let (model, requests) ← scripted #[]
+      let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
+      expectDone (rt.agent.next {} log) "LegacyQuestionFormat"
+      let final ← resumed <| resume rt "scripted" answered (fun _ => pure ())
+      let terminal ← assertOk <| getState reopened final
+      assertEqual "old run explicitly stops" (terminal.outcome?.map (·.status)) (some "LegacyQuestionFormat")
+      assertEqual "legacy stop adds no model request" (← requests.get).size 0
+      assertEqual "legacy stop executes no command" (← calls.get) 0
+      assertEqual "old question was not rewritten" (← assertOk <| getState reopened old).toJson.compress original
+      let report ← assertOk <| Html.dataJson reopened workspaces built.view built.tools
+      check (contains report.compress "multiple_choice") "report retains the original retired question type",
+
   test "a question consumes its model turn and a reply does not reset the step limit" do
     let config : Config := { askUser := true, stepLimit := 1 }
     let (executor, calls) ← countingExecutor
@@ -554,7 +670,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     match stop with
     | .question "q" _ => pure ()
     | _ => fail "the last allowed model turn may still ask its question"
-    let answered := log.push (.observation "q" (.str "[2]"))
+    let answered := log.push (.observation "q" (.str "2"))
     let (_, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a) answered
     match stop with
     | .outcome outcome => assertEqual "limit after reply" outcome.status "LimitsExceeded"
@@ -582,7 +698,7 @@ def suite : Suite := Testing.suite "ask_user" #[
           project (some "task") (agent := built.config)
         let stopped ← resumed <| resume rt "scripted" root (fun _ => pure ())
         check (← assertOk <| getState store stopped).question?.isSome "the allowed model turn asks"
-        let answered ← assertOk <| reply store stopped "[2]"
+        let answered ← assertOk <| reply store stopped "2"
         let some recorded ← assertOk <| agentOf store answered | fail "missing recorded configuration"
         let restored ← assertOk <| Families.instanceOf recorded
         let rebuilt := { rt with agent := restored.build executor }
@@ -627,8 +743,8 @@ def suite : Suite := Testing.suite "ask_user" #[
         question? := some { callId := "q", toQuestion := form } }
       let reopened ← assertOk <| Store.create (base / "states")
       assertEqual "recorded steps add up" (← assertOk <| elapsedMs reopened question) 1000
-      let answered ← assertOk <| reply reopened question "[2]"
-      let alternate ← assertOk <| reply reopened question "[]"
+      let answered ← assertOk <| reply reopened question "2"
+      let alternate ← assertOk <| reply reopened question "none_of_above"
       for answer in #[answered, alternate] do
         assertEqual "answer inherits all recorded running time" (← assertOk <| elapsedMs reopened answer) 1000
         assertEqual "the human reply adds no running time"
@@ -658,7 +774,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     let prose := Event.response { content? := some "no tool", finishReason? := some "stop" }
     expectSample (next config {} #[bad])
     expectDone (next config {} #[prose, .message (.user "try again"), bad]) "RepeatedFormatError"
-    let answered : Log := #[prose, .response (response #[ask]), .observation "q" (.str "[]")]
+    let answered : Log := #[prose, .response (response #[ask]), .observation "q" (.str "none_of_above")]
     expectSample (next config {} (answered.push bad))
     expectDone (next config {} (answered ++ #[bad, bad])) "RepeatedFormatError"
     expectSample (next { config with maxConsecutiveFormatErrors := 0 } {} #[bad, bad, bad]),

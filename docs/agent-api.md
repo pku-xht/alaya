@@ -145,11 +145,16 @@ event.
 `ask` is how an agent asks a person something. The trajectory records the question and stops;
 the person's answer arrives later as the observation of the asking call, and the log continues
 as if the tool had returned. `Question` contains the question text, its `questionType`
-(`yesNo`, `multipleChoice`, or `openEnded`), and the candidate `options`. The default is
+(`yesNo`, `singleChoice`, or `openEnded`), and the candidate `options`. The default is
 an open-ended question. The trajectory stores these fields and validates replies against
 the recorded form before creating an observation: yes/no accepts only `yes` or `no`;
-multiple choice accepts a JSON array of distinct, in-range, one-based option numbers,
-including `[]`; open-ended replies retain their text unchanged.
+single choice accepts one in-range, one-based candidate number or `none_of_above`.
+The model must not generate the system-provided **None of the above** option;
+the answer interface appends it separately from the model's `options`.
+Open-ended replies require nonblank text and retain valid text unchanged.
+The unavailable object remains distinct from every ordinary answer string.
+The former `multipleChoice` type is retained only for reading old experimental records;
+see [the retired-format rules](ask-user.md#earlier-experimental-multiple-choice-records).
 
 `record` is how an agent answers a tool call itself: `next` computes the result, from the log
 or the session, and the loop records it as the call's observation, with nothing run and no

@@ -83,9 +83,12 @@ def instruction : String :=
   "You may ask a concrete question with ask_user instead of running a command. " ++
   "Write your messages, questions, and answer options in English. " ++
   "Include the relevant context and choose question_type: yes_no for a yes/no answer, " ++
-  "multiple_choice to select zero or more of at least two distinct choices, or open_ended " ++
-  "for a free-text answer. Only multiple_choice takes options; otherwise pass an empty array. " ++
-  "No custom-answer option is added. Call ask_user alone, without any other tool. " ++
+  "single_choice to select exactly one of at least two distinct candidates, or open_ended " ++
+  "for a nonblank free-text answer. Only single_choice takes options; otherwise pass an empty array. " ++
+  "A selected candidate returns its one-based option number (starting at 1) as a string. " ++
+  "The platform appends None of the above; never include that reserved label or none_of_above " ++
+  "in options. It returns the plain string none_of_above when all listed candidates are incorrect, " ++
+  "distinct from being unable to answer. Call ask_user alone, without any other tool. " ++
   "For every question type, the person may be unable to answer; this returns the JSON " ++
   "object {\"status\":\"unavailable\"} instead of a string answer. " ++
   "The answer is advice and may be wrong; it does not change " ++
@@ -93,16 +96,19 @@ def instruction : String :=
 
 def definition : Chat.ToolDefinition := {
   name := "ask_user"
-  description := "Ask a yes/no, multiple-choice, or open-ended question and wait for an answer. " ++
+  description := "Ask a yes/no, single-choice, or open-ended question and wait for an answer. " ++
     "Write the question, its context, and all options in English. " ++
-    "Multiple-choice answers may select zero through all options. " ++
+    "Single-choice answers return one candidate's one-based option number (starting at 1) as a string, " ++
+    "or the platform's None of the above " ++
+    "answer (plain text none_of_above). Never include that reserved option yourself. " ++
     "If the person cannot answer, the result is {\"status\":\"unavailable\"}. Call this tool alone."
   parameters := .object #[
     ("question_type", .string (description? := some "The form of the answer requested")
-      (enum := #["yes_no", "multiple_choice", "open_ended"])),
+      (enum := #["yes_no", "single_choice", "open_ended"])),
     ("question", .string (description? := some "The question and enough context to answer it")),
     ("options", .array (.string) (description? := some (
-      "For multiple_choice, at least two distinct, nonempty candidate answers. " ++
+      "For single_choice, at least two distinct, nonempty actual candidates. " ++
+      "Do not include None of the above or none_of_above; the platform adds it. " ++
       "For yes_no and open_ended, an empty array.")))]
 }
 
@@ -116,6 +122,20 @@ def question (arguments : Lean.Json) : Except String Question := do
   let options ← (arguments.getObjVal? "options" >>= Lean.Json.getArr?) >>= (·.mapM Lean.Json.getStr?)
   if text.trimAscii.toString.isEmpty then throw "ask_user needs a nonempty question."
   let question : Question := { text, questionType, options }
+  question.validate
+  pure question
+
+/-- The old tool contract, solely for displaying already-recorded calls. New
+execution uses `question` and the offered schema never includes this form. -/
+def legacyQuestion (arguments : Lean.Json) : Except String Question := do
+  let schema : Chat.JsonSchema := .object #[
+    ("question_type", .string (enum := #["multiple_choice"])),
+    ("question", .string), ("options", .array .string)]
+  schema.validate arguments
+  let text ← arguments.getObjVal? "question" >>= Lean.Json.getStr?
+  let options ← (arguments.getObjVal? "options" >>= Lean.Json.getArr?) >>= (·.mapM Lean.Json.getStr?)
+  if text.trimAscii.toString.isEmpty then throw "ask_user needs a nonempty question."
+  let question : Question := { text, questionType := .multipleChoice, options }
   question.validate
   pure question
 

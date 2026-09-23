@@ -40,6 +40,8 @@
     .option:has(input:checked) { background: #edf3ff; border-color: #5478b7; }
     .option input { flex: 0 0 auto; width: 18px; height: 18px; margin: 2px 0 0; accent-color: #355e9c; }
     .option span { line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+    .legacy-options { padding-left: 24px; margin: 0; color: #697686; line-height: 1.6; }
+    .legacy-options li { padding: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
     textarea { display: block; width: 100%; min-height: 140px; resize: vertical; border: 1px solid #bdc7d5; border-radius: 6px; padding: 13px; line-height: 1.55; }
     .actions { margin-top: 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     .selection { color: #697686; font-size: 13px; }
@@ -345,7 +347,8 @@
       const form = element('form', 'question');
       form.dataset.state = question.state;
       const context = contextPanels(question);
-      const kinds = {yes_no: 'Yes / no', multiple_choice: 'Multiple choice', open_ended: 'Open question'};
+      const legacy = question.question_type === 'multiple_choice';
+      const kinds = {yes_no: 'Yes / no', single_choice: 'Single choice', open_ended: 'Open question', multiple_choice: 'Multiple choice (retired)'};
       form.append(element('p', 'type', kinds[question.question_type]));
       const fieldset = element('fieldset');
       fieldset.append(element('legend', null, question.question));
@@ -356,7 +359,12 @@
       fields.append(help);
       let textarea;
       const inputs = [];
-      if (question.question_type === 'open_ended') {
+      if (legacy) {
+        help.textContent = 'This question uses a retired multiple-choice format. Start a new run to use single-choice questions.';
+        const options = element('ol', 'legacy-options');
+        for (const option of question.options) options.append(element('li', null, option));
+        fields.append(options);
+      } else if (question.question_type === 'open_ended') {
         help.textContent = 'Write your answer below.';
         textarea = element('textarea');
         textarea.setAttribute('aria-label', 'Your answer');
@@ -364,16 +372,17 @@
         fields.append(textarea);
       } else {
         const binary = question.question_type === 'yes_no';
-        help.textContent = binary ? 'Choose one answer.' : 'Select any that apply. You can also submit with no options selected.';
+        help.textContent = binary ? 'Choose one answer.' : 'Choose one answer. If none of the options fits, select None of the above.';
         const options = element('div', 'options' + (binary ? ' binary' : ''));
-        const choices = binary ? ['Yes', 'No'] : question.options;
+        const choices = binary ? ['Yes', 'No'] : [...question.options, 'None of the above'];
         choices.forEach((text, index) => {
           const label = element('label', 'option');
           const input = element('input');
-          input.type = binary ? 'radio' : 'checkbox';
+          input.type = 'radio';
           input.name = `answer-${question.state}`;
-          input.value = binary ? ['yes', 'no'][index] : String(index + 1);
-          if (binary) input.required = true;
+          input.value = binary ? ['yes', 'no'][index]
+            : index === question.options.length ? 'none_of_above' : String(index + 1);
+          input.required = true;
           inputs.push(input);
           label.append(input, element('span', null, text));
           options.append(label);
@@ -396,21 +405,23 @@
       const error = element('p', 'error');
       error.setAttribute('role', 'alert');
       error.hidden = true;
-      form.append(actions, element('p', 'unavailable-help', 'If you don’t know, choose Unable to answer. The agent will be told that no answer was available.'), error, context.panels);
+      const unavailableHelp = legacy ? 'Recorded choices are shown for reference. This retired format cannot be answered.'
+        : 'If you don’t know, choose Unable to answer. The agent will be told that no answer was available.';
+      form.append(actions, element('p', 'unavailable-help', unavailableHelp), error, context.panels);
       let busy = false;
       let pendingUnavailable = false;
       function update() {
         const selected = inputs.filter(input => input.checked);
         const binary = question.question_type === 'yes_no';
-        const valid = textarea ? textarea.value.trim().length > 0 : !binary || selected.length === 1;
-        submit.disabled = busy || !valid;
+        const valid = textarea ? textarea.value.trim().length > 0 : selected.length === 1;
+        submit.disabled = busy || legacy || !valid;
         submit.textContent = busy && !pendingUnavailable ? 'Submitting…' : 'Submit answer';
-        unavailable.disabled = busy;
+        unavailable.disabled = busy || legacy;
         unavailable.textContent = busy && pendingUnavailable ? 'Submitting…' : 'Unable to answer';
-        fieldset.disabled = busy;
-        selection.textContent = textarea ? '' : binary
+        fieldset.disabled = busy || legacy;
+        selection.textContent = legacy ? 'Read only' : textarea ? '' : binary
           ? (selected.length ? `${selected[0].value === 'yes' ? 'Yes' : 'No'} selected` : 'Choose yes or no')
-          : `${selected.length} of ${inputs.length} selected`;
+          : selected.length ? (selected[0].value === 'none_of_above' ? 'None of the above selected' : `Option ${selected[0].value} selected`) : 'Choose one option';
       }
       form.addEventListener('input', update);
       form.addEventListener('change', update);
@@ -424,8 +435,7 @@
       });
       async function sendReply(isUnavailable) {
         const selected = inputs.filter(input => input.checked);
-        const answer = isUnavailable ? undefined : textarea ? textarea.value : question.question_type === 'yes_no'
-          ? selected[0].value : JSON.stringify(selected.map(input => Number(input.value)));
+        const answer = isUnavailable ? undefined : textarea ? textarea.value : selected[0].value;
         busy = true;
         pendingUnavailable = isUnavailable;
         submitting++;
@@ -494,7 +504,7 @@
       if (type === 'questions') {
         if (!Array.isArray(value.questions) || value.questions.some(question =>
           !question || !/^[0-9a-f]{64}$/.test(question.state) || typeof question.question !== 'string' ||
-          !['yes_no', 'multiple_choice', 'open_ended'].includes(question.question_type) ||
+          !['yes_no', 'single_choice', 'open_ended', 'multiple_choice'].includes(question.question_type) ||
           !Array.isArray(question.options) || question.options.some(option => typeof option !== 'string'))) {
           throw new Error('Invalid question update.');
         }
