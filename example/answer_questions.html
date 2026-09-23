@@ -182,7 +182,10 @@
       const label = isResult ? (kind === 'reply' ? 'Previous answer' : `Tool result${callName ? ` · ${callName}` : ''}`)
         : ({system: 'Task instructions', user: 'User', assistant: 'Assistant'}[role] || 'Recorded event');
       node.append(element('p', 'event-label', label));
-      if (message.content !== null && message.content !== undefined) node.append(recordText(message.content));
+      if (message.content !== null && message.content !== undefined) {
+        const unavailable = kind === 'reply' && message.content.status === 'unavailable';
+        node.append(recordText(unavailable ? 'Unable to answer' : message.content));
+      }
       for (const call of message.tool_calls || []) {
         calls.set(call.id, call.name);
         const block = element('div', 'tool-call');
@@ -252,7 +255,7 @@
           taskContent.replaceChildren(text);
           const calls = new Map();
           const steps = result.history.map((step, index) => {
-            const labels = {root: 'Starting instructions', reply: 'Human reply', turn: 'Agent step', fork: 'Branch'};
+            const labels = {root: 'Starting instructions', reply: 'Human reply', turn: 'Agent step', question: 'Question', message: 'Human message', intervention: 'Workspace change', evaluation: 'Evaluation'};
             const node = disclosure(`${index + 1}. ${labels[step.kind] || 'Recorded step'} · ${step.events.length} event${step.events.length === 1 ? '' : 's'}`, 'history-step');
             const events = element('div', 'history-events');
             for (const event of step.events) events.append(historyEvent(event, step.kind, calls));
