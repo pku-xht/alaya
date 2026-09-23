@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="alaya-token" content="__ALAYA_TOKEN__">
   <title>Questions · Alaya</title>
   <style>
     :root { color-scheme: light; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #202a36; background: #f5f6f8; }
@@ -19,7 +20,8 @@
     main { max-width: 860px; margin: auto; padding: 40px 24px 64px; }
     .heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 12px; }
     h1 { margin: 0; font-size: clamp(25px, 4vw, 32px); font-weight: 650; letter-spacing: -.035em; }
-    .intro { color: #697686; margin: 0 0 28px; line-height: 1.6; }
+    .intro { color: #697686; margin: 0 0 8px; line-height: 1.6; }
+    .connection { color: #697686; margin: 0 0 28px; font-size: 13px; line-height: 1.5; }
     .secondary { background: #fff; border: 1px solid #cdd5df; color: #344253; border-radius: 6px; padding: 9px 16px; min-height: 42px; }
     .secondary:hover { background: #edf1f6; }
     #notice { margin-bottom: 20px; padding: 13px 16px; border: 1px solid #b7d6c5; background: #edf7f1; color: #21563b; border-radius: 6px; line-height: 1.5; }
@@ -99,23 +101,25 @@
 <body>
   <header class="topbar"><div class="topbar-inner"><span class="brand">Alaya</span><span class="section-label">Questions</span></div></header>
   <main>
-    <div class="heading"><h1>Waiting for your answer</h1><button id="refresh" class="secondary" type="button">Refresh</button></div>
+    <div class="heading"><h1>Waiting for your answer</h1></div>
     <p class="intro" id="count" aria-live="polite">Loading questions…</p>
+    <p class="connection" id="connection" role="status">Connecting…</p>
     <div id="notice" role="status" hidden></div>
     <div id="questions"></div>
-    <div id="empty" class="empty" hidden><strong>No questions waiting</strong>New questions will appear here when you refresh.</div>
+    <div id="empty" class="empty" hidden><strong>No questions waiting</strong>The next question will appear here automatically.</div>
   </main>
   <script>
     'use strict';
-    const token = '__ALAYA_TOKEN__';
+    let token = document.querySelector('meta[name="alaya-token"]').content;
     const questions = document.getElementById('questions');
     const count = document.getElementById('count');
     const notice = document.getElementById('notice');
     const empty = document.getElementById('empty');
-    const refresh = document.getElementById('refresh');
-    let refreshing = false;
+    const connection = document.getElementById('connection');
     let submitting = 0;
+    let pendingQuestions = null;
     const forms = new Map();
+    const answered = new Set();
 
     function element(tag, className, text) {
       const node = document.createElement(tag);
@@ -135,7 +139,6 @@
       empty.hidden = n !== 0;
     }
     function updateBusy() {
-      refresh.disabled = refreshing || submitting > 0;
       for (const form of forms.values()) form.update();
     }
     async function api(path, payload) {
@@ -400,9 +403,9 @@
         const selected = inputs.filter(input => input.checked);
         const binary = question.question_type === 'yes_no';
         const valid = textarea ? textarea.value.trim().length > 0 : !binary || selected.length === 1;
-        submit.disabled = busy || refreshing || !valid;
+        submit.disabled = busy || !valid;
         submit.textContent = busy && !pendingUnavailable ? 'Submitting…' : 'Submit answer';
-        unavailable.disabled = busy || refreshing;
+        unavailable.disabled = busy;
         unavailable.textContent = busy && pendingUnavailable ? 'Submitting…' : 'Unable to answer';
         fieldset.disabled = busy;
         selection.textContent = textarea ? '' : binary
@@ -430,12 +433,12 @@
         updateBusy();
         try {
           await api('/api/reply', isUnavailable ? {state: question.state, status: 'unavailable'} : {state: question.state, answer});
+          answered.add(question.state);
           context.dispose();
           forms.delete(question.state);
           form.remove();
           updateCount();
           announce(isUnavailable ? 'Saved as unable to answer. The agent can continue.' : 'Answer submitted and saved.');
-          if (forms.size === 0) refresh.focus();
         } catch (problem) {
           error.textContent = problem.message;
           error.hidden = false;
@@ -443,41 +446,142 @@
           busy = false;
           submitting--;
           updateBusy();
+          if (!submitting && pendingQuestions !== null) {
+            const latest = pendingQuestions;
+            pendingQuestions = null;
+            applyQuestions(latest);
+          }
         }
       }
       return {node: form, update, dispose: context.dispose};
     }
-    async function load() {
-      if (refreshing || submitting) return;
-      refreshing = true;
-      updateBusy();
-      try {
-        const result = await api('/api/questions');
-        if (notice.dataset.error === 'true') notice.hidden = true;
-        const waiting = new Set(result.questions.map(question => question.state));
-        for (const [state, form] of forms) {
-          if (!waiting.has(state)) {
-            form.dispose();
-            form.node.remove();
-            forms.delete(state);
-          }
+    function applyQuestions(incoming) {
+      if (submitting) {
+        pendingQuestions = incoming;
+        return;
+      }
+      const waiting = new Set(incoming.map(question => question.state));
+      for (const [state, form] of forms) {
+        if (!waiting.has(state)) {
+          form.dispose();
+          form.node.remove();
+          forms.delete(state);
         }
-        for (const question of result.questions) {
-          const form = forms.get(question.state) || questionForm(question);
-          forms.set(question.state, form);
-          questions.append(form.node);
+      }
+      for (const question of incoming) {
+        // Keep existing nodes in place: their answers, focus and disclosures belong
+        // to the person. Newly observed questions join the end of the list.
+        if (forms.has(question.state) || answered.has(question.state)) continue;
+        const form = questionForm(question);
+        forms.set(question.state, form);
+        form.update();
+        questions.append(form.node);
+      }
+      updateCount();
+    }
+    function showConnection(text) {
+      if (connection.textContent !== text) connection.textContent = text;
+    }
+    function receiveEvent(block) {
+      let type = 'message';
+      const data = [];
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) type = line.slice(6).trim();
+        if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+      }
+      if (!data.length) return;
+      const value = JSON.parse(data.join('\n'));
+      if (type === 'questions') {
+        if (!Array.isArray(value.questions) || value.questions.some(question =>
+          !question || !/^[0-9a-f]{64}$/.test(question.state) || typeof question.question !== 'string' ||
+          !['yes_no', 'multiple_choice', 'open_ended'].includes(question.question_type) ||
+          !Array.isArray(question.options) || question.options.some(option => typeof option !== 'string'))) {
+          throw new Error('Invalid question update.');
         }
-        updateCount();
-      } catch (problem) {
-        announce(problem.message, true);
-        if (forms.size === 0) count.textContent = 'Questions could not be loaded.';
-      } finally {
-        refreshing = false;
-        updateBusy();
+        applyQuestions(value.questions);
+        showConnection('Connected. New questions appear automatically.');
+      } else if (type === 'unavailable') {
+        showConnection('Waiting for Alaya. Updates will resume automatically.');
       }
     }
-    refresh.addEventListener('click', load);
-    load();
+    async function renewToken(signal) {
+      // A server restart rotates the page token. Read the same-origin page's
+      // token without reloading this document or losing an unfinished answer.
+      const response = await fetch('/', {cache: 'no-store', signal});
+      if (!response.ok) throw new Error('Could not reconnect.');
+      const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const next = page.querySelector('meta[name="alaya-token"]')?.content;
+      if (!next) throw new Error('Could not reconnect.');
+      token = next;
+    }
+    let watching = false;
+    let watcher;
+    let streamController;
+    window.addEventListener('pagehide', () => {
+      watching = false;
+      streamController?.abort();
+    });
+    function startWatching() {
+      watching = true;
+      if (!watcher) watcher = watchQuestions().finally(() => {
+        watcher = null;
+        if (watching) startWatching();
+      });
+    }
+    window.addEventListener('pageshow', startWatching);
+    async function watchQuestions() {
+      let retryDelay = 1000;
+      while (watching) {
+        const controller = new AbortController();
+        streamController = controller;
+        let timer;
+        let reader;
+        const keepAlive = () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => controller.abort(), 35000);
+        };
+        try {
+          keepAlive();
+          const response = await fetch('/api/events', {
+            headers: {'X-Alaya-Token': token}, cache: 'no-store', signal: controller.signal
+          });
+          if (response.status === 403) {
+            await renewToken(controller.signal);
+            throw new Error('Reconnecting with a new page token.');
+          }
+          if (!response.ok || !response.body ||
+              !response.headers.get('Content-Type')?.startsWith('text/event-stream')) {
+            throw new Error('Could not listen for questions.');
+          }
+          reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (watching) {
+            const {value, done} = await reader.read();
+            if (done) throw new Error('Connection closed.');
+            keepAlive();
+            buffer = (buffer + decoder.decode(value, {stream: true})).replace(/\r\n/g, '\n');
+            let end;
+            while ((end = buffer.indexOf('\n\n')) !== -1) {
+              receiveEvent(buffer.slice(0, end));
+              buffer = buffer.slice(end + 2);
+              retryDelay = 1000;
+            }
+          }
+        } catch (_) {
+          if (watching) showConnection('Connection interrupted. Reconnecting automatically…');
+        } finally {
+          clearTimeout(timer);
+          controller.abort();
+          if (reader) await reader.cancel().catch(() => {});
+        }
+        if (watching) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          retryDelay = Math.min(retryDelay * 2, 10000);
+        }
+      }
+    }
+    startWatching();
   </script>
 </body>
 </html>

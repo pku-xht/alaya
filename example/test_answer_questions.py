@@ -10,7 +10,9 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
 import unittest
+from unittest.mock import patch
 from urllib.parse import urlencode
 
 from answer_questions import MAX_BODY_BYTES, QuestionApplication, QuestionServer
@@ -94,6 +96,10 @@ else:
 
 class QuestionHttpTests(unittest.TestCase):
     def setUp(self):
+        for name, value in (("EVENT_POLL_SECONDS", 0.05), ("EVENT_HEARTBEAT_SECONDS", 0.1)):
+            setting = patch(f"answer_questions.{name}", value)
+            setting.start()
+            self.addCleanup(setting.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
@@ -135,6 +141,123 @@ class QuestionHttpTests(unittest.TestCase):
     def replies(self):
         path = self.directory / "calls.jsonl"
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+    def open_events(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        connection.request("GET", "/api/events", headers={
+            "X-Alaya-Token": self.server.application.token, "Origin": self.server.origin,
+        })
+        response = connection.getresponse()
+        self.addCleanup(connection.close)
+        self.addCleanup(response.close)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("Content-Type"), "text/event-stream; charset=utf-8")
+        self.assertEqual(response.getheader("Cache-Control"), "no-store")
+        return connection, response
+
+    def event(self, response, include_heartbeat=False):
+        while True:
+            fields = {}
+            while True:
+                line = response.readline()
+                self.assertTrue(line, "The event stream ended unexpectedly")
+                if line == b"\n":
+                    break
+                key, _, value = line.decode("utf-8").rstrip("\n").partition(":")
+                fields[key] = value.lstrip()
+            if "event" in fields:
+                return fields["event"], json.loads(fields["data"])
+            if include_heartbeat:
+                self.assertEqual(fields, {"": "keepalive"})
+                return None, None
+
+    def wait_until(self, predicate):
+        deadline = time.monotonic() + 3
+        while not predicate() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(predicate())
+
+    def write_questions(self, questions):
+        path = self.directory / "new-questions.json"
+        path.write_text(json.dumps(questions), encoding="utf-8")
+        path.replace(self.directory / "questions.json")
+
+    def test_events_deliver_initial_and_changed_question_lists(self):
+        _, stream = self.open_events()
+        self.assertEqual(self.event(stream), ("questions", {"questions": QUESTIONS}))
+        changed = [*QUESTIONS, dict(QUESTIONS[2], state="e" * 64, question="Next question?")]
+        self.write_questions(changed)
+        self.assertEqual(self.event(stream), ("questions", {"questions": changed}))
+        self.assertEqual(self.replies(), [])
+
+    def test_events_send_heartbeats_without_duplicate_snapshots(self):
+        _, stream = self.open_events()
+        self.assertEqual(self.event(stream), ("questions", {"questions": QUESTIONS}))
+        self.assertEqual(self.event(stream, include_heartbeat=True), (None, None))
+
+    def test_events_report_backend_failure_then_recover(self):
+        _, stream = self.open_events()
+        self.assertEqual(self.event(stream), ("questions", {"questions": QUESTIONS}))
+        (self.directory / "questions.json").write_text("broken JSON", encoding="utf-8")
+        event, value = self.event(stream)
+        self.assertEqual(event, "unavailable")
+        self.assertIsInstance(value["error"], str)
+        self.assertNotIn("questions", value)
+        self.write_questions(QUESTIONS)
+        self.assertEqual(self.event(stream), ("questions", {"questions": QUESTIONS}))
+
+    def test_events_initial_failure_is_not_an_empty_list(self):
+        (self.directory / "questions.json").write_text("broken JSON", encoding="utf-8")
+        _, stream = self.open_events()
+        event, value = self.event(stream)
+        self.assertEqual(event, "unavailable")
+        self.assertIn("error", value)
+        self.assertNotIn("questions", value)
+        self.write_questions([])
+        self.assertEqual(self.event(stream), ("questions", {"questions": []}))
+
+    def test_events_disconnect_and_reconnect_receive_fresh_snapshot(self):
+        connection, stream = self.open_events()
+        self.event(stream)
+        monitor = self.server.application.events_thread
+        stream.close()
+        connection.close()
+        self.wait_until(lambda: self.server.application.events_subscribers == 0)
+        self.write_questions(QUESTIONS[1:])
+        _, reconnected = self.open_events()
+        self.assertEqual(self.event(reconnected), ("questions", {"questions": QUESTIONS[1:]}))
+        self.assertIs(self.server.application.events_thread, monitor)
+
+    def test_events_share_monitor_and_remove_replied_question(self):
+        _, first = self.open_events()
+        self.event(first)
+        monitor = self.server.application.events_thread
+        _, second = self.open_events()
+        self.event(second)
+        self.assertIs(self.server.application.events_thread, monitor)
+        self.assertEqual(self.server.application.events_subscribers, 2)
+        self.assertEqual(self.request("POST", "/api/reply", {"state": YES_NO, "answer": "yes"})[0], 200)
+        for stream in (first, second):
+            self.assertEqual(self.event(stream), ("questions", {"questions": QUESTIONS[1:]}))
+            self.assertEqual(self.event(stream, include_heartbeat=True), (None, None))
+        self.assertEqual(self.replies(), [{"state": YES_NO, "answer": "yes"}])
+
+    def test_events_shutdown_closes_stream_and_monitor(self):
+        _, stream = self.open_events()
+        self.event(stream)
+        self.server.shutdown()
+        self.assertEqual(stream.read(), b"")
+        self.wait_until(lambda: self.server.application.events_subscribers == 0)
+        self.assertFalse(self.server.application.events_thread.is_alive())
+
+    def test_events_enforce_token_host_and_origin_without_query_tokens(self):
+        for headers in ({"X-Alaya-Token": None}, {"X-Alaya-Token": "wrong"},
+                        {"X-Alaya-Token": "é"}, {"Origin": "https://elsewhere.test"},
+                        {"Host": "localhost:1234"}, {"Sec-Fetch-Site": "cross-site"}):
+            with self.subTest(headers=headers):
+                self.assertEqual(self.request(path="/api/events", headers=headers)[0], 403)
+        self.assertEqual(self.request(path=f"/api/events?token={self.server.application.token}")[0], 404)
+        self.assertIsNone(self.server.application.events_thread)
 
     def test_page_and_question_listing(self):
         status, body, headers = self.request(path="/", headers={"X-Alaya-Token": None})

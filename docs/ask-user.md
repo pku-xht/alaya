@@ -111,11 +111,21 @@ it never checks out over the agent's live workspace.
 
 Selections are not recorded until **Submit answer** is clicked. A successful
 submission saves a reply in the existing trajectory and removes the question
-from the waiting list. **Refresh** loads newly waiting questions. An error keeps
-the current selection so it can be corrected or retried. A stale page cannot
+from the waiting list. The page listens for new questions automatically; there
+is no manual refresh control. Newly observed questions are appended, while
+existing questions keep their position, unsubmitted answers, focus, and expanded
+context. The same branch waits for a reply before continuing to its next question.
+An error keeps the current selection so it can be corrected or resubmitted. A stale page cannot
 accidentally submit a second answer to a question that is no longer waiting.
-Opening history, browsing files, retrying failed reads, or refreshing the same
-waiting question keeps the person's unsubmitted selections and text.
+Opening history, browsing files, or retrying failed reads also preserves input.
+
+The connection status shows whether updates are available. Disconnections are
+retried automatically, including after the local server restarts, without
+reloading the page or clearing an unfinished answer. An unavailable update source
+does not clear the existing questions. Answer submissions are never automatically
+retried. The server sends authenticated events at `/api/events`, checks for
+waiting-state changes once per second while clients are listening, and shares
+that check across listeners. It does not sample a model.
 
 The server listens only on the local loopback address and does not start a model
 run. Continue from the recorded reply with the normal `resume` command. The CLI

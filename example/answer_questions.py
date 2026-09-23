@@ -16,13 +16,15 @@ import shutil
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Sequence
+from typing import Iterator, Sequence
 from urllib.parse import parse_qs, urlsplit
 
 
 STATE_HASH = re.compile(r"[0-9a-f]{64}\Z")
 MAX_BODY_BYTES = 1024 * 1024
 CLI_TIMEOUT_SECONDS = 30
+EVENT_POLL_SECONDS = 1
+EVENT_HEARTBEAT_SECONDS = 5
 
 
 class ApiError(Exception):
@@ -40,6 +42,15 @@ class QuestionApplication:
             "__ALAYA_TOKEN__", self.token
         ).encode("utf-8")
         self.lock = threading.Lock()
+        # One shared CLI poller, regardless of the number of listening tabs.
+        # Keep its notification lock separate so a slow CLI cannot block heartbeats.
+        self.events_changed = threading.Condition()
+        self.events_stopped = threading.Event()
+        self.events_refresh = threading.Event()
+        self.events_thread: threading.Thread | None = None
+        self.events_subscribers = 0
+        self.events_revision = 0
+        self.events_message: bytes | None = None
 
     def _run(self, verb: str, *args: str) -> str:
         if verb != "waiting":
@@ -59,7 +70,7 @@ class QuestionApplication:
                 shell=False,
             )
         except subprocess.TimeoutExpired as error:
-            raise ApiError(502, "Alaya timed out. Refresh before retrying.") from error
+            raise ApiError(502, "Alaya timed out. The question list will update automatically.") from error
         except OSError as error:
             raise ApiError(502, f"Could not run Alaya: {error}") from error
         if result.returncode:
@@ -97,6 +108,80 @@ class QuestionApplication:
         with self.lock:
             return self._waiting()
 
+    def _publish(self, event: str, value: dict) -> None:
+        message = f"event: {event}\ndata: {json.dumps(value)}\n\n".encode("utf-8")
+        with self.events_changed:
+            if message != self.events_message:
+                self.events_message = message
+                self.events_revision += 1
+                self.events_changed.notify_all()
+
+    def _monitor_questions(self) -> None:
+        while not self.events_stopped.is_set():
+            with self.events_changed:
+                self.events_changed.wait_for(
+                    lambda: self.events_stopped.is_set() or self.events_subscribers > 0
+                )
+            if self.events_stopped.is_set():
+                return
+            # Publication is serialized with reply writes, so a poll started
+            # before a reply cannot publish an old snapshot after that reply.
+            with self.lock:
+                if self.events_stopped.is_set():
+                    return
+                try:
+                    self._publish("questions", {"questions": self._waiting()})
+                except ApiError as error:
+                    self._publish("unavailable", {"error": str(error)})
+            self.events_refresh.wait(EVENT_POLL_SECONDS)
+            self.events_refresh.clear()
+
+    def events(self) -> Iterator[bytes]:
+        with self.events_changed:
+            if self.events_stopped.is_set():
+                return
+            if self.events_subscribers == 0:
+                # After an idle period, obtain a fresh initial snapshot.
+                self.events_message = None
+            self.events_subscribers += 1
+            if self.events_thread is None:
+                self.events_thread = threading.Thread(
+                    target=self._monitor_questions, name="alaya-question-events", daemon=True
+                )
+                self.events_thread.start()
+            self.events_changed.notify_all()
+            self.events_refresh.set()
+        revision = -1
+        try:
+            while not self.events_stopped.is_set():
+                with self.events_changed:
+                    self.events_changed.wait_for(
+                        lambda: self.events_stopped.is_set() or (
+                            self.events_message is not None and self.events_revision != revision
+                        ), timeout=EVENT_HEARTBEAT_SECONDS,
+                    )
+                    if self.events_stopped.is_set():
+                        return
+                    if self.events_message is not None and self.events_revision != revision:
+                        revision = self.events_revision
+                        message = self.events_message
+                    else:
+                        message = b": keepalive\n\n"
+                yield message
+        finally:
+            with self.events_changed:
+                self.events_subscribers -= 1
+                self.events_changed.notify_all()
+            self.events_refresh.set()
+
+    def stop_events(self) -> None:
+        self.events_stopped.set()
+        self.events_refresh.set()
+        with self.events_changed:
+            self.events_changed.notify_all()
+        if self.events_thread is not None:
+            self.events_thread.join(timeout=CLI_TIMEOUT_SECONDS + 1)
+
     def inspect(self, verb: str, state: str, path: str | None = None) -> dict:
         args = (state,) if path is None else (state, path)
         try:
@@ -116,12 +201,17 @@ class QuestionApplication:
         # Serialize the fresh waiting check and write across browser tabs.
         # Alaya's direct CLI still permits intentional reply forks.
         with self.lock:
-            if not any(question["state"] == state for question in self._waiting()):
-                raise ApiError(409, "This question is no longer waiting. Refresh the page.")
+            waiting = self._waiting()
+            if not any(question["state"] == state for question in waiting):
+                self._publish("questions", {"questions": waiting})
+                raise ApiError(409, "This question is no longer waiting. The list updates automatically.")
             reply = (self._run("reply-unavailable", state) if answer is None
                      else self._run("reply", state, answer)).strip()
             if not STATE_HASH.fullmatch(reply):
-                raise ApiError(502, "Alaya returned an invalid reply state. Refresh the page.")
+                self.events_refresh.set()
+                raise ApiError(502, "Alaya returned an invalid reply state. The list updates automatically.")
+            self._publish("questions", {"questions": [q for q in waiting if q["state"] != state]})
+            self.events_refresh.set()
             return reply
 
 
@@ -131,6 +221,14 @@ class QuestionServer(ThreadingHTTPServer):
         super().__init__(("127.0.0.1", port), QuestionHandler)
         self.authority = f"127.0.0.1:{self.server_port}"
         self.origin = f"http://{self.authority}"
+
+    def shutdown(self) -> None:
+        self.application.stop_events()
+        super().shutdown()
+
+    def server_close(self) -> None:
+        self.application.stop_events()
+        super().server_close()
 
 
 class QuestionHandler(BaseHTTPRequestHandler):
@@ -163,6 +261,24 @@ class QuestionHandler(BaseHTTPRequestHandler):
     def _json(self, status: int, value: dict) -> None:
         self._send(status, json.dumps(value).encode("utf-8"), "application/json; charset=utf-8")
 
+    def _events(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        stream = self.server.application.events()
+        try:
+            for message in stream:
+                self.wfile.write(message)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass
+        finally:
+            stream.close()
+
     def _authorize(self, require_token: bool = True) -> None:
         if self.headers.get_all("Host", []) != [self.server.authority]:
             raise ApiError(403, "Invalid local host.")
@@ -186,6 +302,8 @@ class QuestionHandler(BaseHTTPRequestHandler):
                 self._send(200, self.server.application.page, "text/html; charset=utf-8")
             elif self.path == "/api/questions":
                 self._json(200, {"questions": self.server.application.questions()})
+            elif self.path == "/api/events":
+                self._events()
             elif url.path in ("/api/context", "/api/files", "/api/file"):
                 try:
                     query = parse_qs(url.query, keep_blank_values=True, strict_parsing=True,
