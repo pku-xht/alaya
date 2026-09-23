@@ -85,12 +85,32 @@ waiting in that data directory:
   unchecked and clicking **Submit answer** records `[]`; it does not leave the
   question unanswered.
 - For open-ended questions, type a nonblank answer in the text area.
+- For any question, **Unable to answer** records that no answer was available.
+  It does not select `no`, submit `[]`, or send an empty text answer.
+
+The original task is shown above the question so a person joining the run can
+understand its purpose. **Full conversation** expands the recorded messages,
+tool calls, tool results and earlier human replies on this branch, through the
+question. It does not include sibling branches, later answers or evaluations.
+This is the recorded history, rather than a newly generated summary or only the
+model's compressed context. If the root has no recorded user task, the page says
+so. The model should still include the background needed to understand its question.
+
+**Project files** browses the question state's workspace snapshot, including
+hidden files and directories. It is read-only and does not follow subsequent
+workspace edits. UTF-8 files up to 1 MiB are displayed in full; binary files,
+larger files, symbolic links and special files show an explicit preview limitation.
+Links are never followed. Paths containing backslashes or colons cannot be opened
+in this portable browser. Browsing reads snapshot metadata and requested files;
+it never checks out over the agent's live workspace.
 
 Selections are not recorded until **Submit answer** is clicked. A successful
 submission saves a reply in the existing trajectory and removes the question
 from the waiting list. **Refresh** loads newly waiting questions. An error keeps
 the current selection so it can be corrected or retried. A stale page cannot
 accidentally submit a second answer to a question that is no longer waiting.
+Opening history, browsing files, retrying failed reads, or refreshing the same
+waiting question keeps the person's unsubmitted selections and text.
 
 The server listens only on the local loopback address and does not start a model
 run. Continue from the recorded reply with the normal `resume` command. The CLI
@@ -118,6 +138,8 @@ alaya resume ROOT --model PROVIDER:MODEL --data /path/to/run --json
 alaya waiting --data /path/to/run
 # For a multiple-choice question when none of the listed options apply:
 alaya reply --data /path/to/run -- QUESTION '[]'
+# Alternatively, when the person cannot answer (all question types):
+alaya reply-unavailable QUESTION --data /path/to/run
 alaya resume REPLY --model PROVIDER:MODEL --data /path/to/run --json
 ```
 
@@ -137,6 +159,30 @@ Different valid CLI replies to one question form separate branches with the
 same workspace. Receiving an answer does not change the task's rules or imply
 that the answer is correct. `[]` means that none of the listed candidates apply;
 it is not a substitute for an unavailable answer.
+
+`reply-unavailable` creates the same kind of reply child, but its observation is
+the JSON object `{"status":"unavailable"}`. The next model request receives that
+object under the original `ask_user` call ID. Ordinary answers remain JSON strings
+with their exact text, so even an open answer containing the literal text
+`{"status":"unavailable"}` is distinct from the unavailable status. Both paths
+retain the question's workspace and the existing continuation limits. The caller
+resumes from the returned reply hash as usual.
+
+Read-only collectors can use the same snapshot inspection commands as the page:
+
+```bash
+alaya question-context QUESTION --data /path/to/run
+alaya question-files QUESTION --data /path/to/run
+alaya question-files --data /path/to/run -- QUESTION src
+alaya question-file --data /path/to/run -- QUESTION src/Main.lean
+```
+
+These commands return JSON and accept question states even after they have been
+answered. Context contains `state`, `workspace`, `task` (or null) and root-to-question
+`history` entries with their original events. Directory results contain `path`
+and immediate `entries`; file results contain `path`, `kind`, `content` and `size`.
+The empty directory path names the project root. They do not sample a model,
+create a reply, or expose evaluation evidence.
 
 This tool supplies the interaction. Answer collection, simulation, budgets and
 comparative grading remain the caller's policy.

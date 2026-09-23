@@ -737,6 +737,19 @@ def reply (store : Store) (hash : Hash) (text : String) : Result Hash := do
     appended := #[.observation question.callId (.str text)]
     image? := parent.image? }
 
+/-- Records that a person cannot answer, for any question type. The structured status is
+distinct from every ordinary string answer, including an open answer containing this JSON.
+Like a normal reply, this continues the same workspace without consuming a model turn. -/
+def replyUnavailable (store : Store) (hash : Hash) : Result Hash := do
+  let parent ← getState store hash
+  let question ← match parent.question? with
+    | some q => pure q
+    | none => throw <| .configuration "this state is not waiting for an answer"
+  putState store {
+    parent? := some hash, workspace := parent.workspace, kind := .reply
+    appended := #[.observation question.callId (.mkObj [("status", "unavailable")])]
+    image? := parent.image? }
+
 /-- Every question in the forest that has not been answered: waiting states without a `reply`
 child. -/
 def waiting (store : Store) : Result (Array (Hash × Question)) := do

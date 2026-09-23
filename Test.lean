@@ -9,10 +9,11 @@ import Test.Cli
 import Test.Docker
 import Test.OutputRead
 import Test.AskUser
+import Test.QuestionContext
 
 /-! The test runner. `lake exe tests` runs everything; `lake exe tests <substring>` keeps
 only the cases whose `suite/case` name contains the substring. -/
 
 def main (args : List String) : IO UInt32 := do
-  let suites := #[LegacyTests.suite, Sha256Tests.suite, StoreTests.suite] ++ MiniTests.suites ++ CliTests.suites ++ #[MiniVeroTests.suite, MiniVeroTests.timeSuite, WorkspacesTests.pathSuite, WorkspacesTests.suite, WorkspacesTests.resticSuite, WorkspacesTests.trajectorySuite, OutputReadTests.suite, AskUserTests.suite, DockerTests.suite]
+  let suites := #[LegacyTests.suite, Sha256Tests.suite, StoreTests.suite] ++ MiniTests.suites ++ CliTests.suites ++ #[MiniVeroTests.suite, MiniVeroTests.timeSuite, WorkspacesTests.pathSuite, WorkspacesTests.suite, WorkspacesTests.resticSuite, WorkspacesTests.trajectorySuite, OutputReadTests.suite, AskUserTests.suite, QuestionContextTests.suite, DockerTests.suite]
   Testing.runSuites suites args.head?

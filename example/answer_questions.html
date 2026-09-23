@@ -11,7 +11,7 @@
     button, textarea, input { font: inherit; }
     button { cursor: pointer; }
     button:disabled { cursor: default; opacity: .5; }
-    button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 3px solid #7fa8ee; outline-offset: 3px; }
+    button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus-visible, pre:focus-visible { outline: 3px solid #7fa8ee; outline-offset: 3px; }
     .topbar { background: #fff; border-bottom: 1px solid #dce1e7; }
     .topbar-inner { max-width: 860px; margin: auto; padding: 20px 24px; display: flex; align-items: center; gap: 16px; }
     .brand { font-weight: 750; letter-spacing: -.04em; font-size: 22px; }
@@ -43,6 +43,46 @@
     .selection { color: #697686; font-size: 13px; }
     .primary { background: #31598f; color: #fff; border: 1px solid #31598f; border-radius: 6px; padding: 11px 20px; font-weight: 600; min-height: 44px; }
     .primary:hover:not(:disabled) { background: #234775; }
+    .answer-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+    .unavailable-help { margin: 12px 0 0; color: #697686; font-size: 13px; line-height: 1.55; }
+    .task-context { margin: 0 0 26px; padding-bottom: 24px; border-bottom: 1px solid #e5e9ee; }
+    .context-label { margin: 0 0 10px; font-size: 14px; font-weight: 650; color: #344253; }
+    .task-text { margin: 0; font: inherit; font-size: 14px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 290px; overflow: auto; }
+    .context-status { color: #697686; font-size: 14px; line-height: 1.55; margin: 0; }
+    .context-error { margin-top: 8px; }
+    .context-error .error { margin: 0 0 10px; }
+    .context-panels { margin-top: 26px; border-top: 1px solid #e5e9ee; }
+    .context-panel { border-bottom: 1px solid #e5e9ee; }
+    summary { cursor: pointer; overflow-wrap: anywhere; }
+    .context-panel > summary { padding: 16px 0; font-size: 14px; font-weight: 600; color: #344253; }
+    .panel-body { padding: 0 0 18px; min-width: 0; }
+    .panel-body > .help { margin-bottom: 14px; }
+    .history-step { margin: 8px 0; border: 1px solid #dce1e7; border-radius: 6px; }
+    .history-step > summary { padding: 12px; font-size: 13px; font-weight: 600; }
+    .history-events { padding: 0 12px 12px; }
+    .history-event + .history-event { margin-top: 18px; padding-top: 16px; border-top: 1px solid #e5e9ee; }
+    .event-label { margin: 0 0 8px; color: #5d6d82; font-size: 12px; font-weight: 650; }
+    .record-text { font: 13px/1.65 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; overflow: auto; max-height: 420px; }
+    .tool-call { margin-top: 10px; padding: 10px 12px; border-left: 2px solid #bacce5; background: #f7f9fc; }
+    .raw-event { margin-top: 10px; color: #697686; font-size: 12px; }
+    .raw-event > summary { padding: 6px 0; }
+    .raw-event .record-text { color: #344253; }
+    .file-path { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; margin-bottom: 10px; }
+    .path-button { background: none; border: 0; border-radius: 4px; color: #31598f; padding: 6px 8px; min-height: 36px; overflow-wrap: anywhere; max-width: 100%; text-align: left; }
+    .path-button:hover { background: #edf3ff; }
+    .path-button[aria-current="location"] { color: #344253; font-weight: 600; }
+    .path-separator { color: #8d98a6; }
+    .file-list { padding: 0; margin: 0; list-style: none; border: 1px solid #dce1e7; border-radius: 6px; overflow: hidden; max-height: 300px; overflow-y: auto; }
+    .file-list li + li { border-top: 1px solid #e5e9ee; }
+    .file-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 11px 12px; min-height: 44px; color: #344253; background: #fff; border: 0; text-align: left; }
+    .file-entry:hover { background: #f2f6fc; }
+    .file-entry:focus-visible { outline-offset: -3px; }
+    .file-entry[aria-pressed="true"] { background: #edf3ff; box-shadow: inset 3px 0 #5478b7; }
+    .file-name { overflow-wrap: anywhere; min-width: 0; }
+    .file-kind { flex: 0 0 auto; font-size: 12px; color: #697686; }
+    .file-view { margin-top: 16px; }
+    .file-title { margin: 0 0 10px; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+    .file-content { background: #f7f9fc; border: 1px solid #dce1e7; border-radius: 6px; padding: 14px; max-height: 500px; }
     .error { color: #a3332b; margin: 16px 0 0; font-size: 14px; line-height: 1.55; }
     .empty { padding: 42px 24px; text-align: center; color: #697686; border: 1px dashed #cdd5df; border-radius: 8px; line-height: 1.6; }
     .empty strong { display: block; color: #344253; font-weight: 600; margin-bottom: 6px; }
@@ -54,6 +94,9 @@
       .options.binary { grid-template-columns: 1fr; }
       .actions { align-items: stretch; flex-direction: column; gap: 12px; }
       .primary { width: 100%; }
+      .answer-buttons { flex-direction: column-reverse; }
+      .answer-buttons button { width: 100%; }
+      .task-text { max-height: 240px; }
     }
   </style>
 </head>
@@ -116,9 +159,202 @@
       if (!response.ok) throw new Error(result.error || 'The answer could not be saved. Please try again.');
       return result;
     }
+    function readable(value) {
+      return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    }
+    function recordText(value, className = '') {
+      const node = element('pre', `record-text ${className}`, readable(value));
+      node.tabIndex = 0;
+      return node;
+    }
+    function disclosure(title, className) {
+      const node = element('details', className);
+      node.append(element('summary', null, title));
+      return node;
+    }
+    function historyEvent(event, kind, calls) {
+      const node = element('div', 'history-event');
+      const message = event.message || event.response || event;
+      const role = event.type === 'response' ? 'assistant' : message.role;
+      const callId = event.call_id || message.tool_call_id;
+      const callName = calls.get(callId);
+      const isResult = event.type === 'observation' || role === 'tool';
+      const label = isResult ? (kind === 'reply' ? 'Previous answer' : `Tool result${callName ? ` · ${callName}` : ''}`)
+        : ({system: 'Task instructions', user: 'User', assistant: 'Assistant'}[role] || 'Recorded event');
+      node.append(element('p', 'event-label', label));
+      if (message.content !== null && message.content !== undefined) node.append(recordText(message.content));
+      for (const call of message.tool_calls || []) {
+        calls.set(call.id, call.name);
+        const block = element('div', 'tool-call');
+        block.append(element('p', 'event-label', `Tool call · ${call.name}`), recordText(call.arguments));
+        node.append(block);
+      }
+      const raw = disclosure('Full recorded event', 'raw-event');
+      raw.append(recordText(event));
+      node.append(raw);
+      return node;
+    }
+    function contextPanels(question) {
+      let disposed = false;
+      let contextVersion = 0;
+      let navigationVersion = 0;
+      let filesLoaded = false;
+      const query = `state=${encodeURIComponent(question.state)}`;
+      const task = element('section', 'task-context');
+      task.setAttribute('aria-label', 'Task context');
+      task.append(element('h2', 'context-label', 'Task'));
+      const taskContent = element('div');
+      taskContent.append(element('p', 'context-status', 'Loading the task and conversation…'));
+      task.append(taskContent);
+      const panels = element('div', 'context-panels');
+      const history = disclosure('Full conversation', 'context-panel');
+      history.dataset.panel = 'history';
+      const historyBody = element('div', 'panel-body');
+      historyBody.append(element('p', 'help', 'This branch’s recorded conversation, from the task instructions through this question.'));
+      const historyContent = element('div');
+      historyContent.append(element('p', 'context-status', 'Loading conversation…'));
+      historyBody.append(historyContent);
+      history.append(historyBody);
+      const files = disclosure('Project files', 'context-panel');
+      files.dataset.panel = 'files';
+      const fileBody = element('div', 'panel-body');
+      fileBody.append(element('p', 'help', 'Read-only files saved when this question was asked. Later changes are not shown here.'));
+      const breadcrumbs = element('nav', 'file-path');
+      breadcrumbs.setAttribute('aria-label', 'Project folder');
+      const fileStatus = element('p', 'context-status');
+      fileStatus.setAttribute('role', 'status');
+      const fileError = element('div', 'context-error');
+      const fileList = element('ul', 'file-list');
+      fileList.hidden = true;
+      const fileView = element('div', 'file-view');
+      fileView.hidden = true;
+      fileBody.append(breadcrumbs, fileStatus, fileError, fileList, fileView);
+      files.append(fileBody);
+      panels.append(history, files);
+
+      function showError(container, problem, retry) {
+        const message = element('p', 'error', problem.message);
+        message.setAttribute('role', 'alert');
+        const button = element('button', 'secondary', 'Try again');
+        button.type = 'button';
+        button.addEventListener('click', retry);
+        container.replaceChildren(message, button);
+      }
+      async function loadContext() {
+        const version = ++contextVersion;
+        taskContent.replaceChildren(element('p', 'context-status', 'Loading the task and conversation…'));
+        historyContent.replaceChildren(element('p', 'context-status', 'Loading conversation…'));
+        try {
+          const result = await api(`/api/context?${query}`);
+          if (disposed || version !== contextVersion) return;
+          const text = element('pre', 'task-text', result.task || 'No task instructions were recorded.');
+          text.tabIndex = 0;
+          taskContent.replaceChildren(text);
+          const calls = new Map();
+          const steps = result.history.map((step, index) => {
+            const labels = {root: 'Starting instructions', reply: 'Human reply', turn: 'Agent step', fork: 'Branch'};
+            const node = disclosure(`${index + 1}. ${labels[step.kind] || 'Recorded step'} · ${step.events.length} event${step.events.length === 1 ? '' : 's'}`, 'history-step');
+            const events = element('div', 'history-events');
+            for (const event of step.events) events.append(historyEvent(event, step.kind, calls));
+            if (!step.events.length) events.append(element('p', 'context-status', 'No messages or tool results in this step.'));
+            node.append(events);
+            return node;
+          });
+          historyContent.replaceChildren(...steps);
+          if (!steps.length) historyContent.append(element('p', 'context-status', 'No conversation was recorded before this question.'));
+        } catch (problem) {
+          if (disposed || version !== contextVersion) return;
+          showError(taskContent, problem, loadContext);
+          historyContent.replaceChildren(element('p', 'context-status', 'Conversation could not be loaded. Use Try again above.'));
+        }
+      }
+      function renderPath(path) {
+        const segments = path ? path.split('/') : [];
+        const parts = ['Project', ...segments];
+        breadcrumbs.replaceChildren();
+        parts.forEach((name, index) => {
+          if (index) breadcrumbs.append(element('span', 'path-separator', '/'));
+          const button = element('button', 'path-button', name);
+          button.type = 'button';
+          if (index === parts.length - 1) button.setAttribute('aria-current', 'location');
+          button.addEventListener('click', () => loadDirectory(segments.slice(0, index).join('/'), true));
+          breadcrumbs.append(button);
+        });
+      }
+      async function loadDirectory(path = '', moveFocus = false) {
+        const version = ++navigationVersion;
+        fileStatus.textContent = 'Loading folder…';
+        fileError.replaceChildren();
+        const focusOwner = document.activeElement;
+        try {
+          const result = await api(`/api/files?${query}&path=${encodeURIComponent(path)}`);
+          if (disposed || version !== navigationVersion) return;
+          const restoreFocus = moveFocus && document.activeElement === focusOwner;
+          filesLoaded = true;
+          renderPath(result.path);
+          fileView.hidden = true;
+          fileView.replaceChildren();
+          fileList.replaceChildren();
+          for (const entry of result.entries) {
+            const row = element('li');
+            const button = element('button', 'file-entry');
+            button.type = 'button';
+            button.dataset.path = entry.path;
+            const kind = {directory: 'Folder', file: 'File', symlink: 'Link', other: 'Other'}[entry.kind] || 'Other';
+            button.setAttribute('aria-label', `${entry.name}, ${kind}`);
+            button.append(element('span', 'file-name', entry.name), element('span', 'file-kind', kind));
+            button.addEventListener('click', () => entry.kind === 'directory' ? loadDirectory(entry.path, true) : loadFile(entry.path));
+            row.append(button);
+            fileList.append(row);
+          }
+          fileList.hidden = result.entries.length === 0;
+          fileStatus.textContent = result.entries.length ? '' : 'This folder is empty.';
+          if (restoreFocus) breadcrumbs.lastElementChild.focus();
+        } catch (problem) {
+          if (disposed || version !== navigationVersion) return;
+          fileStatus.textContent = '';
+          showError(fileError, problem, () => loadDirectory(path, true));
+        }
+      }
+      async function loadFile(path) {
+        const version = ++navigationVersion;
+        fileStatus.textContent = 'Loading file…';
+        fileError.replaceChildren();
+        try {
+          const result = await api(`/api/file?${query}&path=${encodeURIComponent(path)}`);
+          if (disposed || version !== navigationVersion) return;
+          const title = element('h3', 'file-title', result.path);
+          fileView.replaceChildren(title);
+          if (result.kind === 'text') fileView.append(recordText(result.content || '', 'file-content'));
+          else {
+            const messages = {
+              binary: 'This is a binary file. A text preview is not available.',
+              too_large: 'This file is too large to preview.',
+              symlink: 'This is a symbolic link. Link targets are not opened.',
+              other: 'A text preview is not available for this file type.'
+            };
+            fileView.append(element('p', 'context-status', messages[result.kind] || messages.other));
+          }
+          fileView.hidden = false;
+          fileStatus.textContent = '';
+          for (const button of fileList.querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.path === path));
+        } catch (problem) {
+          if (disposed || version !== navigationVersion) return;
+          fileStatus.textContent = '';
+          showError(fileError, problem, () => loadFile(path));
+        }
+      }
+      files.addEventListener('toggle', () => {
+        if (files.open && !filesLoaded) loadDirectory();
+      });
+      loadContext();
+      return {task, panels, dispose() { disposed = true; }};
+    }
     function questionForm(question) {
       const form = element('form', 'question');
       form.dataset.state = question.state;
+      const context = contextPanels(question);
+      form.append(context.task);
       const kinds = {yes_no: 'Yes / no', multiple_choice: 'Multiple choice', open_ended: 'Open question'};
       form.append(element('p', 'type', kinds[question.question_type]));
       const fieldset = element('fieldset');
@@ -161,18 +397,26 @@
       selection.setAttribute('aria-live', 'polite');
       const submit = element('button', 'primary', 'Submit answer');
       submit.type = 'submit';
-      actions.append(selection, submit);
+      const unavailable = element('button', 'secondary', 'Unable to answer');
+      unavailable.type = 'button';
+      unavailable.dataset.action = 'unavailable';
+      const buttons = element('div', 'answer-buttons');
+      buttons.append(unavailable, submit);
+      actions.append(selection, buttons);
       const error = element('p', 'error');
       error.setAttribute('role', 'alert');
       error.hidden = true;
-      form.append(actions, error);
+      form.append(actions, element('p', 'unavailable-help', 'If you don’t know, choose Unable to answer. The agent will be told that no answer was available.'), error, context.panels);
       let busy = false;
+      let pendingUnavailable = false;
       function update() {
         const selected = inputs.filter(input => input.checked);
         const binary = question.question_type === 'yes_no';
         const valid = textarea ? textarea.value.trim().length > 0 : !binary || selected.length === 1;
         submit.disabled = busy || refreshing || !valid;
-        submit.textContent = busy ? 'Submitting…' : 'Submit answer';
+        submit.textContent = busy && !pendingUnavailable ? 'Submitting…' : 'Submit answer';
+        unavailable.disabled = busy || refreshing;
+        unavailable.textContent = busy && pendingUnavailable ? 'Submitting…' : 'Unable to answer';
         fieldset.disabled = busy;
         selection.textContent = textarea ? '' : binary
           ? (selected.length ? `${selected[0].value === 'yes' ? 'Yes' : 'No'} selected` : 'Choose yes or no')
@@ -183,19 +427,27 @@
       form.addEventListener('submit', async event => {
         event.preventDefault();
         if (submit.disabled || busy) return;
+        await sendReply(false);
+      });
+      unavailable.addEventListener('click', () => {
+        if (!unavailable.disabled && !busy) sendReply(true);
+      });
+      async function sendReply(isUnavailable) {
         const selected = inputs.filter(input => input.checked);
-        const answer = textarea ? textarea.value : question.question_type === 'yes_no'
+        const answer = isUnavailable ? undefined : textarea ? textarea.value : question.question_type === 'yes_no'
           ? selected[0].value : JSON.stringify(selected.map(input => Number(input.value)));
         busy = true;
+        pendingUnavailable = isUnavailable;
         submitting++;
         error.hidden = true;
         updateBusy();
         try {
-          await api('/api/reply', {state: question.state, answer});
+          await api('/api/reply', isUnavailable ? {state: question.state, status: 'unavailable'} : {state: question.state, answer});
+          context.dispose();
           forms.delete(question.state);
           form.remove();
           updateCount();
-          announce('Answer submitted and saved.');
+          announce(isUnavailable ? 'Saved as unable to answer. The agent can continue.' : 'Answer submitted and saved.');
           if (forms.size === 0) refresh.focus();
         } catch (problem) {
           error.textContent = problem.message;
@@ -205,8 +457,8 @@
           submitting--;
           updateBusy();
         }
-      });
-      return {node: form, update};
+      }
+      return {node: form, update, dispose: context.dispose};
     }
     async function load() {
       if (refreshing || submitting) return;
@@ -215,10 +467,16 @@
       try {
         const result = await api('/api/questions');
         if (notice.dataset.error === 'true') notice.hidden = true;
-        forms.clear();
-        questions.replaceChildren();
+        const waiting = new Set(result.questions.map(question => question.state));
+        for (const [state, form] of forms) {
+          if (!waiting.has(state)) {
+            form.dispose();
+            form.node.remove();
+            forms.delete(state);
+          }
+        }
         for (const question of result.questions) {
-          const form = questionForm(question);
+          const form = forms.get(question.state) || questionForm(question);
           forms.set(question.state, form);
           questions.append(form.node);
         }

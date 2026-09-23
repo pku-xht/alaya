@@ -17,6 +17,7 @@ import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Sequence
+from urllib.parse import parse_qs, urlsplit
 
 
 STATE_HASH = re.compile(r"[0-9a-f]{64}\Z")
@@ -41,8 +42,8 @@ class QuestionApplication:
         self.lock = threading.Lock()
 
     def _run(self, verb: str, *args: str) -> str:
-        if verb == "reply":
-            # Answers such as "--data" are positional text, never CLI flags.
+        if verb != "waiting":
+            # Answers and snapshot paths such as "--data" are positional text.
             argv = [*self.command, verb, "--data", self.data, "--", *args]
         else:
             argv = [*self.command, verb, *args, "--data", self.data]
@@ -63,7 +64,7 @@ class QuestionApplication:
             raise ApiError(502, f"Could not run Alaya: {error}") from error
         if result.returncode:
             detail = (result.stderr or result.stdout).strip()[:2000]
-            status = 400 if verb == "reply" and result.returncode == 1 else 502
+            status = 400 if verb != "waiting" and result.returncode == 1 else 502
             raise ApiError(status, detail or f"Alaya exited with code {result.returncode}.")
         return result.stdout
 
@@ -96,13 +97,29 @@ class QuestionApplication:
         with self.lock:
             return self._waiting()
 
-    def reply(self, state: str, answer: str) -> str:
+    def inspect(self, verb: str, state: str, path: str | None = None) -> dict:
+        args = (state,) if path is None else (state, path)
+        try:
+            value = json.loads(self._run(verb, *args))
+        except json.JSONDecodeError as error:
+            raise ApiError(502, "Alaya returned invalid context JSON.") from error
+        if (
+            not isinstance(value, dict) or value.get("state") != state
+            or not isinstance(value.get("workspace"), str)
+            or not STATE_HASH.fullmatch(value["workspace"])
+            or (path is not None and value.get("path") != path)
+        ):
+            raise ApiError(502, "Alaya returned context for an unexpected state or path.")
+        return value
+
+    def reply(self, state: str, answer: str | None) -> str:
         # Serialize the fresh waiting check and write across browser tabs.
         # Alaya's direct CLI still permits intentional reply forks.
         with self.lock:
             if not any(question["state"] == state for question in self._waiting()):
                 raise ApiError(409, "This question is no longer waiting. Refresh the page.")
-            reply = self._run("reply", state, answer).strip()
+            reply = (self._run("reply-unavailable", state) if answer is None
+                     else self._run("reply", state, answer)).strip()
             if not STATE_HASH.fullmatch(reply):
                 raise ApiError(502, "Alaya returned an invalid reply state. Refresh the page.")
             return reply
@@ -164,16 +181,35 @@ class QuestionHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         try:
             self._authorize(require_token=self.path != "/")
+            url = urlsplit(self.path)
             if self.path == "/":
                 self._send(200, self.server.application.page, "text/html; charset=utf-8")
             elif self.path == "/api/questions":
                 self._json(200, {"questions": self.server.application.questions()})
+            elif url.path in ("/api/context", "/api/files", "/api/file"):
+                try:
+                    query = parse_qs(url.query, keep_blank_values=True, strict_parsing=True,
+                                     max_num_fields=2, errors="strict")
+                except (ValueError, UnicodeDecodeError) as error:
+                    raise ApiError(400, "Invalid context query.") from error
+                expected = {"state"} if url.path == "/api/context" else {"state", "path"}
+                if set(query) != expected or any(len(values) != 1 for values in query.values()):
+                    raise ApiError(400, "Expected one question state and, for files, one path.")
+                state = query["state"][0]
+                if not STATE_HASH.fullmatch(state):
+                    raise ApiError(400, "Invalid question state hash.")
+                path = query["path"][0] if "path" in query else None
+                if path is not None and ("\0" in path or len(path) > 4096):
+                    raise ApiError(400, "Invalid snapshot path.")
+                verb = {"/api/context": "question-context", "/api/files": "question-files",
+                        "/api/file": "question-file"}[url.path]
+                self._json(200, self.server.application.inspect(verb, state, path))
             else:
                 raise ApiError(404, "Not found.")
         except ApiError as error:
             self._json(error.status, {"error": str(error)})
 
-    def _read_reply(self) -> tuple[str, str]:
+    def _read_reply(self) -> tuple[str, str | None]:
         if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json":
             raise ApiError(415, "Use application/json.")
         lengths = self.headers.get_all("Content-Length", [])
@@ -194,11 +230,16 @@ class QuestionHandler(BaseHTTPRequestHandler):
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
             raise ApiError(400, "Invalid JSON body.") from error
-        if not isinstance(value, dict) or set(value) != {"state", "answer"}:
-            raise ApiError(400, "Expected state and answer fields.")
-        state, answer = value["state"], value["answer"]
+        if not isinstance(value, dict) or set(value) not in ({"state", "answer"}, {"state", "status"}):
+            raise ApiError(400, "Expected state and answer, or state and unavailable status.")
+        state = value["state"]
         if not isinstance(state, str) or not STATE_HASH.fullmatch(state):
             raise ApiError(400, "Invalid question state hash.")
+        if "status" in value:
+            if value["status"] != "unavailable":
+                raise ApiError(400, "The only reply status is unavailable.")
+            return state, None
+        answer = value["answer"]
         if not isinstance(answer, str) or "\0" in answer:
             raise ApiError(400, "The answer must be a string without NUL characters.")
         try:

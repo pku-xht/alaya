@@ -151,6 +151,30 @@ private def literalPattern (path : String) : String :=
   "/" ++ path.foldl (init := "") fun escaped c =>
     if c == '\\' || c == '*' || c == '?' || c == '[' then escaped.push '\\' |>.push c else escaped.push c
 
+/-- Lists one directory using only snapshot metadata. Passing the directory explicitly keeps
+`restic ls` nonrecursive, even at the root; dependencies are not restored merely to browse. -/
+def listEntries (settings : Settings) (id : Hash) (path : String) : Result (Array Entry) := do
+  if !safeSnapshotPath path then
+    throw <| .configuration "snapshot path must be a clean relative path"
+  let finished ← succeed "ls" (← run settings #["ls", id.hex, "--json", "/" ++ path])
+  let pathPrefix := if path.isEmpty then "/" else "/" ++ path ++ "/"
+  let mut entries := #[]
+  for json in jsonLines finished.stdout do
+    let some absolute := stringField? json "path" | continue
+    if !absolute.startsWith pathPrefix then continue
+    let name := (absolute.drop pathPrefix.length).toString
+    if name.isEmpty || name.contains '/' then continue
+    let relative := if path.isEmpty then name else path ++ "/" ++ name
+    -- Unrepresentable paths are not passed to filesystem reads by the browser.
+    let kind := match stringField? json "type" with
+      | some "dir" => EntryKind.directory
+      | some "file" => .file
+      | some "symlink" => .symlink
+      | _ => .other
+    let size := (json.getObjVal? "size" >>= Lean.Json.getNat?).toOption
+    entries := entries.push ({ name, path := relative, kind, size } : Entry)
+  pure (entries.qsort fun a b => a.path < b.path)
+
 /-- One `restore` of just these paths into a scratch directory, read back from there: a process
 per file would spend most of a second each on deriving the repository key. -/
 def readFiles (settings : Settings) (id : Hash) (paths : Array String) :
@@ -228,6 +252,7 @@ def «open» (repository : System.FilePath) (keep : Array System.FilePath := #[]
     materialize := materialize settings
     diff := diff settings
     readFiles := readFiles settings
+    listEntries := listEntries settings
     retainOnly := retainOnly settings }
 
 end Alaya.Workspaces.Restic

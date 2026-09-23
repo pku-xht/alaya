@@ -73,7 +73,7 @@ private def resumed (result : Result Stopped) : TestM Hash := do
   check (!stopped.outOfTime) "this continuation must stop at its question or outcome, not its time budget"
   pure stopped.state
 
-private def checkQuestionView (dialogue : Dialogue) (answer : String)
+private def checkQuestionResult (dialogue : Dialogue) (answer : Lean.Json)
     (expectedArguments : Lean.Json := args) : TestM Unit := do
   let question := dialogue.findSome? fun
     | .assistant _ calls _ => calls.find? (·.id == "q")
@@ -89,7 +89,11 @@ private def checkQuestionView (dialogue : Dialogue) (answer : String)
   let some shown := shown | fail "the answer must remain the matching tool observation"
   -- Mini's view renders observations as JSON; decoding it must recover the exact answer.
   let decoded ← assertOk <| Result.fromExcept Error.protocol (Lean.Json.parse shown)
-  assertEqual "answer in the model view" decoded.compress (Lean.Json.str answer).compress
+  assertEqual "answer in the model view" decoded.compress answer.compress
+
+private def checkQuestionView (dialogue : Dialogue) (answer : String)
+    (expectedArguments : Lean.Json := args) : TestM Unit :=
+  checkQuestionResult dialogue (.str answer) expectedArguments
 
 def suite : Suite := Testing.suite "ask_user" #[
   test "both families keep their default prompts and tools when asking is disabled" do
@@ -357,6 +361,106 @@ def suite : Suite := Testing.suite "ask_user" #[
         let displayed ← assertOk <| Result.fromExcept Error.storage
           (reportQuestion.getObjVal? "question" >>= (·.getObjValAs? String "text"))
         assertEqual "report question" displayed question.text,
+
+  test "unavailable answers preserve explicit status and resume all question types" do
+    let unavailable := Lean.Json.mkObj [("status", "unavailable")]
+    let cases : Array (String × Lean.Json × String) := #[
+      ("yes_no", args "Keep the public API?" #[] "yes_no", "no"),
+      ("multiple_choice", args, "[]"),
+      ("open_ended", args "What should change?" #[] "open_ended", unavailable.compress)]
+    for family in Families.all do
+      for (questionType, arguments, ordinaryAnswer) in cases do
+        let base := (← scratch) / s!"{family.name}-{questionType}"
+        IO.FS.createDirAll base
+        let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name), ("ask_user", true)])
+        let store ← assertOk <| Store.create (base / "states")
+        let workspaces ← Testing.workspaces
+        let project := base / "project"
+        IO.FS.createDirAll project
+        let (executor, calls) ← countingExecutor
+        let (model, requests) ← scripted #[response #[ask "q" arguments], response #[bash], response #[submit]]
+        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
+        let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
+          project (some "task") (agent := built.config)
+        let before ← assertOk <| allStates store
+        assertError "only a question accepts an unavailable reply" (replyUnavailable store root) fun
+          | .configuration _ => true
+          | _ => false
+        assertEqual "rejected reply writes no state" (← assertOk <| allStates store) before
+        let question ← resumed <| resume rt "scripted" root (fun _ => pure ())
+        let questionState ← assertOk <| getState store question
+        let answered ← assertOk <| replyUnavailable store question
+        let reopened ← assertOk <| Store.create (base / "states")
+        let state ← assertOk <| getState reopened answered
+        assertEqual "reply kind" state.kind Kind.reply
+        assertEqual "reply parent" state.parent? (some question)
+        assertEqual "reply workspace" state.workspace questionState.workspace
+        assertEqual "reply image" state.image? questionState.image?
+        assertEqual "reply adds no runtime" state.elapsedMs? none
+        assertEqual "reply inherits accumulated time" (← assertOk <| elapsedMs reopened answered)
+          (← assertOk <| elapsedMs reopened question)
+        check state.question?.isNone "unavailable is an explicit response, not an unanswered question"
+        match state.appended.toList with
+        | [.observation "q" content] => assertEqual "structured unavailable status" content.compress unavailable.compress
+        | _ => fail "unavailable must answer the original call exactly once"
+        check (← assertOk <| waiting reopened).isEmpty "unavailable clears the waiting question"
+        let ordinary ← assertOk <| reply reopened question ordinaryAnswer
+        check (ordinary != answered) "unavailable must differ from no, [], and literal JSON open text"
+        checkQuestionView (built.view (← assertOk <| logOf reopened ordinary)) ordinaryAnswer arguments
+        let final ← resumed <| resume { rt with store := reopened } "scripted" answered (fun _ => pure ())
+        assertEqual "continuation submitted" ((← assertOk <| getState reopened final).outcome?.map (·.status)) (some "Submitted")
+        assertEqual "continuation ran a command" (← calls.get) 1
+        let allRequests ← requests.get
+        assertEqual "one ask, one command, and one submit" allRequests.size 3
+        let some nextRequest := allRequests[1]? | fail "missing post-reply request"
+        checkQuestionResult nextRequest.messages unavailable arguments
+        let lines ← assertOk <| treeLines reopened
+        check (lines.any (contains · ("reply  " ++ unavailable.compress))) "tree retains the structured status"
+        let report ← assertOk <| Html.dataJson reopened workspaces built.view built.tools
+        let states ← assertOk <| Result.fromExcept Error.storage (report.getObjVal? "states" >>= Lean.Json.getArr?)
+        let some reportReply := states.find? fun json =>
+            (json.getObjValAs? String "hash").toOption == some answered.hex
+          | fail "the unavailable reply is missing from the HTML report"
+        let events ← assertOk <| Result.fromExcept Error.storage (reportReply.getObjVal? "events" >>= Lean.Json.getArr?)
+        let some event := events[0]? | fail "the report reply observation is missing"
+        let content ← assertOk <| Result.fromExcept Error.storage (event.getObjVal? "content")
+        assertEqual "HTML report retains structured status" content.compress unavailable.compress,
+
+  test "unavailable answers retain exhausted time and step limits" do
+    for family in Families.all do
+      let base := (← scratch) / family.name
+      IO.FS.createDirAll base
+      let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name),
+        ("ask_user", true), ("step_limit", 1)])
+      let store ← assertOk <| Store.create (base / "states")
+      let workspaces ← Testing.workspaces
+      let project := base / "project"
+      IO.FS.createDirAll project
+      let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
+        project (some "task") (agent := built.config)
+      let workspace := (← assertOk <| getState store root).workspace
+      let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
+      let question ← assertOk <| putState store {
+        parent? := some root, workspace, kind := .question, elapsedMs? := some 1000
+        appended := #[.response (response #[ask])]
+        question? := some { callId := "q", toQuestion := form } }
+      let answered ← assertOk <| replyUnavailable store question
+      let (executor, calls) ← countingExecutor
+      let (model, requests) ← scripted #[]
+      let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor, budgetMs? := some 1000 }
+      let before ← assertOk <| allStates store
+      assertEqual "step cannot sample after exhausted time" (← assertOk <| stepOnce rt "scripted" answered) none
+      let stopped ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
+      check stopped.outOfTime "unavailable retains the exhausted budget"
+      assertEqual "budget leaves reply resumable" stopped.state answered
+      assertEqual "budget writes no new state" (← assertOk <| allStates store) before
+      let final ← resumed <| resume { rt with budgetMs? := none } "scripted" answered (fun _ => pure ())
+      let terminal ← assertOk <| getState store final
+      assertEqual "unavailable does not reset step limit" (terminal.outcome?.map (·.status)) (some "LimitsExceeded")
+      assertEqual "terminal belongs to reply" terminal.parent? (some answered)
+      assertEqual "unavailable inherits running time" (← assertOk <| elapsedMs store answered) 1000
+      assertEqual "limits prevent all samples" (← requests.get).size 0
+      assertEqual "limits prevent commands" (← calls.get) 0,
 
   test "reply rejects invalid closed answers without writing a state or clearing waiting" do
     let cases : Array (String × Lean.Json × Array String × String) := #[

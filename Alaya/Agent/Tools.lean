@@ -85,13 +85,16 @@ def instruction : String :=
   "multiple_choice to select zero or more of at least two distinct choices, or open_ended " ++
   "for a free-text answer. Only multiple_choice takes options; otherwise pass an empty array. " ++
   "No custom-answer option is added. Call ask_user alone, without any other tool. " ++
+  "For every question type, the person may be unable to answer; this returns the JSON " ++
+  "object {\"status\":\"unavailable\"} instead of a string answer. " ++
   "The answer is advice and may be wrong; it does not change " ++
   "the task's rules."
 
 def definition : Chat.ToolDefinition := {
   name := "ask_user"
   description := "Ask a yes/no, multiple-choice, or open-ended question and wait for an answer. " ++
-    "Multiple-choice answers may select zero through all options. Call this tool alone."
+    "Multiple-choice answers may select zero through all options. " ++
+    "If the person cannot answer, the result is {\"status\":\"unavailable\"}. Call this tool alone."
   parameters := .object #[
     ("question_type", .string (description? := some "The form of the answer requested")
       (enum := #["yes_no", "multiple_choice", "open_ended"])),

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from urllib.parse import urlencode
 
 from answer_questions import MAX_BODY_BYTES, QuestionApplication, QuestionServer
 
@@ -42,13 +43,45 @@ if args[0] == "waiting":
     assert "--json" in args
     for question in questions:
         print(json.dumps(question, ensure_ascii=False))
-elif args[0] == "reply":
+elif args[0] in ("question-context", "question-files", "question-file"):
+    assert delimiter < len(args), "inspection requires a positional delimiter"
+    positional = args[delimiter + 1:]
+    state = positional[0]
+    if state not in [q["state"] for q in questions]:
+        print("not a question", file=sys.stderr)
+        sys.exit(1)
+    value = {"state": state, "workspace": "f" * 64}
+    if args[0] == "question-context":
+        assert len(positional) == 1
+        value.update(task="Original task", history=[{"state": state, "kind": "question", "events": []}])
+    else:
+        assert len(positional) == 2
+        path = positional[1]
+        if ".." in path.split("/") or path.startswith("/"):
+            print("invalid snapshot path", file=sys.stderr)
+            sys.exit(1)
+        value["path"] = path
+        if args[0] == "question-files":
+            value["entries"] = [{"name": "Main.lean", "path": "Main.lean", "kind": "file", "size": 4}]
+        else:
+            value.update(kind="text", content="code", size=4)
+    override = data / "inspect-override.json"
+    if override.exists():
+        value = json.loads(override.read_text(encoding="utf-8"))
+    print(json.dumps(value))
+elif args[0] in ("reply", "reply-unavailable"):
     assert delimiter < len(args), "reply requires a positional delimiter"
-    state, answer = args[delimiter + 1:]
+    if args[0] == "reply":
+        state, answer = args[delimiter + 1:]
+        value = {"state": state, "answer": answer}
+    else:
+        state, = args[delimiter + 1:]
+        answer = None
+        value = {"state": state, "status": "unavailable"}
     with (data / "calls.jsonl").open("a", encoding="utf-8") as calls:
-        calls.write(json.dumps({"state": state, "answer": answer}) + "\n")
+        calls.write(json.dumps(value) + "\n")
     question = next(q for q in questions if q["state"] == state)
-    if question["question_type"] == "yes_no" and answer not in ("yes", "no"):
+    if answer is not None and question["question_type"] == "yes_no" and answer not in ("yes", "no"):
         print("yes/no answers must be yes or no", file=sys.stderr)
         sys.exit(1)
     time.sleep(0.05)
@@ -154,6 +187,66 @@ class QuestionHttpTests(unittest.TestCase):
         self.assertIn("yes or no", body["error"])
         self.assertEqual(self.request()[1], {"questions": QUESTIONS})
         self.assertEqual(self.request("POST", "/api/reply", {"state": YES_NO, "answer": "yes"})[0], 200)
+
+    def test_unavailable_is_distinct_for_every_form(self):
+        expected = []
+        for question in QUESTIONS:
+            value = {"state": question["state"], "status": "unavailable"}
+            self.assertEqual(self.request("POST", "/api/reply", value)[:2], (200, {"reply": REPLY}))
+            expected.append(value)
+        self.assertEqual(self.replies(), expected)
+        self.assertEqual(self.request()[1], {"questions": []})
+
+    def test_unavailable_rejects_ambiguous_or_unknown_status(self):
+        for value in ({"state": YES_NO, "status": "unavailable", "answer": "no"},
+                      {"state": YES_NO, "status": "unknown"},
+                      {"state": YES_NO, "status": None},
+                      {"state": YES_NO, "answer": None}):
+            self.assertEqual(self.request("POST", "/api/reply", value)[0], 400)
+        self.assertEqual(self.replies(), [])
+
+    def test_context_and_snapshot_reads_are_pinned_and_read_only(self):
+        endpoints = [("context", {"state": YES_NO}),
+                     ("files", {"state": YES_NO, "path": ""}),
+                     ("file", {"state": YES_NO, "path": "--data"}),
+                     ("file", {"state": YES_NO, "path": "src/中文 #?.lean"})]
+        for endpoint, query in endpoints:
+            status, body, headers = self.request(path=f"/api/{endpoint}?{urlencode(query)}")
+            self.assertEqual(status, 200)
+            self.assertEqual(body["state"], YES_NO)
+            self.assertEqual(body["workspace"], "f" * 64)
+            self.assertEqual(headers["Cache-Control"], "no-store")
+            if "path" in query:
+                self.assertEqual(body["path"], query["path"])
+        self.assertEqual(self.replies(), [])
+        self.assertEqual(self.request()[1], {"questions": QUESTIONS})
+
+    def test_context_queries_validate_state_and_path(self):
+        paths = ["/api/context", f"/api/context?state={YES_NO}&state={YES_NO}",
+                 "/api/context?state=../../states", f"/api/context?state={YES_NO}&path=x",
+                 f"/api/file?state={YES_NO}", f"/api/file?state={YES_NO}&path=%00",
+                 f"/api/file?state={YES_NO}&path=%FF",
+                 f"/api/files?state={YES_NO}&path=../escape",
+                 f"/api/file?state={YES_NO}&path=/etc/passwd"]
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertEqual(self.request(path=path)[0], 400)
+        self.assertEqual(self.replies(), [])
+
+    def test_context_refuses_mismatched_backend_response(self):
+        (self.directory / "inspect-override.json").write_text(
+            json.dumps({"state": MULTIPLE, "workspace": "f" * 64}), encoding="utf-8")
+        status, body, _ = self.request(path=f"/api/context?state={YES_NO}")
+        self.assertEqual(status, 502)
+        self.assertIn("unexpected state", body["error"])
+
+    def test_context_endpoints_require_token_and_same_origin(self):
+        for endpoint, query in [("context", {"state": YES_NO}),
+                                ("files", {"state": YES_NO, "path": ""}),
+                                ("file", {"state": YES_NO, "path": "Main.lean"})]:
+            path = f"/api/{endpoint}?{urlencode(query)}"
+            for headers in ({"X-Alaya-Token": None}, {"Origin": "http://elsewhere.test"}):
+                self.assertEqual(self.request(path=path, headers=headers)[0], 403)
 
     def test_stale_question_never_calls_reply(self):
         status, body, _ = self.request("POST", "/api/reply", {"state": "e" * 64, "answer": "yes"})

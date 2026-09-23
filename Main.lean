@@ -232,6 +232,26 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let data ← openData args
     emit (← reply data.store (← resolve data.store pfx) text).hex
     pure 0
+  | ["reply-unavailable", pfx] =>
+    let data ← openData args
+    emit (← replyUnavailable data.store (← resolve data.store pfx)).hex
+    pure 0
+  | ["question-context", pfx] =>
+    let data ← openData args
+    emit (← QuestionContext.context data.store (← resolve data.store pfx)).compress
+    pure 0
+  | ["question-files", pfx] =>
+    let data ← openData args
+    emit (← QuestionContext.directory data.store data.workspaces (← resolve data.store pfx)).compress
+    pure 0
+  | ["question-files", pfx, path] =>
+    let data ← openData args
+    emit (← QuestionContext.directory data.store data.workspaces (← resolve data.store pfx) path).compress
+    pure 0
+  | ["question-file", pfx, path] =>
+    let data ← openData args
+    emit (← QuestionContext.file data.store data.workspaces (← resolve data.store pfx) path).compress
+    pure 0
   | ["waiting"] =>
     let data ← openData args
     for (hash, q) in ← waiting data.store do
@@ -312,7 +332,8 @@ private def dispatch (argv : List String) : Result UInt32 := do
       "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent FILE | " ++
       "resume HASH --model P:M [--time-budget S] | step HASH --model P:M [--time-budget S] | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
-      "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++
+      "reply HASH TEXT | reply-unavailable HASH | waiting | question-context HASH | " ++
+      "question-files HASH [PATH] | question-file HASH PATH | checkout HASH DIR [--evidence] | tree | " ++
       "html [FILE] [--hide DIR] | " ++
       "show HASH [--view] | diff A B | rm HASH) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++
