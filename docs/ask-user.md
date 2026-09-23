@@ -22,6 +22,9 @@ One tool supports three forms, selected by the required `question_type` field:
 | `single_choice` | At least two distinct, nonempty candidates | Radio buttons; exactly one candidate, or the system-provided **None of the above** |
 | `open_ended` | `[]` | A text area; free text |
 
+Earlier experimental `multiple_choice` runs are not supported. Start a new run
+in a fresh data directory when switching from that format.
+
 The model calls the tool alone and includes the relevant context in `question`.
 The answer interface is in English, and the enabled-tool guidance asks the model
 to write its messages, questions, context, and options in English. This is a
@@ -197,16 +200,6 @@ with their exact text, so even an open answer containing the literal text
 `{"status":"unavailable"}` is distinct from the unavailable status. Both paths
 retain the question's workspace and the existing continuation limits. The caller
 resumes from the returned reply hash as usual.
-
-### Earlier experimental multiple-choice records
-
-The earlier draft's `multiple_choice` format is retired. Its recorded questions
-and array answers remain readable and unchanged; they are not converted to the
-new single-choice contract. The answer page shows these questions as read-only,
-and both reply commands refuse new answers to them. Continuing an already-answered
-historical question stops with `LegacyQuestionFormat` before model sampling.
-Start a new run to use `single_choice`; a new `multiple_choice` tool call is a
-format error and follows the normal repair and budget rules.
 
 Read-only collectors can use the same snapshot inspection commands as the page:
 

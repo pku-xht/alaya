@@ -83,9 +83,6 @@ elif args[0] in ("reply", "reply-unavailable"):
     with (data / "calls.jsonl").open("a", encoding="utf-8") as calls:
         calls.write(json.dumps(value) + "\n")
     question = next(q for q in questions if q["state"] == state)
-    if question["question_type"] == "multiple_choice":
-        print("retired multiple-choice questions cannot receive new replies", file=sys.stderr)
-        sys.exit(1)
     if answer is not None and question["question_type"] == "yes_no" and answer not in ("yes", "no"):
         print("yes/no answers must be yes or no", file=sys.stderr)
         sys.exit(1)
@@ -354,27 +351,6 @@ class QuestionHttpTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/api/reply", value)[0], 200)
         self.assertEqual(self.replies()[-1], value)
 
-    def test_legacy_questions_remain_read_only_beside_new_questions(self):
-        legacy = dict(QUESTIONS[1], state="e" * 64, question_type="multiple_choice")
-        mixed = [legacy, *QUESTIONS]
-        self.write_questions(mixed)
-        self.assertEqual(self.request()[1], {"questions": mixed})
-        _, stream = self.open_events()
-        self.assertEqual(self.event(stream), ("questions", {"questions": mixed}))
-        for value in ({"state": legacy["state"], "answer": "[]"},
-                      {"state": legacy["state"], "answer": "1"},
-                      {"state": legacy["state"], "status": "unavailable"}):
-            status, body, _ = self.request("POST", "/api/reply", value)
-            self.assertEqual(status, 400)
-            self.assertIn("retired", body["error"])
-        self.assertEqual(self.replies(), [])
-        self.assertEqual(self.request()[1], {"questions": mixed})
-        value = {"state": SINGLE, "answer": "none_of_above"}
-        self.assertEqual(self.request("POST", "/api/reply", value)[0], 200)
-        remaining = [legacy, QUESTIONS[0], QUESTIONS[2]]
-        self.assertEqual(self.event(stream), ("questions", {"questions": remaining}))
-        self.assertEqual(self.replies(), [value])
-
     def test_unavailable_is_distinct_for_every_form(self):
         expected = []
         for question in QUESTIONS:
@@ -499,10 +475,16 @@ class QuestionHttpTests(unittest.TestCase):
         self.assertEqual(self.replies(), [])
 
     def test_backend_failures_report_json(self):
-        (self.directory / "questions.json").write_text("broken JSON", encoding="utf-8")
-        status, body, _ = self.request()
-        self.assertEqual(status, 502)
-        self.assertIsInstance(body["error"], str)
+        payloads = ["broken JSON", *(
+            json.dumps([dict(QUESTIONS[0], question_type=kind)])
+            for kind in ("unsupported", "multiple_choice")
+        )]
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                (self.directory / "questions.json").write_text(payload, encoding="utf-8")
+                status, body, _ = self.request()
+                self.assertEqual(status, 502)
+                self.assertIsInstance(body["error"], str)
 
 
 if __name__ == "__main__":

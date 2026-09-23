@@ -153,8 +153,6 @@ The model must not generate the system-provided **None of the above** option;
 the answer interface appends it separately from the model's `options`.
 Open-ended replies require nonblank text and retain valid text unchanged.
 The unavailable object remains distinct from every ordinary answer string.
-The former `multipleChoice` type is retained only for reading old experimental records;
-see [the retired-format rules](ask-user.md#earlier-experimental-multiple-choice-records).
 
 `record` is how an agent answers a tool call itself: `next` computes the result, from the log
 or the session, and the loop records it as the call's observation, with nothing run and no

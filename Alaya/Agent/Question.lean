@@ -7,21 +7,17 @@ namespace Alaya.Agent
 inductive QuestionType where
   | yesNo
   | singleChoice
-  /-- Retired: retained only to read and display existing trajectories. -/
-  | multipleChoice
   | openEnded
   deriving BEq, Repr, Inhabited
 
 def QuestionType.toString : QuestionType -> String
   | .yesNo => "yes_no"
   | .singleChoice => "single_choice"
-  | .multipleChoice => "multiple_choice"
   | .openEnded => "open_ended"
 
 def QuestionType.fromString : String -> Except String QuestionType
   | "yes_no" => .ok .yesNo
   | "single_choice" => .ok .singleChoice
-  | "multiple_choice" => .ok .multipleChoice
   | "open_ended" => .ok .openEnded
   | other => .error s!"Unknown question_type: {other}."
 
@@ -49,7 +45,7 @@ def validate (question : Question) : Except String Unit := do
   | .yesNo | .openEnded =>
     if !question.options.isEmpty then
       throw "Question options must be empty for yes_no and open_ended questions."
-  | .singleChoice | .multipleChoice =>
+  | .singleChoice =>
     if question.options.size < 2 then throw "A choice question needs at least two candidates."
     let mut seen : Array String := #[]
     for option in question.options do
@@ -57,13 +53,6 @@ def validate (question : Question) : Except String Unit := do
       if key.isEmpty then throw "Question choices must not be empty."
       if seen.contains key then throw "Question choices must be distinct."
       seen := seen.push key
-
-/-- Retired question forms remain readable, but cannot accept new answers, even
-an unavailable response. No old answer or record is reinterpreted. -/
-def validateAnswerable (question : Question) : Except String Unit := do
-  question.validate
-  if question.questionType == .multipleChoice then
-    throw "The multiple_choice format is retired and read-only; start a new run to answer."
 
 def toJson (question : Question) : Lean.Json :=
   .mkObj [("text", question.text), ("question_type", question.questionType.toString),
@@ -96,18 +85,13 @@ def render (question : Question) : String :=
       "JSON integer from 1 to " ++ toString question.options.size ++
       ", or the plain text none_of_above if every listed candidate is incorrect. " ++
       "none_of_above is an answer, distinct from being unable to answer."
-  | .multipleChoice =>
-    let numbered := question.options.mapIdx fun i option => s!"{i + 1}. {option}"
-    question.text ++ "\n\n" ++ "\n".intercalate numbered.toList ++
-      "\n\nHistorical multiple-choice answers selected zero or more option numbers; [] meant " ++
-      "none applied. This retired format is read-only; start a new run to answer."
 
 instance : ToString Question := ⟨render⟩
 
 /-- Validates before a reply is recorded. Successful answers retain their exact original
 text, including whitespace; open-ended answers must contain non-whitespace text. -/
 def validateReply (question : Question) (text : String) : Except String Unit := do
-  question.validateAnswerable
+  question.validate
   match question.questionType with
   | .openEnded =>
     if text.toList.all isReplyWhitespace then throw "An open_ended answer must not be blank."
@@ -129,8 +113,6 @@ def validateReply (question : Question) (text : String) : Except String Unit := 
       fun _ => "The selected option must be one integer numbered from 1."
     if number == 0 || number > question.options.size then
       throw s!"Option {number} is outside the range 1 to {question.options.size}."
-  | .multipleChoice =>
-    throw "The multiple_choice format is retired and read-only; start a new run to answer."
 
 end Question
 

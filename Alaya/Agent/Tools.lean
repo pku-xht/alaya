@@ -125,20 +125,6 @@ def question (arguments : Lean.Json) : Except String Question := do
   question.validate
   pure question
 
-/-- The old tool contract, solely for displaying already-recorded calls. New
-execution uses `question` and the offered schema never includes this form. -/
-def legacyQuestion (arguments : Lean.Json) : Except String Question := do
-  let schema : Chat.JsonSchema := .object #[
-    ("question_type", .string (enum := #["multiple_choice"])),
-    ("question", .string), ("options", .array .string)]
-  schema.validate arguments
-  let text ← arguments.getObjVal? "question" >>= Lean.Json.getStr?
-  let options ← (arguments.getObjVal? "options" >>= Lean.Json.getArr?) >>= (·.mapM Lean.Json.getStr?)
-  if text.trimAscii.toString.isEmpty then throw "ask_user needs a nonempty question."
-  let question : Question := { text, questionType := .multipleChoice, options }
-  question.validate
-  pure question
-
 end AskUser
 
 /-! ## time_budget: how long the run has left -/

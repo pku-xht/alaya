@@ -253,46 +253,16 @@ def parseActions (response : Chat.Response) (config : Config := {}) : Parsed := 
 
 /-! ## The agent: view, control, action -/
 
-/-- Recognize the old schema without making it executable again. -/
-private def legacyQuestionCallId? (response : Chat.Response) : Option String :=
-  match response.toolCalls.toList with
-  | [call] =>
-    if call.name == "ask_user" && call.invalidArguments?.isNone &&
-        (Tools.AskUser.legacyQuestion call.arguments).toOption.isSome
-    then some call.id else none
-  | _ => none
-
-/-- An already-recorded matching observation proves that the retired call ran.
-A new malformed call, or an observation after another response, is not historical
-execution and must still follow the ordinary format-error path. -/
-private def answeredLegacyResponses (log : Log) : Array Nat := Id.run do
-  let mut answered : Array Nat := #[]
-  let mut pending : Option (Nat × String) := none
-  for i in [:log.size] do
-    match log[i]! with
-    | .response r => pending := (legacyQuestionCallId? r).map (i, ·)
-    | .observation id _ =>
-      match pending with
-      | some (index, callId) =>
-        if id == callId then
-          answered := answered.push index
-          pending := none
-      | none => pure ()
-    | .message _ => pure ()
-  return answered
-
 /-- The view: a malformed response is shown as the format error, as a user turn; an observation
 as `Tools.Bash.observation` of the recorded `Output`. A page of `read_output` is not an
 `Output` and is shown as recorded. -/
 def view (config : Config) (log : Log) : Dialogue :=
-  let historical := answeredLegacyResponses log
-  log.mapIdx fun i event => match event with
+  log.map fun
     | .message m => m
     | .response r =>
-      if historical.contains i then .assistant r.content? r.toolCalls r.reasoning?
-      else match parseActions r config with
-        | .actions _ => .assistant r.content? r.toolCalls r.reasoning?
-        | .formatError message => .user message
+      match parseActions r config with
+      | .actions _ => .assistant r.content? r.toolCalls r.reasoning?
+      | .formatError message => .user message
     | .observation id content =>
       let json := match Output.fromJson? content with
         | some output => Tools.Bash.observation output outputLimit
@@ -317,35 +287,31 @@ private def trailingFormatErrors (config : Config) (log : Log) : Nat := Id.run d
 /-- Mini's control flow (`DefaultAgent.run`), decided from the log; the session answers
 `time_budget` and nothing else. -/
 def next (config : Config) (session : Session) (log : Log) : Directive :=
-  if !(answeredLegacyResponses log).isEmpty then
-    .done { status := "LegacyQuestionFormat", submission :=
-      "This run contains retired multiple_choice questions and is read-only. Start a new run." }
-  else
-    let sampleOrStop : Directive :=
-      if config.stepLimit > 0 && log.responses >= config.stepLimit
-      then .done { status := "LimitsExceeded" } else .sample
-    match log.lastResponse? with
-    | none => sampleOrStop
-    | some response =>
-      match parseActions response config with
-      | .formatError _ =>
-        if config.maxConsecutiveFormatErrors > 0 &&
-            trailingFormatErrors config log >= config.maxConsecutiveFormatErrors
-        then .done { status := "RepeatedFormatError" }
-        else sampleOrStop
-      | .actions actions =>
-        let pending := log.pending
-        match actions.find? (fun action => pending.any (·.id == action.id)) with
+  let sampleOrStop : Directive :=
+    if config.stepLimit > 0 && log.responses >= config.stepLimit
+    then .done { status := "LimitsExceeded" } else .sample
+  match log.lastResponse? with
+  | none => sampleOrStop
+  | some response =>
+    match parseActions response config with
+    | .formatError _ =>
+      if config.maxConsecutiveFormatErrors > 0 &&
+          trailingFormatErrors config log >= config.maxConsecutiveFormatErrors
+      then .done { status := "RepeatedFormatError" }
+      else sampleOrStop
+    | .actions actions =>
+      let pending := log.pending
+      match actions.find? (fun action => pending.any (·.id == action.id)) with
+      | none => sampleOrStop
+      | some (.submit _ message) => .done { status := "Submitted", submission := message }
+      | some (.readOutput id arguments) =>
+        .record id (Tools.ReadOutput.read log arguments outputLimit)
+      | some (.timeBudget id) => .record id (Tools.TimeBudget.answer session)
+      | some (.ask id question) => .ask id question
+      | some (.bash id _) =>
+        match pending.find? (·.id == id) with
+        | some call => .act call
         | none => sampleOrStop
-        | some (.submit _ message) => .done { status := "Submitted", submission := message }
-        | some (.readOutput id arguments) =>
-          .record id (Tools.ReadOutput.read log arguments outputLimit)
-        | some (.timeBudget id) => .record id (Tools.TimeBudget.answer session)
-        | some (.ask id question) => .ask id question
-        | some (.bash id _) =>
-          match pending.find? (·.id == id) with
-          | some call => .act call
-          | none => sampleOrStop
 
 /-- Runs one `bash` call in the workspace through the executor and records the `Output`. -/
 def act (executor : Executor) (workspace : Agent.Workspace) (call : Chat.ToolCall) :

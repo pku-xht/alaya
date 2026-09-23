@@ -235,6 +235,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       .mkObj [("question_type", "single_choice"), ("options", .arr #[.str "a", .str "b"])],
       .mkObj [("question_type", "single_choice"), ("question", "q")],
       (args).setObjVal! "question_type" "unknown",
+      (args).setObjVal! "question_type" "multiple_choice",
       (args).setObjVal! "question_type" "",
       (args).setObjVal! "question_type" Lean.Json.null,
       (args).setObjVal! "question_type" 7,
@@ -541,6 +542,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", "yes_no")],
       .mkObj [("call_id", "q"), ("text", "Choose."), ("options", .arr #[])],
       questionJson "unknown" (.arr #[]), questionJson .null (.arr #[]),
+      questionJson "multiple_choice" (.arr #[.str "first", .str "second"]),
       questionJson "yes_no" (.arr #[.str "yes", .str "no"]),
       questionJson "open_ended" (.arr #[.str "candidate"]),
       questionJson "single_choice" (.arr #[]),
@@ -561,104 +563,6 @@ def suite : Suite := Testing.suite "ask_user" #[
     match (← assertOk <| getState store answered).appended.toList with
     | [.observation "legacy" (.str raw)] => assertEqual "legacy reply stays verbatim" raw text
     | _ => fail "legacy open question lost its raw reply",
-
-  test "new retired-format calls remain format errors while only recorded answers mark history" do
-    let arguments := args "Which old alternatives apply?" #["first", "second"] "multiple_choice"
-    let bad := response #[ask "q" arguments]
-    for askEnabled in #[false, true] do
-      let config : Config := { askUser := askEnabled, maxConsecutiveFormatErrors := 2 }
-      let malformedView : Dialogue := MiniSwe.view config #[.response bad]
-      match malformedView[0]? with
-      | some (Chat.Message.user message) => check (contains message "Tool call error:") "new invalid calls need a repair"
-      | _ => fail "an unexecuted retired call must not become an assistant tool call"
-      expectSample (next config {} #[.response bad])
-      expectDone (next config {} #[.response bad, .response bad]) "RepeatedFormatError"
-      expectDone (next { config with stepLimit := 1 } {} #[.response bad]) "LimitsExceeded"
-      let (executor, calls) ← countingExecutor
-      let (model, requests) ← scripted #[bad, response #[submit]]
-      let a := agent executor { config with stepLimit := 2 }
-      let (_, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-        (initialLog config "task" testUname)
-      match stop with
-      | .outcome outcome => assertEqual "repair can submit on its remaining turn" outcome.status "Submitted"
-      | .question _ _ => fail "the retired format cannot create a waiting question"
-      assertEqual "malformed call consumes one of two samples" (← requests.get).size 2
-      assertEqual "format repair executes no command" (← calls.get) 0
-      let unrelated : Log := #[.response bad, .observation "different" (.str "[]")]
-      expectSample (next config {} unrelated)
-      let intervening : Log := #[.response bad, .response (response #[]), .observation "q" (.str "[]")]
-      expectSample (next config {} intervening)
-      let interveningView : Dialogue := MiniSwe.view config intervening
-      match interveningView[0]? with
-      | some (Chat.Message.user _) => pure ()
-      | _ => fail "an answer after a later response must not rescue the retired call"
-      let historical : Log := #[.response bad, .observation "q" (.str "[]")]
-      checkQuestionView (view config historical) "[]" arguments
-      expectDone (next config {} historical) "LegacyQuestionFormat",
-
-  test "retired multiple choice stays readable but cannot answer or sample again" do
-    let arguments := args "Which old alternatives apply?"
-      #["Keep the old rule", "None of the above"] "multiple_choice"
-    match parseActions (response #[ask "q" arguments]) enabled with
-    | .formatError _ => pure ()
-    | _ => fail "new execution must reject the retired tool type"
-    let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.legacyQuestion arguments)
-    assertEqual "old form is not reinterpreted" form.questionType QuestionType.multipleChoice
-    check (contains form.render "read-only") "legacy display must explain that this form is retired"
-    check (!contains form.render "none_of_above") "legacy display must not append the new platform choice"
-    for family in Families.all do
-      let base := (← scratch) / family.name
-      IO.FS.createDirAll base
-      let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name), ("ask_user", true)])
-      let store ← assertOk <| Store.create (base / "states")
-      let workspaces ← Testing.workspaces
-      let project := base / "project"
-      IO.FS.createDirAll project
-      let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-        project (some "task") (agent := built.config)
-      let workspace := (← assertOk <| getState store root).workspace
-      let old ← assertOk <| putState store {
-        parent? := some root, workspace, kind := .question,
-        appended := #[.response (response #[ask "q" arguments])]
-        question? := some { callId := "q", toQuestion := form } }
-      let original := (← assertOk <| getState store old).toJson.compress
-      let freshForm ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
-      let fresh ← assertOk <| putState store {
-        parent? := some root, workspace, kind := .question,
-        appended := #[.response (response #[ask "fresh" args])]
-        question? := some { callId := "fresh", toQuestion := freshForm } }
-      let reopened ← assertOk <| Store.create (base / "states")
-      let pending ← assertOk <| waiting reopened
-      assertEqual "old and new questions remain readable together" pending.size 2
-      check (pending.any (fun (hash, _) => hash == old)) "the old question remains discoverable"
-      check (pending.any (fun (hash, _) => hash == fresh)) "the current question remains discoverable"
-      let before ← assertOk <| allStates reopened
-      for text in #["[]", "[1]", "1", "none_of_above"] do
-        assertError "retired question cannot accept a new answer" (reply reopened old text) fun
-          | .configuration message => contains message "retired" && contains message "new run"
-          | _ => false
-      assertError "unavailable cannot bypass retired question policy" (replyUnavailable reopened old) fun
-        | .configuration message => contains message "retired"
-        | _ => false
-      assertEqual "rejected legacy replies write no state" (← assertOk <| allStates reopened) before
-      -- This fixture represents a reply already written by the historical format.
-      let answered ← assertOk <| putState reopened {
-        parent? := some old, workspace, kind := .reply,
-        appended := #[.observation "q" (.str "[]")] }
-      let log ← assertOk <| logOf reopened answered
-      checkQuestionView (built.view log) "[]" arguments
-      let (executor, calls) ← countingExecutor
-      let (model, requests) ← scripted #[]
-      let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
-      expectDone (rt.agent.next {} log) "LegacyQuestionFormat"
-      let final ← resumed <| resume rt "scripted" answered (fun _ => pure ())
-      let terminal ← assertOk <| getState reopened final
-      assertEqual "old run explicitly stops" (terminal.outcome?.map (·.status)) (some "LegacyQuestionFormat")
-      assertEqual "legacy stop adds no model request" (← requests.get).size 0
-      assertEqual "legacy stop executes no command" (← calls.get) 0
-      assertEqual "old question was not rewritten" (← assertOk <| getState reopened old).toJson.compress original
-      let report ← assertOk <| Html.dataJson reopened workspaces built.view built.tools
-      check (contains report.compress "multiple_choice") "report retains the original retired question type",
 
   test "a question consumes its model turn and a reply does not reset the step limit" do
     let config : Config := { askUser := true, stepLimit := 1 }
