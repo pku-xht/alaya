@@ -81,6 +81,7 @@ namespace AskUser
 
 def instruction : String :=
   "You may ask a concrete question with ask_user instead of running a command. " ++
+  "Write your messages, questions, and answer options in English. " ++
   "Include the relevant context and choose question_type: yes_no for a yes/no answer, " ++
   "multiple_choice to select zero or more of at least two distinct choices, or open_ended " ++
   "for a free-text answer. Only multiple_choice takes options; otherwise pass an empty array. " ++
@@ -93,6 +94,7 @@ def instruction : String :=
 def definition : Chat.ToolDefinition := {
   name := "ask_user"
   description := "Ask a yes/no, multiple-choice, or open-ended question and wait for an answer. " ++
+    "Write the question, its context, and all options in English. " ++
     "Multiple-choice answers may select zero through all options. " ++
     "If the person cannot answer, the result is {\"status\":\"unavailable\"}. Call this tool alone."
   parameters := .object #[

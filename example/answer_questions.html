@@ -45,9 +45,6 @@
     .primary:hover:not(:disabled) { background: #234775; }
     .answer-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
     .unavailable-help { margin: 12px 0 0; color: #697686; font-size: 13px; line-height: 1.55; }
-    .task-context { margin: 0 0 26px; padding-bottom: 24px; border-bottom: 1px solid #e5e9ee; }
-    .context-label { margin: 0 0 10px; font-size: 14px; font-weight: 650; color: #344253; }
-    .task-text { margin: 0; font: inherit; font-size: 14px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 290px; overflow: auto; }
     .context-status { color: #697686; font-size: 14px; line-height: 1.55; margin: 0; }
     .context-error { margin-top: 8px; }
     .context-error .error { margin: 0 0 10px; }
@@ -96,7 +93,6 @@
       .primary { width: 100%; }
       .answer-buttons { flex-direction: column-reverse; }
       .answer-buttons button { width: 100%; }
-      .task-text { max-height: 240px; }
     }
   </style>
 </head>
@@ -203,12 +199,6 @@
       let navigationVersion = 0;
       let filesLoaded = false;
       const query = `state=${encodeURIComponent(question.state)}`;
-      const task = element('section', 'task-context');
-      task.setAttribute('aria-label', 'Task context');
-      task.append(element('h2', 'context-label', 'Task'));
-      const taskContent = element('div');
-      taskContent.append(element('p', 'context-status', 'Loading the task and conversation…'));
-      task.append(taskContent);
       const panels = element('div', 'context-panels');
       const history = disclosure('Full conversation', 'context-panel');
       history.dataset.panel = 'history';
@@ -245,14 +235,10 @@
       }
       async function loadContext() {
         const version = ++contextVersion;
-        taskContent.replaceChildren(element('p', 'context-status', 'Loading the task and conversation…'));
         historyContent.replaceChildren(element('p', 'context-status', 'Loading conversation…'));
         try {
           const result = await api(`/api/context?${query}`);
           if (disposed || version !== contextVersion) return;
-          const text = element('pre', 'task-text', result.task || 'No task instructions were recorded.');
-          text.tabIndex = 0;
-          taskContent.replaceChildren(text);
           const calls = new Map();
           const steps = result.history.map((step, index) => {
             const labels = {root: 'Starting instructions', reply: 'Human reply', turn: 'Agent step', question: 'Question', message: 'Human message', intervention: 'Workspace change', evaluation: 'Evaluation'};
@@ -267,8 +253,7 @@
           if (!steps.length) historyContent.append(element('p', 'context-status', 'No conversation was recorded before this question.'));
         } catch (problem) {
           if (disposed || version !== contextVersion) return;
-          showError(taskContent, problem, loadContext);
-          historyContent.replaceChildren(element('p', 'context-status', 'Conversation could not be loaded. Use Try again above.'));
+          showError(historyContent, problem, loadContext);
         }
       }
       function renderPath(path) {
@@ -351,13 +336,12 @@
         if (files.open && !filesLoaded) loadDirectory();
       });
       loadContext();
-      return {task, panels, dispose() { disposed = true; }};
+      return {panels, dispose() { disposed = true; }};
     }
     function questionForm(question) {
       const form = element('form', 'question');
       form.dataset.state = question.state;
       const context = contextPanels(question);
-      form.append(context.task);
       const kinds = {yes_no: 'Yes / no', multiple_choice: 'Multiple choice', open_ended: 'Open question'};
       form.append(element('p', 'type', kinds[question.question_type]));
       const fieldset = element('fieldset');

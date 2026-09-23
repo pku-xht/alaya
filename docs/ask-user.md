@@ -23,6 +23,10 @@ One tool supports three forms, selected by the required `question_type` field:
 | `open_ended` | `[]` | A text area; free text |
 
 The model calls the tool alone and includes the relevant context in `question`.
+The answer interface is in English, and the enabled-tool guidance asks the model
+to write its messages, questions, context, and options in English. This is a
+generation instruction, not language validation: recorded content, project files,
+and human replies are preserved verbatim.
 All three fields are required. Yes/no and open-ended questions require an empty
 `options` array; multiple-choice questions never append an automatic custom option.
 
@@ -88,13 +92,14 @@ waiting in that data directory:
 - For any question, **Unable to answer** records that no answer was available.
   It does not select `no`, submit `[]`, or send an empty text answer.
 
-The original task is shown above the question so a person joining the run can
-understand its purpose. **Full conversation** expands the recorded messages,
-tool calls, tool results and earlier human replies on this branch, through the
-question. It does not include sibling branches, later answers or evaluations.
+The current question and answer controls are shown by default. **Full conversation**
+expands the original task, recorded messages, tool calls, tool results and earlier
+human replies on this branch, through the question. The task appears within the
+starting instructions, without a separate task panel. The conversation does not
+include sibling branches, later answers or evaluations.
 This is the recorded history, rather than a newly generated summary or only the
-model's compressed context. If the root has no recorded user task, the page says
-so. The model should still include the background needed to understand its question.
+model's compressed context. The model should still include the background needed
+to understand its question.
 
 **Project files** browses the question state's workspace snapshot, including
 hidden files and directories. It is read-only and does not follow subsequent
