@@ -18,3 +18,5 @@ jobs:
           sudo install -m 755 restic /usr/local/bin/restic
           restic version
       - uses: leanprover/lean-action@v1
+      - name: Test local answer service
+        run: python3 -m unittest discover -s example -p test_answer_questions.py

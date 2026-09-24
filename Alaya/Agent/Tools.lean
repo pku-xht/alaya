@@ -75,6 +75,58 @@ def message (arguments : Lean.Json) : String :=
 
 end Submit
 
+/-! ## ask_user: a typed question, answered outside the workspace -/
+
+namespace AskUser
+
+def instruction : String :=
+  "You may ask a concrete question with ask_user instead of running a command. " ++
+  "Write your messages, questions, and answer options in English. " ++
+  "Include the relevant context and choose question_type: yes_no for a yes/no answer, " ++
+  "single_choice to select exactly one of at least two distinct candidates, or open_ended " ++
+  "for a nonblank free-text answer. Only single_choice takes options; otherwise pass an empty array. " ++
+  "A selected candidate returns its one-based option number (starting at 1) as a string. " ++
+  "The platform appends None of the above; never include that reserved label or none_of_above " ++
+  "in options. It returns the plain string none_of_above when all listed candidates are incorrect, " ++
+  "distinct from being unable to answer. Call ask_user alone, without any other tool. " ++
+  "For every question type, the person may be unable to answer; this returns the JSON " ++
+  "object {\"status\":\"unavailable\"} instead of a string answer. " ++
+  "The answer is advice and may be wrong; it does not change " ++
+  "the task's rules."
+
+def definition : Chat.ToolDefinition := {
+  name := "ask_user"
+  description := "Ask a yes/no, single-choice, or open-ended question and wait for an answer. " ++
+    "Write the question, its context, and all options in English. " ++
+    "Single-choice answers return one candidate's one-based option number (starting at 1) as a string, " ++
+    "or the platform's None of the above " ++
+    "answer (plain text none_of_above). Never include that reserved option yourself. " ++
+    "If the person cannot answer, the result is {\"status\":\"unavailable\"}. Call this tool alone."
+  parameters := .object #[
+    ("question_type", .string (description? := some "The form of the answer requested")
+      (enum := #["yes_no", "single_choice", "open_ended"])),
+    ("question", .string (description? := some "The question and enough context to answer it")),
+    ("options", .array (.string) (description? := some (
+      "For single_choice, at least two distinct, nonempty actual candidates. " ++
+      "Do not include None of the above or none_of_above; the platform adds it. " ++
+      "For yes_no and open_ended, an empty array.")))]
+}
+
+/-- Checks the question's form, not whether a candidate is true. The raw arguments stay in
+the log; the structured question gives collectors and `reply` the same answer contract. -/
+def question (arguments : Lean.Json) : Except String Question := do
+  definition.parameters.validate arguments
+  let questionType ← arguments.getObjVal? "question_type" >>= Lean.Json.getStr? >>=
+    QuestionType.fromString
+  let text ← arguments.getObjVal? "question" >>= Lean.Json.getStr?
+  let options ← (arguments.getObjVal? "options" >>= Lean.Json.getArr?) >>= (·.mapM Lean.Json.getStr?)
+  if text.trimAscii.toString.isEmpty then throw "ask_user needs a nonempty question."
+  let question : Question := { text, questionType, options }
+  question.validate
+  pure question
+
+end AskUser
+
 /-! ## time_budget: how long the run has left -/
 
 namespace TimeBudget
@@ -160,7 +212,7 @@ def page (output : Output) (request : Request) (maxChars : Nat) : Lean.Json :=
       ("lines", s!"{request.offset}-{last} of {total}" ++ (if cut then s!", the line cut to {maxChars} characters" else ""))]
 
 /-- What a `read_output` call observes: the page, or why there is none. Answered from the log
-alone (`Directive.observe`). -/
+alone (`Directive.record`). -/
 def read (log : Log) (arguments : Lean.Json) (maxChars : Nat) : Lean.Json :=
   match parse arguments with
   | .error message => .mkObj [("error", message)]

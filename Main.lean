@@ -163,11 +163,13 @@ private def stateLine (data : DataDir) (child : Hash) (json : Bool) : Result Uni
     emit (Lean.Json.mkObj [
       ("state", child.hex), ("kind", state.kind.toString),
       ("outcome", state.outcome?.map (fun o => Lean.Json.str o.status) |>.getD .null),
-      ("question", state.question?.map (fun q => Lean.Json.str q.text) |>.getD .null)]).compress
+      ("question", state.question?.map (fun q => Lean.Json.str q.text) |>.getD .null),
+      ("question_type", state.question?.map (fun q => Lean.Json.str q.questionType.toString) |>.getD .null),
+      ("options", state.question?.map (fun q => Lean.Json.arr (q.options.map Lean.Json.str)) |>.getD .null)]).compress
   else
     let mark := match state.outcome?, state.question? with
       | some o, _ => s!"  [{o.status}]"
-      | none, some q => s!"  ask  {q.text.quote}  [Waiting]"
+      | none, some q => s!"  ask  {q.toQuestion.render.quote}  [Waiting]"
       | none, none => ""
     emit s!"{child.hex}{mark}"
 
@@ -230,11 +232,34 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let data ← openData args
     emit (← reply data.store (← resolve data.store pfx) text).hex
     pure 0
+  | ["reply-unavailable", pfx] =>
+    let data ← openData args
+    emit (← replyUnavailable data.store (← resolve data.store pfx)).hex
+    pure 0
+  | ["question-context", pfx] =>
+    let data ← openData args
+    emit (← QuestionContext.context data.store (← resolve data.store pfx)).compress
+    pure 0
+  | ["question-files", pfx] =>
+    let data ← openData args
+    emit (← QuestionContext.directory data.store data.workspaces (← resolve data.store pfx)).compress
+    pure 0
+  | ["question-files", pfx, path] =>
+    let data ← openData args
+    emit (← QuestionContext.directory data.store data.workspaces (← resolve data.store pfx) path).compress
+    pure 0
+  | ["question-file", pfx, path] =>
+    let data ← openData args
+    emit (← QuestionContext.file data.store data.workspaces (← resolve data.store pfx) path).compress
+    pure 0
   | ["waiting"] =>
     let data ← openData args
     for (hash, q) in ← waiting data.store do
-      if json then emit (Lean.Json.mkObj [("state", hash.hex), ("question", q.text)]).compress
-      else emit s!"{hash.hex}  {q.text.quote}"
+      if json then emit (Lean.Json.mkObj [
+        ("state", hash.hex), ("question", q.text),
+        ("question_type", q.questionType.toString),
+        ("options", .arr (q.options.map Lean.Json.str))]).compress
+      else emit s!"{hash.hex}  {q.toQuestion.render.quote}"
     pure 0
   | "eval" :: pfx :: _ =>
     let data ← openData args
@@ -275,7 +300,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let some first := roots[0]? | throw <| .configuration "nothing to report: the data directory holds no states"
     let spec ← recordedAgent data.store args first
     for root in roots do
-      if (← agentOf data.store root).map (·.compress) != some spec.config.compress then
+      if (← recordedAgent data.store args root).config.compress != spec.config.compress then
         throw <| .configuration <|
           s!"the roots of {data.path} were created with different agents; a report renders one " ++
           "agent's runs, so give each its own data directory"
@@ -307,7 +332,8 @@ private def dispatch (argv : List String) : Result UInt32 := do
       "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent FILE | " ++
       "resume HASH --model P:M [--time-budget S] | step HASH --model P:M [--time-budget S] | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
-      "reply HASH TEXT | waiting | checkout HASH DIR [--evidence] | tree | " ++
+      "reply HASH TEXT | reply-unavailable HASH | waiting | question-context HASH | " ++
+      "question-files HASH [PATH] | question-file HASH PATH | checkout HASH DIR [--evidence] | tree | " ++
       "html [FILE] [--hide DIR] | " ++
       "show HASH [--view] | diff A B | rm HASH) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++

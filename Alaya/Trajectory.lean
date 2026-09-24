@@ -111,7 +111,7 @@ def eventFromJson (json : Lean.Json) : Except String Event := do
 /-- What produced a state, for display and provenance. -/
 inductive Kind where
   | root
-  /-- One model turn: a response and the observations its tool calls produced. -/
+  /-- One model turn, or a stop recorded after a reply without another model sample. -/
   | turn
   /-- A person's workspace change, with the parent's log — plus a notice, when they left one. -/
   | intervention
@@ -164,10 +164,17 @@ def interventionNotice (i : Intervention) : String :=
 
 /-- A question the agent asked a person and is waiting on. `callId` is the asking tool call,
 so the eventual answer can be recorded as its result. -/
-structure Question where
+structure Question extends Agent.Question where
   callId : String
-  text : String
   deriving Inhabited, BEq, Repr
+
+def Question.toJson (question : Question) : Lean.Json :=
+  question.toQuestion.toJson.setObjVal! "call_id" question.callId
+
+def Question.fromJson (json : Lean.Json) : Except String Question := do
+  let callId ← json.getObjVal? "call_id" >>= Lean.Json.getStr?
+  let toQuestion ← Agent.Question.fromJson json
+  pure { callId, toQuestion }
 
 /-- A grader's verdict on a state. A separate axis from `Outcome`, which says how a *run*
 ended: a submitted run can fail its grader and a run that hit the step limit can pass it. -/
@@ -293,8 +300,7 @@ def toJson (state : State) : Lean.Json :=
     ("evaluation", state.evaluation?.map evaluationToJson |>.getD .null),
     ("intervention", state.intervention?.map (fun i => .mkObj [
       ("message", i.message), ("changed", .arr (i.changed.map Lean.Json.str))]) |>.getD .null),
-    ("question", state.question?.map (fun q => .mkObj [
-      ("call_id", q.callId), ("text", q.text)]) |>.getD .null)]
+    ("question", state.question?.map Question.toJson |>.getD .null)]
 
 def fromJson (json : Lean.Json) : Except String State := do
   let version ← json.getObjVal? "v" >>= Lean.Json.getNat?
@@ -328,12 +334,9 @@ def fromJson (json : Lean.Json) : Except String State := do
       pure (some ({ message, changed } : Intervention))
     | _ => pure none
   let question? ← match json.getObjVal? "question" with
-    | .ok (.obj _) =>
-      let q := (json.getObjVal? "question").toOption.get!
-      let callId ← q.getObjVal? "call_id" >>= Lean.Json.getStr?
-      let text ← q.getObjVal? "text" >>= Lean.Json.getStr?
-      pure (some ({ callId, text } : Question))
-    | _ => pure none
+    | .ok .null => pure none
+    | .error _ => pure none
+    | .ok q => some <$> Question.fromJson q
   pure { parent?, workspace, kind, appended, outcome?, note?, image?, agent?, elapsedMs?
          evaluation?, intervention?, question? }
 
@@ -471,8 +474,9 @@ private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (ap
   match rt.agent.next (← sessionAt rt before started) log with
   | .sample => pure (appended, workspace, none, .continue)
   | .done outcome => pure (appended, workspace, none, .outcome outcome)
-  | .ask callId text =>
-    let question : Question := { callId, text }
+  | .ask callId toQuestion =>
+    Result.fromExcept Error.configuration toQuestion.validate
+    let question : Question := { callId, toQuestion }
     pure (appended, workspace, some question, .question question)
   | .act call =>
     let content ← rt.agent.act { dir := rt.workDir } call
@@ -487,16 +491,24 @@ private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (ap
 /-- Runs one model turn from `parent` (whose log is `log` and workspace is `workspace`, already
 materialized into `rt.workDir`, and `before` of whose run has been spent), records it as a new
 child state with its time, and returns the child, its log, its workspace, the run's time so
-far, and why the turn stopped, if it did. -/
+far, and why the turn stopped, if it did. A reply may instead stop before sampling. -/
 def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspace : Hash)
     (before : Nat) : Result (Hash × Log × Hash × Nat × Halt) := do
+  let parentState ← getState rt.store parent
+  -- `follow` stopped at the question before it could check what happens after the answer.
+  -- In particular, answering a question on the last allowed turn must not buy another draw.
+  if parentState.kind == .reply then
+    if let .done outcome := rt.agent.next { elapsedMs := before, budgetMs? := rt.budgetMs? } log then
+      let child ← putState rt.store {
+        parent? := some parent, workspace, appended := #[], outcome? := some outcome
+        kind := .turn, note? := some note, image? := parentState.image? }
+      return (child, log, workspace, before, .outcome outcome)
   -- Draw index = the number of children that came from sampling.
   let mut childCount := 0
   for child in ← children rt.store parent do
-    let kind := (← getState rt.store child).kind
-    if kind == .turn || kind == .question then childCount := childCount + 1
+    if (← getState rt.store child).appended.responses > 0 then childCount := childCount + 1
   -- Children run in whatever the parent ran in; the image is a property of the trajectory.
-  let image? := (← getState rt.store parent).image?
+  let image? := parentState.image?
   let started ← nowMs
   let stream ← rt.model.sample { messages := rt.agent.view log, tools := rt.agent.tools }
   let responses ← stream.nextN (childCount + 1)
@@ -524,8 +536,8 @@ private def withinBudget (rt : Runtime) (elapsed : Nat) : Bool :=
   | some budget => elapsed < budget
   | none => true
 
-/-- Advances exactly one model turn from `hash`, returning the new child state; `none` when the
-time budget is already spent, and then nothing is written. -/
+/-- Advances one model turn, or records the agent's stop after a reply without sampling.
+Returns `none` when the time budget is already spent, and then nothing is written. -/
 def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result (Option Hash) := do
   let state ← getState rt.store hash
   Result.fromExcept Error.configuration state.continuable
@@ -712,16 +724,30 @@ def tell (store : Store) (hash : Hash) (message : String) : Result Hash := do
     intervention? := some intervention
     image? := parent.image? }
 
-/-- Answers the question `hash` is waiting on: a child whose one event is the observation of the
-asking call, carrying `text` verbatim. -/
+/-- Validates an answer before creating a reply child. Its one event is the observation of
+the asking call, carrying the valid `text` verbatim. -/
 def reply (store : Store) (hash : Hash) (text : String) : Result Hash := do
+  let parent ← getState store hash
+  let question ← match parent.question? with
+    | some q => pure q
+    | none => throw <| .configuration "this state is not waiting for an answer"
+  Result.fromExcept Error.configuration (question.toQuestion.validateReply text)
+  putState store {
+    parent? := some hash, workspace := parent.workspace, kind := .reply
+    appended := #[.observation question.callId (.str text)]
+    image? := parent.image? }
+
+/-- Records that a person cannot answer, for any question type. The structured status is
+distinct from every ordinary string answer, including an open answer containing this JSON.
+Like a normal reply, this continues the same workspace without consuming a model turn. -/
+def replyUnavailable (store : Store) (hash : Hash) : Result Hash := do
   let parent ← getState store hash
   let question ← match parent.question? with
     | some q => pure q
     | none => throw <| .configuration "this state is not waiting for an answer"
   putState store {
     parent? := some hash, workspace := parent.workspace, kind := .reply
-    appended := #[.observation question.callId (.str text)]
+    appended := #[.observation question.callId (.mkObj [("status", "unavailable")])]
     image? := parent.image? }
 
 /-- Every question in the forest that has not been answered: waiting states without a `reply`
@@ -875,7 +901,7 @@ def showLines (store : Store) (hash : Hash) (view? : Option View := none) :
   if let some o := state.outcome? then
     lines := lines.push s!"outcome  {o.status}"
     if o.submission != "" then lines := lines.push s!"submission:\n{o.submission}"
-  if let some q := state.question? then lines := lines.push s!"question {q.text}"
+  if let some q := state.question? then lines := lines.push s!"question {q.toQuestion.render}"
   if let some i := state.intervention? then lines := lines.push s!"message  {i.message}"
   lines := lines.push "--- log ---"
   for event in log do

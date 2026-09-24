@@ -29,8 +29,10 @@ structure Config where
   /-- Offer `read_output`, which shows any lines of a long output the view cut to its head and
   tail. Off, the agent is mini to the byte: its tools, its prompts, its observations. On, the
   tool is offered and the two sentences that require a bash call in every response say "a
-  tool call" instead (`withRecovery`). -/
+  tool call" instead (`withExtraTools`). -/
   recoverOutput : Bool := false
+  /-- Offer yes/no, single-choice, and open-ended questions. -/
+  askUser : Bool := false
   /-- Offer `time_budget`, which says how much of the run's time budget is left. Not a field of
   mini-swe's configuration: MiniVero sets it (`time_budget` in its own). -/
   timeBudget : Bool := false
@@ -46,12 +48,13 @@ def Config.toJson (config : Config) : Lean.Json :=
     ("executor", .mkObj [
       ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
       ("env", .arr (config.executor.env.map fun (name, value) => .arr #[.str name, .str value]))]),
-    ("recover_output", (config.recoverOutput : Lean.Json))]
+    ("recover_output", (config.recoverOutput : Lean.Json)),
+    ("ask_user", (config.askUser : Lean.Json))]
 
 /-- Reads a configuration; a field left out is `defaults`', and an unknown one is an error. -/
 def Config.fromJson (json : Lean.Json) (defaults : Config := {}) : Except String Config := do
   let object ← ConfigJson.object json
-    #["family", "step_limit", "max_consecutive_format_errors", "executor", "recover_output"]
+    #["family", "step_limit", "max_consecutive_format_errors", "executor", "recover_output", "ask_user"]
   let executor ← match ← object.field? "executor" with
     | none => pure defaults.executor
     | some json => do
@@ -64,7 +67,8 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) : Except String
     stepLimit := ← object.nat "step_limit" defaults.stepLimit
     maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors
     executor
-    recoverOutput := ← object.bool "recover_output" defaults.recoverOutput }
+    recoverOutput := ← object.bool "recover_output" defaults.recoverOutput
+    askUser := ← object.bool "ask_user" defaults.askUser }
 
 /-! ## Prompts
 
@@ -132,7 +136,8 @@ def instanceMessage (task system release version machine : String) : String :=
 /-- The tools besides `bash` and `submit` a configuration offers, with what each is for. -/
 def extraTools (config : Config) : List (String × String) :=
   (if config.recoverOutput then [("read_output", "see more of an earlier command's output")] else []) ++
-  (if config.timeBudget then [("time_budget", "see how much time is left")] else [])
+  (if config.timeBudget then [("time_budget", "see how much time is left")] else []) ++
+  (if config.askUser then [("ask_user", "ask a person a question")] else [])
 
 /-- The one thing extra tools change in mini's texts: a response must hold a tool call, not a
 bash call, since it may be one of them alone. -/
@@ -140,21 +145,34 @@ def withExtraTools (config : Config) (text : String) : String :=
   let extras := extraTools config
   if extras.isEmpty then text else
     let text := text.replace "Your response MUST include AT LEAST ONE bash tool call"
-      ("Your response MUST include AT LEAST ONE tool call: bash" ++
-        String.join (extras.map fun (name, purpose) => s!", or {name} to {purpose}"))
+      (if config.askUser then "Your response MUST include AT LEAST ONE tool call" else
+        "Your response MUST include AT LEAST ONE tool call: bash" ++
+          String.join (extras.map fun (name, purpose) => s!", or {name} to {purpose}"))
     text.replace "Every response needs to use the 'bash' tool at least once to execute commands."
-      ("Every response needs at least one tool call: 'bash' to execute commands" ++
-        String.join (extras.map fun (name, purpose) => s!", or '{name}' to {purpose}") ++ ".")
+      (if config.askUser then "Every response needs at least one tool call." else
+        "Every response needs at least one tool call: 'bash' to execute commands" ++
+          String.join (extras.map fun (name, purpose) => s!", or '{name}' to {purpose}") ++ ".")
+
+/-- Allow a question turn in the opening and format-error prompts when the tool is offered. -/
+def withAsk (enabled : Bool) (text : String) : String :=
+  if !enabled then text else
+    let text := text.replace "Your response MUST include AT LEAST ONE bash tool call"
+      "Your response MUST include AT LEAST ONE tool call"
+    let text := text.replace "Every response needs to use the 'bash' tool at least once to execute commands."
+      "Every response needs at least one tool call."
+    let text := text.replace "exactly one bash tool call" "exactly one tool call"
+    text ++ "\n\n" ++ Tools.AskUser.instruction
 
 /-- The opening log of a run: the system prompt and the task. -/
 def initialLog (config : Config) (task : String) (uname : Uname) : Log :=
   #[.message (.system systemMessage),
-    .message (.user (withExtraTools config
-      (instanceMessage task uname.system uname.release uname.version uname.machine)))]
+    .message (.user (withAsk config.askUser (withExtraTools config
+      (instanceMessage task uname.system uname.release uname.version uname.machine))))]
 
 /-- The user turn a malformed response is answered with: mini's `format_error_template`. -/
 def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : Option String)
     (config : Config := {}) : String :=
+  withAsk config.askUser <|
   withExtraTools config <|
   let truncated := match finishReason? with
     | some "length" => true
@@ -172,7 +190,8 @@ def outputLimit : Nat := 10000
 def tools (config : Config) : Array Chat.ToolDefinition :=
   #[Tools.Bash.definition, Tools.Submit.definition] ++
     (if config.recoverOutput then #[Tools.ReadOutput.definition] else #[]) ++
-    (if config.timeBudget then #[Tools.TimeBudget.definition] else #[])
+    (if config.timeBudget then #[Tools.TimeBudget.definition] else #[]) ++
+    (if config.askUser then #[Tools.AskUser.definition] else #[])
 
 /-! ## Reading a response -/
 
@@ -182,6 +201,7 @@ inductive Action where
   | bash (id : String) (command : String)
   | readOutput (id : String) (arguments : Lean.Json)
   | timeBudget (id : String)
+  | ask (id : String) (question : Question)
   | submit (id : String) (message : String)
   deriving Inhabited
 
@@ -189,6 +209,7 @@ def Action.id : Action -> String
   | .bash id _ => id
   | .readOutput id _ => id
   | .timeBudget id => id
+  | .ask id _ => id
   | .submit id _ => id
 
 /-- A parsed model turn: its actions, or a format-error message to send back as a user turn. -/
@@ -197,12 +218,15 @@ inductive Parsed where
   | formatError (message : String)
 
 /-- Reads a response's tool calls; the first call with a problem makes the turn a format error.
-`read_output` and `time_budget` are known tools only when they are offered. -/
+`read_output`, `time_budget`, and `ask_user` are known only when offered; an ask must be alone. -/
 def parseActions (response : Chat.Response) (config : Config := {}) : Parsed := Id.run do
   if response.toolCalls.isEmpty then
     return .formatError <| formatErrorMessage
       "No tool calls found in the response. Every response MUST include at least one tool call."
       false response.finishReason? config
+  if config.askUser && response.toolCalls.any (·.name == "ask_user") && response.toolCalls.size != 1 then
+    return .formatError <| formatErrorMessage "ask_user must be called alone."
+      true response.finishReason? config
   let mut actions : Array Action := #[]
   for call in response.toolCalls do
     let action : Except String Action :=
@@ -217,6 +241,9 @@ def parseActions (response : Chat.Response) (config : Config := {}) : Parsed := 
           else (Tools.ReadOutput.parse call.arguments).map fun _ => .readOutput call.id call.arguments
         | "time_budget" =>
           if !config.timeBudget then .error "Unknown tool 'time_budget'." else .ok (.timeBudget call.id)
+        | "ask_user" =>
+          if !config.askUser then .error "Unknown tool 'ask_user'."
+          else (Tools.AskUser.question call.arguments).map (.ask call.id ·)
         | other => .error s!"Unknown tool '{other}'."
     match action with
     | .error problem =>
@@ -280,6 +307,7 @@ def next (config : Config) (session : Session) (log : Log) : Directive :=
       | some (.readOutput id arguments) =>
         .record id (Tools.ReadOutput.read log arguments outputLimit)
       | some (.timeBudget id) => .record id (Tools.TimeBudget.answer session)
+      | some (.ask id question) => .ask id question
       | some (.bash id _) =>
         match pending.find? (·.id == id) with
         | some call => .act call

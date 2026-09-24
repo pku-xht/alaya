@@ -66,9 +66,9 @@ driven by `resume` or `step`.
 | Kind | Created by | `appended` | `workspace` |
 | --- | --- | --- | --- |
 | `root` | `alaya root` | the agent's opening prompts | the project as given |
-| `turn` | one model turn | the response, and the observation of each call it made | the workspace after those calls ran |
+| `turn` | one model turn, or a stop after a reply | the response and observations; empty for a stop before sampling | the workspace after those calls ran, or the parent's when none ran |
 | `question` | a model turn whose call asked a person | the response, and the observations of the calls before the ask | the workspace after those calls ran |
-| `reply` | `alaya reply` | one observation: the person's answer to the question, verbatim | the parent's |
+| `reply` | `alaya reply` or `reply-unavailable` | one observation: the person's verbatim answer string, or the explicit unavailable object | the parent's |
 | `intervention` | `alaya commit` | nothing, or one notice when `--tell` is given | the directory the person edited |
 | `message` | `alaya tell` | one notice carrying the person's text | the parent's |
 | `evaluation` | `alaya eval` | nothing; the verdict is on the state itself | the checkout after the grader ran |
@@ -76,6 +76,10 @@ driven by `resume` or `step`.
 Two kinds constrain what may follow them. A `question` waits: only `reply` may be its child until
 one exists. An `evaluation` is a leaf: it is a verdict on its parent, not a point a run can go on
 from.
+
+After a reply, the agent may already be done, for example when the question consumed its
+last allowed model turn. The driver then records a terminal `turn` with empty `appended`,
+the parent's workspace and the agent's outcome, without calling the model.
 
 Besides the three parts, a state carries what the run needs to continue and what a reader wants
 to know: the container `image?`, set on the root and inherited; on the root, the `agent?` configuration the run is continued with (§8); a `note?` of provenance (the model spec for a turn, the task for a root, the note for
@@ -156,12 +160,12 @@ alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash    # turns until the run e
 ### Which draw
 
 A model request does not have one answer; it has a sequence of draws, and the model cache (§7)
-stores that sequence per request, indexed from 0. Every turn child of a state was sampled from
+stores that sequence per request, indexed from 0. Every sampled child of a state came from
 the *same* request — the parent's log viewed the same way, with the same tools — so the children
-of a state are, in order, draws 0, 1, 2, … of one sequence.
+with a response are, in order, draws 0, 1, 2, … of one sequence.
 
 The trajectory therefore never decides "new" or "reuse" itself. It counts the parent's children
-of kind `turn` or `question` — call the count `n` — and asks the cache for draws `0` to `n`
+whose `appended` contains a model response — call the count `n` — and asks the cache for draws `0` to `n`
 (`nextN (n+1)`), then uses draw `n`. The cache does the rest:
 
 - if its entry already holds draw `n`, it returns it without a provider call;
@@ -169,6 +173,7 @@ of kind `turn` or `question` — call the count `n` — and asks the cache for d
 
 Children a person makes — `reply`, `message`, `intervention` — and evaluations are not counted:
 they asked the model nothing, and counting them would skip a draw the cache holds.
+A terminal `turn` recorded after a reply without sampling is likewise not counted.
 
 *Which draw a continuation receives, by what the state already has under it.*
 
@@ -284,10 +289,17 @@ records it as a `question` state:
 
 - `appended` holds the response and the observations of the calls *before* the ask; the calls
   after it never ran;
-- `question? = { callId, text }` names the asking call and carries the text for the person;
+- `question? = { callId, text, questionType, options }` names the asking call and carries
+  the prompt and answer controls for the person;
 - `resume`, `step`, `commit`, and `tell` refuse the state until it is answered.
 
-`alaya reply HASH TEXT` records the answer as a `reply` child: the parent's workspace, and one
+`alaya reply HASH TEXT` validates the answer against the recorded question type before
+writing any state. Yes/no requires `yes` or `no`; single choice requires one integer
+from 1 through the number of model-provided candidates, or `none_of_above` for the
+system-provided **None of the above** option. The model must not include that reserved
+option in its candidates. Open-ended questions require nonblank text.
+An invalid reply leaves the question waiting and writes
+no child. A valid answer is recorded as a `reply` child: the parent's workspace, and one
 appended event, `Event.observation callId TEXT`, the answer as the asking call's result,
 verbatim. The next turn from the reply child continues with the calls that were still pending,
 exactly as if the tool had returned the person's words.
@@ -318,6 +330,13 @@ flowchart TD
 Answering the same question twice makes two `reply` siblings, which is a fork on the answer.
 `alaya waiting` lists every question no child has answered.
 
+`alaya reply-unavailable HASH` records `{"status":"unavailable"}` as the observation
+of the asking call for any currently supported question type. Normal answers remain JSON strings;
+unavailable is neither `no`, `none_of_above`, nor empty text. The reply keeps the question's
+workspace and follows the same continuation and budget rules. See
+[the answer page and read-only context commands](ask-user.md#answer-in-the-browser)
+for branch history and snapshot browsing.
+
 ```sh
 $ alaya resume 4f2c8b --model M
 c61754d16c7a  ask  "Should I keep the old API?"  [Waiting]
@@ -344,13 +363,14 @@ flowchart LR
 Everything above is a command, so a program — a supervising agent, say — can play the person's
 part by running `alaya` as a subprocess. `resume` and `step` exit with status `0` when the run
 ended and `3` when it stopped at a question; with `--json` each state they print is one object
-with `state`, `kind`, `outcome`, and `question`, and `waiting --json` prints `{state, question}`
-per open question. The loop is: resume; on exit 3 read the question, decide, `reply`; resume
+with `state`, `kind`, `outcome`, `question`, `question_type`, and `options`;
+`waiting --json` prints `{state, question, question_type, options}` per open question.
+The loop is: resume; on exit 3 read the question, decide, `reply`; resume
 from the reply's hash.
 
 ```sh
 alaya resume "$hash" --model M --json
-# {"state":"c61754…","kind":"question","outcome":null,"question":"Should I keep the old API?"}
+# {"state":"c61754…","kind":"question","outcome":null,"question":"Should I keep the old API?","question_type":"open_ended","options":[]}
 # exit status 3
 reply=$(alaya reply c61754 "Keep it; add the new one beside it.")
 alaya resume "$reply" --model M --json
@@ -460,7 +480,7 @@ files; there is nothing else to collect.
 ### Workspace snapshots
 
 A state names the directory the agent left behind by an identifier, `workspace`, and the
-trajectory never looks inside it. It asks for five things, and `Alaya.Workspaces` is that
+trajectory never looks inside it. `Alaya.Workspaces` is the snapshot
 contract:
 
 ```lean
@@ -469,6 +489,7 @@ structure Workspaces where
   materialize : Hash -> System.FilePath -> Result Unit   -- make a directory hold exactly a snapshot
   diff : Hash -> Hash -> Result (Array Change)           -- added, removed, modified paths
   readFiles : Hash -> Array String -> Result (Array (Option ByteArray))  -- regular files of a snapshot
+  listEntries : Hash -> String -> Result (Array Entry)   -- immediate snapshot directory entries
   retainOnly : Array Hash -> Result Unit                 -- drop every snapshot not listed
 ```
 
@@ -477,8 +498,15 @@ structure Workspaces where
 | `snapshot` | `root`, every act of a turn, `commit`, `eval` (the graded checkout and the grader's evidence) |
 | `materialize` | the start of `step` and `resume`, `eval`, `checkout` |
 | `diff` | the notice of a `commit --tell`, `alaya diff`, the HTML report |
-| `readFiles` | the HTML report, for the text of a state's changed files |
+| `readFiles` | the HTML report and question-page file previews |
+| `listEntries` | read-only question-page browsing, using metadata before reading a file |
 | `retainOnly` | `rm`, with the snapshots the surviving states name |
+
+`listEntries` defaults to an unsupported-operation error for older/custom stores.
+Restic implements it without restoring the workspace. An entry records name,
+relative path, kind (directory/file/symlink/other), and optional byte size; the
+empty path names the root. The question browser verifies ancestor directories
+and never follows symbolic links.
 
 An identifier is 64 hexadecimal digits and means something only to the store that issued it.
 **Equal directories need not get equal identifiers**, and nothing compares them: a state's hash
@@ -510,6 +538,7 @@ links, extended attributes. The identifier is the restic snapshot ID.
 | `materialize` | `restic restore ID --target DIR --delete --overwrite always`: in place, comparing content, not times, after the directory is made writable |
 | `diff` | `restic diff A B --json` without `--metadata`, folded so that a directory stands for its subtree; for a type change whose new side is a file, one `restic ls` of the old side tells whether a directory was replaced |
 | `readFiles` | one `restic restore ID --include …` of just those paths into `D/restic-scratch`, read back from there |
+| `listEntries` | `restic ls ID --json /PATH`, immediate directory metadata only |
 | `retainOnly` | `restic forget` of the rest, then `restic prune` |
 
 A snapshot or a checkout of a directory that overlaps the run's own storage — the repository,
@@ -566,7 +595,7 @@ equal hashes.
 | `agent` | object or null | on a root, the agent's complete configuration (§8) |
 | `evaluation` | object or null | `{grader, returncode, elapsed_ms, output, evidence, summary}` on an evaluation |
 | `intervention` | object or null | `{message, changed: ["M path", "+ path", "- path", …]}` on a state that carried a notice |
-| `question` | object or null | `{call_id, text}` on a waiting state |
+| `question` | object or null | `{call_id, text, question_type, options}` on a waiting state |
 
 An **event** is one of:
 
@@ -635,7 +664,11 @@ alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a che
 alaya commit HASH DIR [-m NOTE] [--tell TEXT]    record a hand-edited workspace as a child
 alaya tell   HASH TEXT                           send the agent a message, as a child
 alaya reply  HASH TEXT                           answer the question a state is waiting on
+alaya reply-unavailable HASH                     record that the person cannot answer
 alaya waiting                                    list every unanswered question
+alaya question-context HASH                      recorded task and root-to-question history as JSON
+alaya question-files HASH [PATH]                  list a question snapshot directory as JSON
+alaya question-file HASH PATH                     preview a file from that snapshot as JSON
 alaya checkout HASH DIR [--evidence]             materialize a state's workspace (or an evaluation's evidence) into DIR
 alaya tree                                       show the whole forest
 alaya show HASH [--view]                         metadata, the log, and optionally the view
@@ -693,8 +726,8 @@ need separate data directories: the work directory and the cache are not shared 
   hash ever changes.
 - `logOf state` is the concatenation of `appended` from the root; the request the model was
   sent to produce a turn is `agent.view (logOf parent)` with `agent.tools`.
-- Continuing from a state with `n` turn-or-question children asks for draw `n`; other children
-  never consume a draw.
+- Sampling from a state with `n` children containing a model response asks for draw `n`;
+  children without a response never consume a draw.
 - A state's workspace is the snapshot taken after its last act; an evaluation's is the checkout
   after the grader ran, and nothing continues from it.
 - A waiting state grows only by `reply`.

@@ -13,7 +13,7 @@ change behaviour are listed in §7.
 ```lean
 def agent (executor : Executor) (config : Config) : Agent := {
   identity := config.toJson                   -- the configuration, as the root records it
-  tools := tools config                       -- bash and submit; read_output when configured
+  tools := tools config                       -- bash and submit; optional read_output and ask_user
   view := view config
   next := next config
   act := act executor }
@@ -30,6 +30,7 @@ host, or a container the trajectory pinned — and the **configuration**, a JSON
 | `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
 | `executor.timeout_seconds`, `executor.env` | 30, mini's overrides | how each command is run (`Executor.Config`) |
 | `recover_output` | false | offer `read_output` (§9) |
+| `ask_user` | false | offer yes/no, single-choice, and open-ended questions |
 
 A field left out is its default; a misspelt one is an error. The task is not configuration: it
 is what `root --task` gives, and `initialLog config task uname` places it. The command line
@@ -189,6 +190,7 @@ the run and is gone when a branch is resumed later.
 - The environment is a snapshot of the working directory, not a persistent machine.
 - No per-model cost accounting, so mini's `cost_limit` is not enforced.
 - With `recoverOutput` on: the `read_output` tool, two sentences, and a warning (§9).
+- With `ask_user` enabled in the JSON configuration: [yes/no, single-choice, and open-ended questions](ask-user.md), using the existing question/reply states.
 
 ## 9. Reading a long output back: `read_output`
 

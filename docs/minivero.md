@@ -54,6 +54,9 @@ The agent then inspects the Lean declarations and the compiler output, edits onl
 
 MiniVero defaults to 200 model turns and a 600-second shell-command timeout. The experiment runner can apply additional attempt and wall-clock limits.
 
+Set `"ask_user": true` to offer [yes/no, single-choice, and open-ended questions](ask-user.md).
+This setting is inherited from MiniSwe and recorded in the root configuration.
+
 ## Pacing: `time_budget`
 
 A Vero run may be given a time budget and checkpointed: `alaya resume STATE --time-budget

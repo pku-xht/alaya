@@ -36,6 +36,32 @@ structure Change where
   directory : Bool := false
   deriving BEq, Repr, Inhabited
 
+/-- The kind of an entry in an immutable workspace snapshot. Links are never directories. -/
+inductive EntryKind where
+  | directory | file | symlink | other
+  deriving BEq, Repr, Inhabited
+
+def EntryKind.toString : EntryKind -> String
+  | .directory => "directory"
+  | .file => "file"
+  | .symlink => "symlink"
+  | .other => "other"
+
+/-- Metadata for an immediate child of a directory, without reading its content. -/
+structure Entry where
+  name : String
+  path : String
+  kind : EntryKind
+  /-- Byte count for regular files; unavailable metadata remains `none`. -/
+  size : Option Nat := none
+  deriving BEq, Repr, Inhabited
+
+/-- Browser paths are portable, clean relative paths. The empty path names the snapshot root.
+Backslashes, drive/stream colons, and NUL cannot reach platform-dependent filesystem joins. -/
+def safeSnapshotPath (path : String) : Bool :=
+  (path.isEmpty || safeRelativePath path) &&
+    !path.contains '\\' && !path.contains ':' && !path.contains '\x00'
+
 end Workspaces
 
 /-- A store of directory snapshots. An identifier is 64 hexadecimal digits and means something
@@ -52,6 +78,11 @@ structure Workspaces where
   /-- The bytes of the regular file at each path, in order; `none` where the snapshot has no
   such file. Several at once, because a store may pay per request rather than per file. -/
   readFiles : Hash -> Array String -> Result (Array (Option ByteArray))
+  /-- Immediate directory entries, including hidden entries, from the named snapshot. `""`
+  names its root. Browsing is optional for older/custom stores and never materializes a live
+  workspace. Callers verify each ancestor is a directory before following a requested path. -/
+  listEntries : Hash -> String -> Result (Array Workspaces.Entry) := fun _ _ =>
+    throw <| .configuration "this workspace store does not support snapshot browsing"
   /-- Drops every snapshot not listed, and reclaims their space. -/
   retainOnly : Array Hash -> Result Unit
 

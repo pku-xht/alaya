@@ -118,6 +118,7 @@ private def responseWith (calls : Array Chat.ToolCall) (finish := "tool_calls") 
 private def actionSummary : Action -> String × String
   | .bash id command => (id, command)
   | .readOutput id _ => (id, "read_output")
+  | .ask id question => (id, "ask_user:" ++ question.render)
   | .timeBudget id => (id, "time_budget")
   | .submit id message => (id, "submit:" ++ message)
 
@@ -255,7 +256,7 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
   let env ← assertOk <| (← workspaces).snapshot work
   match stop with
   | .outcome outcome => pure (view config log, env, outcome)
-  | .question _ q => fail s!"unexpected question: {q}"
+  | .question _ q => fail s!"unexpected question: {q.render}"
 
 def runSuite : Suite := suite "mini.run" #[
   test "a two-step run edits the workspace and submits" do
@@ -456,7 +457,7 @@ private def askingAgent (executor : Executor) : Agent.Agent := {
     | none => .sample
     | some call =>
       if call.name == "ask_user" then
-        .ask call.id ((call.arguments.getObjVal? "message" >>= Lean.Json.getStr?).toOption.getD "?")
+        .ask call.id { text := ((call.arguments.getObjVal? "message" >>= Lean.Json.getStr?).toOption.getD "?") }
       else if call.name == "submit" then .done { status := "Submitted" }
       else .act call
   act := act executor

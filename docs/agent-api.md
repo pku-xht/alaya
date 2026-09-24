@@ -130,7 +130,7 @@ inductive Directive where
   | sample                                          -- draw the next response from view log
   | act (call : Chat.ToolCall)                      -- run it in the workspace, snapshot, record the result
   | record (callId : String) (content : Lean.Json)  -- record a result the agent computed itself
-  | ask (callId : String) (question : String)       -- wait for a person; their reply is recorded
+  | ask (callId : String) (question : Question)     -- ask a person and wait for a valid answer
   | done (outcome : Outcome)                        -- the run is over
 ```
 
@@ -144,7 +144,15 @@ event.
 
 `ask` is how an agent asks a person something. The trajectory records the question and stops;
 the person's answer arrives later as the observation of the asking call, and the log continues
-as if the tool had returned.
+as if the tool had returned. `Question` contains the question text, its `questionType`
+(`yesNo`, `singleChoice`, or `openEnded`), and the candidate `options`. The default is
+an open-ended question. The trajectory stores these fields and validates replies against
+the recorded form before creating an observation: yes/no accepts only `yes` or `no`;
+single choice accepts one in-range, one-based candidate number or `none_of_above`.
+The model must not generate the system-provided **None of the above** option;
+the answer interface appends it separately from the model's `options`.
+Open-ended replies require nonblank text and retain valid text unchanged.
+The unavailable object remains distinct from every ordinary answer string.
 
 `record` is how an agent answers a tool call itself: `next` computes the result, from the log
 or the session, and the loop records it as the call's observation, with nothing run and no
@@ -192,7 +200,7 @@ an agent through `Agent.run` with a scripted `sample` and no store at all.
 
 ```mermaid
 flowchart TD
-  NEXT{"next log (pure)"}
+  NEXT{"next session log (pure)"}
 
   NEXT -->|sample| S1["dialogue := view log"]
   S1 --> S2["response := model.sample dialogue"]

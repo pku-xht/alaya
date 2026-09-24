@@ -2,6 +2,10 @@
 .lake/
 .alaya/
 
+# Python helper caches
+__pycache__/
+*.py[cod]
+
 # reference checkouts and scratch space
 tmp/
 
