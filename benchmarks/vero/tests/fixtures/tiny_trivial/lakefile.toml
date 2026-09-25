@@ -1,0 +1,6 @@
+name = "tiny_trivial"
+defaultTargets = ["TinyTrivial"]
+srcDir = "."
+
+[[lean_lib]]
+name = "TinyTrivial"

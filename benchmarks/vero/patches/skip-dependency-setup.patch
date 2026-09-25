@@ -1,0 +1,22 @@
+--- a/src/vero/generation/sandbox.py
++++ b/src/vero/generation/sandbox.py
+@@ -60,6 +60,7 @@
+     seed_artifact: "Artifact | None" = None,
+     chunk_minutes: float | None = None,
+     source_context: str = "lean",
++    prepare_dependencies: bool = True,
+ ) -> SandboxResult:
+     """Build a ready-to-edit sandbox for ``benchmark_dir`` under ``sandbox_dir``.
+ 
+@@ -93,8 +94,9 @@
+         shutil.rmtree(sandbox_dir)
+ 
+     _copy_benchmark(benchmark_dir, sandbox_dir)
+-    _link_lake_packages(benchmark_dir, sandbox_dir)
+-    _ensure_mathlib_cache(sandbox_dir)
++    if prepare_dependencies:
++        _link_lake_packages(benchmark_dir, sandbox_dir)
++        _ensure_mathlib_cache(sandbox_dir)
+ 
+     # Load manifest from the *sandbox* copy from here on so all edits are local.
+     bench = Benchmark(sandbox_dir)
