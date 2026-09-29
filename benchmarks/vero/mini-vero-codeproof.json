@@ -1,6 +1,6 @@
 {
   "family": "mini-vero",
-  "mode": "proof",
+  "mode": "codeproof",
   "step_limit": 200,
   "max_consecutive_format_errors": 3,
   "executor": {

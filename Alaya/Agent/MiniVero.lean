@@ -29,7 +29,7 @@ def Mode.ofString? (name : String) : Option Mode :=
 structure Config where
   base : MiniSwe.Config := {
     stepLimit := 200
-    executor := { MiniSwe.defaultExecutor with timeoutSeconds := 600 }
+    executor := { timeoutSeconds := 600, env := #[] }
     timeBudget := true }
   mode : Mode := .proof
   deriving Inhabited

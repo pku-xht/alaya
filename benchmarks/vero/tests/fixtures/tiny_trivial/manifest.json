@@ -1,0 +1,60 @@
+{
+  "benchmark_id": "tiny_trivial",
+  "description": "Minimal regression fixture for an ordinary successful proof and codeproof run.",
+  "lean_version": "4.29.1",
+  "modes_supported": ["proof", "codeproof"],
+  "source": {
+    "name": null,
+    "language": null,
+    "repo_url": null,
+    "commit_hash": null,
+    "path": null
+  },
+  "curation": {
+    "date": "2026-09-09"
+  },
+  "root_package": "TinyTrivial",
+  "files": {
+    "root_hub": "TinyTrivial.lean",
+    "harness": "TinyTrivial/Harness.lean",
+    "test": "TinyTrivial/Test.lean",
+    "lakefile": "lakefile.toml"
+  },
+  "packages": [
+    {
+      "name": "TinyTrivial",
+      "bundle": "TinyTrivial/Bundle.lean",
+      "bundle_type": "TinyTrivialBundle",
+      "repo_impl_field": "tiny",
+      "modules": [
+        {
+          "name": "Core",
+          "impl": "TinyTrivial/Impl/Core.lean",
+          "spec": "TinyTrivial/Spec/Core.lean",
+          "apis": [
+            {
+              "name": "idNat",
+              "sig": "IdNatSig",
+              "type": "Nat → Nat",
+              "source_id": "TinyTrivial/Impl/Core.lean:idNat:20",
+              "source_file": "TinyTrivial/Impl/Core.lean",
+              "source_line": 20,
+              "source_signature": "def TT.idNat : TT.IdNatSig",
+              "upstream_name": "idNat"
+            }
+          ],
+          "specs": [
+            {
+              "name": "spec_idNat",
+              "source_id": "TinyTrivial/Spec/Core.lean:spec_idNat:11",
+              "source_file": "TinyTrivial/Spec/Core.lean",
+              "source_line": 11,
+              "source_signature": "def spec_idNat (impl : RepoImpl) : Prop",
+              "source_theorem": "spec_idNat"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
