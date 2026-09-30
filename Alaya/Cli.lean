@@ -10,7 +10,7 @@ occurrences rather than a map, so a flag may be repeated and every value survive
 is.
 
 A `--flag` that is last on the line, or followed by another `--flag`, is a *switch*: it is
-recorded with an empty value, so `--force` needs no value. The price of that rule is that a flag
+recorded with an empty value, so `--json` needs no value. The price of that rule is that a flag
 value may not itself begin with `--`. A standalone `--` ends option parsing: every
 remaining token is positional, including flag-like tokens and empty strings.
 -/

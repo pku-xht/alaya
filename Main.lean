@@ -267,7 +267,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let grader ← args.require "grader"
       "e.g. --grader 'cp -R ./hidden-tests/. {checkout}/ && pytest -q'"
     let timeout ← args.natD "timeout" 900
-    let node ← evaluate data.store data.workspaces (data.path / "eval") target grader timeout (args.isSet "force")
+    let node ← evaluate data.store data.workspaces (data.path / "eval") target grader timeout
     match (← getState data.store node).evaluation? with
     | some e => emit s!"{node.hex}  {e.verdict}  ({e.elapsedMs} ms)"
     | none => emit node.hex
@@ -337,7 +337,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
       "html [FILE] [--hide DIR] | " ++
       "show HASH [--view] | diff A B | rm HASH) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++
-      "[--timeout S] [--force]"
+      "[--timeout S]"
 
 /-- Exit 0 on success, 3 when a run stopped at a question (`exitWaiting`), 4 when it stopped
 because the time budget was spent (`exitOutOfTime`), 1 on error. -/
