@@ -1,6 +1,7 @@
 import Test.Framework
 import Test.DirectoryWorkspaces
 import Test.Scripted
+import Test.Container
 import Alaya
 
 /-! Tests of the trajectory tree: tell, commit, questions and replies, the report, images, forks,
@@ -24,14 +25,18 @@ private def cachedRuntime (responses : Array Chat.Response) (config : Config := 
   let cached ← assertOk <| Cache.persistent model { directory := (← scratch) / "cache" }
   let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
   let work ← workDir
-  let executor := Executor.onHost config.executor
+  let executor ← containerExecutor config.executor
   pure { store, workspaces := ← workspaces, workDir := work, executor, model := cached
          agent := agent executor config }
 
 /-- A root for the test task over `project`. -/
 private def mkRoot (rt : Runtime) (project : System.FilePath) (image? : Option String := none) :
-    TestM Hash :=
-  assertOk <| createRoot rt.store rt.workspaces (initialLog {} "t" testUname) project (some "t") image? (agent := ({} : Config).toJson)
+    TestM Hash := do
+  let image ← match image? with
+    | some image => pure image
+    | none => testImage
+  assertOk <| createRoot rt.store rt.workspaces (initialLog {} "t" testUname) project image (some "t")
+    (agent := ({} : Config).toJson)
 
 /-- A directory standing in for a hidden test set. -/
 private def testsDir : TestM System.FilePath := do
@@ -39,8 +44,9 @@ private def testsDir : TestM System.FilePath := do
   assertOk <| Result.fromIO Error.storage do
     IO.FS.createDirAll (dir / "tests")
     IO.FS.writeFile (dir / "tests" / "extra.txt") "hidden\n"
-  -- Absolute: a grader runs inside the checkout, where a relative path would not resolve.
-  assertOk <| Result.fromIO Error.storage (IO.FS.realPath dir)
+  -- Relative to the directory the tests run from, which is the grader's working directory,
+  -- mounted at `/grader`.
+  pure dir
 
 private def emptyProject : TestM System.FilePath := do
   let proj := (← scratch) / "proj"
@@ -213,15 +219,12 @@ def suite : Suite := Testing.suite "trajectory" #[
     let rt ← cachedRuntime #[responseWith #[call "c1" "bash" "echo hi"]]
     let pinned := "example.test/img@sha256:0123456789abcdef"
     let root ← mkRoot rt (← emptyProject) (some pinned)
-    assertEqual "root" (← assertOk (getState rt.store root)).image? (some pinned)
+    assertEqual "root" (← assertOk (getState rt.store root)).image pinned
     let child ← stepped <| stepOnce rt "test:model" root
-    assertEqual "turn" (← assertOk (getState rt.store child)).image? (some pinned)
+    assertEqual "turn" (← assertOk (getState rt.store child)).image pinned
     let edited ← emptyProject
     let intervention ← assertOk <| commit rt.store rt.workspaces child edited (some "by hand")
-    assertEqual "intervention" (← assertOk (getState rt.store intervention)).image? (some pinned)
-    -- A trajectory created without an image keeps running on the host.
-    let hostRoot ← mkRoot rt (← emptyProject)
-    assertEqual "host root" (← assertOk (getState rt.store hostRoot)).image? none,
+    assertEqual "intervention" (← assertOk (getState rt.store intervention)).image pinned,
 
   test "a fork does not inherit the abandoned branch's files" do
     let rt ← cachedRuntime #[
@@ -239,13 +242,14 @@ def suite : Suite := Testing.suite "trajectory" #[
     check (← assertOk (rt.workspaces.readFile? state.workspace "junk.txt")).isNone
       "a fork must not start from the abandoned branch's workspace",
 
-  test "a grader runs on the host against a checkout, and its files never reach a later turn" do
+  test "a grader runs in the trajectory's image against a checkout, and its files never reach a later turn" do
     let rt ← cachedRuntime #[responseWith #[call "a" "bash" "echo hi > after.txt"]]
     let root ← mkRoot rt (← emptyProject)
     let tests ← testsDir
     let scratch := (← scratch) / "eval"
     let node ← assertOk <| evaluate rt.store rt.workspaces scratch root
       ("cp -R " ++ tests.toString ++ "/. {checkout}/ && test -f {checkout}/tests/extra.txt")
+      (← testUser?)
     let state ← assertOk (getState rt.store node)
     assertEqual "kind" state.kind Kind.evaluation
     assertEqual "verdict" (state.evaluation?.map (·.passed)) (some true)
@@ -268,16 +272,16 @@ def suite : Suite := Testing.suite "trajectory" #[
     let rt ← cachedRuntime #[]
     let root ← mkRoot rt (← emptyProject)
     let scratch := (← scratch) / "eval"
-    let node ← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3"
+    let node ← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3" (← testUser?)
     let state ← assertOk (getState rt.store node)
     assertEqual "returncode" (state.evaluation?.map (·.returncode)) (some 3)
     assertEqual "passed" (state.evaluation?.map (·.passed)) (some false)
     assertEqual "no evidence" (state.evaluation?.bind (·.evidence?)) none
-    let again ← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3"
+    let again ← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3" (← testUser?)
     check (again != node) "expected the same grader to run again as a new evaluation"
     assertEqual "two children" (← assertOk (children rt.store root)).size 2
     -- A different grader is another evaluation of the same state.
-    let other ← assertOk <| evaluate rt.store rt.workspaces scratch root "true"
+    let other ← assertOk <| evaluate rt.store rt.workspaces scratch root "true" (← testUser?)
     check (other != node && other != again) "expected a distinct node for a distinct grader"
     assertEqual "three children" (← assertOk (children rt.store root)).size 3,
 
@@ -291,7 +295,7 @@ def suite : Suite := Testing.suite "trajectory" #[
     let grader := "test -f {checkout}/app.txt && " ++
       "printf '{\"passed\": true, \"score\": {\"passed\": 3, \"total\": 4}}' > {out}/verdict.json && " ++
       "echo detail > {out}/report.txt && exit 1"
-    let node ← assertOk <| evaluate rt.store rt.workspaces scratch root grader
+    let node ← assertOk <| evaluate rt.store rt.workspaces scratch root grader (← testUser?)
     let state ← assertOk (getState rt.store node)
     let some e := state.evaluation? | fail "expected an evaluation"
     assertEqual "returncode" e.returncode 1

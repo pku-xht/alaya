@@ -172,7 +172,7 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
     ("kind", state.kind.toString),
     ("workspace", state.workspace.hex),
     ("note", state.note?.map Lean.Json.str |>.getD .null),
-    ("image", state.image?.map Lean.Json.str |>.getD .null),
+    ("image", state.image),
     ("agent", state.agent?.getD .null),
     ("elapsed", state.elapsedMs?.map (fun ms => Lean.Json.str (seconds ms)) |>.getD .null),
     ("outcome", match state.outcome? with

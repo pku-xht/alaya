@@ -1,5 +1,6 @@
 import Test.Framework
 import Test.DirectoryWorkspaces
+import Test.Container
 import Alaya
 
 /-! The `Workspaces` contract — what the trajectory relies on, and the filesystem cases a
@@ -204,7 +205,7 @@ def resticSuite : Suite := Testing.suite "workspaces.restic" #[
     let workspaces ← assertOk <| Workspaces.Restic.open (data / "restic") (keep := #[store.dir])
     let project ← source
     writeSpec project baseSpec
-    let root ← assertOk <| createRoot store workspaces #[] project (some "t")
+    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t")
     let id := (← assertOk <| getState store root).workspace
     let refused (label : String) (action : Result Unit) : TestM Unit :=
       assertError label action fun | .configuration _ => true | _ => false
@@ -227,7 +228,7 @@ def trajectorySuite : Suite := Testing.suite "workspaces.trajectory" #[
     let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic")
     let project ← source
     writeSpec project baseSpec
-    let root ← assertOk <| createRoot store workspaces #[] project (some "t")
+    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t")
     IO.FS.writeFile (project / "README.md") "readme, by hand"
     writeSpec project #[("tests/extra.txt", "extra")]
     let child ← assertOk <| commit store workspaces root project (some "by hand") (tell? := some "look")
@@ -235,7 +236,7 @@ def trajectorySuite : Suite := Testing.suite "workspaces.trajectory" #[
     assertEqual "notice" ((← assertOk <| getState store child).intervention?.map (·.changed))
       (some #["M README.md", "+ tests"])
     let verdict ← assertOk <| evaluate store workspaces ((← scratch) / "eval") child
-      "test -f {checkout}/tests/extra.txt && echo seen > {out}/log.txt"
+      "test -f {checkout}/tests/extra.txt && echo seen > {out}/log.txt" (← testUser?)
     let evaluation? := (← assertOk <| getState store verdict).evaluation?
     assertEqual "passed" (evaluation?.map (·.passed)) (some true)
     let some evidence := evaluation?.bind (·.evidence?) | fail "the grader's output was not kept"

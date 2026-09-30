@@ -13,18 +13,29 @@ lake build              # the alaya executable, in .lake/build/bin/
 lake exe tests          # the test suite; pass a substring to run a subset
 ```
 
-Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls these programs on the host:
+Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls these programs:
 
 | Program | Used for |
 | --- | --- |
 | `curl` | every request to a model provider |
-| `docker` | running an agent's commands in a pinned container image |
+| `docker` | running every command an agent or a grader runs, in a pinned container image |
 | `restic` (0.17 or later) | snapshotting a workspace, writing one back out, and diffing two ([restic.net](https://restic.net)) |
-| `/bin/sh`, `uname`, `chmod` | running commands on the host, describing the host, and making a directory replaceable |
+| `chmod` | making a directory replaceable |
 
-`docker` is needed only for trajectories created with `--image`; `restic` is a single binary,
-and the rest are on any Unix host.
-A grader given to `alaya eval` is a shell command of your own and brings its own dependencies.
+Nothing an agent or a grader asks for runs on the host: every trajectory is created with
+`--image`, and its commands and its graders run in that image, so a running docker daemon is
+required, for the tests too. `restic` is a single binary, and `chmod` is on any Unix host.
+
+A first run needs an image, a project directory, a task, and a model (`docs/llm-api.md` lists
+the providers). `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` — Debian, Python 3.12, and `uv` —
+is a good default image; `alaya` records it by digest:
+
+```sh
+root=$(alaya root --task "Add a hello.py that prints hello" ./project \
+  --agent agents/mini-swe-default.json --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
+alaya resume "$root" --model PROVIDER:MODEL
+alaya tree
+```
 
 ## Documentation
 
@@ -49,7 +60,7 @@ repository, the model cache entry, and every `alaya` command.
 [`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agent.MiniSwe` is the port of
 mini-SWE-agent as one agent: the original's prompts, cut from its `mini.yaml`, its `bash` tool, and protocol for reading a
 response and answering a malformed one, realized through the agent API with Lean-native
-rendering, and commands run on the host or in a container.
+rendering, and commands run in a container.
 
 ## Example
 

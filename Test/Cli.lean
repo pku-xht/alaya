@@ -1,5 +1,6 @@
 import Test.Framework
 import Test.DirectoryWorkspaces
+import Test.Container
 import Alaya
 
 /-! Command-line parsing and the DGX Spark endpoint syntax. -/
@@ -197,7 +198,8 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let project := (← scratch) / "proj"
     IO.FS.createDirAll project
     let built ← assertOk <| Agent.Families.instanceOf (.mkObj [("family", "mini-swe"), ("step_limit", 7)])
-    let root ← assertOk <| Trajectory.createRoot store workspaces #[] project (some "t") (agent := built.config)
+    let root ← assertOk <| Trajectory.createRoot store workspaces #[] project (← testImage) (some "t")
+      (agent := built.config)
     let child ← assertOk <| Trajectory.tell store root "hello"
     assertEqual "root" ((← assertOk <| Trajectory.agentOf store root).map compressed) (some (compressed built.config))
     assertEqual "child" ((← assertOk <| Trajectory.agentOf store child).map compressed) (some (compressed built.config))

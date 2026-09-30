@@ -8,8 +8,9 @@
 usage: grade.py CHECKOUT OUT
 
 CHECKOUT is a checkout of the attempt; its `tests/` is replaced by the reference's 232 programs,
-and the suite is run in the benchmark's container image. OUT receives `pytest.txt` (the suite's
-output), `junit.xml` (per-test results), and `verdict.json`:
+and the suite is run with the attempt's own project. It runs in the Bija image (`Dockerfile`),
+where `alaya eval` runs it: the image has the suite's dependencies, so nothing is downloaded. OUT
+receives `pytest.txt` (the suite's output), `junit.xml` (per-test results), and `verdict.json`:
 
     {"passed": false,
      "score": {"passed": 155, "total": 232},
@@ -20,7 +21,7 @@ output), `junit.xml` (per-test results), and `verdict.json`:
 `standalone` counts `test_generated_python_is_standalone` for the same programs. `passed` is
 true when every check of both kinds passed. The exit status is 0 when passed, 1 otherwise.
 
-Run as an alaya grader from the repository root:
+Run as an alaya grader from the repository root, on a trajectory created with the Bija image:
 
     alaya eval HASH --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800
 """
@@ -28,35 +29,30 @@ Run as an alaya grader from the repository root:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-IMAGE = "ghcr.io/astral-sh/uv:python3.12-alpine3.23"
 HERE = Path(__file__).resolve().parent
 REFERENCE_TESTS = HERE / "reference" / "tests"
 
 
 def run_suite(checkout: Path, out: Path) -> int:
-    """Runs pytest in the container; the results go to OUT. Returns pytest's exit status."""
+    """Runs pytest over the checkout; the results go to OUT. Returns pytest's exit status."""
     tests = checkout / "tests"
     if tests.exists():
         shutil.rmtree(tests)
     shutil.copytree(REFERENCE_TESTS, tests, ignore=shutil.ignore_patterns("__pycache__"))
-    command = [
-        "docker", "run", "--rm",
-        "-v", f"{checkout}:/workspace", "-v", f"{out}:/out", "-w", "/workspace",
-        # A fresh environment outside the checkout, so the attempt's own .venv is neither
-        # trusted nor modified; the cache volume keeps the second run from downloading again.
-        "-e", "UV_PROJECT_ENVIRONMENT=/tmp/venv", "-e", "UV_LINK_MODE=copy",
-        "-v", "bija-grader-uv-cache:/root/.cache/uv",
-        IMAGE, "uv", "run", "pytest", "-q", "--tb=no", "-p", "no:cacheprovider",
-        "--junitxml=/out/junit.xml",
-    ]
+    # A fresh environment outside the checkout, so the attempt's own .venv is neither trusted nor
+    # modified.
+    env = {**os.environ, "UV_PROJECT_ENVIRONMENT": "/tmp/grader-venv"}
+    command = ["uv", "run", "pytest", "-q", "--tb=no", "-p", "no:cacheprovider",
+               f"--junitxml={out / 'junit.xml'}"]
     with (out / "pytest.txt").open("w", encoding="utf-8") as log:
-        result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+        result = subprocess.run(command, cwd=checkout, env=env, stdout=log, stderr=subprocess.STDOUT)
     return result.returncode
 
 

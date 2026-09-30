@@ -4,6 +4,7 @@ import Alaya.Workspaces
 import Alaya.Cache
 import Alaya.Provider
 import Alaya.Executor
+import Alaya.Executor.Docker
 
 /-! A content-addressed trajectory tree over any `Alaya.Agent.Agent`, and the operations the
 command line drives it with. See `docs/trajectory-schema.md`. -/
@@ -227,8 +228,9 @@ structure State where
   note? : Option String := none
   /-- The verdict, on an `evaluation` state. -/
   evaluation? : Option Evaluation := none
-  /-- The pinned container image, inherited from the root; `none` on the host. -/
-  image? : Option String := none
+  /-- The pinned container image every command of the trajectory runs in, inherited from the
+  root. -/
+  image : String
   /-- On a root: the agent that runs this trajectory, as its complete configuration — `family`
   and the family's fields — so that every later command builds the same agent. -/
   agent? : Option Lean.Json := none
@@ -294,7 +296,7 @@ def toJson (state : State) : Lean.Json :=
     ("appended", .arr (state.appended.map eventToJson)),
     ("outcome", state.outcome?.map outcomeToJson |>.getD .null),
     ("note", state.note?.map Lean.Json.str |>.getD .null),
-    ("image", state.image?.map Lean.Json.str |>.getD .null),
+    ("image", state.image),
     ("agent", state.agent?.getD .null),
     ("elapsed_ms", state.elapsedMs?.map (fun ms => (ms : Lean.Json)) |>.getD .null),
     ("evaluation", state.evaluation?.map evaluationToJson |>.getD .null),
@@ -317,7 +319,7 @@ def fromJson (json : Lean.Json) : Except String State := do
     | .ok o => some <$> outcomeFromJson o
     | .error _ => pure none
   let note? := (json.getObjVal? "note" >>= Lean.Json.getStr?).toOption
-  let image? := (json.getObjVal? "image" >>= Lean.Json.getStr?).toOption
+  let image ← json.getObjVal? "image" >>= Lean.Json.getStr?
   let agent? := match json.getObjVal? "agent" with
     | .ok (.obj _) => (json.getObjVal? "agent").toOption
     | _ => none
@@ -337,7 +339,7 @@ def fromJson (json : Lean.Json) : Except String State := do
     | .ok .null => pure none
     | .error _ => pure none
     | .ok q => some <$> Question.fromJson q
-  pure { parent?, workspace, kind, appended, outcome?, note?, image?, agent?, elapsedMs?
+  pure { parent?, workspace, kind, appended, outcome?, note?, image, agent?, elapsedMs?
          evaluation?, intervention?, question? }
 
 end State
@@ -501,14 +503,14 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
     if let .done outcome := rt.agent.next { elapsedMs := before, budgetMs? := rt.budgetMs? } log then
       let child ← putState rt.store {
         parent? := some parent, workspace, appended := #[], outcome? := some outcome
-        kind := .turn, note? := some note, image? := parentState.image? }
+        kind := .turn, note? := some note, image := parentState.image }
       return (child, log, workspace, before, .outcome outcome)
   -- Draw index = the number of children that came from sampling.
   let mut childCount := 0
   for child in ← children rt.store parent do
     if (← getState rt.store child).appended.responses > 0 then childCount := childCount + 1
   -- Children run in whatever the parent ran in; the image is a property of the trajectory.
-  let image? := parentState.image?
+  let image := parentState.image
   let started ← nowMs
   let stream ← rt.model.sample { messages := rt.agent.view log, tools := rt.agent.tools }
   let responses ← stream.nextN (childCount + 1)
@@ -522,11 +524,14 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
   let child ← putState rt.store {
     parent? := some parent, workspace, appended, outcome?, question?
     kind := if question?.isSome then .question else .turn
-    note? := some note, image?, elapsedMs? := some elapsed }
+    note? := some note, image, elapsedMs? := some elapsed }
   pure (child, log ++ appended, workspace, before + elapsed, halt)
 
-/-- Materializes `workspace` into `rt.workDir`, replacing whatever is there. -/
-private def checkoutInto (sandbox : Sandbox) (workspace : Hash) : Result Unit :=
+/-- Materializes `workspace` into `rt.workDir`, replacing whatever is there. A container bind
+mount follows the directory it was started on, which a checkout replaces, so the executor is
+closed first: its next command starts a container on the new directory. -/
+private def checkoutInto (sandbox : Sandbox) (workspace : Hash) : Result Unit := do
+  Result.fromIO Error.storage sandbox.executor.close
   sandbox.workspaces.materialize workspace sandbox.workDir
 
 /-- Whether a run that has taken `elapsed` may take another step under the budget. The budget is
@@ -575,10 +580,16 @@ partial def resume (rt : Runtime) (note : String) (hash : Hash)
 
 /-! ## Evaluation -/
 
+/-- Where a grader finds the state's files, its output directory, and the directory it was
+started from, inside its container. -/
+def graderCheckout : String := Executor.Docker.workMount
+def graderOut : String := "/out"
+def graderDir : String := "/grader"
+
 /-- The grader command with its placeholders expanded: `{checkout}` is the directory holding the
 state's files, `{out}` an empty directory for whatever the grader wants kept. -/
-def expandGrader (grader : String) (checkout out : System.FilePath) : String :=
-  (grader.replace "{checkout}" checkout.toString).replace "{out}" out.toString
+def expandGrader (grader : String) : String :=
+  (grader.replace "{checkout}" graderCheckout).replace "{out}" graderOut
 
 /-- Keeps a grader's output readable in `show` without putting megabytes in a state blob. -/
 private def truncateOutput (s : String) : String :=
@@ -600,12 +611,16 @@ private def emptyDir (dir : System.FilePath) : Result Unit := do
 private def nonEmpty (dir : System.FilePath) : Result Bool :=
   Result.fromIO Error.storage do pure (!(← dir.readDir).isEmpty)
 
-/-- Runs `grader` on the host against a fresh checkout of `hash`'s workspace and records the
-verdict as a leaf child whose workspace is the checkout after the grader ran. `scratch` is a directory the trajectory may wipe: the checkout and the
-grader's output directory are made under it. Every call runs the grader and adds a new
-evaluation, even when an earlier one used the same command. -/
+/-- Runs `grader` in a fresh container from the trajectory's image, against a fresh checkout of
+`hash`'s workspace, and records the verdict as a leaf child whose workspace is the checkout after
+the grader ran. The checkout is mounted at the trajectory's working directory, an empty output
+directory at `/out`, and the directory `alaya` was started from, read-only, at `/grader`, which is
+the grader's working directory, so relative paths in the command are the person's. The
+container runs as `user?` and without network. `scratch` is a directory the trajectory may wipe:
+the checkout and the output directory are made under it. Every call runs the grader and adds a
+new evaluation, even when an earlier one used the same command. -/
 def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePath) (hash : Hash)
-    (grader : String) (timeoutSeconds : Nat := 900) : Result Hash := do
+    (grader : String) (user? : Option String) (timeoutSeconds : Nat := 900) : Result Hash := do
   let state ← getState store hash
   if state.kind == .evaluation then
     throw <| .configuration "cannot evaluate an evaluation: it is already a leaf"
@@ -617,11 +632,13 @@ def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePat
   emptyDir checkout
   emptyDir out
   workspaces.materialize state.workspace checkout
-  let command := expandGrader grader checkout out
-  let runner := Executor.onHost { timeoutSeconds }
+  let here ← Result.fromIO Error.storage IO.currentDir
   let started ← Result.fromIO Error.storage IO.monoMsNow
-  -- In the caller's directory, so relative paths in the command are the person's, not the checkout's.
-  let output ← Result.fromIO Error.storage (runner.bash (← Result.fromIO Error.storage IO.currentDir) command)
+  let output ← Result.fromIO Error.storage <| Executor.Docker.runOnce
+    { image := state.image, user? } #[
+      { host := checkout, container := graderCheckout }, { host := out, container := graderOut },
+      { host := here, container := graderDir, readOnly := true }]
+    graderDir (expandGrader grader) timeoutSeconds
   let elapsedMs := (← Result.fromIO Error.storage IO.monoMsNow) - started
   let evidence? ← if ← nonEmpty out then some <$> workspaces.snapshot out else pure none
   let summary? ← Result.fromIO Error.storage do
@@ -637,7 +654,7 @@ def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePat
   Result.fromIO Error.storage (IO.FS.removeDirAll checkout)
   putState store {
     parent? := some hash, workspace := graded, kind := .evaluation, appended := #[]
-    image? := state.image?
+    image := state.image
     evaluation? := some {
       grader, returncode := output.exitCode?.map (fun c => Int.ofNat c.toNat) |>.getD (-1), elapsedMs
       output := truncateOutput (output.output ++
@@ -649,10 +666,9 @@ def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePat
 /-- Creates a root state from the initial project directory: the agent's opening log — its
 prompts — and a snapshot of `project`. -/
 def createRoot (store : Store) (workspaces : Workspaces) (log : Log) (project : System.FilePath)
-    (note? : Option String := none) (image? : Option String := none)
-    (agent : Lean.Json := .null) : Result Hash := do
+    (image : String) (note? : Option String := none) (agent : Lean.Json := .null) : Result Hash := do
   let workspace ← workspaces.snapshot project
-  putState store { parent? := none, workspace, kind := .root, appended := log, note?, image?
+  putState store { parent? := none, workspace, kind := .root, appended := log, note?, image
                    agent? := if agent.isNull then none else some agent }
 
 /-- The root of the tree `hash` is in. -/
@@ -700,7 +716,7 @@ def commit (store : Store) (workspaces : Workspaces) (hash : Hash) (dir : System
     parent? := some hash, workspace, kind := .intervention, note?
     appended := intervention?.map (fun i => #[Event.message (.user (interventionNotice i))])
       |>.getD #[]
-    intervention?, image? := parent.image? }
+    intervention?, image := parent.image }
 
 /-- Records a person's message to the agent as a child of `hash`: same workspace, and the log
 grown by one user turn carrying the message in the intervention envelope. -/
@@ -712,7 +728,7 @@ def tell (store : Store) (hash : Hash) (message : String) : Result Hash := do
     parent? := some hash, workspace := parent.workspace, kind := .message
     appended := #[.message (.user (interventionNotice intervention))]
     intervention? := some intervention
-    image? := parent.image? }
+    image := parent.image }
 
 /-- Validates an answer before creating a reply child. Its one event is the observation of
 the asking call, carrying the valid `text` verbatim. -/
@@ -725,7 +741,7 @@ def reply (store : Store) (hash : Hash) (text : String) : Result Hash := do
   putState store {
     parent? := some hash, workspace := parent.workspace, kind := .reply
     appended := #[.observation question.callId (.str text)]
-    image? := parent.image? }
+    image := parent.image }
 
 /-- Records that a person cannot answer, for any question type. The structured status is
 distinct from every ordinary string answer, including an open answer containing this JSON.
@@ -738,7 +754,7 @@ def replyUnavailable (store : Store) (hash : Hash) : Result Hash := do
   putState store {
     parent? := some hash, workspace := parent.workspace, kind := .reply
     appended := #[.observation question.callId (.mkObj [("status", "unavailable")])]
-    image? := parent.image? }
+    image := parent.image }
 
 /-- Every question in the forest that has not been answered: waiting states without a `reply`
 child. -/
@@ -875,7 +891,7 @@ def showLines (store : Store) (hash : Hash) (view? : Option View := none) :
     s!"parent   {state.parent?.map (·.hex) |>.getD "(root)"}",
     s!"workspace {state.workspace.hex}"]
   if let some note := state.note? then lines := lines.push s!"note     {note}"
-  if let some image := state.image? then lines := lines.push s!"image    {image}"
+  lines := lines.push s!"image    {state.image}"
   if let some agent := state.agent? then lines := lines.push s!"agent    {agent.compress}"
   if let some ms := state.elapsedMs? then lines := lines.push s!"elapsed  {seconds ms}"
   let total ← elapsedMs store hash

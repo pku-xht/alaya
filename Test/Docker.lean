@@ -1,9 +1,9 @@
 import Test.Framework
 import Test.DirectoryWorkspaces
+import Test.Container
 import Alaya
 
-/-! The container executor, against a real docker daemon. Every case skips when the machine has
-no usable docker or cannot get the test image, so the suite is safe to run anywhere. -/
+/-! The container executor and the grader's container, against a real docker daemon. -/
 
 namespace DockerTests
 
@@ -12,34 +12,15 @@ open Alaya
 open Alaya.Executor
 open Alaya.Trajectory
 
-/-- The image the tests run in. Small, and `busybox` gives it a `timeout(1)`. -/
-private def imageReference : String := "alpine:3"
-
 /-- Mini's command settings, with a short timeout. -/
 private def miniConfig : Agent.MiniSwe.Config :=
   { executor := { Agent.MiniSwe.defaultExecutor with timeoutSeconds := 5 } }
 
 private def config : Executor.Config := miniConfig.executor
 
-/-- Pinned settings for the test image, or `none` when this machine cannot run the suite. -/
-private def settings? : TestM (Option Docker.Settings) := do
-  let daemonUp ←
-    try pure ((← IO.Process.output { cmd := "docker", args := #["info"] }).exitCode == 0)
-    catch _ => pure false
-  if !daemonUp then return none
-  let args := Cli.parse ["--image", imageReference]
-  match ← (do (← Docker.settingsFor args imageReference).pin).toBaseIO with
-  | .ok settings => pure (some settings)
-  | .error _ => pure none
-
-private def skipping (reason : String) : TestM Unit := do
-  IO.println s!"SKIP {(← read).name}: {reason}"
-
-/-- Runs `body` with pinned settings, or skips. -/
+/-- Runs `body` with the pinned settings for the test image. -/
 private def withDocker (body : Docker.Settings -> TestM Unit) : TestM Unit := do
-  match ← settings? with
-  | some settings => body settings
-  | none => skipping s!"no docker daemon, or {imageReference} unavailable"
+  body (← testSettings)
 
 /-- A model that answers with `responses` in order, for driving one real turn. -/
 private def scripted (responses : Array Chat.Response) : TestM Model := do
@@ -72,7 +53,7 @@ private def runtime (settings : Docker.Settings) (work : System.FilePath) (store
 def suite : Suite := Testing.suite "docker" #[
   test "pins the image to exact bits and reads uname from it, not the host" <| withDocker
     fun settings => do
-      check (settings.image != imageReference)
+      check (settings.image != testImageReference)
         s!"expected a pinned reference, got {settings.image}"
       check ((settings.image.splitOn "sha256:").length > 1)
         s!"expected a digest, got {settings.image}"
@@ -97,7 +78,7 @@ def suite : Suite := Testing.suite "docker" #[
       finally
         executor.close,
 
-  test "merges stderr into stdout at the fd level, as the host executor does" <| withDocker
+  test "merges stderr into stdout at the fd level" <| withDocker
     fun settings => do
       let work ← workspace
       let executor ← assertOk (Docker.executor settings config)
@@ -138,14 +119,15 @@ def suite : Suite := Testing.suite "docker" #[
       let work ← workspace
       let executor ← assertOk (Docker.executor settings config)
       let _ ← executor.exec work #["true"] "true"
-      let running : IO String := do
-        pure (← IO.Process.output {
-          cmd := "docker"
-          args := #["ps", "--quiet", "--filter", s!"ancestor={settings.image}"] }).stdout
-      check (!(← running).trimAscii.isEmpty)
-        "expected a running container while the executor is open"
+      -- Other tests' containers may still be running, so count the difference.
+      let running : IO Nat := do
+        let out ← IO.Process.output {
+          cmd := "docker", args := #["ps", "--quiet", "--filter", s!"label={testLabel}"] }
+        pure ((out.stdout.splitOn "\n").filter (!·.isEmpty)).length
+      let open_ ← running
+      check (open_ > 0) "expected a running container while the executor is open"
       executor.close
-      assertEqual "none left" (← running).trimAscii.toString "",
+      assertEqual "one fewer" (← running) (open_ - 1),
 
   test "a step runs its command in the container and snapshots what it wrote" <| withDocker
     fun settings => do
@@ -158,10 +140,10 @@ def suite : Suite := Testing.suite "docker" #[
       try
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
-          (some "t") (some settings.image)
+          settings.image (some "t")
         let child ← stepped <| stepOnce rt "test:model" root
         let state ← assertOk (getState store child)
-        assertEqual "image inherited" state.image? (some settings.image)
+        assertEqual "image inherited" state.image settings.image
         -- The container wrote it, the host snapshotted it.
         assertEqual "snapshot"
           ((← assertOk ((← workspaces).readFile? state.workspace "made.txt")).map (String.fromUTF8? ·))
@@ -189,7 +171,7 @@ def suite : Suite := Testing.suite "docker" #[
         | .configuration m => (m.splitOn "/no/such/path").length > 1
         | _ => false,
 
-  test "a grader on the host sees what a container turn wrote" <| withDocker
+  test "a grader runs in the trajectory's image and sees what a turn wrote" <| withDocker
     fun settings => do
       let work ← workspace
       let project := (← scratch) / "proj"
@@ -200,15 +182,16 @@ def suite : Suite := Testing.suite "docker" #[
       try
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
-          (some "t") (some settings.image)
+          settings.image (some "t")
         let child ← stepped <| stepOnce rt "test:model" root
-        -- The grader is a host program over a checkout; the container is not involved.
+        -- The image's own file shows the grader is in the container, not on the host.
         let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") child
-          "test -f {checkout}/made.txt && cat {checkout}/made.txt"
+          "test -f /etc/alpine-release && test -f {checkout}/made.txt && cat {checkout}/made.txt"
+          settings.user?
         let state ← assertOk (getState store node)
         assertEqual "passed" (state.evaluation?.map (·.passed)) (some true)
         assertEqual "output" (state.evaluation?.map (·.output)) (some "made-in-container\n")
-        assertEqual "image inherited" state.image? (some settings.image)
+        assertEqual "image inherited" state.image settings.image
       finally
         rt.executor.close,
 
@@ -221,7 +204,7 @@ def suite : Suite := Testing.suite "docker" #[
       let model ← scripted #[toolResponse "awk 'BEGIN {for(i=0;i<6000;i++) printf \"a\"; printf \"MIDDLE\"; for(i=0;i<6000;i++) printf \"z\"}'"]
       let first ← runtime settings work store model
       let saved ← try
-        let root ← assertOk <| createRoot store (← workspaces) #[] project (image? := some settings.image)
+        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
         stepped <| stepOnce first "produce" root
       finally first.executor.close
       let log ← assertOk <| logOf store saved
@@ -248,6 +231,43 @@ def suite : Suite := Testing.suite "docker" #[
         assertEqual "the page is the line, cut" (page?.map (·.length)) (some Agent.MiniSwe.outputLimit)
         check (page?.any fun text => (text.splitOn "MIDDLE").length == 2) "the elided middle is readable"
       finally second.executor.close,
+
+  test "a grader has no network, works from /grader read-only, and writes to {checkout} and {out}" <| withDocker
+    fun settings => do
+      let project := (← scratch) / "proj"
+      IO.FS.createDirAll project
+      let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
+      -- The tests run from the repository root, which the grader sees at /grader.
+      -- Without network the routing table has its header line and nothing else.
+      let grader := "test \"$(wc -l < /proc/net/route)\" = 1 && test \"$(pwd)\" = /grader && " ++
+        "test -f lakefile.toml && ! touch /grader/written 2>/dev/null && " ++
+        "echo checked > {checkout}/graded.txt && echo kept > {out}/report.txt"
+      let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root grader settings.user?
+      let some e := (← assertOk (getState store node)).evaluation? | fail "expected an evaluation"
+      assertEqual "passed" (e.returncode, e.output) (0, "")
+      check (!(← System.FilePath.pathExists "written")) "the grader could not write to its directory"
+      let state ← assertOk (getState store node)
+      check (← assertOk ((← workspaces).readFile? state.workspace "graded.txt")).isSome
+        "the checkout as the grader left it"
+      let some evidence := e.evidence? | fail "expected the output directory as evidence"
+      check (← assertOk ((← workspaces).readFile? evidence "report.txt")).isSome "the output directory",
+
+  test "a grader past its timeout is stopped, container and all" <| withDocker
+    fun settings => do
+      let project := (← scratch) / "proj"
+      IO.FS.createDirAll project
+      let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
+      let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root
+        "echo started; sleep 30" settings.user? (timeoutSeconds := 1)
+      let some e := (← assertOk (getState store node)).evaluation? | fail "expected an evaluation"
+      assertEqual "no exit status" e.returncode (-1)
+      check ((e.output.splitOn "timed out after 1 seconds").length > 1) s!"output: {e.output}"
+      check ((e.output.splitOn "started").length > 1) "what it printed before is kept"
+      let left ← IO.Process.output {
+        cmd := "docker", args := #["ps", "--all", "--quiet", "--filter", "name=alaya-once-"] }
+      assertEqual "no grader container left" left.stdout.trimAscii.toString "",
 
   test "a missing image is a configuration error naming it" <| withDocker
     fun _ => do

@@ -1,5 +1,6 @@
 import Test.Framework
 import Test.DirectoryWorkspaces
+import Test.Container
 import Alaya
 
 /-! The optional typed-question tool, from configuration through recorded replies and forks.
@@ -299,7 +300,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (model, requests) ← scripted (#[response #[ask "q" arguments]] ++ continuations)
         let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-          project (some "task") (agent := built.config)
+          project (← testImage) (some "task") (agent := built.config)
         let waitingHash ← resumed <| resume rt "scripted" root (fun _ => pure ())
         let questionState ← assertOk <| getState store waitingHash
         assertEqual "waiting kind" questionState.kind Kind.question
@@ -388,7 +389,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (model, requests) ← scripted #[response #[ask "q" arguments], response #[bash], response #[submit]]
         let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-          project (some "task") (agent := built.config)
+          project (← testImage) (some "task") (agent := built.config)
         let before ← assertOk <| allStates store
         assertError "only a question accepts an unavailable reply" (replyUnavailable store root) fun
           | .configuration _ => true
@@ -402,7 +403,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "reply kind" state.kind Kind.reply
         assertEqual "reply parent" state.parent? (some question)
         assertEqual "reply workspace" state.workspace questionState.workspace
-        assertEqual "reply image" state.image? questionState.image?
+        assertEqual "reply image" state.image questionState.image
         assertEqual "reply adds no runtime" state.elapsedMs? none
         assertEqual "reply inherits accumulated time" (← assertOk <| elapsedMs reopened answered)
           (← assertOk <| elapsedMs reopened question)
@@ -444,10 +445,11 @@ def suite : Suite := Testing.suite "ask_user" #[
       let project := base / "project"
       IO.FS.createDirAll project
       let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-        project (some "task") (agent := built.config)
+        project (← testImage) (some "task") (agent := built.config)
       let workspace := (← assertOk <| getState store root).workspace
       let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
       let question ← assertOk <| putState store {
+        image := recordedImage
         parent? := some root, workspace, kind := .question, elapsedMs? := some 1000
         appended := #[.response (response #[ask])]
         question? := some { callId := "q", toQuestion := form } }
@@ -500,7 +502,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (model, requests) ← scripted #[response #[ask "q" arguments], response #[submit]]
         let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-          project (some "task") (agent := built.config)
+          project (← testImage) (some "task") (agent := built.config)
         let stopped ← resumed <| resume rt "scripted" root (fun _ => pure ())
         let reopened ← assertOk <| Store.create (base / "states")
         let before ← assertOk <| allStates reopened
@@ -529,7 +531,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "one question and one continuation" (← requests.get).size 2,
 
   test "stored question forms reject malformed metadata and retain legacy open text" do
-    let seed : State := { parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .question, appended := #[], question? := some { callId := "legacy", text := "Explain the change." } }
+    let seed : State := { image := recordedImage, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .question, appended := #[], question? := some { callId := "legacy", text := "Explain the change." } }
     let legacyJson := seed.toJson.setObjVal! "question"
       (.mkObj [("call_id", "legacy"), ("text", "Explain the change.")])
     let legacy ← assertOk <| Result.fromExcept Error.storage (State.fromJson legacyJson)
@@ -599,7 +601,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (model, requests) ← scripted #[response #[ask]]
         let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-          project (some "task") (agent := built.config)
+          project (← testImage) (some "task") (agent := built.config)
         let stopped ← resumed <| resume rt "scripted" root (fun _ => pure ())
         check (← assertOk <| getState store stopped).question?.isSome "the allowed model turn asks"
         let answered ← assertOk <| reply store stopped "2"
@@ -631,17 +633,19 @@ def suite : Suite := Testing.suite "ask_user" #[
       let project := base / "project"
       IO.FS.createDirAll project
       let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-        project (some "task") (agent := built.config)
+        project (← testImage) (some "task") (agent := built.config)
       let workspace := (← assertOk <| getState store root).workspace
       -- Reconstruct an already-recorded run with two timed model steps. Fixed durations
       -- exercise persistence and accumulation without sleeps or timing-sensitive assertions.
       let previous : Chat.ToolCall := { id := "previous", name := "bash", arguments := .mkObj [("command", "true")] }
       let first ← assertOk <| putState store {
+        image := recordedImage
         parent? := some root, workspace, kind := .turn, elapsedMs? := some 700
         appended := #[.response (response #[previous]),
           .observation "previous" (Output.toJson { output := "", exitCode? := some 0 })] }
       let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
       let question ← assertOk <| putState store {
+        image := recordedImage
         parent? := some first, workspace, kind := .question, elapsedMs? := some 300
         appended := #[.response (response #[ask])]
         question? := some { callId := "q", toQuestion := form } }

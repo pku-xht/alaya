@@ -1,5 +1,6 @@
 import Test.Framework
 import Test.DirectoryWorkspaces
+import Test.Container
 import Alaya
 
 /-! Tests of the MiniVero port: the opening message it sends, and how it behaves on compiler
@@ -123,7 +124,7 @@ def suite : Suite := Testing.suite "mini-vero" #[
     | .sample => pure ()
     | _ => fail "should continue after compiler feedback",
   test "submit is terminal but is not claimed to be a passing evaluation" do
-    let agent := MiniVero.agent (Executor.onHost config.base.executor) config
+    let agent := MiniVero.agent noCommands config
     let log : Log := #[.response { toolCalls := #[{
       id := "s", name := "submit", arguments := .mkObj [("message", "done")] }] }]
     match agent.next {} log with
@@ -131,7 +132,7 @@ def suite : Suite := Testing.suite "mini-vero" #[
     | _ => fail "expected submission",
   test "the step limit is enforced and long output stays in the raw log" do
     let cfg : MiniVero.Config := { config with base := { config.base with stepLimit := 1 } }
-    let agent := MiniVero.agent (Executor.onHost cfg.base.executor) cfg
+    let agent := MiniVero.agent noCommands cfg
     let call : Chat.ToolCall := { id := "c", name := "bash", arguments := .mkObj [("command", "lake build")] }
     let raw := String.ofList (List.replicate 12000 'x')
     let log : Log := #[.response { toolCalls := #[call] },
@@ -175,12 +176,12 @@ private def runtime (responses : Array Chat.Response) (budgetMs? : Option Nat) :
   IO.FS.createDirAll project
   let work := (← scratch) / "work"
   IO.FS.createDirAll work
-  let executor := Executor.onHost config.base.executor
+  let executor ← containerExecutor config.base.executor
   let rt : Trajectory.Runtime := { store, workspaces, workDir := work, executor, model := ← scripted responses
                                    agent := MiniVero.agent executor config, budgetMs? }
   let uname : Uname := { system := "Linux", release := "", version := "", machine := "x86_64" }
   let root ← assertOk <| Trajectory.createRoot store workspaces (MiniVero.initialLog config "t" uname)
-    project (some "t") (agent := config.toJson)
+    project (← testImage) (some "t") (agent := config.toJson)
   pure (rt, root)
 
 def timeSuite : Suite := Testing.suite "mini-vero.time" #[
@@ -201,7 +202,7 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     assertEqual "tools" ((MiniVero.tools config).map (·.name)) #["bash", "submit", "time_budget"],
 
   test "time_budget records the seconds left, or that there is none, and runs nothing" do
-    let agent := MiniVero.agent (Executor.onHost config.base.executor) config
+    let agent := MiniVero.agent noCommands config
     let log : Log := #[.response (turn #[call "t" "time_budget"])]
     match agent.next { elapsedMs := 60500, budgetMs? := some 3600000 } log with
     | .record "t" json => assertEqual "left" (json.getObjVal? "seconds_left" |>.toOption |>.map (·.compress)) (some "3539")
