@@ -224,6 +224,32 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let data ← openData args
     emit (← QuestionContext.context data.store (← resolve data.store pfx)).compress
     pure 0
+  | "ls" :: pfx :: rest =>
+    if rest.length > 1 then throw <| .configuration "alaya ls HASH [PATH]"
+    let data ← openData args
+    let hash ← resolve data.store pfx
+    let workspace := (← getState data.store hash).workspace
+    let path := rest.head?.getD ""
+    let entries ← data.workspaces.list workspace path
+    if json then
+      emit (Lean.Json.mkObj [("state", hash.hex), ("workspace", workspace.hex), ("path", path),
+        ("entries", .arr (entries.map fun e => .mkObj [("name", e.name), ("path", e.path),
+          ("kind", e.kind.toString), ("size", e.size.map (fun n => (n : Lean.Json)) |>.getD .null)]))]).compress
+    else
+      for e in entries do
+        let size := e.size.map toString |>.getD "-"
+        let suffix := if e.kind == .directory then "/" else if e.kind == .symlink then "@" else ""
+        emit s!"{"".pushn ' ' (10 - min 10 size.length)}{size}  {e.path}{suffix}"
+    pure 0
+  | ["cat", pfx, path] =>
+    let data ← openData args
+    let workspace := (← getState data.store (← resolve data.store pfx)).workspace
+    let bytes ← data.workspaces.read workspace path
+    Result.fromIO Error.storage do
+      let out ← IO.getStdout
+      out.write bytes
+      out.flush
+    pure 0
   | ["question-files", pfx] =>
     let data ← openData args
     emit (← QuestionContext.directory data.store data.workspaces (← resolve data.store pfx)).compress
@@ -319,7 +345,8 @@ private def dispatch (argv : List String) : Result UInt32 := do
       "resume HASH --model P:M [--time-budget S] | step HASH --model P:M [--time-budget S] | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | reply-unavailable HASH | waiting | question-context HASH | " ++
-      "question-files HASH [PATH] | question-file HASH PATH | checkout HASH DIR [--evidence] | tree | " ++
+      "question-files HASH [PATH] | question-file HASH PATH | ls HASH [PATH] | cat HASH PATH | " ++
+      "checkout HASH DIR [--evidence] | tree | " ++
       "html [FILE] [--hide DIR] | " ++
       "show HASH [--view] | diff A B | rm HASH) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++

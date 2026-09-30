@@ -40,38 +40,13 @@ def context (store : Store) (hash : Hash) : Result Json := do
       ("state", id.hex), ("kind", item.kind.toString),
       ("events", .arr (item.appended.map eventToJson))]))]
 
-private def validatePath (path : String) : Result Unit := do
-  if !Workspaces.safeSnapshotPath path then
-    throw <| .configuration "snapshot path must be a clean relative path"
-
-/-- Walk only metadata, checking each ancestor before requesting its children. In particular,
-a symlink to a directory is never traversed, even when its target is inside the snapshot. -/
-private def entryAt (workspaces : Workspaces) (workspace : Hash) (path : String) :
-    Result Workspaces.Entry := do
-  validatePath path
-  if path.isEmpty then return { name := "", path := "", kind := .directory }
-  let mut directory := ""
-  let parts := (path.splitOn "/").toArray
-  let mut found : Workspaces.Entry := default
-  for index in [:parts.size] do
-    let name := parts[index]!
-    let expected := if directory.isEmpty then name else directory ++ "/" ++ name
-    let entries ← workspaces.listEntries workspace directory
-    let some entry := entries.find? fun entry => entry.name == name && entry.path == expected
-      | throw <| .configuration s!"no such snapshot path: {path}"
-    if index + 1 < parts.size && entry.kind != .directory then
-      throw <| .configuration s!"snapshot path crosses a non-directory: {expected}"
-    found := entry
-    directory := expected
-  pure found
-
 private def sizeJson (size : Option Nat) : Json := size.map (fun n => (n : Json)) |>.getD .null
 
 /-- Immediate entries at the question's snapshot. The empty path is the project root. -/
 def directory (store : Store) (workspaces : Workspaces) (hash : Hash)
     (path : String := "") : Result Json := do
   let state ← questionState store hash
-  let entry ← entryAt workspaces state.workspace path
+  let entry ← workspaces.entryAt state.workspace path
   if entry.kind != .directory then
     throw <| .configuration s!"not a snapshot directory: {path}"
   let entries ← workspaces.listEntries state.workspace path
@@ -87,7 +62,7 @@ def maxFileBytes : Nat := 1024 * 1024
 larger files remain visible as explicit metadata-only results. No working tree is consulted. -/
 def file (store : Store) (workspaces : Workspaces) (hash : Hash) (path : String) : Result Json := do
   let state ← questionState store hash
-  let entry ← entryAt workspaces state.workspace path
+  let entry ← workspaces.entryAt state.workspace path
   let response (kind : String) (content : Json := .null) (size := entry.size) := Json.mkObj [
     ("state", hash.hex), ("workspace", state.workspace.hex), ("path", path),
     ("kind", kind), ("content", content), ("size", sizeJson size)]
