@@ -89,8 +89,21 @@ MiniSwe truncates a single tool output of at least 10,000 characters to its begi
 
 ## Running
 
-Build with `lake build`. The image build, render, prepare, root and resume
-commands are in [the Vero integration](../benchmarks/vero/README.md).
+Build with `lake build`. The image build, render, prepare, root, resume and
+evaluation commands are in [the Vero integration](../benchmarks/vero/README.md).
+An attempt is graded through alaya's TAP grading interface
+([`docs/trajectory-schema.md`](trajectory-schema.md) §4), in the Vero grader
+image, with the trusted benchmark as the grader's input:
+
+```sh
+alaya eval STATE --grader-image alaya-vero-grader:0a7325d --input path/to/trusted/Benchmark \
+  --grader 'python /opt/alaya-vero/grade.py --mode codeproof --benchmark /grader'
+alaya cat EVALUATION_HASH .vero/report.md
+```
+
+The mode is chosen in the experiment's trusted configuration, never from the
+agent's task file. Vero remains the source of the benchmark definitions, the
+trusted reconstruction, and the grading rules.
 
 The task contract is outside `source/` and enters the root through `--task-file`.
 The proof baseline is `agents/mini-vero-default.json`; only codeproof needs a

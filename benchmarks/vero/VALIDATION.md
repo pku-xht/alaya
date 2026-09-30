@@ -19,6 +19,11 @@ lake exe tests
 AGENT=alaya-vero-agent:0a7325d
 GRADER_IMAGE=alaya-vero-grader:0a7325d
 
+python3 benchmarks/vero/tests/integration.py \
+  --agent-image "$AGENT" --grader-image "$GRADER_IMAGE" --output /tmp/vero-acceptance-new
+python3 benchmarks/vero/tests/regressions.py \
+  --agent-image "$AGENT" --grader-image "$GRADER_IMAGE" --output /tmp/vero-grader-regressions-new
+
 # Use a clean Flocq directory exported from the pinned Vero commit:
 python3 benchmarks/vero/tests/mathlib.py \
   --benchmark /path/to/pinned/vero/benchmarks/Flocq \
@@ -28,8 +33,9 @@ python3 benchmarks/vero/tests/mathlib.py \
 
 The Mathlib check records package links, the root snapshot size, and build logs.
 It rejects incompatible locks and real host package directories, then builds the
-dependency targets and Flocq offline as the host UID:GID. A small fixture without
-Mathlib cannot establish that the dependency cache works.
+dependency targets and Flocq offline as the host UID:GID, and grades the
+untouched attempt: a fail with no specification passed, not an error. A small
+fixture without Mathlib cannot establish that the dependency cache works.
 
 ## Expected behavior
 
@@ -41,6 +47,10 @@ Mathlib cannot establish that the dependency cache works.
 | A lock that differs from the image's | Refused instead of silently using the image's revision |
 | Offline build of a Mathlib benchmark | `lake build` exits 0 with `--network none`, non-root, through the package links |
 | Root snapshot of a Mathlib benchmark | Source files and symlinks only: no dependency trees |
+| Grading a blank, a correct, and a tampered attempt | `fail 0/N`, `pass N/N`, `fail`; Vero's reports in `.vero/` |
+| An answer file that is a symbolic link | Every check fails as `anti-cheat` |
+| An invalid joint claim | A failing `acceptance: joint:...` check; the specifications keep their results |
+| An unknown Vero status, a compiler timeout or signal | `Bail out!`, an `error` verdict |
 
 ## Validation records
 
@@ -67,7 +77,7 @@ platform, inputs, and commands; it does not establish untested combinations.
 
 ## Coverage boundaries
 
-- Runtime validation covers Linux amd64. The arm64 helper is cross-compiled;
-  arm64 and macOS runtime behavior are not covered by these checks.
+- The images are Linux amd64. The checks run on Linux amd64, and on macOS arm64
+  through Docker Desktop's emulation; other hosts are not covered.
 - The recorded tests establish the listed cases and workflows for their recorded
   artifacts, not correctness for every benchmark that could be rendered.
