@@ -74,7 +74,7 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) : Except String
 
 The files in `MiniSwe/` are mini's templates from `mini.yaml` (vendored beside them, from
 SWE-agent/mini-swe-agent `04d809c`), cut where jinja substitutes or branches, byte for byte;
-`Test/Mini.lean` checks each against the vendored copy. Assembly does what jinja does: puts
+`Test/MiniSwe.lean` checks each against the vendored copy. Assembly does what jinja does: puts
 the task and the `uname` in, keeps the MacOS note when `system == "Darwin"` with the
 whitespace its `{%-`/`-%}` tags strip, and drops one trailing newline from a rendering. The
 one change of text is the port's: the sentences that name mini's submission sentinel say the
