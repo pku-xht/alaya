@@ -186,11 +186,11 @@ def suite : Suite := Testing.suite "docker" #[
         let child ← stepped <| stepOnce rt "test:model" root
         -- The image's own file shows the grader is in the container, not on the host.
         let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") child
-          "test -f /etc/alpine-release && test -f {checkout}/made.txt && cat {checkout}/made.txt"
-          settings.user?
+          "test -f /etc/alpine-release && echo 1..1 && echo \"ok 1 - $(cat made.txt)\"" settings.user?
         let state ← assertOk (getState store node)
-        assertEqual "passed" (state.evaluation?.map (·.passed)) (some true)
-        assertEqual "output" (state.evaluation?.map (·.output)) (some "made-in-container\n")
+        let some e := state.evaluation? | fail "expected an evaluation"
+        assertEqual "status" e.status .pass
+        assertEqual "checks" e.checks #[{ ok := true, name := "made-in-container" }]
         assertEqual "image inherited" state.image settings.image
       finally
         rt.executor.close,
@@ -232,42 +232,71 @@ def suite : Suite := Testing.suite "docker" #[
         check (page?.any fun text => (text.splitOn "MIDDLE").length == 2) "the elided middle is readable"
       finally second.executor.close,
 
-  test "a grader has no network, works from /grader read-only, and writes to {checkout} and {out}" <| withDocker
+  test "a grader has no network, reads its input at /grader and cannot write it, and keeps stderr apart" <| withDocker
     fun settings => do
       let project := (← scratch) / "proj"
       IO.FS.createDirAll project
+      let input := (← scratch) / "input"
+      writeSpec input #[("data.txt", "trusted")]
       let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
       let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
-      -- The tests run from the repository root, which the grader sees at /grader.
       -- Without network the routing table has its header line and nothing else.
-      let grader := "test \"$(wc -l < /proc/net/route)\" = 1 && test \"$(pwd)\" = /grader && " ++
-        "test -f lakefile.toml && ! touch /grader/written 2>/dev/null && " ++
-        "echo checked > {checkout}/graded.txt && echo kept > {out}/report.txt"
-      let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root grader settings.user?
-      let some e := (← assertOk (getState store node)).evaluation? | fail "expected an evaluation"
-      assertEqual "passed" (e.returncode, e.output) (0, "")
-      check (!(← System.FilePath.pathExists "written")) "the grader could not write to its directory"
+      let grader := "echo noise >&2; test \"$(wc -l < /proc/net/route)\" = 1 && " ++
+        "test \"$(pwd)\" = /workspace && test \"$(cat /grader/data.txt)\" = trusted && " ++
+        "! touch /grader/written 2>/dev/null && echo checked > graded.txt && " ++
+        "printf '1..1\\nok 1 - isolated\\n'"
+      let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root grader
+        settings.user? (input? := some input)
       let state ← assertOk (getState store node)
+      let some e := state.evaluation? | fail "expected an evaluation"
+      assertEqual "status" (e.status, e.reason) (.pass, "")
+      assertEqual "stdout is the TAP" e.stdout "1..1\nok 1 - isolated\n"
+      assertEqual "stderr apart" e.stderr "noise\n"
+      check (!(← (input / "written").pathExists)) "the input stays as it was"
       check (← assertOk ((← workspaces).readFile? state.workspace "graded.txt")).isSome
-        "the checkout as the grader left it"
-      let some evidence := e.evidence? | fail "expected the output directory as evidence"
-      check (← assertOk ((← workspaces).readFile? evidence "report.txt")).isSome "the output directory",
+        "the checkout as the grader left it",
 
-  test "a grader past its timeout is stopped, container and all" <| withDocker
+  test "a grader past its timeout is an error, and its container is removed" <| withDocker
     fun settings => do
       let project := (← scratch) / "proj"
       IO.FS.createDirAll project
       let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
       let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
+      -- Complete TAP before the timeout does not make it a pass.
       let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root
-        "echo started; sleep 30" settings.user? (timeoutSeconds := 1)
+        "printf '1..1\\nok 1\\n'; sleep 30" settings.user? (timeoutSeconds := 1)
       let some e := (← assertOk (getState store node)).evaluation? | fail "expected an evaluation"
-      assertEqual "no exit status" e.returncode (-1)
-      check ((e.output.splitOn "timed out after 1 seconds").length > 1) s!"output: {e.output}"
-      check ((e.output.splitOn "started").length > 1) "what it printed before is kept"
+      assertEqual "status" e.status .error
+      assertEqual "no exit status" e.returncode? none
+      assertEqual "reason" e.reason "timed out after 1 seconds"
+      assertEqual "what it printed before is kept" e.stdout "1..1\nok 1\n"
       let left ← IO.Process.output {
         cmd := "docker", args := #["ps", "--all", "--quiet", "--filter", "name=alaya-once-"] }
       assertEqual "no grader container left" left.stdout.trimAscii.toString "",
+
+  test "--grader-image runs the grader in another image, pinned and recorded" <| withDocker
+    fun settings => do
+      let project := (← scratch) / "proj"
+      IO.FS.createDirAll project
+      let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+      -- The trajectory's own image does not exist, so only the grader image can run it.
+      let root ← assertOk <| createRoot store (← workspaces) #[] project recordedImage
+      let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root
+        "test -f /etc/alpine-release && printf '1..1\\nok 1\\n'" settings.user?
+        (graderImage? := some testImageReference)
+      let some e := (← assertOk (getState store node)).evaluation? | fail "expected an evaluation"
+      assertEqual "status" e.status .pass
+      assertEqual "pinned" e.graderImage settings.image
+      -- A grader image that cannot be had is no verdict at all.
+      assertError "missing" (evaluate store (← workspaces) ((← scratch) / "eval") root "true"
+          settings.user? (graderImage? := some "alaya.invalid/nope:1")) fun
+        | .configuration m => (m.splitOn "alaya.invalid/nope").length > 1
+        | _ => false
+      -- Without one, the trajectory's missing image is an error verdict with docker's message.
+      let broken ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root "true" settings.user?
+      let some b := (← assertOk (getState store broken)).evaluation? | fail "expected an evaluation"
+      assertEqual "cannot start" b.status .error
+      check (!b.stderr.isEmpty) "docker's message is kept",
 
   test "a trajectory at another workdir runs its commands there, and its grader finds the checkout there" <| withDocker
     fun settings => do
@@ -288,9 +317,10 @@ def suite : Suite := Testing.suite "docker" #[
           ((← assertOk ((← workspaces).readFile? state.workspace "where.txt")).map (String.fromUTF8? ·))
           (some (some "/testbed\n"))
         let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") child
-          "test {checkout} = /testbed && test \"$(cat /testbed/where.txt)\" = /testbed" settings.user?
+          "test \"$(pwd)\" = /testbed && test \"$(cat where.txt)\" = /testbed && printf '1..1\\nok\\n'"
+          settings.user?
         let evaluation ← assertOk (getState store node)
-        assertEqual "graded there" (evaluation.evaluation?.map (·.passed)) (some true)
+        assertEqual "graded there" (evaluation.evaluation?.map (·.status)) (some .pass)
         assertEqual "evaluation workdir" evaluation.workdir "/testbed"
       finally
         rt.executor.close,

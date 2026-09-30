@@ -3,32 +3,25 @@
 # requires-python = ">=3.12"
 # dependencies = []
 # ///
-"""Grade a Bija attempt against the reference acceptance suite.
+"""Grade a Bija attempt against the reference acceptance suite, as an alaya grader.
 
-usage: grade.py CHECKOUT OUT
+usage: grade.py
 
-CHECKOUT is a checkout of the attempt; its `tests/` is replaced by the reference's 232 programs,
-and the suite is run with the attempt's own project. It runs in the Bija image (`Dockerfile`),
-where `alaya eval` runs it: the image has the suite's dependencies, so nothing is downloaded. OUT
-receives `pytest.txt` (the suite's output), `junit.xml` (per-test results), and `verdict.json`:
+`alaya eval` runs it in the Bija image (`Dockerfile`), in a checkout of the attempt, with this
+directory as the grader's trusted input at /grader. From the repository root:
 
-    {"passed": false,
-     "score": {"passed": 155, "total": 232},
-     "standalone": {"passed": 150, "total": 232},
-     "areas": {"attempt": {"passed": 14, "total": 16}, ...}}
+    alaya eval HASH --input example/bija --grader /grader/grade.py --timeout 1800
 
-`score` counts `test_program`: one check per program, run through the command line.
-`standalone` counts `test_generated_python_is_standalone` for the same programs. `passed` is
-true when every check of both kinds passed. The exit status is 0 when passed, 1 otherwise.
-
-Run as an alaya grader from the repository root, on a trajectory created with the Bija image:
-
-    alaya eval HASH --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800
+It replaces the checkout's `tests/` with the reference's 232 programs, runs the suite with the
+attempt's own project, and prints TAP on stdout: one check per program run through the command
+line (`program AREA/NAME`), then one per program compiled with `bija build` and run under a bare
+interpreter (`standalone AREA/NAME`). A suite that did not run bails out. The pass counts by
+area go to stderr, and the suite's output and JUnit report stay in the checkout under `.grade/`,
+where `alaya cat HASH .grade/pytest.txt` reads them.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -38,10 +31,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REFERENCE_TESTS = HERE / "reference" / "tests"
+KINDS = {"test_program": "program", "test_generated_python_is_standalone": "standalone"}
 
 
-def run_suite(checkout: Path, out: Path) -> int:
-    """Runs pytest over the checkout; the results go to OUT. Returns pytest's exit status."""
+def run_suite(checkout: Path, reports: Path) -> int:
+    """Runs pytest over the checkout; its output and JUnit report go to REPORTS."""
     tests = checkout / "tests"
     if tests.exists():
         shutil.rmtree(tests)
@@ -50,54 +44,49 @@ def run_suite(checkout: Path, out: Path) -> int:
     # modified.
     env = {**os.environ, "UV_PROJECT_ENVIRONMENT": "/tmp/grader-venv"}
     command = ["uv", "run", "pytest", "-q", "--tb=no", "-p", "no:cacheprovider",
-               f"--junitxml={out / 'junit.xml'}"]
-    with (out / "pytest.txt").open("w", encoding="utf-8") as log:
+               f"--junitxml={reports / 'junit.xml'}"]
+    with (reports / "pytest.txt").open("w", encoding="utf-8") as log:
         result = subprocess.run(command, cwd=checkout, env=env, stdout=log, stderr=subprocess.STDOUT)
     return result.returncode
 
 
-def count(cases: list[ET.Element]) -> dict[str, int]:
-    passed = sum(1 for case in cases if case.find("failure") is None and case.find("error") is None)
-    return {"passed": passed, "total": len(cases)}
+def checks(junit: Path) -> list[tuple[bool, str]]:
+    """One (passed, name) per program and kind: every command-line check, then every standalone
+    one, each in the order of the programs' names."""
+    found: dict[str, list[tuple[str, bool]]] = {kind: [] for kind in KINDS.values()}
+    for case in ET.parse(junit).getroot().iter("testcase"):
+        test, _, program = case.get("name", "").partition("[")
+        if test in KINDS and program.endswith("]"):
+            passed = case.find("failure") is None and case.find("error") is None
+            found[KINDS[test]].append((program[:-1], passed))
+    return [(passed, f"{kind} {program}")
+            for kind in KINDS.values() for program, passed in sorted(found[kind])]
 
 
-def verdict(junit: Path) -> dict:
-    cases = list(ET.parse(junit).getroot().iter("testcase"))
-    programs = [c for c in cases if c.get("name", "").startswith("test_program[")]
-    standalone = [c for c in cases if c.get("name", "").startswith("test_generated_python_is_standalone[")]
-    areas: dict[str, list[ET.Element]] = {}
-    for case in programs:
-        # test_program[attempt/nested_wither] -> attempt
-        area = case.get("name", "").split("[", 1)[1].split("/", 1)[0]
-        areas.setdefault(area, []).append(case)
-    score = count(programs)
-    alone = count(standalone)
-    return {
-        "passed": score["passed"] == score["total"] and alone["passed"] == alone["total"],
-        "score": score,
-        "standalone": alone,
-        "areas": {area: count(group) for area, group in sorted(areas.items())},
-    }
+def escape(name: str) -> str:
+    return name.replace("\\", "\\\\").replace("#", "\\#")
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        sys.stderr.write(__doc__)
-        return 2
-    checkout, out = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
-    status = run_suite(checkout, out)
-    junit = out / "junit.xml"
+    checkout = Path.cwd()
+    reports = checkout / ".grade"
+    reports.mkdir(exist_ok=True)
+    status = run_suite(checkout, reports)
+    junit = reports / "junit.xml"
     if not junit.exists():
-        sys.stdout.write((out / "pytest.txt").read_text(encoding="utf-8", errors="replace"))
-        sys.stderr.write(f"grade.py: the suite did not run (pytest exit {status})\n")
+        sys.stderr.write((reports / "pytest.txt").read_text(encoding="utf-8", errors="replace"))
+        print(f"Bail out! the suite did not run (pytest exit {status})")
         return 1
-    result = verdict(junit)
-    (out / "verdict.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    areas = ", ".join(f"{a} {c['passed']}/{c['total']}" for a, c in result["areas"].items())
-    sys.stdout.write(
-        f"programs {result['score']['passed']}/{result['score']['total']}, "
-        f"standalone {result['standalone']['passed']}/{result['standalone']['total']}\n{areas}\n")
-    return 0 if result["passed"] else 1
+    results = checks(junit)
+    print(f"1..{len(results)}")
+    for number, (passed, name) in enumerate(results, 1):
+        print(f"{'ok' if passed else 'not ok'} {number} - {escape(name)}")
+    areas: dict[str, list[bool]] = {}
+    for passed, name in results:
+        if name.startswith("program "):
+            areas.setdefault(name.split()[1].split("/")[0], []).append(passed)
+    sys.stderr.write(", ".join(f"{area} {sum(r)}/{len(r)}" for area, r in sorted(areas.items())) + "\n")
+    return 0
 
 
 if __name__ == "__main__":

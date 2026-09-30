@@ -149,12 +149,7 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
   let changesJson ← changesJson workspaces parentEnv? state.workspace shown
   let evaluation := match state.evaluation? with
     | none => Lean.Json.null
-    | some e => .mkObj [
-        ("grader", e.grader), ("returncode", (e.returncode : Lean.Json)),
-        ("elapsedMs", (e.elapsedMs : Lean.Json)), ("output", e.output),
-        ("passed", e.passed), ("summary", e.summary?.getD .null),
-        ("score", e.score?.map (fun (p, t) => Lean.Json.str s!"{p}/{t}") |>.getD .null),
-        ("evidence", e.evidence?.map (Lean.Json.str ·.hex) |>.getD .null)]
+    | some e => (State.evaluationToJson e).setObjVal! "verdict" e.verdict
   -- The context the model is sent from this state, as the view makes it. A state carries only
   -- what its own turn added to the parent's context when the view extended it — the common
   -- case, and linear in the forest — and the whole context when the view rewrote earlier
@@ -237,7 +232,7 @@ height:14px;color:#5a6570;cursor:pointer;user-select:none}
 .ic{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;
 height:14px;margin-right:5px}
 .i-root{color:#4a4a4a}.i-turn{color:#3a6ea5}
-.i-intervention{color:#7a5aa5}.i-pass{color:#2f7d4f}.i-fail{color:#b02020}
+.i-intervention{color:#7a5aa5}.i-pass{color:#2f7d4f}.i-fail{color:#b02020}.i-error{color:#b8600b}
 .i-message{color:#7a5aa5}.i-question{color:#c07a1a}.i-reply{color:#2f7d4f}
 .chip{display:inline-block;padding:0 6px;border-radius:9px;font-size:11px;margin-left:6px;
 background:#eee;color:#444}
@@ -317,7 +312,7 @@ function summary(state) {
   if (state.kind === 'root') return state.note || 'root';
   if (state.kind === 'evaluation') {
     const e = state.evaluation || {};
-    return (e.passed ? 'pass' : 'fail ' + e.returncode) + (e.score ? ' ' + e.score : '') + '  ' + (e.grader || '');
+    return (e.verdict || '') + '  ' + (e.command || '');
   }
   if (state.kind === 'intervention') return state.note || 'commit';
   if (state.kind === 'message') return (state.intervention || {}).message || 'message';
@@ -360,7 +355,7 @@ const ROWS_AT_START = 300;   // how much of the forest is open when the page loa
 
 /* A glyph per kind, on a 14x14 grid: a seed for a root, a prompt for a turn, a diamond for a
    hand-made commit, a bubble for a message, a question mark, a return arrow for a reply, and a
-   tick or cross for a verdict. */
+   tick, a cross, or a warning sign for a verdict of pass, fail, or error. */
 const GLYPHS = {
   root: '<circle cx=\"7\" cy=\"7\" r=\"2.6\"/><circle cx=\"7\" cy=\"7\" r=\"5.6\" fill=\"none\"/>',
   turn: '<path d=\"M2.5 3.5L6 7l-3.5 3.5\" fill=\"none\"/><path d=\"M7.5 10.5h4\" fill=\"none\"/>',
@@ -370,19 +365,21 @@ const GLYPHS = {
     '<circle cx=\"7\" cy=\"11.2\" r=\".8\" stroke=\"none\"/>',
   reply: '<path d=\"M6 3.5L2.5 7 6 10.5\" fill=\"none\"/><path d=\"M2.5 7h5.5a3 3 0 0 1 3 3v1.5\" fill=\"none\"/>',
   pass: '<path d=\"M2.2 7.4l3.3 3.3L11.8 4\" fill=\"none\"/>',
-  fail: '<path d=\"M3.2 3.2l7.6 7.6M10.8 3.2l-7.6 7.6\" fill=\"none\"/>'
+  fail: '<path d=\"M3.2 3.2l7.6 7.6M10.8 3.2l-7.6 7.6\" fill=\"none\"/>',
+  error: '<path d=\"M7 1.8L12.6 11.8H1.4z\" fill=\"none\"/><path d=\"M7 5.4v3\" fill=\"none\"/>' +
+    '<circle cx=\"7\" cy=\"10.1\" r=\".7\" stroke=\"none\"/>'
 };
 
 function glyphOf(state) {
   if (state.kind !== 'evaluation') return state.kind;
-  return state.evaluation && state.evaluation.passed ? 'pass' : 'fail';
+  const status = state.evaluation && state.evaluation.status;
+  return status === 'pass' || status === 'fail' ? status : 'error';
 }
 
 function icon(state) {
   const key = glyphOf(state);
   const holder = el('span', 'ic i-' + key);
-  holder.title = state.kind === 'evaluation'
-    ? 'evaluation: ' + (key === 'pass' ? 'passed' : 'failed') : state.kind;
+  holder.title = state.kind === 'evaluation' ? 'evaluation: ' + key : state.kind;
   holder.innerHTML = '<svg viewBox=\"0 0 14 14\" width=\"13\" height=\"13\" ' +
     'stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" ' +
     'stroke-linejoin=\"round\" fill=\"currentColor\">' + (GLYPHS[key] || GLYPHS.turn) +
@@ -741,23 +738,32 @@ function renderEvaluation(parent, state) {
   if (!e) return;
   const box = section(parent, 'Evaluation');
   const meta = el('table', 'meta');
-  const rows = [['grader', e.grader],
-                ['verdict', (e.passed ? 'pass' : 'fail') + ' (rc ' + e.returncode + ')'],
+  const exit = e.returncode === null ? 'no exit status' : 'exit ' + e.returncode;
+  const rows = [['grader', e.command],
+                ['verdict', e.verdict + ' (' + exit + ')'],
+                ['grader image', e.graderImage],
                 ['elapsed', e.elapsedMs + ' ms']];
-  if (e.score) rows.push(['score', e.score]);
-  if (e.evidence) rows.push(['evidence', e.evidence]);
+  if (e.input) rows.push(['input', e.input]);
+  if (e.reason) rows.push(['reason', e.reason]);
   for (const [k, v] of rows) {
     const row = el('tr');
     row.append(el('td', null, k), el('td', 'mono', v));
     meta.append(row);
   }
   box.append(meta);
-  if (e.summary) {
-    box.append(el('div', 'muted', 'verdict.json'));
-    box.append(el('pre', 'mono', JSON.stringify(e.summary, null, 2)));
+  if (e.checks.length) {
+    box.append(el('div', 'muted', 'checks'));
+    const lines = e.checks.map(c => (c.ok ? 'ok      ' : 'not ok  ') + c.name +
+      (c.directive ? '  # ' + c.directive : ''));
+    box.append(foldable(el('pre', null, lines.join('\\n')), e.checks.length + ' checks'));
   }
-  box.append(el('div', 'muted', 'grader output'));
-  box.append(foldable(el('pre', null, e.output), e.output.split('\\n').length + ' lines'));
+  const stdout = e.output.stdout, stderr = e.output.stderr;
+  box.append(el('div', 'muted', 'grader stdout'));
+  box.append(foldable(el('pre', null, stdout), stdout.split('\\n').length + ' lines'));
+  if (stderr) {
+    box.append(el('div', 'muted', 'grader stderr'));
+    box.append(foldable(el('pre', null, stderr), stderr.split('\\n').length + ' lines'));
+  }
 }
 
 /* --- the model's context -----------------------------------------------

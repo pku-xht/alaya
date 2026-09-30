@@ -38,14 +38,12 @@ private def mkRoot (rt : Runtime) (project : System.FilePath) (image? : Option S
   assertOk <| createRoot rt.store rt.workspaces (initialLog {} "t" testUname) project image (some "t")
     (agent := ({} : Config).toJson)
 
-/-- A directory standing in for a hidden test set. -/
+/-- A directory standing in for a grader's trusted input: a hidden test set. -/
 private def testsDir : TestM System.FilePath := do
   let dir := (← scratch) / "tests-src"
   assertOk <| Result.fromIO Error.storage do
     IO.FS.createDirAll (dir / "tests")
     IO.FS.writeFile (dir / "tests" / "extra.txt") "hidden\n"
-  -- Relative to the directory the tests run from, which is the grader's working directory,
-  -- mounted at `/grader`.
   pure dir
 
 private def emptyProject : TestM System.FilePath := do
@@ -242,17 +240,24 @@ def suite : Suite := Testing.suite "trajectory" #[
     check (← assertOk (rt.workspaces.readFile? state.workspace "junk.txt")).isNone
       "a fork must not start from the abandoned branch's workspace",
 
-  test "a grader runs in the trajectory's image against a checkout, and its files never reach a later turn" do
+  test "a grader runs against a checkout with its input at /grader, and its files never reach a later turn" do
     let rt ← cachedRuntime #[responseWith #[call "a" "bash" "echo hi > after.txt"]]
     let root ← mkRoot rt (← emptyProject)
     let tests ← testsDir
     let scratch := (← scratch) / "eval"
     let node ← assertOk <| evaluate rt.store rt.workspaces scratch root
-      ("cp -R " ++ tests.toString ++ "/. {checkout}/ && test -f {checkout}/tests/extra.txt")
-      (← testUser?)
+      "cp -R /grader/tests . && test -f tests/extra.txt && printf '1..1\\nok 1 - hidden tests in place\\n'"
+      (← testUser?) (input? := some tests)
     let state ← assertOk (getState rt.store node)
     assertEqual "kind" state.kind Kind.evaluation
-    assertEqual "verdict" (state.evaluation?.map (·.passed)) (some true)
+    let some e := state.evaluation? | fail "expected an evaluation"
+    assertEqual "status" e.status .pass
+    assertEqual "checks" e.checks #[{ ok := true, name := "hidden tests in place" }]
+    assertEqual "grader image" e.graderImage state.image
+    -- The input is recorded as the snapshot the grader saw.
+    let some input := e.input? | fail "expected the input snapshot"
+    assertEqual "input" (String.fromUTF8? (← assertOk (rt.workspaces.read input "tests/extra.txt")))
+      (some "hidden\n")
     -- The evaluation's workspace is the checkout as the grader left it, and the next turn from
     -- the root does not see the tests.
     check (← assertOk (rt.workspaces.readFile? state.workspace "tests/extra.txt")).isSome
@@ -268,45 +273,49 @@ def suite : Suite := Testing.suite "trajectory" #[
       | .configuration m => (m.splitOn "cannot build on an evaluation").length > 1
       | _ => false,
 
-  test "a failing grader is a failing verdict, and re-evaluating adds a new evaluation" do
+  test "a failing check is a failing verdict, and re-evaluating adds a new evaluation" do
     let rt ← cachedRuntime #[]
     let root ← mkRoot rt (← emptyProject)
     let scratch := (← scratch) / "eval"
-    let node ← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3" (← testUser?)
-    let state ← assertOk (getState rt.store node)
-    assertEqual "returncode" (state.evaluation?.map (·.returncode)) (some 3)
-    assertEqual "passed" (state.evaluation?.map (·.passed)) (some false)
-    assertEqual "no evidence" (state.evaluation?.bind (·.evidence?)) none
-    let again ← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3" (← testUser?)
+    let grader := "printf '1..2\\nok 1 - a\\nnot ok 2 - b\\n'; exit 3"
+    let node ← assertOk <| evaluate rt.store rt.workspaces scratch root grader (← testUser?)
+    let some e := (← assertOk (getState rt.store node)).evaluation? | fail "expected an evaluation"
+    assertEqual "status" e.status .fail
+    assertEqual "returncode" e.returncode? (some 3)
+    assertEqual "checks" e.checks #[{ ok := true, name := "a" }, { ok := false, name := "b" }]
+    assertEqual "reason" e.reason "failed: b"
+    assertEqual "verdict" e.verdict "fail 1/2"
+    let again ← assertOk <| evaluate rt.store rt.workspaces scratch root grader (← testUser?)
     check (again != node) "expected the same grader to run again as a new evaluation"
     assertEqual "two children" (← assertOk (children rt.store root)).size 2
     -- A different grader is another evaluation of the same state.
-    let other ← assertOk <| evaluate rt.store rt.workspaces scratch root "true" (← testUser?)
+    let other ← assertOk <| evaluate rt.store rt.workspaces scratch root "printf '1..1\\nok\\n'" (← testUser?)
     check (other != node && other != again) "expected a distinct node for a distinct grader"
     assertEqual "three children" (← assertOk (children rt.store root)).size 3,
 
-  test "a grader's verdict.json decides, and its output directory is kept as evidence" do
+  test "the exit status decides nothing: TAP does, and reports stay in the workspace" do
     let rt ← cachedRuntime #[]
     let project ← emptyProject
     assertOk <| Result.fromIO Error.storage (IO.FS.writeFile (project / "app.txt") "code\n")
     let root ← mkRoot rt project
     let scratch := (← scratch) / "eval"
-    -- Exit status 1, but the verdict says passed: the verdict wins. The report beside it is kept.
-    let grader := "test -f {checkout}/app.txt && " ++
-      "printf '{\"passed\": true, \"score\": {\"passed\": 3, \"total\": 4}}' > {out}/verdict.json && " ++
-      "echo detail > {out}/report.txt && exit 1"
+    -- Complete, passing TAP and exit 1: a pass. The report is where the grader left it.
+    let grader := "test -f app.txt && mkdir -p .report && echo detail > .report/report.txt && " ++
+      "printf '1..1\\nok 1 - app\\n' && exit 1"
     let node ← assertOk <| evaluate rt.store rt.workspaces scratch root grader (← testUser?)
     let state ← assertOk (getState rt.store node)
     let some e := state.evaluation? | fail "expected an evaluation"
-    assertEqual "returncode" e.returncode 1
-    check e.passed "verdict.json says passed"
-    assertEqual "score" e.score? (some (3, 4))
-    assertEqual "verdict line" e.verdict "pass 3/4"
-    let some evidence := e.evidence? | fail "expected the output directory as evidence"
-    assertEqual "report kept"
-      ((← assertOk (rt.workspaces.readFile? evidence "report.txt")).map (String.fromUTF8? ·))
-      (some (some "detail\n"))
-    check (← assertOk (rt.workspaces.readFile? evidence "verdict.json")).isSome "verdict.json is in the evidence"
+    assertEqual "status" e.status .pass
+    assertEqual "returncode" e.returncode? (some 1)
+    assertEqual "verdict line" e.verdict "pass 1/1"
+    assertEqual "report" (String.fromUTF8? (← assertOk (rt.workspaces.read state.workspace ".report/report.txt")))
+      (some "detail\n")
+    -- Exit 0 with a stream cut short: an error, not a fail.
+    let crashed ← assertOk <| evaluate rt.store rt.workspaces scratch root
+      "printf '1..3\\nok 1\\n'" (← testUser?)
+    let some c := (← assertOk (getState rt.store crashed)).evaluation? | fail "expected an evaluation"
+    assertEqual "crashed" c.status .error
+    assertEqual "crash reason" c.reason "planned 3 test points, but found 1"
     -- The checkout is gone afterwards; only the store holds what was tested.
     check (!(← (scratch / "checkout").pathExists)) "the checkout is discarded",
 

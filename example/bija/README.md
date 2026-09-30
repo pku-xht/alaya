@@ -37,19 +37,13 @@ cd skeleton  && uv run pytest        # 24 tests, all failing, until the work is 
 
 ## The grader
 
-`grade.py CHECKOUT OUT` grades an attempt: it replaces the attempt's `tests/` with the
-reference's 232 programs, runs the suite, and writes `verdict.json` into `OUT` beside the
-suite's output and its JUnit report. The score counts programs that run
-correctly through the command line (`test_program`); `standalone` counts the same programs
-compiled with `bija build` and run under a bare interpreter; `areas` breaks the score down by
-section of the specification. It runs in the Bija image, where `alaya eval` runs it.
-
-```json
-{"passed": false,
- "score": {"passed": 155, "total": 232},
- "standalone": {"passed": 150, "total": 232},
- "areas": {"attempt": {"passed": 14, "total": 16}, "builtins": {"passed": 22, "total": 22}, ...}}
-```
+`grade.py` grades an attempt as an alaya grader: `alaya eval` runs it in the Bija image, in a
+checkout of the attempt, with this directory as its trusted input at `/grader`. It replaces the
+attempt's `tests/` with the reference's 232 programs, runs the suite, and prints TAP: one check
+per program run through the command line (`program AREA/NAME`), then one per program compiled
+with `bija build` and run under a bare interpreter (`standalone AREA/NAME`), 464 in all. The pass
+counts by section of the specification go to stderr, and the suite's output and JUnit report
+stay in the evaluation's workspace, under `.grade/`.
 
 ## Driving it with alaya
 
@@ -66,12 +60,14 @@ root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agen
 
 alaya resume "$root" --model dgx:gpt-oss-120b
 
-alaya eval <final-hash> --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800
-# <hash>  fail 1 155/232  (61377 ms)
+alaya eval <final-hash> --input example/bija --grader /grader/grade.py --timeout 1800
+# <hash>  fail N/464  (… ms)
+
+alaya show <evaluation-hash>                     # the verdict, every check, the grader's output
+alaya cat <evaluation-hash> .grade/pytest.txt    # the suite's own output
 ```
 
 The image carries the suite's dependencies, so the agent can run the sample suite itself between
 turns with `uv run pytest`.
 The agent never sees the reference programs: the grader copies them over a checkout that is
-discarded afterwards, and the verdict is recorded as a leaf. `example/README.md` walks through
-one such run, with a fork and an intervention, both branches graded.
+discarded afterwards, and the verdict is recorded as a leaf.

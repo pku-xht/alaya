@@ -284,12 +284,20 @@ structure Mount where
   container : String
   readOnly : Bool := false
 
-/-- Runs `command` once in a fresh container from `settings.image`, with `mounts` and `workdir`
-as its working directory, stderr merged into stdout, and removes the container afterwards. At
-`timeoutSeconds` (0 for none) the container is killed and the result is `timedOut`. A setup
-failure, such as a missing mount source, is a `failed` result rather than an error. -/
+/-- What a `runOnce` command printed, how it ended, and, when it did not end on its own, why. -/
+structure Captured where
+  stdout : String := ""
+  stderr : String := ""
+  exitCode? : Option UInt32 := none
+  /-- Set when the command did not finish: it timed out, or could not be started. -/
+  stopped? : Option String := none
+  deriving Inhabited
+
+/-- Runs `command` once with `/bin/sh -c` in a fresh container from `settings.image`, with
+`mounts`, in `workdir`, and removes the container afterwards. Stdout and stderr are kept apart.
+At `timeoutSeconds` (0 for none) the container is removed and the result says it timed out. -/
 def runOnce (settings : Settings) (mounts : Array Mount) (workdir command : String)
-    (timeoutSeconds : Nat) : IO Output := do
+    (timeoutSeconds : Nat) : IO Captured := do
   let name := s!"alaya-once-{← IO.monoNanosNow}"
   try
     let volumes ← mounts.foldlM (init := #[]) fun args m => do
@@ -299,27 +307,21 @@ def runOnce (settings : Settings) (mounts : Array Mount) (workdir command : Stri
       cmd := "docker"
       args := #["run", "--rm", "--init", "--name", name, "--entrypoint", "/bin/sh"]
         ++ runArgs settings ++ volumes ++ #["--workdir", workdir] ++ settings.extraRunArgs
-        ++ #[settings.image, "-c", "exec /bin/sh -c \"$@\" 2>&1", "sh", command]
+        ++ #[settings.image, "-c", command]
       stdin := .null, stdout := .piped, stderr := .piped }
     let outReader ← IO.asTask (prio := .dedicated) child.stdout.readBinToEnd
     let errReader ← IO.asTask (prio := .dedicated) child.stderr.readBinToEnd
-    let readAll : IO String := do
-      pure (lossyDecodeUtf8 ((← IO.wait outReader).toOption.getD ByteArray.empty))
+    let read (reader : Task (Except IO.Error ByteArray)) : IO String := do
+      pure (lossyDecodeUtf8 ((← IO.wait reader).toOption.getD ByteArray.empty))
     let now ← IO.monoMsNow
     let deadline := if timeoutSeconds == 0 then none else some (now + timeoutSeconds * 1000)
     -- Killing the client would leave the command running; the container has to go.
     let code? ← waitUntil child deadline (remove name)
-    match code? with
-    | none => pure (timedOut (← readAll) command timeoutSeconds)
-    | some code =>
-      let output ← readAll
-      let stderr := lossyDecodeUtf8 ((← IO.wait errReader).toOption.getD ByteArray.empty)
-      match clientFailure? code stderr.trimAscii.toString with
-      | some message => pure (failed message)
-      | none => pure { output, exitCode? := some code }
+    pure { stdout := ← read outReader, stderr := ← read errReader, exitCode? := code?
+           stopped? := if code?.isNone then some s!"timed out after {timeoutSeconds} seconds" else none }
   catch e =>
     remove name
-    pure (failed (toString e))
+    pure { stopped? := some s!"could not be started: {e}" }
 
 /-! ## Command line -/
 
