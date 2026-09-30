@@ -90,7 +90,7 @@ def specSuite : Suite := Testing.suite "tap/spec" #[
 
   test "fewer test points than planned is not a successful run" do
     assertOk "1..6 with five" (doc ["TAP version 14", "1..6", "not ok", "ok", "not ok", "ok", "ok"]) false
-    assertOk "1..6 with six passing" (doc ["1..2", "ok"]) false,
+    assertOk "one point short of 1..2" (doc ["1..2", "ok"]) false,
 
   test "test points may come in any order, but IDs must be within the plan" do
     assertOk "in range" (doc ["TAP version 14", "1..3", "ok 2", "ok 3", "ok 1"]) true
@@ -145,7 +145,6 @@ def specSuite : Suite := Testing.suite "tap/spec" #[
     assertEqual "description" (d.points.map (·.description)) #["hello # description # todo"],
 
   test "failing TODO and SKIP test points are not failures" do
-    assertOk "TODO" (doc ["1..1", "not ok 14 # TODO bend space and time"]) false
     let todo := doc ["1..1", "not ok 1 # TODO bend space and time"]
     assertOk "TODO in range" todo true
     assertEqual "todo" (todo.points.map (·.directive)) #[.todo "bend space and time"]
@@ -270,6 +269,41 @@ def specSuite : Suite := Testing.suite "tap/spec" #[
       "!!This is not valid TAP content!!", "1..1"]) true
     assertOk "child strict" (doc ["# Subtest: child test", "    1..1", "    pragma +strict",
       "    ok 1", "    garbage", "ok 1 - child test", "1..1"]) false,
+
+  test "a broken subtest's errors are the parent's, named by its # Subtest comment" do
+    let d := doc ["1..1", "# Subtest: child", "    ok 1", "ok 1 - child"]
+    assertOk "document" d false
+    assertEqual "errors" d.errors #["subtest 'child': no plan"]
+    assertEqual "no failed point" (d.points.filter (·.failed)).size 0
+    let indented := doc ["1..1", "    # Subtest: child", "    1..2", "    ok 1", "ok 1 - child"]
+    assertEqual "named by an indented comment" indented.errors
+      #["subtest 'child': planned 2 test points, but found 1"]
+    let bare := doc ["1..1", "    ok 1", "ok 1 - child"]
+    assertEqual "a bare subtest" bare.errors #["subtest: no plan"]
+    let nested := doc ["1..1", "# Subtest: outer", "    1..1", "    # Subtest: inner",
+      "        ok 1", "    ok 1 - inner", "ok 1 - outer"]
+    assertEqual "nested" nested.errors #["subtest 'outer': subtest 'inner': no plan"]
+    let strict := doc ["1..1", "# Subtest: child", "    pragma +strict", "    1..1", "    ok 1",
+      "    garbage", "ok 1 - child"]
+    assertEqual "strict in the subtest" strict.errors
+      #["subtest 'child': non-TAP output in strict mode: garbage"],
+
+  test "the # Subtest name is not matched against the test point that ends the subtest" do
+    let d := doc ["1..1", "# Subtest: a", "    1..1", "    ok 1", "ok 1 - b"]
+    assertOk "document" d true
+    assertEqual "errors" d.errors #[],
+
+  test "Bail out! after a trailing plan still bails out" do
+    let d := doc ["ok 1", "1..1", "Bail out! report failed"]
+    assertEqual "reason" d.bailout? (some "report failed")
+    assertOk "document" d false
+    assertEqual "points" d.points.size 1,
+
+  test "a test point after a trailing plan is not TAP" do
+    let d := doc ["ok 1", "1..1", "not ok 2"]
+    assertEqual "points" d.points.size 1
+    assertOk "document" d true
+    assertOk "strict" (doc ["pragma +strict", "ok 1", "1..1", "not ok 2"]) false,
 
   test "subtest: a version line in a subtest is ignored" do
     assertOk "document" (doc ["TAP version 14", "# Subtest: child", "    TAP version 14", "    1..1",

@@ -9,14 +9,21 @@ subtest, and no bail-out.
 
 Where the specification leaves a choice to the harness, this parser does what tap-parser
 (node-tap's parser, written by the specification's author) does, and the tests compare the two on
-tap-parser's fixtures. It departs from tap-parser in three places, each to follow the
+tap-parser's fixtures. It departs from tap-parser in four places, each to follow the
 specification:
 
 - A stream without a plan is never ok, even an empty one ("A Harness _must_ treat a TAP stream
   lacking a plan as a failed test"); tap-parser treats an empty stream as a skipped test set.
+- `Bail out!` stops the run even after a trailing plan: the specification forbids only test points
+  there, and tap-parser ignores the bail-out.
 - A line of only whitespace is blank and ignored, rather than non-TAP.
 - A `TODO`/`SKIP` reason is the text after `TODO\S*\s+`, as the specification's regular
   expression puts it.
+
+A failing subtest fails its parent, and the parent's `errors` include the subtest's, prefixed by
+its name from `# Subtest: NAME`. Like tap-parser, the parser does not check that name against the
+description of the test point that ends the subtest, which the specification says a harness
+should.
 
 It does not implement tap-parser's own extensions: buffered subtests (`ok 1 - name {` … `}`) and
 `time=` directives. YAML diagnostics are kept as text and not parsed.
@@ -208,6 +215,8 @@ private def pointOf? (line : String) (count : Nat) : Option Point := do
 private structure Parser where
   /-- A subtest: its version lines are ignored. -/
   nested : Bool := false
+  /-- The subtest's name from `# Subtest: NAME`, for its errors in the parent. -/
+  name : String := ""
   strict : Bool := false
   version? : Option Nat := none
   plan? : Option Plan := none
@@ -219,8 +228,8 @@ private structure Parser where
   /-- An open YAML block: its indentation and lines so far. -/
   yaml? : Option (String × Array String) := none
   child? : Option Parser := none
-  /-- A `# Subtest` comment that the next indented line may open. -/
-  announced : Bool := false
+  /-- A `# Subtest` comment, with its name, that the next indented line may open. -/
+  announced? : Option String := none
   seen : Array Nat := #[]
   bailout? : Option String := none
   errors : Array String := #[]
@@ -241,13 +250,17 @@ private def idError? (plan : Plan) (id : Nat) : Option String :=
   else none
 
 mutual
-  /-- Ends the subtest, if one is open. A failing subtest fails its parent. -/
+  /-- Ends the subtest, if one is open. A failing subtest fails its parent, and its errors are
+  the parent's too. -/
   private partial def closeChild (p : Parser) : Parser × Option Document :=
     match p.child? with
     | none => (p, none)
     | some child =>
       let document := child.finish
-      ({ p with child? := none, ok := p.ok && document.ok }, some document)
+      let label := if child.name.isEmpty then "subtest" else s!"subtest '{child.name}'"
+      ({ p with child? := none, ok := p.ok && document.ok
+                errors := p.errors ++ document.errors.map (s!"{label}: " ++ ·) },
+       some document)
 
   /-- Records the current test point: nothing more can be attached to it. -/
   private partial def settle (p : Parser) : Parser :=
@@ -302,10 +315,13 @@ mutual
   /-- Opens a subtest with `line`, which is indented by at least four spaces. -/
   private partial def openChild (p : Parser) (line : String) : Parser :=
     let p := p.settle
+    let content := dropChars line 4
     let child : Parser := { nested := true, strict := p.strict }
-    let child := if (subtestOf? (dropChars line 4)).isSome && !p.announced then child
-      else child.feed (dropChars line 4)
-    { p with child? := some child, announced := false }
+    let child := match p.announced?, subtestOf? content with
+      | some name, _ => { child with name }.feed content
+      | none, some name => { child with name }
+      | none, none => child.feed content
+    { p with child? := some child, announced? := none }
 
   private partial def indented (p : Parser) (line indent : String) : Parser := Id.run do
     if let some child := p.child? then
@@ -329,7 +345,7 @@ mutual
     if p.current?.isSome && p.yaml?.isNone && line == indent ++ "---" then
       return { p with yaml? := some (indent, #[]) }
     if line.startsWith "    " then
-      if p.announced || (subtestOf? (dropChars line 4)).isSome then
+      if p.announced?.isSome || (subtestOf? (dropChars line 4)).isSome then
         return p.openChild line
       if let some content := stripRepeated "    " line then
         if !content.startsWith " " then
@@ -360,12 +376,12 @@ mutual
     if !isPoint && !isOther then
       if (subtestOf? line).isSome then
         let p := p.yamlGarbage
-        return if p.closed then p.nonTap line else { p with announced := true }
+        return if p.closed then p.nonTap line else { p with announced? := subtestOf? line }
       if isComment line then return p
       return p.nonTap line
-    let p := { p.yamlGarbage with announced := false }
-    if p.closed then return p.nonTap line
+    let p := { p.yamlGarbage with announced? := none }
     if let some reason := bailoutOf? line then return p.bail reason
+    if p.closed then return p.nonTap line
     if let some (on, key) := pragmaOf? line then
       if p.child?.isSome then return p.nonTap line
       let p := p.settle
