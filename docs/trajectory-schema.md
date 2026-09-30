@@ -243,7 +243,7 @@ output; the text inside is verbatim.
 ```sh
 alaya checkout 4f2c8b ./fix                  # the state's files, to edit by hand
 $EDITOR ./fix/src/app.py
-alaya commit 4f2c8b ./fix -m "fixed the fixture" \
+alaya commit 4f2c8b ./fix --note "fixed the fixture" \
   --tell "I fixed the identifier lookup in src/app.py; re-run the suite."
 # 9d0e11a2b7c4
 alaya resume 9d0e11 --model M   # the agent continues, having read the notice
@@ -470,7 +470,7 @@ flowchart LR
 Every `eval` runs the grader and adds a new evaluation of the state, even with a grader command
 used before; each evaluation records one run. `eval` exits 0 for pass, 1 for fail, 2 for error,
 and 5 when it recorded no verdict at all — an unknown state, a grader image or input that could
-not be had.
+not be had, a command line that does not parse.
 
 ```sh
 # A hidden test suite, copied over the checkout; pytest-tap prints the TAP.
@@ -687,7 +687,7 @@ alaya root --task TEXT --agent FILE --image IMAGE --workdir PATH   …or from th
 alaya resume HASH --model P:M [--time-budget S]  grow one continuation until it ends, asks, or spends S
 alaya step   HASH --model P:M [--time-budget S]  advance exactly one turn
 alaya eval   HASH --grader CMD [--input DIR] [--grader-image IMAGE] [--timeout S]   grade a state (§4)
-alaya commit HASH DIR [-m NOTE] [--tell TEXT]    record a hand-edited workspace as a child
+alaya commit HASH DIR [--note NOTE] [--tell TEXT]  record a hand-edited workspace as a child
 alaya tell   HASH TEXT                           send the agent a message, as a child
 alaya reply  HASH TEXT                           answer the question a state is waiting on
 alaya reply-unavailable HASH                     record that the person cannot answer
@@ -703,6 +703,7 @@ alaya show HASH [--view]                         metadata, the log, and optional
 alaya diff A B                                   workspace changes between two states
 alaya html [FILE] [--hide DIR]                   write the forest as one self-contained page
 alaya rm HASH                                    delete a subtree and the snapshots only it used
+alaya help [COMMAND]                             what a command takes; `help --json` for all of them
 ```
 
 `root` takes the task as `--task TEXT` or `--task-file FILE`, one of the two. The file is read
@@ -712,7 +713,28 @@ anything is created, not an empty task. Either way the task is saved in the open
 root's note, so the first request carries all of it without a tool read: a task specification
 too long for a command's output preview reaches the model whole, its middle included.
 
-Every command takes `--data D` and `--json` where it prints states.
+Every command takes `--data D`, `--json` and `--help`.
+
+**The command line.** Every command declares what it takes (`Alaya.Cli`), and the command comes
+first. A command refuses an option it does not take, naming the nearest one it does; a switch
+never takes the next token; a valued option takes the next token, or its value after `=`
+(`--task=--literal`), and may be given once; after `--` everything is an argument, which is how
+an answer that begins with `-` is given. Every problem is reported at once. `alaya help`,
+`alaya help COMMAND` and `alaya COMMAND --help` print what a command accepts, and
+`alaya help --json` describes every command as data. `--task-file -` reads the task from stdin.
+
+**JSON.** With `--json`, a command prints one JSON object per line. A command that creates a
+state — `root`, `resume`, `step`, `commit`, `tell`, `reply`, `reply-unavailable` — prints that
+state as `{state, parent, kind, note, outcome, question, question_type, options}`, and `tree`
+prints every state that way. `show` prints the state object (§6) with its `state` hash, the
+run's `run_time_ms`, the whole `log` and, with `--view`, the `view`; `diff` prints
+`{a, b, changes}`, `checkout` `{state, workspace, directory}`, `html` `{file, bytes}` and `rm`
+`{removed}`. The `question-*` commands print JSON either way, and `cat` prints the file's bytes
+either way. A failure is one JSON object on stderr: `{"error": "usage", "problems": [...],
+"usage": ...}` for a command line that does not parse, and `{"error": KIND, "message": ...}`
+for a command that failed, where KIND is `configuration`, `transport`, `http` (with `status`
+and `retry_after_ms`), `provider`, `protocol`, `structured_output`, `cache`, `storage` or
+`cancelled`.
 
 `ls` and `cat` read a state's snapshot directly, without restoring its workspace, which is how
 a report an evaluation left in its workspace is read. A path is clean and relative to the
@@ -761,7 +783,8 @@ Docker's default network): an agent with network access can go looking for its o
 solution, so an image should carry what a task legitimately needs.
 
 Exit status: 0 when a run ended, 3 when it stopped at a question, 4 when it stopped because its
-time budget was spent, 1 on error; `eval` exits with its verdict (§4). Concurrent runs
+time budget was spent, 1 on an error or a command line that does not parse; `eval` exits with
+its verdict (§4), and 5 for a command line that does not parse, as for any other missing verdict. Concurrent runs
 need separate data directories: the work directory and the cache are not shared safely.
 
 ## 9. Invariants

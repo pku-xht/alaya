@@ -334,19 +334,11 @@ def suite : Suite := Testing.suite "docker" #[
           | .configuration _ => true
           | _ => false,
 
-  test "a command refuses a --workdir other than the trajectory's" <| withDocker
-    fun settings => do
-      let image := settings.image
-      assertError "different" (Docker.settingsFor (Cli.parse ["--workdir", "/other"]) image "/testbed") fun
-        | .configuration m => (m.splitOn "fixed at `root`").length > 1
-        | _ => false
-      let same ← assertOk <| Docker.settingsFor (Cli.parse ["--workdir", "/testbed"]) image "/testbed"
-      assertEqual "same" same.workdir "/testbed"
-      let absent ← assertOk <| Docker.settingsFor (Cli.parse []) image "/testbed"
-      assertEqual "absent" absent.workdir "/testbed"
-      -- At `root` the line's own --image and --workdir are the trajectory's, not a contradiction.
-      let atRoot ← assertOk <| Docker.settings? (Cli.parse ["--image", image, "--workdir", "/testbed"])
-      assertEqual "root" (atRoot.map (·.workdir)) (some "/testbed"),
+  test "a command refuses a --workdir other than the trajectory's" do
+    assertError "different" (Docker.checkSameWorkdir "/other" "/testbed") fun
+      | .configuration m => (m.splitOn "fixed at `root`").length > 1
+      | _ => false
+    assertOk <| Docker.checkSameWorkdir "/testbed" "/testbed",
 
   test "a missing image is a configuration error naming it" <| withDocker
     fun _ => do

@@ -22,17 +22,18 @@ structure Options where
   echoReasoning : Bool := false
   deriving Repr, Inhabited
 
-/-- Reads `--url` and `--port`, which address the DGX Spark. -/
-def Options.ofArgs (args : Cli.Args) : Result Options := do
-  let fromUrl ← match args.get? "url" with
-    | none => pure none
-    | some url => match Dgx.Endpoint.ofUrl url with
-      | .ok endpoint => pure (some endpoint)
-      | .error message => throw <| .configuration s!"--url: {message}"
-  let dgxEndpoint? ← match ← args.nat? "port" with
-    | none => pure fromUrl
-    | some port => pure (some { fromUrl.getD {} with port })
-  pure { dgxEndpoint?, echoReasoning := args.isSet "echo-reasoning" }
+/-- `--url` and `--port`, which address the DGX Spark, and `--echo-reasoning`. -/
+def Options.cli : Cli.Spec Options :=
+  let endpoint : Cli.Value Dgx.Endpoint := ⟨"URL", fun url =>
+    (Dgx.Endpoint.ofUrl url).mapError (s!"is not an endpoint: {·}")⟩
+  (fun url? port? echoReasoning =>
+      let dgxEndpoint? := match port? with
+        | none => url?
+        | some port => some { url?.getD {} with port }
+      { dgxEndpoint?, echoReasoning })
+    <$> Cli.flag? "url" endpoint "the DGX Spark endpoint, e.g. spark.local:9000"
+    <*> Cli.flag? "port" .nat "the DGX Spark port, overriding the one in --url"
+    <*> Cli.switch "echo-reasoning" "send the model its earlier reasoning back"
 
 /-- Splits a `PROVIDER:NAME` spec. The model name may itself contain colons. -/
 def splitSpec (spec : String) : String × String :=
@@ -53,5 +54,18 @@ def fromSpec (spec : String) (temperature : Float) (options : Options := {}) : R
     | "dgx" => Dgx.model name temperature options.dgxEndpoint? (echoReasoning := options.echoReasoning)
     | other =>
       throw <| .configuration s!"unknown provider: {other} (use {"|".intercalate names.toList})"
+
+/-- The model a continuation samples from, as the command line names it. -/
+structure Choice where
+  spec : String
+  temperature : Float := 0.0
+  options : Options := {}
+  deriving Repr, Inhabited
+
+def Choice.cli : Cli.Spec Choice :=
+  Choice.mk
+    <$> Cli.flag "model" (.string "P:M") s!"the model, PROVIDER:NAME, PROVIDER one of {"|".intercalate names.toList}"
+    <*> Cli.flagD "temperature" .float 0.0 "the sampling temperature" (shown := "0")
+    <*> Options.cli
 
 end Alaya.Provider
