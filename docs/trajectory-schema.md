@@ -82,7 +82,7 @@ last allowed model turn. The driver then records a terminal `turn` with empty `a
 the parent's workspace and the agent's outcome, without calling the model.
 
 Besides the three parts, a state carries what the run needs to continue and what a reader wants
-to know: the container `image?`, set on the root and inherited; on the root, the `agent?` configuration the run is continued with (§8); a `note?` of provenance (the model spec for a turn, the task for a root, the note for
+to know: the container `image`, set on the root and inherited; on the root, the `agent?` configuration the run is continued with (§8); a `note?` of provenance (the model spec for a turn, the task for a root, the note for
 an intervention); the `outcome?` when the state ended the run; the `question?` a `question` is
 waiting on; the `intervention?` record behind a notice; and the `evaluation?` verdict.
 
@@ -384,20 +384,22 @@ it knows how to hand a program the state's files, collect what the program says,
 
 ### The grader
 
-A grader is a shell command run on the host, in the directory `alaya` was invoked from, so
-relative paths in it mean what they mean on the person's command line. Before it runs, the
-trajectory materializes the state's workspace into a fresh directory, the **checkout**, and
-creates an empty **output directory**; the command receives both, as absolute paths, by
-substitution:
+A grader is a shell command run in a fresh container from the trajectory's image, without
+network, as the user the agent's commands run as. Its working directory is `/grader`: the
+directory `alaya` was invoked from, mounted read-only, so relative paths in it mean what they
+mean on the person's command line, and the grader's own scripts and hidden tests are where the
+person keeps them. Before it runs, the trajectory materializes the state's workspace into a
+fresh directory, the **checkout**, and creates an empty **output directory**; both are mounted
+in the container, and the command receives them by substitution:
 
 | Placeholder | Expands to |
 | --- | --- |
-| `{checkout}` | the directory holding the state's files |
-| `{out}` | an empty directory for anything the grader wants kept |
+| `{checkout}` | `/workspace`, the state's files |
+| `{out}` | `/out`, an empty directory for anything the grader wants kept |
 
-The grader may do anything to the checkout: copy tests over it, apply a patch, build it, start a
-container with it mounted, or rebuild a clean project elsewhere and carry only the agent's edits
-across. When it finishes, the checkout is snapshotted as the evaluation's `workspace` and
+The image has to carry what the grader runs. The grader may do anything to the checkout: copy
+tests over it, apply a patch, build it, or rebuild a clean project elsewhere and carry only the
+agent's edits across. When it finishes, the checkout is snapshotted as the evaluation's `workspace` and
 discarded, so the tree records what the grader did to the files — the tests it copied in, the
 artefacts it built — as the change from the graded state to the evaluation. None of it reaches
 a state a run continues from: an evaluation is a leaf.
@@ -428,7 +430,7 @@ The score is shown wherever the verdict is — `tree`, `show`, the report — as
 result is a number rather than a bare `fail`. `alaya show` prints the whole summary and names the
 evidence, and `alaya checkout HASH DIR --evidence` yields the files.
 
-*An evaluation: the grader runs on the host over a checkout; the state records the verdict.*
+*An evaluation: the grader runs in the trajectory's image over a checkout; the state records the verdict.*
 
 ```mermaid
 flowchart LR
@@ -590,7 +592,7 @@ equal hashes.
 | `appended` | array of events | what this state adds to the parent's log |
 | `outcome` | `{status, submission}` or null | when this state ended the run |
 | `note` | string or null | provenance |
-| `image` | string or null | the pinned container image, inherited |
+| `image` | string | the pinned container image, set on the root and inherited |
 | `elapsed_ms` | integer or null | on a model step (`turn`, `question`), its wall-clock time: from before the model call to after its last act and snapshot; a run's time is the sum from the root |
 | `agent` | object or null | on a root, the agent's complete configuration (§8) |
 | `evaluation` | object or null | `{grader, returncode, elapsed_ms, output, evidence, summary}` on an evaluation |
@@ -656,7 +658,7 @@ an entry is only ever appended to.
 ## 8. Commands
 
 ```
-alaya root --task TEXT PROJECT --agent FILE [--image IMAGE]   create a root from a project directory
+alaya root --task TEXT PROJECT --agent FILE --image IMAGE    create a root from a project directory
 alaya root --task-file FILE --agent FILE --image IMAGE --path PATH   …or from a path inside the image
 alaya resume HASH --model P:M [--time-budget S]  grow one continuation until it ends, asks, or spends S
 alaya step   HASH --model P:M [--time-budget S]  advance exactly one turn
@@ -678,7 +680,7 @@ alaya rm HASH                                    delete a subtree and the snapsh
 ```
 
 `root` takes the task as `--task TEXT` or `--task-file FILE`, one of the two. The file is read
-on the host — relative to the current directory, whatever image the run uses — as it is, not
+by `alaya`, relative to the current directory, not from the image, as it is, not
 trimmed or rewritten, and must be UTF-8; a missing or unreadable file is an error before
 anything is created, not an empty task. Either way the task is saved in the opening log and the
 root's note, so the first request carries all of it without a tool read: a task specification
@@ -708,10 +710,11 @@ with a larger budget, or none — continues from the same state. The budget neve
 short, so a run can overrun it by one step. An agent that paces itself reads the time left from
 its session (`docs/agent-api.md` §3), as MiniVero's `time_budget` tool does (`docs/minivero.md`).
 
-`root` takes `--image`, `--container-user`, and `--network`; `resume` and `step` take `--model`,
-`--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
-takes `--timeout` (default 900 s) for the grader. The image is resolved to a digest at `root`
-and recorded; `resume` uses it and refuses an `--image` that resolves to anything else.
+`root` requires `--image` and takes `--container-user` and `--network`; `resume` and `step` take
+`--model`, `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`;
+`eval` takes `--timeout` (default 900 s) and `--container-user` for the grader, which always runs
+without network. The image is resolved to a digest at `root` and recorded; every later command
+runs in it, and `resume` refuses an `--image` that resolves to anything else.
 A container runs with **no network** unless `--network` names one (`--network bridge` is
 Docker's default network): an agent with network access can go looking for its own reference
 solution, so an image should carry what a task legitimately needs.

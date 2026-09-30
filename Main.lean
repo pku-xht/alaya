@@ -46,28 +46,20 @@ private def openWork (data : DataDir) : Result WorkDir := do
   Result.fromIO Error.storage (IO.FS.createDirAll path)
   pure { path }
 
-/-- Where a run's commands go: the host, or the image the trajectory recorded, which a
-`--image` that resolves to anything else must not override. -/
-private def executorFor (args : Cli.Args) (image? : Option String) (config : Executor.Config) :
+/-- Where a run's commands go: the image the trajectory recorded, which a `--image` that resolves
+to anything else must not override. -/
+private def executorFor (args : Cli.Args) (pinned : String) (config : Executor.Config) :
     Result Executor := do
-  match image? with
-  | none =>
-    if args.isSet "image" then
+  let settings ← Executor.Docker.settingsFor args pinned
+  match ← Executor.Docker.settings? args with
+  | none => settings.verifyPresent
+  | some requested =>
+    let requested ← requested.pin
+    if requested.image != pinned then
       throw <| .configuration <|
-        "this trajectory runs on the host: it was created without --image, and its prompt " ++
-        "describes the host. Start a new one with `alaya root --task TEXT PROJECT --image IMAGE`"
-    pure (Executor.onHost config)
-  | some pinned =>
-    let settings ← Executor.Docker.settingsFor args pinned
-    match ← Executor.Docker.settings? args with
-    | none => settings.verifyPresent
-    | some requested =>
-      let requested ← requested.pin
-      if requested.image != pinned then
-        throw <| .configuration <|
-          s!"--image resolves to {requested.image}, but this trajectory runs {pinned}; " ++
-          "a continuation has to run the same bits its earlier turns did"
-    Executor.Docker.executor settings config
+        s!"--image resolves to {requested.image}, but this trajectory runs {pinned}; " ++
+        "a continuation has to run the same bits its earlier turns did"
+  Executor.Docker.executor settings config
 
 /-- The agent of an existing run: what its root recorded. `--agent` is for `root`; given
 again, it must describe the same agent, as `--image` must name the same image, or the command
@@ -91,22 +83,14 @@ private def budgetOf (args : Cli.Args) : Result (Option Nat) := do
   pure (if seconds == 0 then none else some (seconds * 1000))
 
 private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args) (start : Hash)
-    (image? : Option String) : Result Runtime := do
+    (image : String) : Result Runtime := do
   let spec ← recordedAgent data.store args start
   let modelSpec ← args.require "model" "e.g. --model yunwu:gpt-5.6-luna"
   let temperature ← args.floatD "temperature" 0.0
   let model ← buildModel modelSpec temperature data.cache (← Provider.Options.ofArgs args)
-  let executor ← executorFor args image? spec.executorConfig
+  let executor ← executorFor args image spec.executorConfig
   pure { store := data.store, workspaces := data.workspaces, workDir := work.path, executor, model
          agent := spec.build executor, budgetMs? := ← budgetOf args }
-
-/-- The `uname` a new trajectory's prompt is built from, and the image it is pinned to: read
-from the image when there is one, from the host otherwise. -/
-private def rootEnvironment (settings? : Option Executor.Docker.Settings) :
-    Result (Uname × Option String) := do
-  match settings? with
-  | none => pure (← Result.fromIO Error.configuration Uname.local, none)
-  | some settings => pure (← Executor.Docker.uname settings, some settings.image)
 
 /-- Empties the work directory. Both a checkout and an extraction from an image need it to start
 clean, and it is the one place holding nothing durable. -/
@@ -121,23 +105,21 @@ private def clearWork (data : DataDir) : Result WorkDir := do
 /-- The directory a new trajectory snapshots: a host `PROJECT`, or `--path` copied out of the
 image — task images usually carry the project already, so there is nothing on the host to point
 at. An extraction lands in the work directory, which is disposable by construction. -/
-private def rootProject (args : Cli.Args) (data : DataDir)
-    (settings? : Option Executor.Docker.Settings) (project? : Option String) :
-    Result System.FilePath := do
+private def rootUsage : String :=
+  "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH) --image IMAGE --agent FILE"
+
+private def rootProject (args : Cli.Args) (data : DataDir) (settings : Executor.Docker.Settings)
+    (project? : Option String) : Result System.FilePath := do
   match project?, args.get? "path" with
   | some project, none => pure project
   | none, some path =>
     if path.isEmpty then throw <| .configuration "--path needs a value (e.g. --path /testbed)"
-    match settings? with
-    | none => throw <| .configuration "--path names a path inside an image: pass --image too"
-    | some settings =>
-      let work ← clearWork data
-      Executor.Docker.copyOut settings path work.path
-      pure work.path
+    let work ← clearWork data
+    Executor.Docker.copyOut settings path work.path
+    pure work.path
   | some _, some _ =>
     throw <| .configuration "give either a PROJECT directory or --path PATH, not both"
-  | none, none =>
-    throw <| .configuration "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH --image IMAGE)"
+  | none, none => throw <| .configuration rootUsage
 
 private def modelSpecOf (args : Cli.Args) : String := args.getD "model" ""
 
@@ -182,26 +164,28 @@ private def dispatch (argv : List String) : Result UInt32 := do
   let json := args.isSet "json"
   match args.positional.toList with
   | "root" :: rest =>
-    if rest.length > 1 then
-      throw <| .configuration "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH --image IMAGE)"
-    let task ← args.taskOf "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH --image IMAGE)"
+    if rest.length > 1 then throw <| .configuration rootUsage
+    let task ← args.taskOf rootUsage
     -- Before the data directory is created: inside the project it would become part of it.
     if let some project := rest.head? then
       Workspaces.refuseOverlap "snapshot" project #[← args.valueD "data" ".alaya"]
     let data ← openData args
-    let settings? ← (← Executor.Docker.settings? args).mapM (·.pin)
-    let (uname, image?) ← rootEnvironment settings?
+    -- Every command of a trajectory runs in its image, so a root must name one.
+    let some settings ← Executor.Docker.settings? args
+      | throw <| .configuration s!"--image is required: every run happens in a container. {rootUsage}"
+    let settings ← settings.pin
+    let uname ← Executor.Docker.uname settings
     let spec ← Agent.Families.fromFile (← args.require "agent"
       s!"a JSON configuration, e.g. agents/mini-swe-default.json; the families are {Agent.Families.names}")
     let log := spec.initialLog task uname
-    let project ← rootProject args data settings? rest.head?
-    let hash ← createRoot data.store data.workspaces log project (some task) image? spec.config
+    let project ← rootProject args data settings rest.head?
+    let hash ← createRoot data.store data.workspaces log project settings.image (some task) spec.config
     emit hash.hex
     pure 0
   | "resume" :: pfx :: _ =>
     let data ← openData args
     let start ← resolve data.store pfx
-    let rt ← runtimeFor data (← openWork data) args start (← getState data.store start).image?
+    let rt ← runtimeFor data (← openWork data) args start (← getState data.store start).image
     try
       let stopped ← resume rt (modelSpecOf args) start (stateLine data · json)
       if stopped.outOfTime then outOfTime data stopped.state json else
@@ -215,7 +199,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
   | "step" :: pfx :: _ =>
     let data ← openData args
     let parent ← resolve data.store pfx
-    let rt ← runtimeFor data (← openWork data) args parent (← getState data.store parent).image?
+    let rt ← runtimeFor data (← openWork data) args parent (← getState data.store parent).image
     try
       match ← stepOnce rt (modelSpecOf args) parent with
       | none => outOfTime data parent json
@@ -267,7 +251,9 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let grader ← args.require "grader"
       "e.g. --grader 'cp -R ./hidden-tests/. {checkout}/ && pytest -q'"
     let timeout ← args.natD "timeout" 900
-    let node ← evaluate data.store data.workspaces (data.path / "eval") target grader timeout
+    let settings ← Executor.Docker.settingsFor args (← getState data.store target).image
+    let node ← evaluate data.store data.workspaces (data.path / "eval") target grader
+      settings.user? timeout
     match (← getState data.store node).evaluation? with
     | some e => emit s!"{node.hex}  {e.verdict}  ({e.elapsedMs} ms)"
     | none => emit node.hex
@@ -329,7 +315,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | _ =>
     throw <| .configuration <|
-      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P --image I) --agent FILE | " ++
+      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P) --image I --agent FILE | " ++
       "resume HASH --model P:M [--time-budget S] | step HASH --model P:M [--time-budget S] | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | reply-unavailable HASH | waiting | question-context HASH | " ++

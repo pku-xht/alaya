@@ -163,17 +163,19 @@ flowchart TD
 
 ## 7. Running a command
 
-The executor (`Alaya.Executor`) runs a script through `/bin/sh` with stderr merged into stdout at
-the file-descriptor level, so the model sees output in the order a terminal would, in the
-workspace, with the inherited environment plus the configured overrides, in its own session so a
-timeout kills the whole process group. Output is decoded as UTF-8 with invalid bytes replaced.
-A command that cannot be run, or that is killed at the timeout, yields an `Output` with no exit
-code and an `error` saying why — never an exception, so a run does not die on a failed command.
+Every command runs in a container (`Alaya.Executor.Docker`): one container per run, started
+from the trajectory's image at the first command, with the workspace bind-mounted at
+`/workspace`, and each command run in it with `docker exec`. Nothing runs on the host. The
+command goes through `/bin/sh` with stderr merged into stdout at the file-descriptor level, so
+the model sees output in the order a terminal would, with the image's environment plus the
+configured overrides. When the image has `timeout(1)`, it kills the command's process group at
+the timeout; otherwise the container is removed, and the next command starts a new one. Output
+is decoded as UTF-8 with invalid bytes replaced. A command that cannot be run, or that is killed
+at the timeout, yields an `Output` with no exit code and an `error` saying why — never an
+exception, so a run does not die on a failed command.
 
-`Executor.onHost` runs on the machine; `Executor.Docker.executor` starts one container per run
-with the workspace bind-mounted and runs each command with `docker exec`. What a container run
-changes: only the workspace is snapshotted, so an install into the image's filesystem lasts for
-the run and is gone when a branch is resumed later.
+Only the workspace is snapshotted, so an install into the image's filesystem lasts for the run
+and is gone when a branch is resumed later.
 
 ## 8. Differences from mini-SWE-agent
 

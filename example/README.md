@@ -51,7 +51,9 @@ empty `example/trajectory`. The agent ran in
 `ghcr.io/astral-sh/uv:python3.12-alpine3.23` without network access, the default; the model was
 `gpt-5.4-mini` at temperature 0 through the xmcp provider. The run predates restic snapshots: the
 archive is that run with every workspace moved into a restic repository, which changed the
-state hashes and nothing else, and the hashes here are the archive's.
+state hashes and nothing else, and the hashes here are the archive's. It also predates graders running in
+the trajectory's image: its grader started a container of its own. `bija/README.md` has the
+current commands.
 
 ```sh
 D=example/trajectory

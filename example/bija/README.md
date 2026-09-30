@@ -38,11 +38,11 @@ cd skeleton  && uv run pytest        # 24 tests, all failing, until the work is 
 ## The grader
 
 `grade.py CHECKOUT OUT` grades an attempt: it replaces the attempt's `tests/` with the
-reference's 232 programs, runs the suite in the benchmark's image, and writes `verdict.json`
-into `OUT` beside the suite's output and its JUnit report. The score counts programs that run
+reference's 232 programs, runs the suite, and writes `verdict.json` into `OUT` beside the
+suite's output and its JUnit report. The score counts programs that run
 correctly through the command line (`test_program`); `standalone` counts the same programs
 compiled with `bija build` and run under a bare interpreter; `areas` breaks the score down by
-section of the specification. It needs `docker` and `uv` on the host.
+section of the specification. It runs in the Bija image, where `alaya eval` runs it.
 
 ```json
 {"passed": false,
@@ -54,19 +54,24 @@ section of the specification. It needs `docker` and `uv` on the host.
 ## Driving it with alaya
 
 The skeleton is a project directory, so it seeds a trajectory directly; `TASK.txt` is the task
-statement, kept here so every run is given the same one. From the repository root:
+statement, kept here so every run is given the same one. The agent and the grader run in the
+Bija image, built from `Dockerfile`: Python, `uv`, and the suite's dependencies, which containers
+cannot download, since they run without network. From the repository root:
 
 ```sh
+docker build -t alaya-bija example/bija
+
 root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agent agents/mini-swe-default.json \
-  --image ghcr.io/astral-sh/uv:python3.12-alpine3.23)
+  --image alaya-bija)
 
 alaya resume "$root" --model dgx:gpt-oss-120b
 
-alaya eval <final-hash> --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800
+alaya eval <final-hash> --grader 'python3 example/bija/grade.py {checkout} {out}' --timeout 1800
 # <hash>  fail 1 155/232  (61377 ms)
 ```
 
-The image carries `uv` and Python, so the agent can run the sample suite itself between turns.
+The image carries the suite's dependencies, so the agent can run the sample suite itself between
+turns with `uv run pytest`.
 The agent never sees the reference programs: the grader copies them over a checkout that is
 discarded afterwards, and the verdict is recorded as a leaf. `example/README.md` walks through
 one such run, with a fork and an intervention, both branches graded.

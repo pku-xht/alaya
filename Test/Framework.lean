@@ -45,6 +45,10 @@ def suite (name : String) (cases : Array Case) : Suite :=
 def scratch : TestM System.FilePath :=
   return (← read).scratch
 
+/-- The image of states a test builds by hand. Nothing runs in them, so it names no real image;
+a test that runs a command uses the pinned test image (`Test/Container.lean`). -/
+def recordedImage : String := "alaya.test/image@sha256:0"
+
 def fail (message : String) : TestM alpha := do
   throw <| IO.userError s!"{(← read).name}: {message}"
 

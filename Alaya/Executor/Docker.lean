@@ -1,10 +1,11 @@
 import Alaya.Executor
 import Alaya.Cli
 
-/-! An `Executor` that runs commands in one container per run, with the working directory
+/-! The container executor: every command of a run in one container, with the working directory
 bind-mounted at `/workspace`, so the store still snapshots a host directory. The command runs
-through the same trampoline as on the host, with the environment overrides applied to the
-command rather than to the docker client. -/
+through a `/bin/sh` trampoline that merges stderr into stdout, with the environment overrides
+applied to the command rather than to the docker client. `runOnce` runs a single command in a
+fresh container, which is how a grader runs. -/
 
 namespace Alaya.Executor.Docker
 
@@ -120,9 +121,8 @@ private structure Container where
 /-- Starts the run's container with the working directory bind-mounted.
 
 The mount is bound to that directory's inode, and a full (non-incremental) materialize replaces
-it — `Store.materialize` removes the destination and recreates it. A trajectory checks out
-once, before the first command, so the container is always started against the final inode.
-Anything that re-materializes mid-run has to restart the container too. -/
+it — `Store.materialize` removes the destination and recreates it. A trajectory closes the
+executor before every checkout, so the next command starts a container on the new directory. -/
 private def start (settings : Settings) (workDir : System.FilePath) : IO Container := do
   let host ← IO.FS.realPath workDir
   let args := #["run", "--detach", "--rm", "--init", "--entrypoint", "/bin/sh"]
@@ -206,7 +206,7 @@ private def execIn (ref : IO.Ref (Option Container)) (settings : Settings) (conf
       pure (lossyDecodeUtf8 ((← IO.wait outReader).toOption.getD ByteArray.empty))
     let start ← IO.monoMsNow
     -- With an in-container `timeout` the host deadline is only a backstop, so it allows for the
-    -- kill grace; without one it is the whole mechanism and matches the local executor exactly.
+    -- kill grace; without one it is the whole mechanism.
     let graceMs := if container.hasTimeout then 5000 else 0
     let (code?, output) ← poll child readAll (start + config.timeoutSeconds * 1000 + graceMs)
     let elapsedMs := (← IO.monoMsNow) - start
@@ -244,12 +244,70 @@ def executor (settings : Settings) (config : Config) : Result Executor := do
   pure {
     exec := execIn ref settings config
     uname := (uname settings).toUserIO
-    image? := some settings.image
     close := do
       match ← ref.get with
       | some container => remove container.id; ref.set none
       | none => pure ()
   }
+
+/-! ## One command in a fresh container -/
+
+/-- Waits for `child`; at `deadline` runs `stop` and returns `none`. -/
+private partial def waitUntil (child : IO.Process.Child cfg) (deadline : Option Nat)
+    (stop : IO Unit) : IO (Option UInt32) := do
+  match ← child.tryWait with
+  | some code => pure (some code)
+  | none =>
+    if let some limit := deadline then
+      if (← IO.monoMsNow) >= limit then
+        stop
+        let _ ← child.wait
+        return none
+    IO.sleep 20
+    waitUntil child deadline stop
+
+/-- A host directory bind-mounted into a `runOnce` container. -/
+structure Mount where
+  host : System.FilePath
+  container : String
+  readOnly : Bool := false
+
+/-- Runs `command` once in a fresh container from `settings.image`, with `mounts` and `workdir`
+as its working directory, stderr merged into stdout, and removes the container afterwards. At
+`timeoutSeconds` (0 for none) the container is killed and the result is `timedOut`. A setup
+failure, such as a missing mount source, is a `failed` result rather than an error. -/
+def runOnce (settings : Settings) (mounts : Array Mount) (workdir command : String)
+    (timeoutSeconds : Nat) : IO Output := do
+  let name := s!"alaya-once-{← IO.monoNanosNow}"
+  try
+    let volumes ← mounts.foldlM (init := #[]) fun args m => do
+      let host ← IO.FS.realPath m.host
+      pure (args ++ #["--volume", s!"{host}:{m.container}{if m.readOnly then ":ro" else ""}"])
+    let child ← IO.Process.spawn {
+      cmd := "docker"
+      args := #["run", "--rm", "--init", "--name", name, "--entrypoint", "/bin/sh"]
+        ++ runArgs settings ++ volumes ++ #["--workdir", workdir] ++ settings.extraRunArgs
+        ++ #[settings.image, "-c", "exec /bin/sh -c \"$@\" 2>&1", "sh", command]
+      stdin := .null, stdout := .piped, stderr := .piped }
+    let outReader ← IO.asTask (prio := .dedicated) child.stdout.readBinToEnd
+    let errReader ← IO.asTask (prio := .dedicated) child.stderr.readBinToEnd
+    let readAll : IO String := do
+      pure (lossyDecodeUtf8 ((← IO.wait outReader).toOption.getD ByteArray.empty))
+    let now ← IO.monoMsNow
+    let deadline := if timeoutSeconds == 0 then none else some (now + timeoutSeconds * 1000)
+    -- Killing the client would leave the command running; the container has to go.
+    let code? ← waitUntil child deadline (remove name)
+    match code? with
+    | none => pure (timedOut (← readAll) command timeoutSeconds)
+    | some code =>
+      let output ← readAll
+      let stderr := lossyDecodeUtf8 ((← IO.wait errReader).toOption.getD ByteArray.empty)
+      match clientFailure? code stderr.trimAscii.toString with
+      | some message => pure (failed message)
+      | none => pure { output, exitCode? := some code }
+  catch e =>
+    remove name
+    pure (failed (toString e))
 
 /-! ## Command line -/
 
@@ -260,7 +318,7 @@ def settingsFor (args : Cli.Args) (image : String) : Result Settings := do
     | none => Result.fromIO Error.configuration defaultUser?
   pure { image, user?, network? := some (args.getD "network" "none") }
 
-/-- The container named on the command line, or `none` to run on the host. -/
+/-- The image named on the command line with `--image`, if any. -/
 def settings? (args : Cli.Args) : Result (Option Settings) := do
   match args.get? "image" with
   | none => pure none

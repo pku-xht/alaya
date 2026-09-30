@@ -2,6 +2,7 @@ import Test.Framework
 import Test.DirectoryWorkspaces
 import Test.MiniSweFixtures
 import Test.Scripted
+import Test.Container
 import Alaya
 
 /-! Tests of the mini-SWE-agent port. The prompt fixtures (`Test/MiniSweFixtures.lean`) are
@@ -203,7 +204,7 @@ def parseSuite : Suite := suite "mini-swe.parse" #[
     | .actions _ => fail "expected a format error"
 ]
 
-/-! ## End-to-end runs of the agent on the host -/
+/-! ## End-to-end runs of the agent in a container -/
 
 
 /-- Runs the mini agent with a scripted model through the reference loop, then snapshots the
@@ -212,10 +213,12 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
     TestM (Dialogue × Hash × Outcome) := do
   let work ← workDir
   let model ← scriptedModel responses
-  let mini := agent (Executor.onHost config.executor) config
+  let executor ← containerExecutor config.executor
+  let mini := agent executor config
   let sample (dialogue : Dialogue) : Result Chat.Response := do
     (← model.sample { messages := dialogue, tools := mini.tools }).next
-  let (log, stop) ← assertOk <| Agent.run mini { dir := work } sample (initialLog config "t" testUname)
+  let (log, stop) ← try assertOk <| Agent.run mini { dir := work } sample (initialLog config "t" testUname)
+    finally executor.close
   let env ← assertOk <| (← workspaces).snapshot work
   match stop with
   | .outcome outcome => pure (view config log, env, outcome)
@@ -324,7 +327,16 @@ def runSuite : Suite := suite "mini-swe.run" #[
 
 /-! ## Command execution fidelity -/
 
-private def hostExecutor : Executor := Executor.onHost defaultExecutor
+/-- Runs `command` with mini's default settings in a container over `work`. -/
+private def runIn (work : System.FilePath) (command : String) : TestM Output := do
+  let executor ← containerExecutor defaultExecutor
+  try executor.bash work command finally executor.close
+
+/-- What the test image's own `/bin/sh -c command` prints on stdout and stderr, and its status. -/
+private def imageShell (command : String) : TestM (String × UInt32) := do
+  let out ← IO.Process.output { cmd := "docker", args := #["run", "--rm", "--network", "none",
+    "--label", testLabel, "--entrypoint", "/bin/sh", ← testImage, "-c", command] }
+  pure (out.stdout ++ out.stderr, out.exitCode)
 
 def execSuite : Suite := suite "mini-swe.exec" #[
   iotest "invalid UTF-8 bytes are replaced and valid text survives" do
@@ -340,28 +352,29 @@ def execSuite : Suite := suite "mini-swe.exec" #[
         throw <| IO.userError s!"lossy decode {bytes}: got {repr actual}, want {repr expected}",
 
   test "stderr is merged into stdout at the fd level" do
-    let out ← hostExecutor.bash (← workDir) "echo hi >&2"
+    let out ← runIn (← workDir) "echo hi >&2"
     assertEqual "merged output" out.output "hi\n"
     assertEqual "exit code" out.exitCode? (some 0),
 
   test "shell diagnostics are the shell's own, with stderr merged" do
-    -- The inner shell sees the script as `$1`, so its messages are what `/bin/sh -c` prints; for
-    -- commands whose output is all on one stream, concatenating the streams is exact.
+    -- The inner shell sees the script as `$1`, so its messages are what the image's
+    -- `/bin/sh -c` prints; for commands whose output is all on one stream, concatenating the
+    -- streams is exact.
     let work ← workDir
     for command in ["fi", "echo \"unterminated", "nosuchcmd_alaya_test"] do
-      let out ← hostExecutor.bash work command
-      let reference ← IO.Process.output { cmd := "/bin/sh", args := #["-c", command] }
-      assertEqual s!"output of {repr command}" out.output (reference.stdout ++ reference.stderr)
-      assertEqual s!"exit code of {repr command}" out.exitCode? (some reference.exitCode),
+      let out ← runIn work command
+      let (output, code) ← imageShell command
+      assertEqual s!"output of {repr command}" out.output output
+      assertEqual s!"exit code of {repr command}" out.exitCode? (some code),
 
   test "non-UTF-8 command output is replaced, not dropped" do
-    let out ← hostExecutor.bash (← workDir) "printf 'a\\377b'"
+    let out ← runIn (← workDir) "printf 'a\\377b'"
     assertEqual "replaced output" out.output "a�b"
     assertEqual "exit code" out.exitCode? (some 0),
 
   test "a command that cannot run is an error observation, not an aborted run" do
     let missing := (← scratch) / "missing"
-    let out ← hostExecutor.bash missing "echo hi"
+    let out ← runIn missing "echo hi"
     assertEqual "no exit code" out.exitCode? none
     check (((out.error?.getD "").splitOn missing.toString).length > 1) "the error names the directory"
 ]

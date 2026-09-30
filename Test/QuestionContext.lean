@@ -15,6 +15,7 @@ private def workspace : Hash := Hash.ofBytes "test snapshot".toUTF8
 private def question (store : Store) (workspace : Hash) (parent? : Option Hash := none)
     (appended : Agent.Log := #[]) : TestM Hash :=
   assertOk <| putState store {
+    image := recordedImage
     parent?, workspace, kind := .question, appended,
     question? := some { callId := "ask-1", text := "What next?" } }
 
@@ -67,22 +68,27 @@ def suite : Suite := Testing.suite "question_context" #[
     let rootLog : Agent.Log := #[.message (.system "system instruction"),
       .message (.user originalTask), .message (.user "second user message")]
     let root ← assertOk <| putState store {
+      image := recordedImage
       parent? := none, workspace, kind := .root, appended := rootLog }
     let middleLog : Agent.Log := #[
       .response { content? := some "I inspected the source", toolCalls := #[
         { id := "read-1", name := "bash", arguments := .mkObj [("command", "cat code")] }] },
       .observation "read-1" (.mkObj [("output", "the full recorded result\nline 2")])]
     let middle ← assertOk <| putState store {
+      image := recordedImage
       parent? := some root, workspace, kind := .turn, appended := middleLog }
     let questionLog : Agent.Log := #[.response { toolCalls := #[
       { id := "ask-1", name := "ask_user", arguments := .mkObj [("question", "What next?")] }] }]
     let asked ← question store workspace (some middle) questionLog
     let _ ← assertOk <| putState store {
+      image := recordedImage
       parent? := some root, workspace, kind := .turn, appended := #[.message (.user "SIBLING SECRET")] }
     let _ ← assertOk <| putState store {
+      image := recordedImage
       parent? := some asked, workspace, kind := .reply,
       appended := #[.observation "ask-1" (.str "LATER ANSWER")] }
     let _ ← assertOk <| putState store {
+      image := recordedImage
       parent? := some asked, workspace, kind := .evaluation,
       appended := #[.message (.user "HIDDEN GRADER")],
       evaluation? := some { grader := "hidden", returncode := 0, elapsedMs := 1, output := "secret" } }
@@ -100,10 +106,12 @@ def suite : Suite := Testing.suite "question_context" #[
   test "missing original task is explicit and evaluation ancestry fails closed" do
     let store ← store
     let root ← assertOk <| putState store {
+      image := recordedImage
       parent? := none, workspace, kind := .root, appended := #[], note? := some "not the task" }
     let asked ← question store workspace (some root) #[.message (.user "later text")]
     assertEqual "missing task" (← field (← assertOk <| context store asked) "task").compress "null"
     let evaluation ← assertOk <| putState store {
+      image := recordedImage
       parent? := some root, workspace, kind := .evaluation, appended := #[] }
     let invalid ← question store workspace (some evaluation)
     assertError "no evaluator history" (context store invalid) fun
