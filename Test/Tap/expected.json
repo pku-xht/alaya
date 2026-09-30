@@ -1,0 +1,10065 @@
+{
+ "bail-escaped.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": "hash # slash \\ noesc hash # noesc slash \\ done",
+  "plan": null,
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "bailout-no-raison.tap": {
+  "ok": false,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": "",
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "bailout.tap": {
+  "ok": false,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": "GERONIMMMOOOOOO!!!",
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "basic.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 6,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "big-last.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "bignum.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 136211425,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 136211426,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "bignum_many.tap": {
+  "ok": false,
+  "count": 11,
+  "pass": 11,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 99997,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 99998,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 99999,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 100000,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 100001,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 100002,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 100003,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 100004,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 100005,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "broken-yamlish-looks-like-child.tap": {
+  "ok": true,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "callback happened",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "child test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should come last",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "broken-yamlish-with-nonbroken-yamlish.tap": {
+  "ok": true,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "callback happened",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "child test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should come last",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "buffered-nested-failure-top-ok-diag.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "my kids are fine",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "buffered-nested-failure-top-ok-no-msg.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "my kids are fine",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "buffered-nested-failure-top-ok.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "my kids are fine",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "buffered-nested-ok-top-failure-diag.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "please sir, my son, he is sick",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "buffered-nested-ok-top-failure.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "please sir, my son, he is sick",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "buffered-with-diag-not-ok.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "child",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "buffered-with-diag-ok.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "child",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "child-after-failure.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 0,
+    "name": "1",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "child",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "child-extra.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "test/debug-test.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "combined.tap": {
+  "ok": false,
+  "count": 10,
+  "pass": 7,
+  "todo": 2,
+  "skip": 1,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 10,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "basset hounds got long ears",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 3,
+    "name": "all hell broke loose",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 4,
+    "name": "",
+    "todo": "if I heard a voice from heaven ...",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "say \"live without loving\",",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "I'd beg off.",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 7,
+    "name": "",
+    "todo": null,
+    "skip": "contract negotiations"
+   },
+   {
+    "ok": true,
+    "id": 8,
+    "name": "Girls are such exquisite hell",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 9,
+    "name": "Elegy 9B",
+    "todo": "",
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 10,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "combined_compat.tap": {
+  "ok": false,
+  "count": 10,
+  "pass": 7,
+  "todo": 0,
+  "skip": 1,
+  "bailout": null,
+  "plan": null,
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "basset hounds got long ears",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 3,
+    "name": "all hell broke lose",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 7,
+    "name": "",
+    "todo": null,
+    "skip": "contract negociations"
+   },
+   {
+    "ok": true,
+    "id": 8,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 9,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 10,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "comment-mid-diag-postplan.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "please keep my diags",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "child",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "comment-mid-diag.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "please keep my diags",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "common-with-explanation.tap": {
+  "ok": true,
+  "count": 6,
+  "pass": 6,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 6,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "The object isa Board",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Board size is zero",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "The object isa Tile",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "Get possible places to put the Tile",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "Placing the tile produces no error",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "Board size is 1",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "confusing-json.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "Test newlines in tap and console.log",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "creative-liberties.tap": {
+  "ok": true,
+  "count": 9,
+  "pass": 9,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 9,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "created Board",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "board has 7 tiles + starter tile",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "delayed.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "00000",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "00000",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "descriptive.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "Interlock activated",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Megathrusters are go",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "Head formed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "Blazing sword formed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "Robeast destroyed",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "descriptive_trailing.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "Interlock activated",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Megathrusters are go",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "Head formed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "Blazing sword formed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "Robeast destroyed",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "diag-looks-like-comment.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "-t 0.2",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "die.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": "no tests found"
+  },
+  "points": []
+ },
+ "die_head_end.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": null,
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "die_last_minute.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "die_unfinished.tap": {
+  "ok": false,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "duplicates.tap": {
+  "ok": false,
+  "count": 11,
+  "pass": 11,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 10,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 7,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 8,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 9,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 10,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "duration_ms.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "subtest",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "echo.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": ""
+  },
+  "points": []
+ },
+ "empty-buffered-child.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "child",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "empty-diags.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "test passes",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "another test",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "empty-failures.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "empty.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": "no tests found"
+  },
+  "points": []
+ },
+ "escape_eol.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "Should parse as literal backslash --> \\",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Not a continuation line",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "escape_hash.tap": {
+  "ok": true,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "Not a # TODO",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Not a # SKIP",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "Escaped \\#",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "extra-in-child.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "test/01c-user-updates.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "fail-right-before-indented-child-diag.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": null,
+  "points": [
+   {
+    "ok": false,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "maybe a child",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "fail-right-before-indented-child.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": null,
+  "points": [
+   {
+    "ok": false,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "maybe a child",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "garbage-yamlish.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "de-indenting the yamlish wrongly.",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "But this is not garbage",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 3,
+    "name": "truncating the yamlish",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 4,
+    "name": "this is truncated weirdly",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "giving-up.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": "Couldn't connect to database.",
+  "plan": {
+   "start": 1,
+   "end": 573,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "database handle",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "got-spare-tuits.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 2,
+  "todo": 2,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "Creating test program",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Test program runs, no error",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 3,
+    "name": "infinite loop",
+    "todo": "halting problem unsolved",
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 4,
+    "name": "infinite loop 2",
+    "todo": "halting problem unsolved",
+    "skip": null
+   }
+  ]
+ },
+ "hashes.tap": {
+  "ok": true,
+  "count": 6,
+  "pass": 6,
+  "todo": 3,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 6,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "contains # hash",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "directive",
+    "todo": "# x # y",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "escaped \\ slash \\",
+    "todo": "true",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "not todo # hash # todo",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "yes todo",
+    "todo": "# hash",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "not todo # hash # todo",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "head_end.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "head_fail.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "implicit-counter.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "one",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "two",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "three",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "four",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "indent.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "first",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "second",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "indented-stdout-noise.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "index.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "junk_before_plan.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "line-break.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "foo",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "lone_not_bug.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "mismatched-child-assert.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "different name",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "missing.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 6,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "no-numbers.tap": {
+  "ok": false,
+  "count": 3,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "we are good",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "we are bad",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "we are zesty!",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "no-plan.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": null,
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "no_nums.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "node-test-cjs.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "uhoh, this one throws",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "test thing",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "node-test-mjs.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "uhoh, this one throws",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "A thing",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "not-enough.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "not-ok-todo.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 3,
+  "todo": 1,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "should be equivalent",
+    "todo": "but we will fix it later",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "not-ok-with-trailing-comment.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "not-ok.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "offset-mismatch.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 8,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 9,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 10,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 11,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "offset.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 8,
+   "end": 11,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 8,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 9,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 10,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 11,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "ok.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": "just some plan comment"
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "one-ok.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "out-of-order.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "out_err_mix.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": "no tests found"
+  },
+  "points": []
+ },
+ "out_of_order.tap": {
+  "ok": false,
+  "count": 10,
+  "pass": 10,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 15,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Test that argument passing works",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "Test that passing arguments as references work",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "Test a normal sub",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "Detach test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 8,
+    "name": "Nested thread test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 9,
+    "name": "Nested thread test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 10,
+    "name": "Wanted 7, got 7",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 11,
+    "name": "Wanted 7, got 7",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 12,
+    "name": "Wanted 8, got 8",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 13,
+    "name": "Wanted 8, got 8",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "outside-plan-end-many.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 420,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "outside-plan-end.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "outside-plan-start.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 2,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "outside-plan.tap": {
+  "ok": false,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 234,
+    "name": "pretty big",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "less big",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "three",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "perl-test2-buffered.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "empty",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "my_test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "my_test_plan",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "Subtest: my_streamy_test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "Subtest: my_streamy_test_plan",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "perl-test2-streamed.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "Subtest: my_streamy_test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Subtest: my_streamy_test_plan",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "plan-escape.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": "hash # slash \\ noesc hash # noesc slash \\"
+  },
+  "points": []
+ },
+ "plan-in-bad-places-post.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 99,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "subtest",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "yaml",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "plan-in-bad-places-pre.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "subtest",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "yaml",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "plan-invalid-strict.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "plan-invalid.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "pragma-after-failure.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "pragma-invalid.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "pragma-mid-child-strict.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "pragma-mid-child.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "pragma-mid-yaml.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "some yaml",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "repeat-test-point-id.tap": {
+  "ok": false,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "schwern-todo-quiet.tap": {
+  "ok": false,
+  "count": 3,
+  "pass": 1,
+  "todo": 1,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 3,
+    "name": "",
+    "todo": "Roman numerials still not a built in type",
+    "skip": null
+   }
+  ]
+ },
+ "schwern.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "42",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "sequence_misparse.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 1,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": "on foobar system"
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "simple.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "simple_fail.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "simple_yaml.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "simple_yaml_missing_version13.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "skip-all-nonempty.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": "SKIP Insufficient positron flux"
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "found some spare flux in bottom drawer",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "skip-all-with-assert.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": "SKIP Insufficient skipping"
+  },
+  "points": []
+ },
+ "skip-all-with-test.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "skip-all.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": "SKIP Insufficient positron flux"
+  },
+  "points": []
+ },
+ "skip-one-fail.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 1,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "does not count as failure",
+    "todo": null,
+    "skip": ""
+   }
+  ]
+ },
+ "skip-one-ok.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 1,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "totally fine",
+    "todo": null,
+    "skip": ""
+   }
+  ]
+ },
+ "skip.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 2,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": "rain delay"
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "#skip should not skip because escaped",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "notskip, because testTitle#skip is not a directive",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": "weird spelling but ok, skip it"
+   }
+  ]
+ },
+ "skip_nomsg.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 1,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": ""
+   }
+  ]
+ },
+ "skipall.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": "skipping: rope"
+  },
+  "points": []
+ },
+ "skipall_nomsg.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": ""
+  },
+  "points": []
+ },
+ "skipall_v13.tap": {
+  "ok": true,
+  "count": 0,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 0,
+   "skipAll": true,
+   "reason": "skipping: rope"
+  },
+  "points": []
+ },
+ "skippidy-doo-dah.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 1,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "x",
+    "todo": null,
+    "skip": "doo dah"
+   }
+  ]
+ },
+ "skipping-a-few.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 4,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "approved operating system",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": "no /sys directory"
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": "no /sys directory"
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": "no /sys directory"
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": "no /sys directory"
+   }
+  ]
+ },
+ "space_after_plan.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": null,
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "stdout_stderr.tap": {
+  "ok": true,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "strict-pragma-child-broken-diags.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "child",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "strict.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "All OK",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-buffer-diags-time.tap": {
+  "ok": true,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "first",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "second",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "third",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-buffer-todo.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 1,
+  "skip": 1,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "tbd",
+    "todo": "foo",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "skippy",
+    "todo": null,
+    "skip": ""
+   }
+  ]
+ },
+ "subtest-buffer.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "nesting",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "this passes",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-comment-indent.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "../tap/test/test/ok.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-comment-leading.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "nesting",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "this passes",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-comment-mixed-indent.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "../tap/test/test/ok.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-comment-noindent.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "../tap/test/test/ok.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-confusing.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "a brace looks like this",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "x",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-heading.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "x",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-maybe-child-unfulfilled.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "x",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-mixing.tap": {
+  "ok": true,
+  "count": 9,
+  "pass": 9,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 9,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "x1",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "x2",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "x3",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "x4",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "x5",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "x6",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 7,
+    "name": "x7",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 8,
+    "name": "x8",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 9,
+    "name": "x9",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-no-comment-leading-comment.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "../tap/test/test/ok.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-no-comment-mid-comment-indent.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "../tap/test/test/ok.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-no-comment-mid-comment.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "../tap/test/test/ok.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-no-comment.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "../tap/test/test/ok.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-stream-comment-indent.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "nesting",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "this passes",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-stream-comment.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "nesting",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "this passes",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-stream-no-comment.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "nesting",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "this passes",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "subtest-unfinished.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "switches.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "tap-tests-stdout.tap": {
+  "ok": false,
+  "count": 312,
+  "pass": 307,
+  "todo": 4,
+  "skip": 5,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 312,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "should not be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "test/buffer_compare.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "just setup, nothing relevant",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "test/common.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 7,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 8,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 9,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 10,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 11,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 12,
+    "name": "test/consumer.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 13,
+    "name": "Should output debugger message",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 14,
+    "name": "test/debug-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 15,
+    "name": "should be strictly equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 16,
+    "name": "should be strictly equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 17,
+    "name": "should be strictly equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 18,
+    "name": "test/deep-strict.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 19,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 20,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 21,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 22,
+    "name": "test/deep.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 23,
+    "name": "File with executable bit should be executed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 24,
+    "name": "test/executed.sh",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 25,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 26,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 27,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 28,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 29,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 30,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 31,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 32,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 33,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 34,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 35,
+    "name": "test/exit-code.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 36,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 37,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 38,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 39,
+    "name": "test/expose-gc-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 40,
+    "name": "1-1",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 41,
+    "name": "2-1",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 42,
+    "name": "3-1",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 43,
+    "name": "test/global-harness-async.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 44,
+    "name": "test/independent-timeouts.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 45,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 46,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 47,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 48,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 49,
+    "name": "test/isolated-conf-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 50,
+    "name": "sanity check",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 51,
+    "name": "not ok",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 52,
+    "name": "total test count",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 53,
+    "name": "tests passed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 54,
+    "name": "tests failed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 55,
+    "name": "ok is boolean",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 56,
+    "name": "skip is number",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 57,
+    "name": "results isa Results",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 58,
+    "name": "test isa Test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 59,
+    "name": "test isa Harness",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 60,
+    "name": "test/meta-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 61,
+    "name": "sync child A",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 62,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 63,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 64,
+    "name": "sync grandchild in async child A",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 65,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 66,
+    "name": "test/nested-async.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 67,
+    "name": "p test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 68,
+    "name": "ch test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 69,
+    "name": "grch test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 70,
+    "name": "ch test 2",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 71,
+    "name": "test/nested-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 72,
+    "name": ", 8 can stay.",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 73,
+    "name": "might be confusing",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 74,
+    "name": "done now, exiting",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 75,
+    "name": "test/non-tap-output.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 76,
+    "name": "outputs parent description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 77,
+    "name": "outputs child description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 78,
+    "name": "outputs parent description before parent result",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 79,
+    "name": "outputs parent result before child description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 80,
+    "name": "outputs child description before child result",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 81,
+    "name": "test/output-childtest-description.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 82,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 83,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 84,
+    "name": "test/result-trap.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 85,
+    "name": "compiled seg faulter",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 86,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 87,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 88,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 89,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 90,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 91,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 92,
+    "name": "cleaned up",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 93,
+    "name": "test/segv.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 94,
+    "name": "it works",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 95,
+    "name": "math should work",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 96,
+    "name": "false should not be ok",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 97,
+    "name": "test/simple-harness-test-with-plan.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 98,
+    "name": "it works",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 99,
+    "name": "math should work",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 100,
+    "name": "false should not be ok",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 101,
+    "name": "test/simple-harness-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 102,
+    "name": "always passes",
+    "todo": null,
+    "skip": "skip it good"
+   },
+   {
+    "ok": true,
+    "id": 103,
+    "name": "false",
+    "todo": null,
+    "skip": "always fails"
+   },
+   {
+    "ok": true,
+    "id": 104,
+    "name": "bonus",
+    "todo": "remove todo directive",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 105,
+    "name": "expected",
+    "todo": "implement a thing",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 106,
+    "name": "always passes without explanation",
+    "todo": null,
+    "skip": ""
+   },
+   {
+    "ok": true,
+    "id": 107,
+    "name": "false without explanation",
+    "todo": null,
+    "skip": ""
+   },
+   {
+    "ok": true,
+    "id": 108,
+    "name": "bonus without explanation",
+    "todo": "",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 109,
+    "name": "expected without explanation",
+    "todo": "",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 110,
+    "name": "test/test-assert-todo-skip.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 111,
+    "name": "exit cleanly",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 112,
+    "name": "captures SKIP description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 113,
+    "name": "skip summary is not from file",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 114,
+    "name": "todo summary is not from file",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 115,
+    "name": "captures TODO description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 116,
+    "name": "exit cleanly",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 117,
+    "name": "captures SKIP description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 118,
+    "name": "skip summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 119,
+    "name": "todo summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 120,
+    "name": "captures TODO description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 121,
+    "name": "exit cleanly",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 122,
+    "name": "summarizes skipped count",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 123,
+    "name": "summarizes todo count",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 124,
+    "name": "test/test-descriptions.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 125,
+    "name": "overall result is PASS",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 126,
+    "name": "captures ok SKIP",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 127,
+    "name": "captures not ok SKIP",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 128,
+    "name": "skip summary not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 129,
+    "name": "captures ok TODO",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 130,
+    "name": "captures not ok TODO",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 131,
+    "name": "todo summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 132,
+    "name": "no ugly \"undefined\" in output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 133,
+    "name": "overall result is PASS",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 134,
+    "name": "no SKIP in summary",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 135,
+    "name": "skip summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 136,
+    "name": "no TODO in summary",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 137,
+    "name": "todo summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 138,
+    "name": "no ugly \"undefined\" in output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 139,
+    "name": "overall result is PASS",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 140,
+    "name": "captures ok SKIP",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 141,
+    "name": "captures not ok SKIP",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 142,
+    "name": "skip summary not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 143,
+    "name": "captures ok TODO",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 144,
+    "name": "captures not ok TODO",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 145,
+    "name": "todo summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 146,
+    "name": "no ugly \"undefined\" in output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 147,
+    "name": "test/test-directives.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 148,
+    "name": "does not count as failure",
+    "todo": null,
+    "skip": ""
+   },
+   {
+    "ok": true,
+    "id": 149,
+    "name": "test/test-skip.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 150,
+    "name": "test object should be instanceof Test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 151,
+    "name": "test object should be instanceof Harness",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 152,
+    "name": "test._Test should be the Test class",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 153,
+    "name": "should have isNotDeepEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 154,
+    "name": "isNotDeepEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 155,
+    "name": "should have equals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 156,
+    "name": "equals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 157,
+    "name": "should have inequivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 158,
+    "name": "inequivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 159,
+    "name": "should have threw method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 160,
+    "name": "threw method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 161,
+    "name": "should have strictEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 162,
+    "name": "strictEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 163,
+    "name": "should have emit method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 164,
+    "name": "emit method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 165,
+    "name": "should have fail method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 166,
+    "name": "fail method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 167,
+    "name": "should have strictEquals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 168,
+    "name": "strictEquals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 169,
+    "name": "should have notLike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 170,
+    "name": "notLike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 171,
+    "name": "should have dissimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 172,
+    "name": "dissimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 173,
+    "name": "should have true method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 174,
+    "name": "true method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 175,
+    "name": "should have assert method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 176,
+    "name": "assert method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 177,
+    "name": "should have is method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 178,
+    "name": "is method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 179,
+    "name": "should have ok method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 180,
+    "name": "ok method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 181,
+    "name": "should have isEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 182,
+    "name": "isEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 183,
+    "name": "should have isDeeply method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 184,
+    "name": "isDeeply method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 185,
+    "name": "should have deepEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 186,
+    "name": "deepEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 187,
+    "name": "should have deepEquals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 188,
+    "name": "deepEquals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 189,
+    "name": "should have pass method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 190,
+    "name": "pass method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 191,
+    "name": "should have length method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 192,
+    "name": "length method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 193,
+    "name": "should have skip method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 194,
+    "name": "skip method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 195,
+    "name": "should have isNotEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 196,
+    "name": "isNotEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 197,
+    "name": "should have looseEquals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 198,
+    "name": "looseEquals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 199,
+    "name": "should have false method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 200,
+    "name": "false method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 201,
+    "name": "should have notDeeply method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 202,
+    "name": "notDeeply method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 203,
+    "name": "should have ifErr method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 204,
+    "name": "ifErr method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 205,
+    "name": "should have hasFields method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 206,
+    "name": "hasFields method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 207,
+    "name": "should have isNotDeeply method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 208,
+    "name": "isNotDeeply method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 209,
+    "name": "should have like method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 210,
+    "name": "like method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 211,
+    "name": "should have similar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 212,
+    "name": "similar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 213,
+    "name": "should have notOk method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 214,
+    "name": "notOk method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 215,
+    "name": "should have isDissimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 216,
+    "name": "isDissimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 217,
+    "name": "should have isEquivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 218,
+    "name": "isEquivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 219,
+    "name": "should have doesNotEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 220,
+    "name": "doesNotEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 221,
+    "name": "should have isSimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 222,
+    "name": "isSimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 223,
+    "name": "should have notDeepEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 224,
+    "name": "notDeepEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 225,
+    "name": "should have type method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 226,
+    "name": "type method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 227,
+    "name": "should have notok method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 228,
+    "name": "notok method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 229,
+    "name": "should have isInequivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 230,
+    "name": "isInequivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 231,
+    "name": "should have isNot method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 232,
+    "name": "isNot method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 233,
+    "name": "should have same method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 234,
+    "name": "same method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 235,
+    "name": "should have isInequal method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 236,
+    "name": "isInequal method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 237,
+    "name": "should have _endNice method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 238,
+    "name": "_endNice method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 239,
+    "name": "should have ifError method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 240,
+    "name": "ifError method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 241,
+    "name": "should have iferror method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 242,
+    "name": "iferror method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 243,
+    "name": "should have clear method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 244,
+    "name": "clear method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 245,
+    "name": "should have has method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 246,
+    "name": "has method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 247,
+    "name": "should have not method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 248,
+    "name": "not method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 249,
+    "name": "should have timeout method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 250,
+    "name": "timeout method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 251,
+    "name": "should have notSimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 252,
+    "name": "notSimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 253,
+    "name": "should have isUnlike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 254,
+    "name": "isUnlike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 255,
+    "name": "should have notEquals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 256,
+    "name": "notEquals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 257,
+    "name": "should have unsimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 258,
+    "name": "unsimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 259,
+    "name": "should have result method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 260,
+    "name": "result method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 261,
+    "name": "should have doesNotThrow method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 262,
+    "name": "doesNotThrow method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 263,
+    "name": "should have error method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 264,
+    "name": "error method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 265,
+    "name": "should have constructor method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 266,
+    "name": "constructor method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 267,
+    "name": "should have notEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 268,
+    "name": "notEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 269,
+    "name": "should have throws method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 270,
+    "name": "throws method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 271,
+    "name": "should have isLike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 272,
+    "name": "isLike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 273,
+    "name": "should have isNotSimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 274,
+    "name": "isNotSimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 275,
+    "name": "should have isNotEquivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 276,
+    "name": "isNotEquivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 277,
+    "name": "should have inequal method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 278,
+    "name": "inequal method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 279,
+    "name": "should have notEquivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 280,
+    "name": "notEquivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 281,
+    "name": "should have isNotLike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 282,
+    "name": "isNotLike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 283,
+    "name": "should have equivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 284,
+    "name": "equivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 285,
+    "name": "should have looseEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 286,
+    "name": "looseEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 287,
+    "name": "should have equal method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 288,
+    "name": "equal method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 289,
+    "name": "should have unlike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 290,
+    "name": "unlike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 291,
+    "name": "should have doesNotHave method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 292,
+    "name": "doesNotHave method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 293,
+    "name": "should have comment method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 294,
+    "name": "comment method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 295,
+    "name": "should have isa method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 296,
+    "name": "isa method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 297,
+    "name": "test/test-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 298,
+    "name": "a",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 299,
+    "name": "b",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 300,
+    "name": "a",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 301,
+    "name": "b",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 302,
+    "name": "test/timeout.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 303,
+    "name": "test/trivial-success.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 304,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 305,
+    "name": "test/undefined_indented.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 306,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 307,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 308,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 309,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 310,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 311,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 312,
+    "name": "test/valid-command.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "tap-tests.tap": {
+  "ok": false,
+  "count": 311,
+  "pass": 306,
+  "todo": 4,
+  "skip": 5,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 311,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "should not be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "test/buffer_compare.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "just setup, nothing relevant",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "test/common.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 7,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 8,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 9,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 10,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 11,
+    "name": "test/consumer.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 12,
+    "name": "Should output debugger message",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 13,
+    "name": "test/debug-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 14,
+    "name": "should be strictly equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 15,
+    "name": "should be strictly equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 16,
+    "name": "should be strictly equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 17,
+    "name": "test/deep-strict.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 18,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 19,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 20,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 21,
+    "name": "test/deep.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 22,
+    "name": "File with executable bit should be executed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 23,
+    "name": "test/executed.sh",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 24,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 25,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 26,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 27,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 28,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 29,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 30,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 31,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 32,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 33,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 34,
+    "name": "test/exit-code.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 35,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 36,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 37,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 38,
+    "name": "test/expose-gc-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 39,
+    "name": "1-1",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 40,
+    "name": "2-1",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 41,
+    "name": "3-1",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 42,
+    "name": "test/global-harness-async.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 43,
+    "name": "test/independent-timeouts.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 44,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 45,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 46,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 47,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 48,
+    "name": "test/isolated-conf-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 49,
+    "name": "sanity check",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 50,
+    "name": "not ok",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 51,
+    "name": "total test count",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 52,
+    "name": "tests passed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 53,
+    "name": "tests failed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 54,
+    "name": "ok is boolean",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 55,
+    "name": "skip is number",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 56,
+    "name": "results isa Results",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 57,
+    "name": "test isa Test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 58,
+    "name": "test isa Harness",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 59,
+    "name": "test/meta-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 60,
+    "name": "sync child A",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 61,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 62,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 63,
+    "name": "sync grandchild in async child A",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 64,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 65,
+    "name": "test/nested-async.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 66,
+    "name": "p test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 67,
+    "name": "ch test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 68,
+    "name": "grch test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 69,
+    "name": "ch test 2",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 70,
+    "name": "test/nested-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 71,
+    "name": ", 8 can stay.",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 72,
+    "name": "might be confusing",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 73,
+    "name": "done now, exiting",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 74,
+    "name": "test/non-tap-output.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 75,
+    "name": "outputs parent description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 76,
+    "name": "outputs child description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 77,
+    "name": "outputs parent description before parent result",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 78,
+    "name": "outputs parent result before child description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 79,
+    "name": "outputs child description before child result",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 80,
+    "name": "test/output-childtest-description.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 81,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 82,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 83,
+    "name": "test/result-trap.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 84,
+    "name": "compiled seg faulter",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 85,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 86,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 87,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 88,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 89,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 90,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 91,
+    "name": "cleaned up",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 92,
+    "name": "test/segv.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 93,
+    "name": "it works",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 94,
+    "name": "math should work",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 95,
+    "name": "false should not be ok",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 96,
+    "name": "test/simple-harness-test-with-plan.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 97,
+    "name": "it works",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 98,
+    "name": "math should work",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 99,
+    "name": "false should not be ok",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 100,
+    "name": "test/simple-harness-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 101,
+    "name": "always passes",
+    "todo": null,
+    "skip": "skip it good"
+   },
+   {
+    "ok": true,
+    "id": 102,
+    "name": "false",
+    "todo": null,
+    "skip": "always fails"
+   },
+   {
+    "ok": true,
+    "id": 103,
+    "name": "bonus",
+    "todo": "remove todo directive",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 104,
+    "name": "expected",
+    "todo": "implement a thing",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 105,
+    "name": "always passes without explanation",
+    "todo": null,
+    "skip": ""
+   },
+   {
+    "ok": true,
+    "id": 106,
+    "name": "false without explanation",
+    "todo": null,
+    "skip": ""
+   },
+   {
+    "ok": true,
+    "id": 107,
+    "name": "bonus without explanation",
+    "todo": "",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 108,
+    "name": "expected without explanation",
+    "todo": "",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 109,
+    "name": "test/test-assert-todo-skip.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 110,
+    "name": "exit cleanly",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 111,
+    "name": "captures SKIP description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 112,
+    "name": "skip summary is not from file",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 113,
+    "name": "todo summary is not from file",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 114,
+    "name": "captures TODO description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 115,
+    "name": "exit cleanly",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 116,
+    "name": "captures SKIP description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 117,
+    "name": "skip summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 118,
+    "name": "todo summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 119,
+    "name": "captures TODO description",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 120,
+    "name": "exit cleanly",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 121,
+    "name": "summarizes skipped count",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 122,
+    "name": "summarizes todo count",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 123,
+    "name": "test/test-descriptions.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 124,
+    "name": "overall result is PASS",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 125,
+    "name": "captures ok SKIP",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 126,
+    "name": "captures not ok SKIP",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 127,
+    "name": "skip summary not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 128,
+    "name": "captures ok TODO",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 129,
+    "name": "captures not ok TODO",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 130,
+    "name": "todo summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 131,
+    "name": "no ugly \"undefined\" in output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 132,
+    "name": "overall result is PASS",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 133,
+    "name": "no SKIP in summary",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 134,
+    "name": "skip summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 135,
+    "name": "no TODO in summary",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 136,
+    "name": "todo summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 137,
+    "name": "no ugly \"undefined\" in output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 138,
+    "name": "overall result is PASS",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 139,
+    "name": "captures ok SKIP",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 140,
+    "name": "captures not ok SKIP",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 141,
+    "name": "skip summary not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 142,
+    "name": "captures ok TODO",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 143,
+    "name": "captures not ok TODO",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 144,
+    "name": "todo summary is not in TAP output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 145,
+    "name": "no ugly \"undefined\" in output",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 146,
+    "name": "test/test-directives.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 147,
+    "name": "does not count as failure",
+    "todo": null,
+    "skip": ""
+   },
+   {
+    "ok": true,
+    "id": 148,
+    "name": "test/test-skip.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 149,
+    "name": "test object should be instanceof Test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 150,
+    "name": "test object should be instanceof Harness",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 151,
+    "name": "test._Test should be the Test class",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 152,
+    "name": "should have isNotDeepEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 153,
+    "name": "isNotDeepEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 154,
+    "name": "should have equals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 155,
+    "name": "equals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 156,
+    "name": "should have inequivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 157,
+    "name": "inequivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 158,
+    "name": "should have threw method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 159,
+    "name": "threw method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 160,
+    "name": "should have strictEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 161,
+    "name": "strictEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 162,
+    "name": "should have emit method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 163,
+    "name": "emit method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 164,
+    "name": "should have fail method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 165,
+    "name": "fail method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 166,
+    "name": "should have strictEquals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 167,
+    "name": "strictEquals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 168,
+    "name": "should have notLike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 169,
+    "name": "notLike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 170,
+    "name": "should have dissimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 171,
+    "name": "dissimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 172,
+    "name": "should have true method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 173,
+    "name": "true method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 174,
+    "name": "should have assert method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 175,
+    "name": "assert method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 176,
+    "name": "should have is method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 177,
+    "name": "is method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 178,
+    "name": "should have ok method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 179,
+    "name": "ok method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 180,
+    "name": "should have isEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 181,
+    "name": "isEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 182,
+    "name": "should have isDeeply method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 183,
+    "name": "isDeeply method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 184,
+    "name": "should have deepEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 185,
+    "name": "deepEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 186,
+    "name": "should have deepEquals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 187,
+    "name": "deepEquals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 188,
+    "name": "should have pass method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 189,
+    "name": "pass method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 190,
+    "name": "should have length method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 191,
+    "name": "length method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 192,
+    "name": "should have skip method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 193,
+    "name": "skip method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 194,
+    "name": "should have isNotEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 195,
+    "name": "isNotEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 196,
+    "name": "should have looseEquals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 197,
+    "name": "looseEquals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 198,
+    "name": "should have false method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 199,
+    "name": "false method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 200,
+    "name": "should have notDeeply method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 201,
+    "name": "notDeeply method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 202,
+    "name": "should have ifErr method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 203,
+    "name": "ifErr method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 204,
+    "name": "should have hasFields method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 205,
+    "name": "hasFields method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 206,
+    "name": "should have isNotDeeply method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 207,
+    "name": "isNotDeeply method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 208,
+    "name": "should have like method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 209,
+    "name": "like method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 210,
+    "name": "should have similar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 211,
+    "name": "similar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 212,
+    "name": "should have notOk method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 213,
+    "name": "notOk method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 214,
+    "name": "should have isDissimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 215,
+    "name": "isDissimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 216,
+    "name": "should have isEquivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 217,
+    "name": "isEquivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 218,
+    "name": "should have doesNotEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 219,
+    "name": "doesNotEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 220,
+    "name": "should have isSimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 221,
+    "name": "isSimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 222,
+    "name": "should have notDeepEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 223,
+    "name": "notDeepEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 224,
+    "name": "should have type method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 225,
+    "name": "type method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 226,
+    "name": "should have notok method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 227,
+    "name": "notok method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 228,
+    "name": "should have isInequivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 229,
+    "name": "isInequivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 230,
+    "name": "should have isNot method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 231,
+    "name": "isNot method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 232,
+    "name": "should have same method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 233,
+    "name": "same method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 234,
+    "name": "should have isInequal method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 235,
+    "name": "isInequal method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 236,
+    "name": "should have _endNice method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 237,
+    "name": "_endNice method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 238,
+    "name": "should have ifError method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 239,
+    "name": "ifError method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 240,
+    "name": "should have iferror method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 241,
+    "name": "iferror method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 242,
+    "name": "should have clear method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 243,
+    "name": "clear method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 244,
+    "name": "should have has method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 245,
+    "name": "has method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 246,
+    "name": "should have not method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 247,
+    "name": "not method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 248,
+    "name": "should have timeout method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 249,
+    "name": "timeout method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 250,
+    "name": "should have notSimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 251,
+    "name": "notSimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 252,
+    "name": "should have isUnlike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 253,
+    "name": "isUnlike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 254,
+    "name": "should have notEquals method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 255,
+    "name": "notEquals method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 256,
+    "name": "should have unsimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 257,
+    "name": "unsimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 258,
+    "name": "should have result method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 259,
+    "name": "result method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 260,
+    "name": "should have doesNotThrow method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 261,
+    "name": "doesNotThrow method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 262,
+    "name": "should have error method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 263,
+    "name": "error method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 264,
+    "name": "should have constructor method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 265,
+    "name": "constructor method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 266,
+    "name": "should have notEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 267,
+    "name": "notEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 268,
+    "name": "should have throws method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 269,
+    "name": "throws method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 270,
+    "name": "should have isLike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 271,
+    "name": "isLike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 272,
+    "name": "should have isNotSimilar method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 273,
+    "name": "isNotSimilar method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 274,
+    "name": "should have isNotEquivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 275,
+    "name": "isNotEquivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 276,
+    "name": "should have inequal method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 277,
+    "name": "inequal method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 278,
+    "name": "should have notEquivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 279,
+    "name": "notEquivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 280,
+    "name": "should have isNotLike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 281,
+    "name": "isNotLike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 282,
+    "name": "should have equivalent method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 283,
+    "name": "equivalent method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 284,
+    "name": "should have looseEqual method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 285,
+    "name": "looseEqual method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 286,
+    "name": "should have equal method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 287,
+    "name": "equal method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 288,
+    "name": "should have unlike method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 289,
+    "name": "unlike method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 290,
+    "name": "should have doesNotHave method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 291,
+    "name": "doesNotHave method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 292,
+    "name": "should have comment method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 293,
+    "name": "comment method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 294,
+    "name": "should have isa method",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 295,
+    "name": "isa method should be a function",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 296,
+    "name": "test/test-test.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 297,
+    "name": "a",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 298,
+    "name": "b",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 299,
+    "name": "a",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 300,
+    "name": "b",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 301,
+    "name": "test/timeout.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 302,
+    "name": "test/trivial-success.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 303,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 304,
+    "name": "test/undefined_indented.js",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 305,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 306,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 307,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 308,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 309,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 310,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 311,
+    "name": "test/valid-command.js",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "todo.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "a set of tests to be done later",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "another set of tests",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "todo_inline.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 4,
+  "todo": 3,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "Foo",
+    "todo": "Just testing the todo interface.",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Unexpected success",
+    "todo": "Just testing the todo interface.",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "This is not todo",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": "This is a todo with an empty description",
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "testTitle#todo is not a todo, it's a url",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "todo_misparse.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 0,
+  "todo": 1,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "Hamlette",
+    "todo": "",
+    "skip": null
+   }
+  ]
+ },
+ "too-many.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 4,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "should be equivalent",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should be equal",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "(unnamed assert)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "too_many.tap": {
+  "ok": false,
+  "count": 7,
+  "pass": 7,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 6,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 7,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "unfinished.tap": {
+  "ok": false,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "unknown-amount-and-failures.tap": {
+  "ok": false,
+  "count": 7,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 7,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "retrieving servers from the database",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "pinged diamond",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "pinged ruby",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 4,
+    "name": "pinged saphire",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "pinged onyx",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 6,
+    "name": "pinged quartz",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 7,
+    "name": "pinged gold",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "version-14.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "version-in-yaml.tap": {
+  "ok": false,
+  "count": 4,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 4,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "child indented",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 2,
+    "name": "child unindented",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 3,
+    "name": "child unnamed",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 4,
+    "name": "child buffered",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "version_good.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "version_late.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "version_old-strict.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "version_old.tap": {
+  "ok": true,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "vms_nit.tap": {
+  "ok": true,
+  "count": 2,
+  "pass": 2,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 2,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "with_comments.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": null,
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "# (t/todo.t at line 10 TODO?!)",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": false,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "# (t/todo.t at line 13 TODO?!)",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "wrong-last.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 4,
+    "name": "",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "yaml_late_plan.tap": {
+  "ok": true,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "test suite started",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "bogomips",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "test suite finished",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "yamlish-looks-like-child.tap": {
+  "ok": true,
+  "count": 3,
+  "pass": 3,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 3,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "callback happened",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "child test",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 3,
+    "name": "should come last",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "yamlish-that-is-not-yaml.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "expected yaml, got a sea turtle",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "yamlish-without-test.tap": {
+  "ok": true,
+  "count": 1,
+  "pass": 1,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 0,
+    "name": "this is fine",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "yamlish.tap": {
+  "ok": false,
+  "count": 1,
+  "pass": 0,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 1,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": false,
+    "id": 1,
+    "name": "Resolve address",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ },
+ "zero_valid.tap": {
+  "ok": false,
+  "count": 5,
+  "pass": 5,
+  "todo": 0,
+  "skip": 0,
+  "bailout": null,
+  "plan": {
+   "start": 1,
+   "end": 5,
+   "skipAll": false,
+   "reason": ""
+  },
+  "points": [
+   {
+    "ok": true,
+    "id": 1,
+    "name": "One",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 2,
+    "name": "Two",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "Three",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 0,
+    "name": "Four",
+    "todo": null,
+    "skip": null
+   },
+   {
+    "ok": true,
+    "id": 5,
+    "name": "Five",
+    "todo": null,
+    "skip": null
+   }
+  ]
+ }
+}
