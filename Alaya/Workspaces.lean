@@ -79,10 +79,9 @@ structure Workspaces where
   such file. Several at once, because a store may pay per request rather than per file. -/
   readFiles : Hash -> Array String -> Result (Array (Option ByteArray))
   /-- Immediate directory entries, including hidden entries, from the named snapshot. `""`
-  names its root. Browsing is optional for older/custom stores and never materializes a live
-  workspace. Callers verify each ancestor is a directory before following a requested path. -/
-  listEntries : Hash -> String -> Result (Array Workspaces.Entry) := fun _ _ =>
-    throw <| .configuration "this workspace store does not support snapshot browsing"
+  names its root. Never materializes a live workspace. Callers verify each ancestor is a
+  directory before following a requested path (`entryAt`). -/
+  listEntries : Hash -> String -> Result (Array Workspaces.Entry)
   /-- Drops every snapshot not listed, and reclaims their space. -/
   retainOnly : Array Hash -> Result Unit
 
@@ -91,6 +90,44 @@ namespace Workspaces
 /-- The bytes of the regular file at `path`; `none` when there is no such file. -/
 def readFile? (workspaces : Workspaces) (id : Hash) (path : String) : Result (Option ByteArray) := do
   pure ((← workspaces.readFiles id #[path])[0]?.join)
+
+/-- The entry at `path` in snapshot `id`, found by listing each ancestor in turn: a symbolic link
+on the way is never followed, even when its target is inside the snapshot. The empty path is the
+snapshot's root. -/
+def entryAt (workspaces : Workspaces) (id : Hash) (path : String) : Result Entry := do
+  if !safeSnapshotPath path then
+    throw <| .configuration s!"not a clean relative path in a snapshot: {path}"
+  if path.isEmpty then return { name := "", path := "", kind := .directory }
+  let mut directory := ""
+  let parts := (path.splitOn "/").toArray
+  let mut found : Entry := default
+  for index in [:parts.size] do
+    let name := parts[index]!
+    let expected := if directory.isEmpty then name else directory ++ "/" ++ name
+    let entries ← workspaces.listEntries id directory
+    let some entry := entries.find? fun entry => entry.name == name && entry.path == expected
+      | throw <| .configuration s!"no such path in the snapshot: {path}"
+    if index + 1 < parts.size && entry.kind != .directory then
+      throw <| .configuration s!"the snapshot path crosses a non-directory: {expected}"
+    found := entry
+    directory := expected
+  pure found
+
+/-- The entries of the directory at `path` in snapshot `id`, by name. -/
+def list (workspaces : Workspaces) (id : Hash) (path : String := "") : Result (Array Entry) := do
+  let entry ← workspaces.entryAt id path
+  if entry.kind != .directory then
+    throw <| .configuration s!"not a directory in the snapshot: {path}"
+  pure ((← workspaces.listEntries id path).qsort (·.name < ·.name))
+
+/-- The bytes of the regular file at `path` in snapshot `id`. A link is not followed. -/
+def read (workspaces : Workspaces) (id : Hash) (path : String) : Result ByteArray := do
+  let entry ← workspaces.entryAt id path
+  if entry.kind != .file then
+    throw <| .configuration s!"not a regular file in the snapshot ({entry.kind.toString}): {path}"
+  let some bytes ← workspaces.readFile? id path
+    | throw <| .storage s!"the snapshot file could not be read: {path}"
+  pure bytes
 
 /-- `path` with its symbolic links resolved, as far as it exists: the rest is appended as given,
 so a directory that is yet to be created can be compared with ones that are there. -/

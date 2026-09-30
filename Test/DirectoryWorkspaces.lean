@@ -80,6 +80,20 @@ def directoryWorkspaces (root : System.FilePath) : Workspaces where
     match (← file.symlinkMetadata).type with
     | .file => pure (some (← IO.FS.readBinFile file))
     | _ => pure none
+  listEntries id path := storageIO do
+    if !Workspaces.safeSnapshotPath path then
+      throw <| IO.userError s!"not a clean relative path: {path}"
+    let directory := if path.isEmpty then root / id.hex else root / id.hex / (path : System.FilePath)
+    let mut entries := #[]
+    for child in ← directory.readDir do
+      let metadata ← child.path.symlinkMetadata
+      let kind : Workspaces.EntryKind := match metadata.type with
+        | .dir => .directory | .file => .file | .symlink => .symlink | _ => .other
+      entries := entries.push {
+        name := child.fileName
+        path := if path.isEmpty then child.fileName else s!"{path}/{child.fileName}"
+        kind, size := if kind == .file then some metadata.byteSize.toNat else none }
+    pure entries
   retainOnly keep := storageIO do
     if !(← root.isDir) then return
     for entry in ← root.readDir do

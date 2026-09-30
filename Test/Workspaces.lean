@@ -164,6 +164,60 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     assertEqual "bytes" ((← assertOk <| workspaces.readFile? id "blob.bin").map (·.size)) (some bytes.size)
     check ((← assertOk <| workspaces.readFile? id "blob.bin") == some bytes) "bytes differ",
 
+  onEach "list gives a directory's entries by name, hidden ones included, with kinds and sizes" fun workspaces => do
+    let source ← source
+    writeSpec source (baseSpec.push (".hidden", "h"))
+    createSymlink "README.md" (source / "link")
+    let id ← assertOk <| workspaces.snapshot source
+    let describe (entries : Array Workspaces.Entry) :=
+      entries.map fun e => (e.path, e.kind.toString, e.size)
+    assertEqual "root" (describe (← assertOk <| workspaces.list id))
+      #[(".hidden", "file", some 1), ("README.md", "file", some 6), ("link", "symlink", none),
+        ("src", "directory", none)]
+    assertEqual "nested" (describe (← assertOk <| workspaces.list id "src"))
+      #[("src/lib", "directory", none), ("src/main.lean", "file", some 13)]
+    assertError "a file is not a directory" (workspaces.list id "README.md") fun
+      | .configuration m => (m.splitOn "not a directory").length > 1
+      | _ => false,
+
+  onEach "read gives a file's bytes; a directory, a link, or an absent path is an error" fun workspaces => do
+    let source ← source
+    writeSpec source baseSpec
+    let bytes := deterministicBytes 11 5000
+    IO.FS.writeBinFile (source / "src" / "blob.bin") bytes
+    createSymlink "README.md" (source / "link")
+    let id ← assertOk <| workspaces.snapshot source
+    check ((← assertOk <| workspaces.read id "src/blob.bin") == bytes) "bytes differ"
+    assertEqual "text" (String.fromUTF8? (← assertOk <| workspaces.read id "src/lib/util.lean")) (some "util")
+    for (path, message) in [("src", "not a regular file"), ("link", "not a regular file"),
+        ("missing.txt", "no such path"), ("src/missing.txt", "no such path")] do
+      assertError path (workspaces.read id path) fun
+        | .configuration m => (m.splitOn message).length > 1
+        | _ => false,
+
+  onEach "a path through a symbolic link is refused, even to a directory in the snapshot" fun workspaces => do
+    let source ← source
+    writeSpec source baseSpec
+    createSymlink "src" (source / "alias")
+    let id ← assertOk <| workspaces.snapshot source
+    for path in ["alias/main.lean", "alias/lib/util.lean"] do
+      assertError path (workspaces.read id path) fun
+        | .configuration m => (m.splitOn "crosses a non-directory").length > 1
+        | _ => false
+    assertError "listing" (workspaces.list id "alias") fun
+      | .configuration m => (m.splitOn "not a directory").length > 1
+      | _ => false,
+
+  onEach "a path that is not clean and relative is refused" fun workspaces => do
+    let source ← source
+    writeSpec source baseSpec
+    let id ← assertOk <| workspaces.snapshot source
+    for path in ["../README.md", "/README.md", "src/../README.md", "./README.md", "src//main.lean",
+        "src/", "src\\main.lean"] do
+      assertError path (workspaces.read id path) fun
+        | .configuration m => (m.splitOn "not a clean relative path").length > 1
+        | _ => false,
+
   onEach "retainOnly keeps the listed snapshots usable" fun workspaces => do
     let source ← source
     writeSpec source baseSpec

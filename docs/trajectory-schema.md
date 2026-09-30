@@ -671,6 +671,8 @@ alaya waiting                                    list every unanswered question
 alaya question-context HASH                      recorded task and root-to-question history as JSON
 alaya question-files HASH [PATH]                  list a question snapshot directory as JSON
 alaya question-file HASH PATH                     preview a file from that snapshot as JSON
+alaya ls HASH [PATH]                             list a directory of a state's workspace snapshot
+alaya cat HASH PATH                              print a file from a state's workspace snapshot
 alaya checkout HASH DIR [--evidence]             materialize a state's workspace (or an evaluation's evidence) into DIR
 alaya tree                                       show the whole forest
 alaya show HASH [--view]                         metadata, the log, and optionally the view
@@ -687,6 +689,13 @@ root's note, so the first request carries all of it without a tool read: a task 
 too long for a command's output preview reaches the model whole, its middle included.
 
 Every command takes `--data D` and `--json` where it prints states.
+
+`ls` and `cat` read a state's snapshot directly, without restoring its workspace, which is how
+a report an evaluation left in its workspace is read. A path is clean and relative to the
+workspace's root (no `..`, no leading `/`); a symbolic link is listed, but never followed, and
+`cat` prints only regular files, byte for byte. `ls` prints each entry's size and path, with
+`/` after a directory and `@` after a link; `ls --json` prints the entries' names, paths, kinds
+and sizes.
 
 **The agent.** An agent is a *family* — `mini-swe` (`docs/miniswe.md`) or `mini-vero`
 (`docs/minivero.md`) — and a *configuration*: a JSON object with a `family` field and the
