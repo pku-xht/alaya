@@ -48,10 +48,10 @@ conventionally-shaped implementation goes wrong:
 ## Environment
 
 No runtime dependencies; `pytest` is the only development dependency. The project targets
-`ghcr.io/astral-sh/uv:alpine3.23`:
+`ghcr.io/astral-sh/uv:python3.12-bookworm-slim`:
 
 ```sh
 docker run --rm -v "$PWD:/project" -w /project \
   -e UV_PROJECT_ENVIRONMENT=/tmp/venv -e UV_LINK_MODE=copy \
-  ghcr.io/astral-sh/uv:alpine3.23 uv run pytest
+  ghcr.io/astral-sh/uv:python3.12-bookworm-slim uv run pytest
 ```

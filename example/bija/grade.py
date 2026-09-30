@@ -23,7 +23,7 @@ true when every check of both kinds passed. The exit status is 0 when passed, 1 
 
 Run as an alaya grader from the repository root, on a trajectory created with the Bija image:
 
-    alaya eval HASH --grader 'python3 example/bija/grade.py {checkout} {out}' --timeout 1800
+    alaya eval HASH --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800
 """
 
 from __future__ import annotations

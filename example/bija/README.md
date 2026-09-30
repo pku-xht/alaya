@@ -28,7 +28,7 @@ task is to implement its compiler from a written specification.
 ## Running it
 
 Both directories are self-contained uv projects with no runtime dependencies, targeting
-`ghcr.io/astral-sh/uv:python3.12-alpine3.23`:
+`ghcr.io/astral-sh/uv:python3.12-bookworm-slim`:
 
 ```sh
 cd reference && uv run pytest        # 464 tests, all passing
@@ -66,7 +66,7 @@ root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agen
 
 alaya resume "$root" --model dgx:gpt-oss-120b
 
-alaya eval <final-hash> --grader 'python3 example/bija/grade.py {checkout} {out}' --timeout 1800
+alaya eval <final-hash> --grader 'example/bija/grade.py {checkout} {out}' --timeout 1800
 # <hash>  fail 1 155/232  (61377 ms)
 ```
 

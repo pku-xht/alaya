@@ -4,7 +4,7 @@
 # never snapshotted.
 #
 #   docker build -t alaya-bija example/bija
-FROM ghcr.io/astral-sh/uv:python3.12-alpine3.23
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 ENV UV_CACHE_DIR=/opt/uv-cache \
     UV_PROJECT_ENVIRONMENT=/tmp/venv \

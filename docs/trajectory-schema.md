@@ -20,7 +20,7 @@ a restic repository and named by its snapshot ID (§5).
 
 ```sh
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
-root=$(alaya root --task "make the test suite pass" ./project --agent agents/mini-swe-default.json --image python:3.12-slim)
+root=$(alaya root --task "make the test suite pass" ./project --agent agents/mini-swe-default.json --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
 
 alaya show adbac1          # the state: kind, parent, workspace snapshot, note, image, then its log

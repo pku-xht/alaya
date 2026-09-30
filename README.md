@@ -27,11 +27,12 @@ Nothing an agent or a grader asks for runs on the host: every trajectory is crea
 required, for the tests too. `restic` is a single binary, and `chmod` is on any Unix host.
 
 A first run needs an image, a project directory, a task, and a model (`docs/llm-api.md` lists
-the providers). `python:3.12-slim` is a good default image; `alaya` records it by digest:
+the providers). `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` — Debian, Python 3.12, and `uv` —
+is a good default image; `alaya` records it by digest:
 
 ```sh
 root=$(alaya root --task "Add a hello.py that prints hello" ./project \
-  --agent agents/mini-swe-default.json --image python:3.12-slim)
+  --agent agents/mini-swe-default.json --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
 alaya resume "$root" --model PROVIDER:MODEL
 alaya tree
 ```
