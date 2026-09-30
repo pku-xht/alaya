@@ -46,11 +46,12 @@ private def openWork (data : DataDir) : Result WorkDir := do
   Result.fromIO Error.storage (IO.FS.createDirAll path)
   pure { path }
 
-/-- Where a run's commands go: the image the trajectory recorded, which a `--image` that resolves
-to anything else must not override. -/
-private def executorFor (args : Cli.Args) (pinned : String) (config : Executor.Config) :
+/-- Where a run's commands go: the image and workdir the trajectory recorded, which a `--image`
+that resolves to anything else must not override. -/
+private def executorFor (args : Cli.Args) (state : State) (config : Executor.Config) :
     Result Executor := do
-  let settings ← Executor.Docker.settingsFor args pinned
+  let pinned := state.image
+  let settings ← Executor.Docker.settingsFor args pinned state.workdir
   match ← Executor.Docker.settings? args with
   | none => settings.verifyPresent
   | some requested =>
@@ -82,13 +83,13 @@ private def budgetOf (args : Cli.Args) : Result (Option Nat) := do
   let seconds ← args.natD "time-budget" 0
   pure (if seconds == 0 then none else some (seconds * 1000))
 
-private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args) (start : Hash)
-    (image : String) : Result Runtime := do
+private def runtimeFor (data : DataDir) (work : WorkDir) (args : Cli.Args) (start : Hash) :
+    Result Runtime := do
   let spec ← recordedAgent data.store args start
   let modelSpec ← args.require "model" "e.g. --model yunwu:gpt-5.6-luna"
   let temperature ← args.floatD "temperature" 0.0
   let model ← buildModel modelSpec temperature data.cache (← Provider.Options.ofArgs args)
-  let executor ← executorFor args image spec.executorConfig
+  let executor ← executorFor args (← getState data.store start) spec.executorConfig
   pure { store := data.store, workspaces := data.workspaces, workDir := work.path, executor, model
          agent := spec.build executor, budgetMs? := ← budgetOf args }
 
@@ -106,20 +107,19 @@ private def clearWork (data : DataDir) : Result WorkDir := do
 image — task images usually carry the project already, so there is nothing on the host to point
 at. An extraction lands in the work directory, which is disposable by construction. -/
 private def rootUsage : String :=
-  "alaya root (--task TEXT | --task-file FILE) (PROJECT | --path PATH) --image IMAGE --agent FILE"
+  "alaya root (--task TEXT | --task-file FILE) [PROJECT] --image IMAGE [--workdir PATH] --agent FILE"
 
-private def rootProject (args : Cli.Args) (data : DataDir) (settings : Executor.Docker.Settings)
+/-- The directory a new trajectory snapshots: a host `PROJECT`, or else the image's own
+`workdir`, copied out — task images usually carry the project already, at the path their tools
+expect. An extraction lands in the work directory, which is disposable by construction. -/
+private def rootProject (data : DataDir) (settings : Executor.Docker.Settings)
     (project? : Option String) : Result System.FilePath := do
-  match project?, args.get? "path" with
-  | some project, none => pure project
-  | none, some path =>
-    if path.isEmpty then throw <| .configuration "--path needs a value (e.g. --path /testbed)"
+  match project? with
+  | some project => pure project
+  | none =>
     let work ← clearWork data
-    Executor.Docker.copyOut settings path work.path
+    Executor.Docker.copyOut settings settings.workdir work.path
     pure work.path
-  | some _, some _ =>
-    throw <| .configuration "give either a PROJECT directory or --path PATH, not both"
-  | none, none => throw <| .configuration rootUsage
 
 private def modelSpecOf (args : Cli.Args) : String := args.getD "model" ""
 
@@ -173,19 +173,24 @@ private def dispatch (argv : List String) : Result UInt32 := do
     -- Every command of a trajectory runs in its image, so a root must name one.
     let some settings ← Executor.Docker.settings? args
       | throw <| .configuration s!"--image is required: every run happens in a container. {rootUsage}"
-    let settings ← settings.pin
+    if args.isSet "path" then
+      throw <| .configuration "--path is gone: --workdir PATH names where the workspace is mounted, and without a PROJECT the root copies it out of the image"
+    let workdir ← args.valueD "workdir" Executor.Docker.defaultWorkdir
+    Executor.Docker.checkWorkdir workdir #[graderOut, graderDir]
+    let settings ← ({ settings with workdir }).pin
     let uname ← Executor.Docker.uname settings
     let spec ← Agent.Families.fromFile (← args.require "agent"
       s!"a JSON configuration, e.g. agents/mini-swe-default.json; the families are {Agent.Families.names}")
     let log := spec.initialLog task uname
-    let project ← rootProject args data settings rest.head?
+    let project ← rootProject data settings rest.head?
     let hash ← createRoot data.store data.workspaces log project settings.image (some task) spec.config
+      workdir
     emit hash.hex
     pure 0
   | "resume" :: pfx :: _ =>
     let data ← openData args
     let start ← resolve data.store pfx
-    let rt ← runtimeFor data (← openWork data) args start (← getState data.store start).image
+    let rt ← runtimeFor data (← openWork data) args start
     try
       let stopped ← resume rt (modelSpecOf args) start (stateLine data · json)
       if stopped.outOfTime then outOfTime data stopped.state json else
@@ -199,7 +204,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
   | "step" :: pfx :: _ =>
     let data ← openData args
     let parent ← resolve data.store pfx
-    let rt ← runtimeFor data (← openWork data) args parent (← getState data.store parent).image
+    let rt ← runtimeFor data (← openWork data) args parent
     try
       match ← stepOnce rt (modelSpecOf args) parent with
       | none => outOfTime data parent json
@@ -277,7 +282,8 @@ private def dispatch (argv : List String) : Result UInt32 := do
     let grader ← args.require "grader"
       "e.g. --grader 'cp -R ./hidden-tests/. {checkout}/ && pytest -q'"
     let timeout ← args.natD "timeout" 900
-    let settings ← Executor.Docker.settingsFor args (← getState data.store target).image
+    let targetState ← getState data.store target
+    let settings ← Executor.Docker.settingsFor args targetState.image targetState.workdir
     let node ← evaluate data.store data.workspaces (data.path / "eval") target grader
       settings.user? timeout
     match (← getState data.store node).evaluation? with
@@ -341,7 +347,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
     pure 0
   | _ =>
     throw <| .configuration <|
-      "usage: alaya (root (--task TEXT | --task-file FILE) (PROJECT | --path P) --image I --agent FILE | " ++
+      "usage: alaya (root (--task TEXT | --task-file FILE) [PROJECT] --image I [--workdir P] --agent FILE | " ++
       "resume HASH --model P:M [--time-budget S] | step HASH --model P:M [--time-budget S] | " ++
       "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | reply-unavailable HASH | waiting | question-context HASH | " ++

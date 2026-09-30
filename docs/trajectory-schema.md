@@ -82,7 +82,7 @@ last allowed model turn. The driver then records a terminal `turn` with empty `a
 the parent's workspace and the agent's outcome, without calling the model.
 
 Besides the three parts, a state carries what the run needs to continue and what a reader wants
-to know: the container `image`, set on the root and inherited; on the root, the `agent?` configuration the run is continued with (§8); a `note?` of provenance (the model spec for a turn, the task for a root, the note for
+to know: the container `image` and `workdir`, set on the root and inherited; on the root, the `agent?` configuration the run is continued with (§8); a `note?` of provenance (the model spec for a turn, the task for a root, the note for
 an intervention); the `outcome?` when the state ended the run; the `question?` a `question` is
 waiting on; the `intervention?` record behind a notice; and the `evaluation?` verdict.
 
@@ -394,7 +394,7 @@ in the container, and the command receives them by substitution:
 
 | Placeholder | Expands to |
 | --- | --- |
-| `{checkout}` | `/workspace`, the state's files |
+| `{checkout}` | the trajectory's workdir, holding the state's files |
 | `{out}` | `/out`, an empty directory for anything the grader wants kept |
 
 The image has to carry what the grader runs. The grader may do anything to the checkout: copy
@@ -593,6 +593,7 @@ equal hashes.
 | `outcome` | `{status, submission}` or null | when this state ended the run |
 | `note` | string or null | provenance |
 | `image` | string | the pinned container image, set on the root and inherited |
+| `workdir` | string | where the workspace is mounted in the image, set on the root and inherited |
 | `elapsed_ms` | integer or null | on a model step (`turn`, `question`), its wall-clock time: from before the model call to after its last act and snapshot; a run's time is the sum from the root |
 | `agent` | object or null | on a root, the agent's complete configuration (§8) |
 | `evaluation` | object or null | `{grader, returncode, elapsed_ms, output, evidence, summary}` on an evaluation |
@@ -658,8 +659,8 @@ an entry is only ever appended to.
 ## 8. Commands
 
 ```
-alaya root --task TEXT PROJECT --agent FILE --image IMAGE    create a root from a project directory
-alaya root --task-file FILE --agent FILE --image IMAGE --path PATH   …or from a path inside the image
+alaya root --task TEXT PROJECT --agent FILE --image IMAGE [--workdir PATH]   create a root from a project directory
+alaya root --task TEXT --agent FILE --image IMAGE --workdir PATH   …or from the image's own PATH
 alaya resume HASH --model P:M [--time-budget S]  grow one continuation until it ends, asks, or spends S
 alaya step   HASH --model P:M [--time-budget S]  advance exactly one turn
 alaya eval   HASH --grader CMD [--timeout S]     run a grader over a checkout; record the verdict
@@ -719,11 +720,19 @@ with a larger budget, or none — continues from the same state. The budget neve
 short, so a run can overrun it by one step. An agent that paces itself reads the time left from
 its session (`docs/agent-api.md` §3), as MiniVero's `time_budget` tool does (`docs/minivero.md`).
 
-`root` requires `--image` and takes `--container-user` and `--network`; `resume` and `step` take
+`root` requires `--image` and takes `--workdir`, `--container-user` and `--network`; `resume` and `step` take
 `--model`, `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`;
 `eval` takes `--timeout` (default 900 s) and `--container-user` for the grader, which always runs
 without network. The image is resolved to a digest at `root` and recorded; every later command
 runs in it, and `resume` refuses an `--image` that resolves to anything else.
+
+**The workdir.** The workspace is mounted in the container at the root's `--workdir`, which is
+`/workspace` unless given, and commands run there. It is recorded on the root and inherited, like
+the image, so every later command and every grader sees the workspace at the same path; a
+`--workdir` given again must be the same one. Without a `PROJECT`, `root` copies the image's own
+`--workdir` out as the initial workspace: task images that install their project in place, such
+as SWE-bench's at `/testbed`, work as they are, compiled extensions and `.git` included. A workdir
+is an absolute, clean path other than `/`, and not `/grader` or `/out`, which the grader mounts.
 A container runs with **no network** unless `--network` names one (`--network bridge` is
 Docker's default network): an agent with network access can go looking for its own reference
 solution, so an image should carry what a task legitimately needs.

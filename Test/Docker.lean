@@ -269,6 +269,55 @@ def suite : Suite := Testing.suite "docker" #[
         cmd := "docker", args := #["ps", "--all", "--quiet", "--filter", "name=alaya-once-"] }
       assertEqual "no grader container left" left.stdout.trimAscii.toString "",
 
+  test "a trajectory at another workdir runs its commands there, and its grader finds the checkout there" <| withDocker
+    fun settings => do
+      let settings := { settings with workdir := "/testbed" }
+      let work ← workspace
+      let project := (← scratch) / "proj"
+      IO.FS.createDirAll project
+      let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+      let model ← scripted #[toolResponse "pwd > where.txt"]
+      let rt ← runtime settings work store model
+      try
+        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
+          (workdir := "/testbed")
+        let child ← stepped <| stepOnce rt "test:model" root
+        let state ← assertOk (getState store child)
+        assertEqual "workdir inherited" state.workdir "/testbed"
+        assertEqual "the command ran there"
+          ((← assertOk ((← workspaces).readFile? state.workspace "where.txt")).map (String.fromUTF8? ·))
+          (some (some "/testbed\n"))
+        let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") child
+          "test {checkout} = /testbed && test \"$(cat /testbed/where.txt)\" = /testbed" settings.user?
+        let evaluation ← assertOk (getState store node)
+        assertEqual "graded there" (evaluation.evaluation?.map (·.passed)) (some true)
+        assertEqual "evaluation workdir" evaluation.workdir "/testbed"
+      finally
+        rt.executor.close,
+
+  test "a workdir is an absolute, clean path, and not one the grader mounts" <| withDocker
+    fun _ => do
+      for good in ["/workspace", "/testbed", "/home/user/project"] do
+        assertOk <| Docker.checkWorkdir good #["/grader", "/out"]
+      for bad in ["workspace", "/", "/a/../b", "/a//b", "/a/", "/a/./b", "/grader", "/out/x"] do
+        assertError bad (Docker.checkWorkdir bad #["/grader", "/out"]) fun
+          | .configuration _ => true
+          | _ => false,
+
+  test "a command refuses a --workdir other than the trajectory's" <| withDocker
+    fun settings => do
+      let image := settings.image
+      assertError "different" (Docker.settingsFor (Cli.parse ["--workdir", "/other"]) image "/testbed") fun
+        | .configuration m => (m.splitOn "fixed at `root`").length > 1
+        | _ => false
+      let same ← assertOk <| Docker.settingsFor (Cli.parse ["--workdir", "/testbed"]) image "/testbed"
+      assertEqual "same" same.workdir "/testbed"
+      let absent ← assertOk <| Docker.settingsFor (Cli.parse []) image "/testbed"
+      assertEqual "absent" absent.workdir "/testbed"
+      -- At `root` the line's own --image and --workdir are the trajectory's, not a contradiction.
+      let atRoot ← assertOk <| Docker.settings? (Cli.parse ["--image", image, "--workdir", "/testbed"])
+      assertEqual "root" (atRoot.map (·.workdir)) (some "/testbed"),
+
   test "a missing image is a configuration error naming it" <| withDocker
     fun _ => do
       let missing : Docker.Settings := { image := "alaya.invalid/nope@sha256:0" }
