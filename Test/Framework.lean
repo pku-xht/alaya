@@ -49,6 +49,9 @@ def scratch : TestM System.FilePath :=
 a test that runs a command uses the pinned test image (`Test/Container.lean`). -/
 def recordedImage : String := "alaya.test/image@sha256:0"
 
+/-- The workdir of states a test builds by hand. -/
+def recordedWorkdir : String := "/workspace"
+
 def fail (message : String) : TestM alpha := do
   throw <| IO.userError s!"{(← read).name}: {message}"
 

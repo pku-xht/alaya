@@ -450,6 +450,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
       let question ← assertOk <| putState store {
         image := recordedImage
+        workdir := recordedWorkdir
         parent? := some root, workspace, kind := .question, elapsedMs? := some 1000
         appended := #[.response (response #[ask])]
         question? := some { callId := "q", toQuestion := form } }
@@ -531,7 +532,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "one question and one continuation" (← requests.get).size 2,
 
   test "stored question forms reject malformed metadata and retain legacy open text" do
-    let seed : State := { image := recordedImage, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .question, appended := #[], question? := some { callId := "legacy", text := "Explain the change." } }
+    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .question, appended := #[], question? := some { callId := "legacy", text := "Explain the change." } }
     let legacyJson := seed.toJson.setObjVal! "question"
       (.mkObj [("call_id", "legacy"), ("text", "Explain the change.")])
     let legacy ← assertOk <| Result.fromExcept Error.storage (State.fromJson legacyJson)
@@ -640,12 +641,14 @@ def suite : Suite := Testing.suite "ask_user" #[
       let previous : Chat.ToolCall := { id := "previous", name := "bash", arguments := .mkObj [("command", "true")] }
       let first ← assertOk <| putState store {
         image := recordedImage
+        workdir := recordedWorkdir
         parent? := some root, workspace, kind := .turn, elapsedMs? := some 700
         appended := #[.response (response #[previous]),
           .observation "previous" (Output.toJson { output := "", exitCode? := some 0 })] }
       let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
       let question ← assertOk <| putState store {
         image := recordedImage
+        workdir := recordedWorkdir
         parent? := some first, workspace, kind := .question, elapsedMs? := some 300
         appended := #[.response (response #[ask])]
         question? := some { callId := "q", toQuestion := form } }

@@ -2,7 +2,8 @@ import Alaya.Executor
 import Alaya.Cli
 
 /-! The container executor: every command of a run in one container, with the working directory
-bind-mounted at `/workspace`, so the store still snapshots a host directory. The command runs
+bind-mounted at the trajectory's workdir, `/workspace` unless the root chose another, so the
+store still snapshots a host directory. The command runs
 through a `/bin/sh` trampoline that merges stderr into stdout, with the environment overrides
 applied to the command rather than to the docker client. `runOnce` runs a single command in a
 fresh container, which is how a grader runs. -/
@@ -11,8 +12,17 @@ namespace Alaya.Executor.Docker
 
 open Alaya (Result Error Output Uname Executor)
 
-/-- Where the working directory is mounted inside the container. -/
-def workMount : String := "/workspace"
+/-- Where the working directory is mounted inside the container, unless a root chooses another. -/
+def defaultWorkdir : String := "/workspace"
+
+/-- A workdir is an absolute, clean path other than the root, and not one of `reserved`. -/
+def checkWorkdir (workdir : String) (reserved : Array String := #[]) : Result Unit := do
+  let parts := (workdir.drop 1).toString.splitOn "/"
+  if !workdir.startsWith "/" || workdir == "/" ||
+      parts.any (fun part => part.isEmpty || part == "." || part == "..") then
+    throw <| .configuration s!"--workdir must be an absolute, clean path other than /: {workdir}"
+  if let some taken := reserved.find? fun r => workdir == r || workdir.startsWith (r ++ "/") then
+    throw <| .configuration s!"--workdir cannot be {workdir}: {taken} is reserved"
 
 /-- How the container is created. `image` is a runnable reference; once `pin`ned it is one that
 names exact bits, which is what a trajectory records. -/
@@ -24,6 +34,8 @@ structure Settings where
   user? : Option String := none
   /-- `docker run --network`; off by default, see `docs/trajectory-schema.md` §8. -/
   network? : Option String := some "none"
+  /-- Where the working directory is mounted, and where commands run. -/
+  workdir : String := defaultWorkdir
   /-- Extra `docker run` arguments, verbatim. -/
   extraRunArgs : Array String := #[]
   deriving Repr, Inhabited
@@ -127,7 +139,7 @@ private def start (settings : Settings) (workDir : System.FilePath) : IO Contain
   let host ← IO.FS.realPath workDir
   let args := #["run", "--detach", "--rm", "--init", "--entrypoint", "/bin/sh"]
     ++ runArgs settings
-    ++ #["--volume", s!"{host}:{workMount}", "--workdir", workMount]
+    ++ #["--volume", s!"{host}:{settings.workdir}", "--workdir", settings.workdir]
     ++ settings.extraRunArgs
     ++ #[settings.image, "-c", "while :; do sleep 86400; done"]
   let started ← client args
@@ -197,7 +209,7 @@ private def execIn (ref : IO.Ref (Option Container)) (settings : Settings) (conf
         pure container
     let child ← IO.Process.spawn {
       cmd := "docker"
-      args := #["exec", "--interactive", "--workdir", workMount] ++ envArgs config
+      args := #["exec", "--interactive", "--workdir", settings.workdir] ++ envArgs config
         ++ #[container.id, "/bin/sh", "-c", script config container.hasTimeout, "sh"] ++ argv
       stdin := .inherit, stdout := .piped, stderr := .piped }
     let outReader ← IO.asTask (prio := .dedicated) child.stdout.readBinToEnd
@@ -311,18 +323,24 @@ def runOnce (settings : Settings) (mounts : Array Mount) (workdir command : Stri
 
 /-! ## Command line -/
 
-/-- Settings for a given image, taking `--container-user` and `--network` from the line. -/
-def settingsFor (args : Cli.Args) (image : String) : Result Settings := do
+/-- Settings for a trajectory's image and workdir, taking `--container-user` and `--network` from
+the line. A `--workdir` on the line must be the trajectory's own. -/
+def settingsFor (args : Cli.Args) (image : String) (workdir : String := defaultWorkdir) :
+    Result Settings := do
+  if let some requested := args.get? "workdir" then
+    if requested != workdir then
+      throw <| .configuration <|
+        s!"--workdir {requested} is not this trajectory's workdir, {workdir}; it is fixed at `root`"
   let user? ← match args.get? "container-user" with
     | some user => pure (some user)
     | none => Result.fromIO Error.configuration defaultUser?
-  pure { image, user?, network? := some (args.getD "network" "none") }
+  pure { image, user?, network? := some (args.getD "network" "none"), workdir }
 
 /-- The image named on the command line with `--image`, if any. -/
 def settings? (args : Cli.Args) : Result (Option Settings) := do
   match args.get? "image" with
   | none => pure none
-  | some "" => throw <| .configuration "--image needs a value (e.g. --image python:3.12-slim)"
-  | some image => some <$> settingsFor args image
+  | some "" => throw <| .configuration "--image needs a value (e.g. --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)"
+  | some image => some <$> settingsFor args image (args.getD "workdir" defaultWorkdir)
 
 end Alaya.Executor.Docker
