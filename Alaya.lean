@@ -1,6 +1,7 @@
 import Alaya.Error
 import Alaya.Retry
 import Alaya.Tap
+import Alaya.Grader
 import Alaya.Model
 import Alaya.Cache
 import Alaya.Hash

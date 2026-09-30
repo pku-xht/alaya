@@ -23,8 +23,8 @@ Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls these progra
 | `chmod` | making a directory replaceable |
 
 Nothing an agent or a grader asks for runs on the host: every trajectory is created with
-`--image`, and its commands and its graders run in that image, so a running docker daemon is
-required, for the tests too. `restic` is a single binary, and `chmod` is on any Unix host.
+`--image`, its commands run in that image, and its graders in that image or one of their own,
+so a running docker daemon is required, for the tests too. `restic` is a single binary, and `chmod` is on any Unix host.
 
 A first run needs an image, a project directory, a task, and a model (`docs/llm-api.md` lists
 the providers). `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` — Debian, Python 3.12, and `uv` —
@@ -64,10 +64,6 @@ rendering, and commands run in a container.
 
 ## Example
 
-[`example/`](example/README.md) is a recorded run of the mini agent on
-[Bija](example/bija/README.md), a small language to be implemented from its specification. The
-run is forked at the point where the agent gave up: one branch is its own submission, the other
-continues after a person fixed the parser by hand and told the agent so. A grader scores both
-against a test suite the agent never saw, and the tree below holds all of it.
-
-![The report of the example trajectory, with the intervention state selected](example/trajectory.png)
+[`example/bija/`](example/bija/README.md) is a benchmark for alaya: Bija, a small language to be
+implemented from its specification, with a skeleton to start from, an image to run in, and a
+grader that scores an attempt against 232 programs the agent never sees.

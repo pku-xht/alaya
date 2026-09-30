@@ -126,6 +126,10 @@ private def modelSpecOf (args : Cli.Args) : String := args.getD "model" ""
 /-- Exit status when a run stopped at a question rather than an outcome. -/
 private def exitWaiting : UInt32 := 3
 
+/-- Exit status of `eval` when no verdict was recorded: the state, the grader image, or the
+input could not be had. A verdict exits 0 for pass, 1 for fail, 2 for error. -/
+private def exitNoVerdict : UInt32 := 5
+
 /-- Exit status when a run stopped because this invocation's time budget was spent: it has not
 ended, and a later `resume` continues it. -/
 private def exitOutOfTime : UInt32 := 4
@@ -176,7 +180,7 @@ private def dispatch (argv : List String) : Result UInt32 := do
     if args.isSet "path" then
       throw <| .configuration "--path is gone: --workdir PATH names where the workspace is mounted, and without a PROJECT the root copies it out of the image"
     let workdir ← args.valueD "workdir" Executor.Docker.defaultWorkdir
-    Executor.Docker.checkWorkdir workdir #[graderOut, graderDir]
+    Executor.Docker.checkWorkdir workdir #[graderInput]
     let settings ← ({ settings with workdir }).pin
     let uname ← Executor.Docker.uname settings
     let spec ← Agent.Families.fromFile (← args.require "agent"
@@ -277,19 +281,32 @@ private def dispatch (argv : List String) : Result UInt32 := do
       else emit s!"{hash.hex}  {q.toQuestion.render.quote}"
     pure 0
   | "eval" :: pfx :: _ =>
-    let data ← openData args
-    let target ← resolve data.store pfx
-    let grader ← args.require "grader"
-      "e.g. --grader 'cp -R ./hidden-tests/. {checkout}/ && pytest -q'"
-    let timeout ← args.natD "timeout" 900
-    let targetState ← getState data.store target
-    let settings ← Executor.Docker.settingsFor args targetState.image targetState.workdir
-    let node ← evaluate data.store data.workspaces (data.path / "eval") target grader
-      settings.user? timeout
-    match (← getState data.store node).evaluation? with
-    | some e => emit s!"{node.hex}  {e.verdict}  ({e.elapsedMs} ms)"
-    | none => emit node.hex
-    pure 0
+    -- The exit status is the verdict's; an error before one is recorded has its own.
+    try
+      let data ← openData args
+      let target ← resolve data.store pfx
+      let grader ← args.require "grader"
+        "a command that prints TAP on stdout, e.g. --grader 'python3 /grader/grade.py'"
+      let timeout ← args.natD "timeout" 900
+      let input? ← (args.get? "input").mapM fun _ => args.require "input" "a directory of trusted files"
+      let graderImage? ← (args.get? "grader-image").mapM fun _ =>
+        args.require "grader-image" "an image, e.g. --grader-image my-grader:1"
+      let targetState ← getState data.store target
+      let settings ← Executor.Docker.settingsFor args targetState.image targetState.workdir
+      let node ← evaluate data.store data.workspaces (data.path / "eval") target grader
+        settings.user? (input?.map System.FilePath.mk) graderImage? timeout
+      let some e := (← getState data.store node).evaluation?
+        | throw <| .storage "the evaluation was not recorded"
+      if json then
+        emit (Lean.Json.mkObj [("state", node.hex), ("status", e.status.toString),
+          ("passed", e.score.1), ("total", e.score.2), ("reason", e.reason)]).compress
+      else
+        emit s!"{node.hex}  {e.verdict}  ({e.elapsedMs} ms)"
+        if e.status == .error then emit s!"error: {e.reason}"
+      pure (match e.status with | .pass => 0 | .fail => 1 | .error => 2)
+    catch error =>
+      Result.fromIO Error.storage (IO.eprintln s!"error: {error.describe}")
+      pure exitNoVerdict
   | ["commit", pfx, dir] =>
     let data ← openData args
     let hash ← commit data.store data.workspaces (← resolve data.store pfx) dir
@@ -299,13 +316,8 @@ private def dispatch (argv : List String) : Result UInt32 := do
   | ["checkout", pfx, dir] =>
     let data ← openData args
     let state ← getState data.store (← resolve data.store pfx)
-    -- `--evidence` takes an evaluation's grader output instead of its workspace.
-    let tree ← if !args.isSet "evidence" then pure state.workspace else
-      match state.evaluation?.bind (·.evidence?) with
-      | some evidence => pure evidence
-      | none => throw <| .configuration "this state has no evidence: it is not an evaluation, or its grader wrote nothing"
-    data.workspaces.materialize tree dir
-    emit s!"checked out {tree.hex} into {dir}"
+    data.workspaces.materialize state.workspace dir
+    emit s!"checked out {state.workspace.hex} into {dir}"
     pure 0
   | "html" :: rest =>
     let data ← openData args
@@ -349,17 +361,18 @@ private def dispatch (argv : List String) : Result UInt32 := do
     throw <| .configuration <|
       "usage: alaya (root (--task TEXT | --task-file FILE) [PROJECT] --image I [--workdir P] --agent FILE | " ++
       "resume HASH --model P:M [--time-budget S] | step HASH --model P:M [--time-budget S] | " ++
-      "eval HASH --grader CMD | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
+      "eval HASH --grader CMD [--input DIR] [--grader-image IMAGE] [--timeout S] | commit HASH DIR [-m NOTE] [--tell TEXT] | tell HASH TEXT | " ++
       "reply HASH TEXT | reply-unavailable HASH | waiting | question-context HASH | " ++
       "question-files HASH [PATH] | question-file HASH PATH | ls HASH [PATH] | cat HASH PATH | " ++
-      "checkout HASH DIR [--evidence] | tree | " ++
+      "checkout HASH DIR | tree | " ++
       "html [FILE] [--hide DIR] | " ++
       "show HASH [--view] | diff A B | rm HASH) " ++
       "[--data D] [--json] [--temperature T] [--url U] [--port N] [--echo-reasoning] [--image IMAGE] [--network N] " ++
       "[--timeout S]"
 
 /-- Exit 0 on success, 3 when a run stopped at a question (`exitWaiting`), 4 when it stopped
-because the time budget was spent (`exitOutOfTime`), 1 on error. -/
+because the time budget was spent (`exitOutOfTime`), 1 on error. `eval` exits with its verdict:
+0 pass, 1 fail, 2 error, and 5 when it recorded none (`exitNoVerdict`). -/
 def main (args : List String) : IO UInt32 := do
   match ← (dispatch args).toBaseIO with
   | .ok code => pure code

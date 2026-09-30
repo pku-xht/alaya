@@ -97,7 +97,8 @@ def suite : Suite := Testing.suite "question_context" #[
       workdir := recordedWorkdir
       parent? := some asked, workspace, kind := .evaluation,
       appended := #[.message (.user "HIDDEN GRADER")],
-      evaluation? := some { grader := "hidden", returncode := 0, elapsedMs := 1, output := "secret" } }
+      evaluation? := some { command := "hidden", graderImage := recordedImage, status := .pass
+                            elapsedMs := 1, stdout := "secret", stderr := "" } }
     let result ← assertOk <| context store asked
     assertEqual "original task is complete" (← string result "task") originalTask
     let history ← array result "history"

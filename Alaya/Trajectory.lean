@@ -5,6 +5,7 @@ import Alaya.Cache
 import Alaya.Provider
 import Alaya.Executor
 import Alaya.Executor.Docker
+import Alaya.Grader
 
 /-! A content-addressed trajectory tree over any `Alaya.Agent.Agent`, and the operations the
 command line drives it with. See `docs/trajectory-schema.md`. -/
@@ -177,43 +178,35 @@ def Question.fromJson (json : Lean.Json) : Except String Question := do
   let toQuestion ← Agent.Question.fromJson json
   pure { callId, toQuestion }
 
-/-- A grader's verdict on a state. A separate axis from `Outcome`, which says how a *run*
-ended: a submitted run can fail its grader and a run that hit the step limit can pass it. -/
+/-- A grader's verdict on a state (`Alaya.Grader`). A separate axis from `Outcome`, which says how
+a *run* ended: a submitted run can fail its grader and a run that hit the step limit can pass it. -/
 structure Evaluation where
-  /-- The grader command as given, with its `{checkout}` and `{out}` placeholders unexpanded. -/
-  grader : String
-  returncode : Int
+  /-- The grader command, run with `/bin/sh -c` in the grader's container. -/
+  command : String
+  /-- The pinned image the grader ran in. -/
+  graderImage : String
+  /-- A snapshot of the trusted input, mounted read-only at `/grader`, when there was one. -/
+  input? : Option Hash := none
+  status : Grader.Status
+  /-- One per top-level TAP test point. -/
+  checks : Array Grader.Check := #[]
+  /-- Why the status is `error`, or which checks made it `fail`. -/
+  reason : String := ""
+  /-- The grader's exit status, `none` when it did not finish; recorded, not a verdict. -/
+  returncode? : Option Int := none
   elapsedMs : Nat
-  /-- The grader's stdout and stderr, merged and truncated, so a failing run stays readable. -/
-  output : String
-  /-- A snapshot of the grader's output directory — reports, logs, whatever it wrote to `{out}` —
-  or `none` when it wrote nothing. -/
-  evidence? : Option Hash := none
-  /-- The grader's `{out}/verdict.json`, when it wrote one. -/
-  summary? : Option Lean.Json := none
+  /-- The grader's stdout, its TAP, and its stderr, each truncated. -/
+  stdout : String
+  stderr : String
   deriving Inhabited
 
-/-- Whether the state passed: the grader's own `passed` when its summary has one, otherwise a
-zero exit status. -/
-def Evaluation.passed (evaluation : Evaluation) : Bool :=
-  match evaluation.summary?.bind fun s => (s.getObjVal? "passed" >>= Lean.Json.getBool?).toOption with
-  | some verdict => verdict
-  | none => evaluation.returncode == 0
+/-- How many checks passed, out of how many. -/
+def Evaluation.score (e : Evaluation) : Nat × Nat := Grader.Verdict.score e.checks
 
-/-- How many of the grader's checks passed, out of how many: the summary's
-`score: {passed, total}`, when it has one. -/
-def Evaluation.score? (evaluation : Evaluation) : Option (Nat × Nat) := do
-  let score ← (← evaluation.summary?).getObjVal? "score" |>.toOption
-  let passed ← (score.getObjVal? "passed" >>= Lean.Json.getNat?).toOption
-  let total ← (score.getObjVal? "total" >>= Lean.Json.getNat?).toOption
-  pure (passed, total)
-
-/-- `pass` or `fail`, with the exit status of a failure and the score when there is one. -/
-def Evaluation.verdict (evaluation : Evaluation) : String :=
-  let base := if evaluation.passed then "pass" else s!"fail {evaluation.returncode}"
-  match evaluation.score? with
-  | some (passed, total) => s!"{base} {passed}/{total}"
-  | none => base
+/-- The status, with the score when there are checks: `pass 3/3`, `fail 2/3`, `error`. -/
+def Evaluation.verdict (e : Evaluation) : String :=
+  let (passed, total) := e.score
+  if total == 0 then e.status.toString else s!"{e.status.toString} {passed}/{total}"
 
 /-- A node of the trajectory tree, content-addressed in the store. -/
 structure State where
@@ -260,23 +253,36 @@ def continuable (state : State) : Except String Unit := do
   if let some q := state.question? then
     throw s!"this state is waiting for an answer to: {q.text}\nanswer it with `alaya reply HASH TEXT`"
 
-private def evaluationToJson (e : Evaluation) : Lean.Json :=
+def checkToJson (c : Grader.Check) : Lean.Json :=
+  .mkObj [("ok", c.ok), ("name", c.name), ("directive", c.directive)]
+
+def evaluationToJson (e : Evaluation) : Lean.Json :=
   .mkObj [
-    ("grader", e.grader), ("returncode", (e.returncode : Lean.Json)),
-    ("elapsed_ms", (e.elapsedMs : Lean.Json)), ("output", e.output),
-    ("evidence", e.evidence?.map (Lean.Json.str ·.hex) |>.getD .null),
-    ("summary", e.summary?.getD .null)]
+    ("command", e.command), ("graderImage", e.graderImage),
+    ("input", e.input?.map (Lean.Json.str ·.hex) |>.getD .null),
+    ("status", e.status.toString), ("checks", .arr (e.checks.map checkToJson)),
+    ("reason", e.reason),
+    ("returncode", e.returncode?.map (fun c => (c : Lean.Json)) |>.getD .null),
+    ("elapsedMs", (e.elapsedMs : Lean.Json)),
+    ("output", .mkObj [("stdout", e.stdout), ("stderr", e.stderr)])]
 
 private def evaluationFromJson (json : Lean.Json) : Except String Evaluation := do
-  let grader ← json.getObjVal? "grader" >>= Lean.Json.getStr?
-  let returncode ← json.getObjVal? "returncode" >>= Lean.Json.getInt?
-  let elapsedMs ← json.getObjVal? "elapsed_ms" >>= Lean.Json.getNat?
-  let output ← json.getObjVal? "output" >>= Lean.Json.getStr?
-  let evidence? := (json.getObjVal? "evidence" >>= Lean.Json.getStr?).toOption.map (⟨·⟩)
-  let summary? := match json.getObjVal? "summary" with
-    | .ok .null | .error _ => none
-    | .ok v => some v
-  pure { grader, returncode, elapsedMs, output, evidence?, summary? }
+  let command ← json.getObjVal? "command" >>= Lean.Json.getStr?
+  let graderImage ← json.getObjVal? "graderImage" >>= Lean.Json.getStr?
+  let input? := (json.getObjVal? "input" >>= Lean.Json.getStr?).toOption.map (⟨·⟩)
+  let some status := Grader.Status.ofString? (← json.getObjVal? "status" >>= Lean.Json.getStr?)
+    | throw "unknown evaluation status"
+  let checks ← (← json.getObjVal? "checks" >>= Lean.Json.getArr?).mapM fun c => do
+    pure ({ ok := ← c.getObjVal? "ok" >>= Lean.Json.getBool?
+            name := ← c.getObjVal? "name" >>= Lean.Json.getStr?
+            directive := ← c.getObjVal? "directive" >>= Lean.Json.getStr? } : Grader.Check)
+  let reason ← json.getObjVal? "reason" >>= Lean.Json.getStr?
+  let returncode? := (json.getObjVal? "returncode" >>= Lean.Json.getInt?).toOption
+  let elapsedMs ← json.getObjVal? "elapsedMs" >>= Lean.Json.getNat?
+  let output ← json.getObjVal? "output"
+  let stdout ← output.getObjVal? "stdout" >>= Lean.Json.getStr?
+  let stderr ← output.getObjVal? "stderr" >>= Lean.Json.getStr?
+  pure { command, graderImage, input?, status, checks, reason, returncode?, elapsedMs, stdout, stderr }
 
 private def outcomeToJson (o : Outcome) : Lean.Json :=
   .mkObj [("status", o.status), ("submission", o.submission)]
@@ -351,9 +357,9 @@ end State
 
 /-! ## The store as a trajectory tree -/
 
-/-- The snapshots a state keeps alive: its workspace, and an evaluation's evidence. -/
+/-- The snapshots a state keeps alive: its workspace, and an evaluation's trusted input. -/
 private def snapshotsOf (state : State) : Array Hash :=
-  #[state.workspace] ++ (state.evaluation?.bind (·.evidence?)).toArray
+  #[state.workspace] ++ (state.evaluation?.bind (·.input?)).toArray
 
 /-- Persists a state, returning its content hash. Its snapshots are kept by `Workspaces` from
 the moment they were taken. -/
@@ -587,15 +593,8 @@ partial def resume (rt : Runtime) (note : String) (hash : Hash)
 
 /-! ## Evaluation -/
 
-/-- Where a grader finds its output directory, and the directory it was started from, inside its
-container; the state's files are at the trajectory's workdir. A workdir may not be either. -/
-def graderOut : String := "/out"
-def graderDir : String := "/grader"
-
-/-- The grader command with its placeholders expanded: `{checkout}` is the directory holding the
-state's files, `workdir`, and `{out}` an empty directory for whatever the grader wants kept. -/
-def expandGrader (grader workdir : String) : String :=
-  (grader.replace "{checkout}" workdir).replace "{out}" graderOut
+/-- Where a grader finds its trusted input, read-only; a workdir may not be there. -/
+def graderInput : String := "/grader"
 
 /-- Keeps a grader's output readable in `show` without putting megabytes in a state blob. -/
 private def truncateOutput (s : String) : String :=
@@ -613,59 +612,62 @@ private def emptyDir (dir : System.FilePath) : Result Unit := do
     if ← dir.pathExists then IO.FS.removeDirAll dir
     IO.FS.createDirAll dir
 
-/-- Whether `dir` has any entry. -/
-private def nonEmpty (dir : System.FilePath) : Result Bool :=
-  Result.fromIO Error.storage do pure (!(← dir.readDir).isEmpty)
+/-- Runs `command` with `/bin/sh -c` in a fresh container and records its verdict as a leaf child
+of `hash`, whose workspace is the checkout after the grader ran, reports included.
 
-/-- Runs `grader` in a fresh container from the trajectory's image, against a fresh checkout of
-`hash`'s workspace, and records the verdict as a leaf child whose workspace is the checkout after
-the grader ran. The checkout is mounted at the trajectory's workdir, an empty output
-directory at `/out`, and the directory `alaya` was started from, read-only, at `/grader`, which is
-the grader's working directory, so relative paths in the command are the person's. The
-container runs as `user?` and without network. `scratch` is a directory the trajectory may wipe:
-the checkout and the output directory are made under it. Every call runs the grader and adds a
-new evaluation, even when an earlier one used the same command. -/
+The container is from `graderImage?`, pinned, or else the trajectory's image; it runs as `user?`
+and without network. A fresh checkout of the state is mounted read-write at the trajectory's
+workdir, which is the working directory. `input?`, a directory of trusted files such as hidden
+tests, is snapshotted, and that snapshot is mounted read-only at `/grader`, so the grader sees
+exactly what is recorded. The verdict comes from the TAP the grader prints on stdout
+(`Alaya.Grader`). `scratch` is a directory the trajectory may wipe. Every call runs the grader
+and adds a new evaluation. -/
 def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePath) (hash : Hash)
-    (grader : String) (user? : Option String) (timeoutSeconds : Nat := 900) : Result Hash := do
+    (command : String) (user? : Option String) (input? : Option System.FilePath := none)
+    (graderImage? : Option String := none) (timeoutSeconds : Nat := 900) : Result Hash := do
   let state ← getState store hash
   if state.kind == .evaluation then
     throw <| .configuration "cannot evaluate an evaluation: it is already a leaf"
-  -- Absolute, so a grader that changes directory still finds them.
+  let graderImage ← match graderImage? with
+    | some reference => pure (← Executor.Docker.Settings.pin { image := reference }).image
+    | none => pure state.image
+  let inputId? ← input?.mapM fun dir => do
+    if !(← Result.fromIO Error.storage dir.isDir) then
+      throw <| .configuration s!"--input must be a directory: {dir}"
+    workspaces.snapshot dir
   Result.fromIO Error.storage (IO.FS.createDirAll scratch)
   let scratch ← Result.fromIO Error.storage (IO.FS.realPath scratch)
   let checkout := scratch / "checkout"
-  let out := scratch / "out"
+  let input := scratch / "input"
   emptyDir checkout
-  emptyDir out
-  workspaces.materialize state.workspace checkout
-  let here ← Result.fromIO Error.storage IO.currentDir
-  let started ← Result.fromIO Error.storage IO.monoMsNow
-  let output ← Result.fromIO Error.storage <| Executor.Docker.runOnce
-    { image := state.image, user? } #[
-      { host := checkout, container := state.workdir }, { host := out, container := graderOut },
-      { host := here, container := graderDir, readOnly := true }]
-    graderDir (expandGrader grader state.workdir) timeoutSeconds
-  let elapsedMs := (← Result.fromIO Error.storage IO.monoMsNow) - started
-  let evidence? ← if ← nonEmpty out then some <$> workspaces.snapshot out else pure none
-  let summary? ← Result.fromIO Error.storage do
-    let verdict := out / "verdict.json"
-    if !(← verdict.pathExists) then pure none
-    else match Lean.Json.parse (← IO.FS.readFile verdict) with
-      | .ok json => pure (some json)
-      | .error _ => pure none
-  -- The evaluation's workspace is the checkout as the grader left it, so the tree shows what
-  -- the grader did to the files; the leaf rule keeps it out of any state a run continues from.
-  let graded ← workspaces.snapshot checkout
-  Workspaces.makeWritable checkout
-  Result.fromIO Error.storage (IO.FS.removeDirAll checkout)
-  putState store {
-    parent? := some hash, workspace := graded, kind := .evaluation, appended := #[]
-    image := state.image, workdir := state.workdir
-    evaluation? := some {
-      grader, returncode := output.exitCode?.map (fun c => Int.ofNat c.toNat) |>.getD (-1), elapsedMs
-      output := truncateOutput (output.output ++
-        (match output.error? with | some e => s!"\n{e}" | none => ""))
-      evidence?, summary? } }
+  emptyDir input
+  try
+    workspaces.materialize state.workspace checkout
+    if let some id := inputId? then workspaces.materialize id input
+    let mounts := #[{ host := checkout, container := state.workdir : Executor.Docker.Mount }] ++
+      (if inputId?.isSome then #[{ host := input, container := graderInput, readOnly := true }] else #[])
+    let started ← Result.fromIO Error.storage IO.monoMsNow
+    let captured ← Result.fromIO Error.storage <| Executor.Docker.runOnce
+      { image := graderImage, user? } mounts state.workdir command timeoutSeconds
+    let elapsedMs := (← Result.fromIO Error.storage IO.monoMsNow) - started
+    let verdict := Grader.verdict captured.stdout captured.stopped?
+    -- The evaluation's workspace is the checkout as the grader left it, so the tree shows what
+    -- the grader did to the files, its reports included; the leaf rule keeps it out of any state
+    -- a run continues from.
+    let graded ← workspaces.snapshot checkout
+    putState store {
+      parent? := some hash, workspace := graded, kind := .evaluation, appended := #[]
+      image := state.image, workdir := state.workdir
+      evaluation? := some {
+        command, graderImage, input? := inputId?, status := verdict.status
+        checks := verdict.checks, reason := verdict.reason
+        returncode? := captured.exitCode?.map fun c => Int.ofNat c.toNat, elapsedMs
+        stdout := truncateOutput captured.stdout, stderr := truncateOutput captured.stderr } }
+  finally
+    Workspaces.makeWritable scratch
+    Result.fromIO Error.storage do
+      if ← checkout.pathExists then IO.FS.removeDirAll checkout
+      if ← input.pathExists then IO.FS.removeDirAll input
 
 /-! ## Root creation and what a person adds -/
 
@@ -836,7 +838,7 @@ private def label (state : State) : String :=
     "reply  " ++ flatten text
   | .evaluation =>
     match state.evaluation? with
-    | some e => s!"eval  [{e.verdict}]  " ++ flatten e.grader
+    | some e => s!"eval  [{e.verdict}]  " ++ flatten e.command
     | none => "eval"
 
 private def outcomeSuffix (state : State) : String :=
@@ -905,13 +907,22 @@ def showLines (store : Store) (hash : Hash) (view? : Option View := none) :
   let total ← elapsedMs store hash
   if total > 0 then lines := lines.push s!"run time {seconds total}, from the root"
   if let some e := state.evaluation? then
-    lines := lines.push s!"grader   {e.grader}"
-    lines := lines.push s!"verdict  {if e.passed then "pass" else "fail"} (rc={e.returncode}, {e.elapsedMs} ms)"
-    if let some (passed, total) := e.score? then lines := lines.push s!"score    {passed}/{total}"
-    if let some evidence := e.evidence? then lines := lines.push s!"evidence {evidence.hex}"
-    if let some summary := e.summary? then lines := lines.push s!"summary  {summary.compress}"
-    lines := lines.push "--- grader output ---"
-    lines := lines.push e.output
+    lines := lines.push s!"grader   {e.command}"
+    lines := lines.push s!"grader image {e.graderImage}"
+    if let some input := e.input? then lines := lines.push s!"input    {input.hex}"
+    let exit := e.returncode?.map (s!"exit {·}") |>.getD "no exit status"
+    lines := lines.push s!"verdict  {e.verdict} ({exit}, {e.elapsedMs} ms)"
+    if !e.reason.isEmpty then lines := lines.push s!"reason   {e.reason}"
+    if !e.checks.isEmpty then
+      lines := lines.push "--- checks ---"
+      for c in e.checks do
+        let directive := if c.directive.isEmpty then "" else s!"  # {c.directive}"
+        lines := lines.push s!"{if c.ok then "ok    " else "not ok"}  {c.name}{directive}"
+    lines := lines.push "--- grader stdout ---"
+    lines := lines.push e.stdout
+    if !e.stderr.isEmpty then
+      lines := lines.push "--- grader stderr ---"
+      lines := lines.push e.stderr
   if let some o := state.outcome? then
     lines := lines.push s!"outcome  {o.status}"
     if o.submission != "" then lines := lines.push s!"submission:\n{o.submission}"

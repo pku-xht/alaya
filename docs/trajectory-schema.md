@@ -113,7 +113,7 @@ adbac197aea8  root  make the test suite pass
     9d0e11a2b7c4  commit  fixed the fixture by hand
       2c7f0a9e5d31  bash  pytest -q
         e5a1c3d9f802  submit  done  [Submitted]
-          7b19d4c2ff01  eval  [pass]  cp -R ./hidden-tests/. {checkout}/ && cd {checkout} && pytest -q
+          7b19d4c2ff01  eval  [pass 48/48]  cp -R /grader/tests . && pytest -q -p tap --tap-stream
     c61754d16c7a  ask  Should I keep the old API?  [Waiting]
 ```
 
@@ -382,84 +382,107 @@ An **evaluation** is a verdict on a state, produced by a program of the person's
 recorded as a leaf child. The trajectory does not know what a verdict means for a given task;
 it knows how to hand a program the state's files, collect what the program says, and keep it.
 
+> The grader runs in a fresh copy of the state at the trajectory's workdir, in the trajectory's
+> image or a grader image, with trusted files read-only at `/grader`. It can change anything;
+> the result is kept as the evaluation's workspace. It prints TAP on stdout: a complete plan with
+> all results `ok` is a pass, any `not ok` is a fail, and anything incomplete is an error.
+
 ### The grader
 
-A grader is a shell command run in a fresh container from the trajectory's image, without
-network, as the user the agent's commands run as. Its working directory is `/grader`: the
-directory `alaya` was invoked from, mounted read-only, so relative paths in it mean what they
-mean on the person's command line, and the grader's own scripts and hidden tests are where the
-person keeps them. Before it runs, the trajectory materializes the state's workspace into a
-fresh directory, the **checkout**, and creates an empty **output directory**; both are mounted
-in the container, and the command receives them by substitution:
+A grader is a shell command, run with `/bin/sh -c` in a fresh container, without network, as the
+user the agent's commands run as. The container is from the trajectory's image, or from
+`--grader-image`, which is resolved to a digest and recorded: a grader's tools, which the agent
+should not see, belong in an image of their own, best built on the agent's image (two targets of
+one Dockerfile), so the grader runs in the agent's environment plus its tools.
 
-| Placeholder | Expands to |
-| --- | --- |
-| `{checkout}` | the trajectory's workdir, holding the state's files |
-| `{out}` | `/out`, an empty directory for anything the grader wants kept |
+Before it runs, the trajectory materializes the state's workspace into a fresh directory, the
+**checkout**, mounted read-write at the trajectory's workdir, which is the grader's working
+directory — exactly where the agent saw its files. `--input DIR` names the grader's **trusted
+input**: its script, hidden tests, a benchmark. It is snapshotted, and the snapshot is mounted
+read-only at `/grader`, so the grader sees exactly what is recorded. Nothing else of the host is
+visible, and no path is substituted into the command.
 
-The image has to carry what the grader runs. The grader may do anything to the checkout: copy
-tests over it, apply a patch, build it, or rebuild a clean project elsewhere and carry only the
-agent's edits across. When it finishes, the checkout is snapshotted as the evaluation's `workspace` and
-discarded, so the tree records what the grader did to the files — the tests it copied in, the
-artefacts it built — as the change from the graded state to the evaluation. None of it reaches
-a state a run continues from: an evaluation is a leaf.
+The grader may do anything to the checkout: copy tests over it, apply a patch, build it, or
+rebuild a clean project elsewhere and carry only the agent's edits across. Its reports belong
+in the checkout too, and scratch work in `/tmp`. When it finishes, the checkout is snapshotted as
+the evaluation's `workspace` and discarded, so the tree records what the grader did to the
+files — the tests it copied in, the reports it wrote — as the change from the graded state to
+the evaluation, and `alaya ls` and `alaya cat` read them. None of it reaches a state a run
+continues from: an evaluation is a leaf.
 
 ### The verdict
 
-When the grader exits, the trajectory records:
+A grader reports through [TAP](https://testanything.org/tap-version-14-specification.html) on
+stdout: a plan `1..N` and one `ok` or `not ok` line per check (`Alaya.Tap`). Logs go to stderr,
+or in `#` comment lines, so they cannot be read as TAP. The status comes from the TAP alone
+(`Alaya.Grader`):
+
+- **pass**: the plan is there, as many checks arrived as it announced, and none failed;
+- **fail**: the TAP is complete, and a check failed — a failing `TODO` or `SKIP` check does not
+  count, and a failing subtest does;
+- **error**: anything else — no plan, fewer or more checks than planned, a `Bail out!`, a
+  grader that timed out or could not start.
+
+The exit status is recorded but decides nothing, so "the checks ran and some failed" and "the
+grader crashed" cannot be confused: a crash leaves the TAP incomplete, which is an error. A
+plain test command needs a few lines of wrapper, in which the grader's author, who knows the
+tool, says what its exit codes mean:
+
+```sh
+echo 1..1
+pytest -q; code=$?
+case $code in
+  0) echo "ok 1 - tests" ;;
+  1) echo "not ok 1 - tests" ;;
+  *) echo "Bail out! pytest exited $code" ;;
+esac
+```
+
+The trajectory records:
 
 | Field | Meaning |
 | --- | --- |
-| `grader` | the command as given, placeholders unexpanded |
-| `returncode`, `elapsedMs` | the exit status and the wall-clock time |
-| `output` | stdout and stderr, merged, truncated to 20 000 characters |
-| `evidence?` | a snapshot of `{out}`, when the grader wrote anything there |
-| `summary?` | the contents of `{out}/verdict.json`, when the grader wrote one |
+| `command` | the grader command |
+| `graderImage` | the image it ran in, by digest |
+| `input` | the snapshot of `--input`, or null |
+| `status` | `pass`, `fail` or `error` |
+| `checks` | `[{ok, name, directive}]`, one per top-level test point; `ok` is false only for a failure that counts |
+| `reason` | why the status is `error`, or which checks made it `fail` |
+| `returncode`, `elapsedMs` | the exit status, null when the grader did not finish, and the wall-clock time |
+| `output` | `{stdout, stderr}`, each truncated to 20 000 characters |
 
-A state **passed** when `summary?` has a boolean `passed` field and it is true; otherwise when the
-exit status is zero. A grader that only runs a test suite needs no `verdict.json`: the suite's
-exit status is the verdict. A grader with more to say writes `verdict.json` and puts its reports
-and logs beside it. Two of its fields have a fixed meaning; the rest are the grader's own:
+The score, how many checks passed out of how many, is shown wherever the status is — `tree`,
+`show`, the report — as `pass 3/3`, `fail 2/3`, so a partial result is a number rather than a
+bare `fail`. `alaya show` lists every check and prints the grader's stdout and stderr.
 
-| Field | Meaning |
-| --- | --- |
-| `passed` | boolean; the verdict |
-| `score` | `{"passed": n, "total": m}`: how many of the grader's checks passed, out of how many |
-
-The score is shown wherever the verdict is — `tree`, `show`, the report — as `n/m`, so a partial
-result is a number rather than a bare `fail`. `alaya show` prints the whole summary and names the
-evidence, and `alaya checkout HASH DIR --evidence` yields the files.
-
-*An evaluation: the grader runs in the trajectory's image over a checkout; the state records the verdict.*
+*An evaluation: the grader runs over a checkout with its trusted input; the state records the verdict.*
 
 ```mermaid
 flowchart LR
-  S["state e5a1c3<br/>workspace W"] -->|"materialize W"| C["checkout<br/>(snapshotted afterwards)"]
-  G["grader command<br/>{checkout} {out}"] --> C
-  G --> O["out/<br/>verdict.json · report.md · …"]
-  C -.->|"exit status, output, snapshot"| E["evaluation 7b19d4<br/>workspace W' · grader · returncode · output · summary · evidence"]
-  O -.->|"snapshot"| E
+  S["state e5a1c3<br/>workspace W"] -->|"materialize W"| C["checkout at the workdir<br/>(snapshotted afterwards)"]
+  I["--input DIR"] -->|"snapshot, read-only"| G
+  G["grader command<br/>in the image"] --> C
+  G -.->|"TAP on stdout"| E["evaluation 7b19d4<br/>workspace W' · status · checks · output · input"]
+  C -.->|"snapshot, reports included"| E
   S --> E
 ```
 
 Every `eval` runs the grader and adds a new evaluation of the state, even with a grader command
-used before; each evaluation records one run.
+used before; each evaluation records one run. `eval` exits 0 for pass, 1 for fail, 2 for error,
+and 5 when it recorded no verdict at all — an unknown state, a grader image or input that could
+not be had.
 
 ```sh
-# A hidden test suite, copied over the checkout; the suite's exit status is the verdict.
-alaya eval e5a1c3 --grader 'cp -R ./hidden-tests/. {checkout}/ && cd {checkout} && pytest -q' --timeout 1800
-# 7b19d4c2ff01  pass  (48210 ms)
+# A hidden test suite, copied over the checkout; pytest-tap prints the TAP.
+alaya eval e5a1c3 --input ./hidden --grader 'cp -R /grader/tests . && pytest -q -p tap --tap-stream' --timeout 1800
+# 7b19d4c2ff01  pass 48/48  (48210 ms)
 
-# A patch of the tests against the original files, then the suite.
-alaya eval e5a1c3 --grader 'patch -p1 -d {checkout} < ./tests.diff && cd {checkout} && pytest -q tests/test_foo.py'
+# A grading program in an image of its own, with the benchmark it trusts as its input.
+alaya eval e5a1c3 --grader-image my-grader:1 --input ./benchmark --grader 'grade-project /grader'
+# 3c9e02a71b5d  fail 155/232  (61377 ms)
 
-# A grading program with its own verdict: it rebuilds a clean project from a source it trusts,
-# carries the agent's edits across, and writes verdict.json and a report into {out}.
-alaya eval e5a1c3 --grader 'grade-project --candidate {checkout} --source ./benchmark --report-dir {out}'
-# 3c9e02a71b5d  fail 1 155/232  (61377 ms)
-
-alaya show 7b19d4                        # verdict, summary, evidence snapshot, and the grader's output
-alaya checkout 7b19d4 ./report --evidence  # the grader's report files
+alaya show 7b19d4                 # the status, every check, and the grader's stdout and stderr
+alaya ls 7b19d4 .report           # the reports the grader left in the checkout
 ```
 
 ## 5. On disk
@@ -497,7 +520,7 @@ structure Workspaces where
 
 | Operation | Used by |
 | --- | --- |
-| `snapshot` | `root`, every act of a turn, `commit`, `eval` (the graded checkout and the grader's evidence) |
+| `snapshot` | `root`, every act of a turn, `commit`, `eval` (the grader's input and the graded checkout) |
 | `materialize` | the start of `step` and `resume`, `eval`, `checkout` |
 | `diff` | the notice of a `commit --tell`, `alaya diff`, the HTML report |
 | `readFiles` | the HTML report and question-page file previews |
@@ -596,7 +619,7 @@ equal hashes.
 | `workdir` | string | where the workspace is mounted in the image, set on the root and inherited |
 | `elapsed_ms` | integer or null | on a model step (`turn`, `question`), its wall-clock time: from before the model call to after its last act and snapshot; a run's time is the sum from the root |
 | `agent` | object or null | on a root, the agent's complete configuration (§8) |
-| `evaluation` | object or null | `{grader, returncode, elapsed_ms, output, evidence, summary}` on an evaluation |
+| `evaluation` | object or null | `{command, graderImage, input, status, checks, reason, returncode, elapsedMs, output}` on an evaluation (§4) |
 | `intervention` | object or null | `{message, changed: ["M path", "+ path", "- path", …]}` on a state that carried a notice |
 | `question` | object or null | `{call_id, text, question_type, options}` on a waiting state |
 
@@ -663,7 +686,7 @@ alaya root --task TEXT PROJECT --agent FILE --image IMAGE [--workdir PATH]   cre
 alaya root --task TEXT --agent FILE --image IMAGE --workdir PATH   …or from the image's own PATH
 alaya resume HASH --model P:M [--time-budget S]  grow one continuation until it ends, asks, or spends S
 alaya step   HASH --model P:M [--time-budget S]  advance exactly one turn
-alaya eval   HASH --grader CMD [--timeout S]     run a grader over a checkout; record the verdict
+alaya eval   HASH --grader CMD [--input DIR] [--grader-image IMAGE] [--timeout S]   grade a state (§4)
 alaya commit HASH DIR [-m NOTE] [--tell TEXT]    record a hand-edited workspace as a child
 alaya tell   HASH TEXT                           send the agent a message, as a child
 alaya reply  HASH TEXT                           answer the question a state is waiting on
@@ -674,7 +697,7 @@ alaya question-files HASH [PATH]                  list a question snapshot direc
 alaya question-file HASH PATH                     preview a file from that snapshot as JSON
 alaya ls HASH [PATH]                             list a directory of a state's workspace snapshot
 alaya cat HASH PATH                              print a file from a state's workspace snapshot
-alaya checkout HASH DIR [--evidence]             materialize a state's workspace (or an evaluation's evidence) into DIR
+alaya checkout HASH DIR                          materialize a state's workspace into DIR
 alaya tree                                       show the whole forest
 alaya show HASH [--view]                         metadata, the log, and optionally the view
 alaya diff A B                                   workspace changes between two states
@@ -722,8 +745,8 @@ its session (`docs/agent-api.md` §3), as MiniVero's `time_budget` tool does (`d
 
 `root` requires `--image` and takes `--workdir`, `--container-user` and `--network`; `resume` and `step` take
 `--model`, `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`;
-`eval` takes `--timeout` (default 900 s) and `--container-user` for the grader, which always runs
-without network. The image is resolved to a digest at `root` and recorded; every later command
+`eval` takes `--input`, `--grader-image`, `--timeout` (default 900 s) and `--container-user` for
+the grader, which always runs without network. The image is resolved to a digest at `root` and recorded; every later command
 runs in it, and `resume` refuses an `--image` that resolves to anything else.
 
 **The workdir.** The workspace is mounted in the container at the root's `--workdir`, which is
@@ -738,7 +761,7 @@ Docker's default network): an agent with network access can go looking for its o
 solution, so an image should carry what a task legitimately needs.
 
 Exit status: 0 when a run ended, 3 when it stopped at a question, 4 when it stopped because its
-time budget was spent, 1 on error. Concurrent runs
+time budget was spent, 1 on error; `eval` exits with its verdict (§4). Concurrent runs
 need separate data directories: the work directory and the cache are not shared safely.
 
 ## 9. Invariants

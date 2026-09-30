@@ -289,18 +289,20 @@ def trajectorySuite : Suite := Testing.suite "workspaces.trajectory" #[
     assertEqual "diff" (← assertOk <| diffLines store workspaces root child) #["M README.md", "+ tests"]
     assertEqual "notice" ((← assertOk <| getState store child).intervention?.map (·.changed))
       (some #["M README.md", "+ tests"])
+    let input := (← scratch) / "input"
+    writeSpec input #[("check.sh", "test -f tests/extra.txt && printf '1..1\\nok 1\\n'")]
     let verdict ← assertOk <| evaluate store workspaces ((← scratch) / "eval") child
-      "test -f {checkout}/tests/extra.txt && echo seen > {out}/log.txt" (← testUser?)
+      "sh /grader/check.sh" (← testUser?) (input? := some input)
     let evaluation? := (← assertOk <| getState store verdict).evaluation?
-    assertEqual "passed" (evaluation?.map (·.passed)) (some true)
-    let some evidence := evaluation?.bind (·.evidence?) | fail "the grader's output was not kept"
-    assertEqual "evidence" ((← assertOk <| workspaces.readFile? evidence "log.txt").bind String.fromUTF8?)
-      (some "seen\n")
+    assertEqual "passed" (evaluation?.map (·.status)) (some .pass)
+    let some evidence := evaluation?.bind (·.input?) | fail "the grader's input was not kept"
+    assertEqual "input" ((← assertOk <| workspaces.readFile? evidence "check.sh").isSome) true
     -- Removing the commit's subtree drops its snapshots and keeps the root's.
     assertEqual "removed" (← assertOk <| removeSubtree store workspaces child) 2
     let out := (← scratch) / "out"
     assertOk <| workspaces.materialize (← assertOk <| getState store root).workspace out
     assertEqual "root intact" (← IO.FS.readFile (out / "README.md")) "readme"
+    -- The evaluation's input snapshot went with it.
     assertError "dropped" (workspaces.materialize evidence out) fun
       | .storage _ => true
       | _ => false
