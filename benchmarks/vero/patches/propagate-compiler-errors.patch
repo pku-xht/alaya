@@ -1,0 +1,18 @@
+--- a/src/vero/evaluation/lake.py
++++ b/src/vero/evaluation/lake.py
+@@ -68,12 +68,9 @@
+             timeout=timeout,
+         )
+     except subprocess.TimeoutExpired as e:
+-        return LakeResult(
+-            exit_code=124,
+-            stdout=(e.stdout or "") if isinstance(e.stdout, str) else "",
+-            stderr=f"TIMEOUT after {timeout}s: {' '.join(cmd)}",
+-            combined=f"TIMEOUT after {timeout}s: {' '.join(cmd)}",
+-        )
++        raise TimeoutError(f"TIMEOUT after {timeout}s: {' '.join(cmd)}") from e
++    if proc.returncode < 0:
++        raise RuntimeError(f"compiler terminated by signal {-proc.returncode}: {' '.join(cmd)}")
+     combined = (proc.stdout or "") + (proc.stderr or "")
+     return LakeResult(
+         exit_code=proc.returncode,

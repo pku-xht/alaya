@@ -63,9 +63,30 @@ build = run(*base, "lake", "build")
 (output / "build.log").write_text(build.stdout + build.stderr)
 assert (source / "lake-manifest.json").read_bytes() == lock
 
+# Grading must also work offline on a Mathlib benchmark: an untouched
+# submission is a fail with 0 of N specification checks, never an error.
+spec_total = sum(
+    len(module.get("specs", []))
+    for package in json.loads((benchmark / "manifest.json").read_text())["packages"]
+    for module in package.get("modules", [])
+)
+grading = run(alaya, "eval", root, "--timeout", "5400",
+              "--grader-image", args.grader_image, "--input", benchmark,
+              "--grader", "python /opt/alaya-vero/grade.py --mode proof --benchmark /grader",
+              "--data", data, codes=(1,))
+evaluation = state_hash(grading.stdout)
+record = json.loads((data / "states" / f"{evaluation}.json").read_text())["evaluation"]
+assert record["status"] == "fail", record
+assert len(record["checks"]) == spec_total, (len(record["checks"]), spec_total)
+assert not any(check["ok"] for check in record["checks"]), record
+report = json.loads(run(alaya, "cat", evaluation, ".vero/report.json", "--data", data).stdout)
+assert report["summary"]["total_specs"] == spec_total, report["summary"]
 result = {"root": root, "image": state["image"], "snapshot_stats": stats,
           "package_symlinks": {p.name: str(p.readlink()) for p in packages},
           "uid_gid": uid, "network": "none", "build_exit": build.returncode,
+          "grading": {"state": evaluation, "status": record["status"],
+                      "checks": len(record["checks"]),
+                      "passed_specs": report["summary"]["passed_specs"]},
           "rejects_host_packages": True, "rejects_changed_lock": True,
           "dependency_build_exit": cached.returncode}
 (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")

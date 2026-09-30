@@ -45,6 +45,7 @@ COPY --from=uv /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
 # Put the selected Lean installation in a system path that remains readable when
 # Alaya runs the container as the host uid:gid rather than as root.
 ENV ELAN_HOME=/opt/elan \
+    PATH="/opt/elan/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 RUN elan toolchain install "${LEAN_TOOLCHAIN}" \
@@ -55,9 +56,9 @@ RUN elan toolchain install "${LEAN_TOOLCHAIN}" \
 FROM base AS dependencies
 
 # Fetch exactly the reviewed Vero revision.  Vero is installed from its lockfile;
-# its Python source remains for the sandbox renderer, while its benchmark and
-# reference trees are removed below so the agent cannot inspect trusted inputs
-# or solutions from the execution image.
+# its Python source remains for the renderer and the grader, while its benchmark
+# and reference trees are removed below so the agent cannot inspect trusted
+# inputs or solutions from the execution image.
 RUN git init /opt/vero \
  && git -C /opt/vero remote add origin "${VERO_REPOSITORY}" \
  && git -C /opt/vero fetch --depth 1 origin "${VERO_COMMIT}" \
@@ -66,7 +67,7 @@ RUN git init /opt/vero \
  && cd /opt/vero \
  && uv sync --python /usr/bin/python3 --frozen --no-dev
 
-ENV PATH="/opt/vero/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+ENV PATH="/opt/vero/.venv/bin:/opt/elan/bin:/usr/local/bin:/usr/bin:/bin"
 
 # Seven Vero projects use the same pinned Mathlib dependency graph.  Populate a
 # shared source tree once and point every project at it. Resolve from the existing
@@ -144,7 +145,7 @@ RUN mkdir -p /opt/vero-image \
       git config --system --add safe.directory "$package"; \
     done \
  && rm -rf /opt/vero/.git /opt/vero/benchmarks /opt/vero/reference \
- && chmod -R a+rX /opt/elan /opt/vero /opt/vero-image \
+ && chmod -R a+rX /opt/elan /opt/vero /opt/vero-image /opt/vero-packages \
  && rm -rf /root/.cache
 
 # The agent image never inherits Vero's Python installation or the removed
@@ -161,5 +162,6 @@ FROM agent AS grader
 COPY --from=dependencies /opt/vero /opt/vero
 COPY benchmarks/vero/patches/*.patch /opt/alaya-vero/
 RUN cd /opt/vero && git apply --check /opt/alaya-vero/*.patch && git apply /opt/alaya-vero/*.patch
-ENV PATH="/opt/vero/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+ENV PATH="/opt/vero/.venv/bin:/opt/elan/bin:/usr/local/bin:/usr/bin:/bin"
 COPY benchmarks/vero/render.py /opt/alaya-vero/render.py
+COPY benchmarks/vero/grade.py /opt/alaya-vero/grade.py
