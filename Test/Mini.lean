@@ -653,7 +653,7 @@ def trajectorySuite : Suite := suite "trajectory" #[
       | .configuration m => (m.splitOn "cannot build on an evaluation").length > 1
       | _ => false,
 
-  test "a failing grader is a failing verdict, and re-evaluating is a no-op" do
+  test "a failing grader is a failing verdict, and re-evaluating adds a new evaluation" do
     let rt ← cachedRuntime #[]
     let root ← mkRoot rt (← emptyProject)
     let scratch := (← scratch) / "eval"
@@ -662,12 +662,13 @@ def trajectorySuite : Suite := suite "trajectory" #[
     assertEqual "returncode" (state.evaluation?.map (·.returncode)) (some 3)
     assertEqual "passed" (state.evaluation?.map (·.passed)) (some false)
     assertEqual "no evidence" (state.evaluation?.bind (·.evidence?)) none
-    assertEqual "same node again" (← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3") node
-    assertEqual "one child" (← assertOk (children rt.store root)).size 1
-    -- A different grader is a separate evaluation of the same state.
+    let again ← assertOk <| evaluate rt.store rt.workspaces scratch root "exit 3"
+    check (again != node) "expected the same grader to run again as a new evaluation"
+    assertEqual "two children" (← assertOk (children rt.store root)).size 2
+    -- A different grader is another evaluation of the same state.
     let other ← assertOk <| evaluate rt.store rt.workspaces scratch root "true"
-    check (other != node) "expected a distinct node for a distinct grader"
-    assertEqual "two children" (← assertOk (children rt.store root)).size 2,
+    check (other != node && other != again) "expected a distinct node for a distinct grader"
+    assertEqual "three children" (← assertOk (children rt.store root)).size 3,
 
   test "a grader's verdict.json decides, and its output directory is kept as evidence" do
     let rt ← cachedRuntime #[]

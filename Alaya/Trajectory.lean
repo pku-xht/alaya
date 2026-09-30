@@ -588,15 +588,6 @@ private def truncateOutput (s : String) : String :=
     String.ofList (s.toList.take 10000) ++ s!"\n… {elided} characters elided …\n" ++
       String.ofList (s.toList.drop (s.length - 10000))
 
-/-- An evaluation of `hash` that already ran this grader. -/
-def evaluationOf? (store : Store) (hash : Hash) (grader : String) : Result (Option Hash) := do
-  for child in ← children store hash do
-    let state ← getState store child
-    if state.kind == .evaluation then
-      if let some e := state.evaluation? then
-        if e.grader == grader then return some child
-  pure none
-
 /-- Empties `dir`, creating it if needed. -/
 private def emptyDir (dir : System.FilePath) : Result Unit := do
   -- A grader or a checkout may have left directories that cannot be deleted from.
@@ -611,14 +602,13 @@ private def nonEmpty (dir : System.FilePath) : Result Bool :=
 
 /-- Runs `grader` on the host against a fresh checkout of `hash`'s workspace and records the
 verdict as a leaf child whose workspace is the checkout after the grader ran. `scratch` is a directory the trajectory may wipe: the checkout and the
-grader's output directory are made under it. -/
+grader's output directory are made under it. Every call runs the grader and adds a new
+evaluation, even when an earlier one used the same command. -/
 def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePath) (hash : Hash)
-    (grader : String) (timeoutSeconds : Nat := 900) (force : Bool := false) : Result Hash := do
+    (grader : String) (timeoutSeconds : Nat := 900) : Result Hash := do
   let state ← getState store hash
   if state.kind == .evaluation then
     throw <| .configuration "cannot evaluate an evaluation: it is already a leaf"
-  if !force then
-    if let some existing ← evaluationOf? store hash grader then return existing
   -- Absolute, so a grader that changes directory still finds them.
   Result.fromIO Error.storage (IO.FS.createDirAll scratch)
   let scratch ← Result.fromIO Error.storage (IO.FS.realPath scratch)

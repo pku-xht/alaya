@@ -440,8 +440,8 @@ flowchart LR
   S --> E
 ```
 
-Re-evaluating a state with the same grader command returns the existing node; `--force` runs it
-again and adds a sibling. Different grader commands are different evaluations of the same state.
+Every `eval` runs the grader and adds a new evaluation of the state, even with a grader command
+used before; each evaluation records one run.
 
 ```sh
 # A hidden test suite, copied over the checkout; the suite's exit status is the verdict.
@@ -660,7 +660,7 @@ alaya root --task TEXT PROJECT --agent FILE [--image IMAGE]   create a root from
 alaya root --task-file FILE --agent FILE --image IMAGE --path PATH   …or from a path inside the image
 alaya resume HASH --model P:M [--time-budget S]  grow one continuation until it ends, asks, or spends S
 alaya step   HASH --model P:M [--time-budget S]  advance exactly one turn
-alaya eval   HASH --grader CMD [--timeout S] [--force]   run a grader over a checkout; record the verdict
+alaya eval   HASH --grader CMD [--timeout S]     run a grader over a checkout; record the verdict
 alaya commit HASH DIR [-m NOTE] [--tell TEXT]    record a hand-edited workspace as a child
 alaya tell   HASH TEXT                           send the agent a message, as a child
 alaya reply  HASH TEXT                           answer the question a state is waiting on
@@ -710,7 +710,7 @@ its session (`docs/agent-api.md` §3), as MiniVero's `time_budget` tool does (`d
 
 `root` takes `--image`, `--container-user`, and `--network`; `resume` and `step` take `--model`,
 `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`; `eval`
-takes `--timeout` (default 900 s) for the grader and `--force`. The image is resolved to a digest at `root`
+takes `--timeout` (default 900 s) for the grader. The image is resolved to a digest at `root`
 and recorded; `resume` uses it and refuses an `--image` that resolves to anything else.
 A container runs with **no network** unless `--network` names one (`--network bridge` is
 Docker's default network): an agent with network access can go looking for its own reference
