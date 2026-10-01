@@ -135,4 +135,31 @@ def calls (log : Log) : Array Chat.ToolCall :=
 
 end Log
 
+/-- The tokens of a request with `dialogue`, estimated at four characters a token of its JSON. -/
+def estimateTokens (dialogue : Dialogue) : Nat :=
+  (dialogue.foldl (fun n m => n + m.toJson.compress.length) 0 + 3) / 4
+
+/-- The tokens of the request `view` makes of `log`, known without a tokenizer: the latest
+response's recorded `usage` says how many the request it answered held and how many it
+returned, and what the view added since is estimated. When the view rewrote what that request
+held, or no response has `usage`, the whole request is estimated. -/
+def contextTokens (view : View) (log : Log) : Nat :=
+  let full := view log
+  let wire (dialogue : Dialogue) := dialogue.map (·.toJson.compress)
+  let extends? (part : Dialogue) := part.size ≤ full.size && wire (full.extract 0 part.size) == wire part
+  let measured? := (List.range log.size).reverse.findSome? fun index =>
+    match (log[index]? : Option Event) with
+    | some (.response r) => r.usage?.bind (·.input?) |>.map fun input => (index, input, r.usage?.bind (·.output?))
+    | _ => none
+  match measured? with
+  | none => estimateTokens full
+  | some (index, input, output?) =>
+    let before := view (log.extract 0 index)
+    let answered := view (log.extract 0 (index + 1))
+    -- Measured only while the request that was sent, and the response, are still as shown.
+    if !(extends? before && extends? answered) then estimateTokens full
+    else
+      let response := output?.getD (estimateTokens (answered.extract before.size answered.size))
+      input + response + estimateTokens (full.extract answered.size full.size)
+
 end Alaya.Agent

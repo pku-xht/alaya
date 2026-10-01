@@ -42,7 +42,7 @@ private def status : Directive → String
 def suite : Suite := Testing.suite "context" #[
   iotest "the configuration records the reserve and masking, and rejects a bad block" do
     let json := masking.toJson
-    if (json.getObjVal? "context_reserve").toOption != some (32000 : Nat) then throw <| IO.userError "no reserve"
+    if (json.getObjVal? "context_reserve").toOption != some (8000 : Nat) then throw <| IO.userError "no reserve"
     if (({} : Config).toJson.getObjVal? "mask_observations").toOption != some .null then
       throw <| IO.userError "masking should be off by default"
     match Config.fromJson json with
@@ -84,11 +84,20 @@ def suite : Suite := Testing.suite "context" #[
     let usage : Chat.TokenUsage := { input? := some 1000, output? := some 50 }
     let log : Log := #[.message (.user "task"), .response (response "c" (some usage)),
       observed "c" (String.ofList (List.replicate 4000 'x'))]
-    let tokens := contextTokens {} log
+    let tokens := Agent.contextTokens (view {}) log
     -- 4,000 characters of output, plus its JSON, at four characters a token.
     if tokens < 2050 || tokens > 2100 then throw <| IO.userError s!"wrong size: {tokens}"
-    let unmeasured := contextTokens {} #[.message (.user (String.ofList (List.replicate 400 'y')))]
-    if unmeasured != 100 then throw <| IO.userError s!"wrong estimate: {unmeasured}"
+    let unmeasured := Agent.contextTokens (view {}) #[.message (.user (String.ofList (List.replicate 400 'y')))]
+    if unmeasured < 100 || unmeasured > 115 then throw <| IO.userError s!"wrong estimate: {unmeasured}"
+    -- Once masking rewrites what was measured, the measure no longer holds: the whole is estimated.
+    let measured (t : Nat) : Log := (turns t).map fun
+      | .response r => .response { r with usage? := some { input? := some 1, output? := some 1 } }
+      | event => event
+    let small := Agent.contextTokens (view masking) (measured 4)
+    if small > 200 then throw <| IO.userError s!"not measured before the boundary moves: {small}"
+    let moved := Agent.contextTokens (view masking) (measured 5)
+    if moved != estimateTokens (view masking (measured 5)) then
+      throw <| IO.userError s!"measured across a move of the boundary: {moved}"
     -- The limit is the model's context less the reserve, or less its output size when smaller.
     let model : Models.Spec := { name := "m", contextTokens? := some 3000, outputTokens? := some 500 }
     if contextLimit? {} model != some 2500 then throw <| IO.userError "wrong limit"

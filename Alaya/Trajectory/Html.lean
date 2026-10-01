@@ -154,7 +154,11 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
   -- what its own turn added to the parent's context when the view extended it — the common
   -- case, and linear in the forest — and the whole context when the view rewrote earlier
   -- messages, which a view that elides old output does. The page assembles the rest.
-  let full := view (← logOf store hash)
+  let log ← logOf store hash
+  let full := view log
+  -- How full the model's context is: of what it holds, when the root's model says.
+  let contextSize? := (← tryCatch (some <$> (Models.fromJson (← modelOf store hash))) fun _ => pure none)
+    |>.bind (·.contextTokens?)
   let parentView ← match state.parent? with
     | some parent => pure (view (← logOf store parent))
     | none => pure #[]
@@ -186,6 +190,8 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
     ("wire", .arr (wire.map Chat.Message.toJson)),
     ("wireFull", !extended),
     ("wireOwn", ((full.size - parentView.size) : Lean.Json)),
+    ("contextTokens", (Agent.contextTokens view log : Lean.Json)),
+    ("contextSize", contextSize?.map (fun n => (n : Lean.Json)) |>.getD .null),
     ("changes", .arr changesJson),
     ("folded", .arr foldedJson),
     ("listedCount", (listed.size : Lean.Json)),
@@ -908,8 +914,13 @@ function select(hash) {
   headbar.append(el('h1', null, state.kind + '  ' + short(hash)));
   // An evaluation is a leaf nothing continues from, so it has no context to show.
   if (state.kind !== 'evaluation') {
-    const context = el('button', 'tool', 'view context');
-    context.title = 'The request a continuation from this state is sampled from';
+    // How full the context is, estimated as the agent does, of the root's model's context size.
+    const used = state.contextSize ? Math.round(100 * state.contextTokens / state.contextSize) + '% of context'
+      : '~' + state.contextTokens.toLocaleString('en-US') + ' tokens';
+    const context = el('button', 'tool', 'view context \u00b7 ' + used);
+    context.title = 'The request a continuation from this state is sampled from: about ' +
+      state.contextTokens.toLocaleString('en-US') + ' tokens' +
+      (state.contextSize ? ' of ' + state.contextSize.toLocaleString('en-US') : '');
     context.onclick = () => showContext(hash);
     headbar.append(context);
   }

@@ -42,7 +42,7 @@ structure Config where
   askUser : Bool := false
   /-- Tokens kept free for the next response when deciding whether the context is full, or the
   model's `output_tokens` when that is less. -/
-  contextReserve : Nat := 32000
+  contextReserve : Nat := 8000
   /-- Omit old outputs from the view (`Masking`); `none` shows them all. -/
   masking? : Option Masking := none
   /-- The tokens a request may hold: the model's context less the reserve, set from the model
@@ -348,33 +348,6 @@ def outputs (config : Config) (log : Log) : Array (String × String) :=
       if named then some (outputFile index id, output.output) else none
     | _ => none).filterMap (·)
 
-/-! ## The context's size
-
-Known without a tokenizer: the provider's `usage` of the latest response says how many tokens
-the request it answered held, and what has been added since is estimated at four characters a
-token. -/
-
-/-- The characters of a message as sent, roughly. -/
-private def chars : Chat.Message → Nat
-  | .system text | .user text => text.length
-  | .assistant content? calls reasoning? =>
-    (content?.getD "").length + (reasoning?.getD "").length +
-      calls.foldl (fun n call => n + call.name.length + call.arguments.compress.length) 0
-  | .tool _ (.str text) => text.length
-  | .tool _ content => content.compress.length
-
-/-- The tokens the next request would hold, estimated from the log. -/
-def contextTokens (config : Config) (log : Log) : Nat :=
-  let dialogue := view config log
-  let estimate (messages : List Chat.Message) := (messages.foldl (· + chars ·) 0 + 3) / 4
-  let measured? := (List.range log.size).reverse.findSome? fun index =>
-    match (log[index]? : Option Event) with
-    | some (.response r) => r.usage?.bind (·.input?) |>.map fun input =>
-      let response := r.usage?.bind (·.output?) |>.getD (estimate (dialogue[index]?.toList))
-      input + response + estimate (dialogue.toList.drop (index + 1))
-    | _ => none
-  measured?.getD (estimate dialogue.toList)
-
 /-- How many format-error responses end the log with no clean turn between them. A person's
 message in between does not reset the count; an observation does, since it means a turn ran. -/
 private def trailingFormatErrors (config : Config) (log : Log) : Nat := Id.run do
@@ -395,7 +368,7 @@ def next (config : Config) (session : Session) (log : Log) : Directive :=
   let sampleOrStop : Directive :=
     if config.stepLimit > 0 && log.responses >= config.stepLimit
     then .done { status := "LimitsExceeded" }
-    else if config.contextLimit?.any (contextTokens config log ≥ ·)
+    else if config.contextLimit?.any (Agent.contextTokens (view config) log ≥ ·)
     then .done { status := "ContextExceeded" }
     else .sample
   match log.lastResponse? with

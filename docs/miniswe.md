@@ -31,7 +31,7 @@ defaults `alaya config --agent mini-swe` prints:
 | `executor.timeout_seconds`, `executor.env` | 30, mini's overrides | how each command is run (`Executor.Config`) |
 | `recover_output` | false | name the file holding a cut output's whole (§9) |
 | `ask_user` | false | offer yes/no, single-choice, and open-ended questions |
-| `context_reserve` | 32000 | tokens kept free for the next response, or the model's `output_tokens` when less (§10) |
+| `context_reserve` | 8000 | tokens kept free for the next response, or the model's `output_tokens` when less (§10) |
 | `mask_observations` | null | `{keep_turns, block}`: omit old outputs from the view (§10) |
 
 A field left out is its default; a misspelt one is an error. The task is not configuration: it
@@ -221,10 +221,11 @@ they are, so only the warning differs.
 **A full context ends the run cleanly.** When the model spec gives a `context_tokens`, `next`
 ends the run with `done ContextExceeded` instead of sampling a request that would not fit:
 when the request's size reaches the context less `context_reserve`, or less the model's
-`output_tokens` when that is smaller. The size needs no tokenizer: the latest response's
-recorded `usage` says how many tokens the request it answered held and how many it returned,
-and what the view has added since is estimated at four characters a token; with no `usage`, the
-whole view is estimated. A model with no known context size is not checked.
+`output_tokens` when that is smaller. The size needs no tokenizer (`Agent.contextTokens`): the
+latest response's recorded `usage` says how many tokens the request it answered held and how
+many it returned, and what the view has added since is estimated at four characters a token of
+its JSON. With no `usage`, or once the view has rewritten what was measured, the whole view is
+estimated. A model with no known context size is not checked.
 
 **Masking omits old outputs, in blocks.** With `mask_observations` `{keep_turns: K, block: B}`,
 the view omits the outputs of the oldest turns: none while the log holds fewer than `K + B`
@@ -240,5 +241,4 @@ the agent reads with `bash`:
 Only command outputs are omitted, and only those longer than that notice: messages, responses
 and every other tool result stay. Masking depends on turn positions alone, never on the context
 size, so a log is shown the same way whatever the model; the files are derived from the log as
-in §9, with or without `recover_output`. After the boundary moves, the size measured by `usage`
-counts outputs no longer sent, so a run stops early rather than late.
+in §9, with or without `recover_output`.
