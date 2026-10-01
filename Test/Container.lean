@@ -17,7 +17,7 @@ def testLabel : String := "alaya-test"
 
 /-- Settings for the pinned test image, running as the host user on Linux, without network. -/
 def testSettings : IO Executor.Docker.Settings := do
-  let settings ← (Executor.Docker.settingsFor (Cli.parse []) testImageReference).toUserIO
+  let settings ← (Executor.Docker.settingsOf {} testImageReference).toUserIO
   let settings ← settings.pin.toUserIO
   pure { settings with extraRunArgs := #["--label", testLabel] }
 

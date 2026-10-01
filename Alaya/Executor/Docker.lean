@@ -325,24 +325,31 @@ def runOnce (settings : Settings) (mounts : Array Mount) (workdir command : Stri
 
 /-! ## Command line -/
 
-/-- Settings for a trajectory's image and workdir, taking `--container-user` and `--network` from
-the line. A `--workdir` on the line must be the trajectory's own. -/
-def settingsFor (args : Cli.Args) (image : String) (workdir : String := defaultWorkdir) :
+/-- How this invocation's containers run: as whom, and on which network. Neither is recorded. -/
+structure RunOptions where
+  /-- `none` is `defaultUser?`. -/
+  user? : Option String := none
+  network : String := "none"
+  deriving Repr, Inhabited
+
+def RunOptions.cli : Cli.Spec RunOptions :=
+  (fun user? network => { user?, network })
+    <$> Cli.flag? "container-user" (.string "UID:GID")
+      "the user commands run as; by default the host user on Linux, the image's own on macOS"
+    <*> Cli.flagD "network" (.string "NAME") "none" "the docker network, e.g. bridge; none is no network"
+
+/-- A `--workdir` given after `root` must be the trajectory's own. -/
+def checkSameWorkdir (requested workdir : String) : Result Unit := do
+  if requested != workdir then
+    throw <| .configuration <|
+      s!"--workdir {requested} is not this trajectory's workdir, {workdir}; it is fixed at `root`"
+
+/-- Settings for a trajectory's image and workdir, run as `options` say. -/
+def settingsOf (options : RunOptions) (image : String) (workdir : String := defaultWorkdir) :
     Result Settings := do
-  if let some requested := args.get? "workdir" then
-    if requested != workdir then
-      throw <| .configuration <|
-        s!"--workdir {requested} is not this trajectory's workdir, {workdir}; it is fixed at `root`"
-  let user? ← match args.get? "container-user" with
+  let user? ← match options.user? with
     | some user => pure (some user)
     | none => Result.fromIO Error.configuration defaultUser?
-  pure { image, user?, network? := some (args.getD "network" "none"), workdir }
-
-/-- The image named on the command line with `--image`, if any. -/
-def settings? (args : Cli.Args) : Result (Option Settings) := do
-  match args.get? "image" with
-  | none => pure none
-  | some "" => throw <| .configuration "--image needs a value (e.g. --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)"
-  | some image => some <$> settingsFor args image (args.getD "workdir" defaultWorkdir)
+  pure { image, user?, network? := some options.network, workdir }
 
 end Alaya.Executor.Docker

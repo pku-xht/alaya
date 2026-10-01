@@ -10,83 +10,35 @@ namespace CliTests
 open Testing
 open Alaya
 
-private def parse (argv : List String) : Cli.Args :=
-  Cli.parse argv (aliases := [("-m", "note")])
-
 private def endpoint (url : String) : Option Provider.Dgx.Endpoint :=
   (Provider.Dgx.Endpoint.ofUrl url).toOption
 
-private def baseUrlOf (argv : List String) : Result (Option String) := do
-  let options ← Provider.Options.ofArgs (Cli.parse argv)
+private def parsed (label : String) (result : Except (Array String) α) : TestM α :=
+  match result with
+  | .ok a => pure a
+  | .error problems => fail s!"{label}: {problems}"
+
+private def problemsOf (label : String) (result : Except (Array String) α) : TestM (Array String) :=
+  match result with
+  | .ok _ => fail s!"{label}: parsed, but should have been refused"
+  | .error problems => pure problems
+
+private def baseUrlOf (argv : List String) : Except (Array String) (Option String) := do
+  let options ← Provider.Options.cli.parse argv
   pure (options.dgxEndpoint?.map (·.baseUrl))
 
-def argsSuite : Suite := suite "cli.args" #[
-  test "positionals and flags interleave" do
-    let args := parse ["commit", "abc", "dir", "--data", "d", "-m", "note text"]
-    assertEqual "positional" args.positional #["commit", "abc", "dir"]
-    assertEqual "data" (args.getD "data" "") "d"
-    assertEqual "alias" (args.getD "note" "") "note text",
+private def task (argv : List String) : TestM (Result String) := do
+  let source ← parsed "task" <| ((Cli.text "task" "the task").required "a task is required").parse argv
+  pure (source.read "task")
 
-  test "reply text after -- stays positional even when it looks like an option" do
-    for answer in #["", "--data", "-m", "--", "--json", "--instruction-file",
-        "  answer\n--data another-directory\n原文  "] do
-      let args := parse ["reply", "--data", "run directory", "--", "question-hash", answer]
-      assertEqual "exact reply arguments" args.positional #["reply", "question-hash", answer]
-      assertEqual "only the real data flag" args.flags #[("data", "run directory")],
-
-  test "-- keeps earlier flags and switches and treats its whole tail literally" do
-    let args := parse ["waiting", "-m", "a note", "--json", "--", "--data", "-m", "", "--"]
-    assertEqual "tail unchanged" args.positional #["waiting", "--data", "-m", "", "--"]
-    assertEqual "earlier options" args.flags #[("note", "a note"), ("json", "")]
-    assertEqual "separator at start" (parse ["--", "--data", "-m", ""]).positional
-      #["--data", "-m", ""]
-    assertEqual "separator at end" (parse ["waiting", "--"]).positional #["waiting"]
-    assertEqual "separator alone" (parse ["--"]).positional #[],
-
-  test "a repeated flag keeps every value, and get? takes the last" do
-    let args := parse ["--model", "a:1", "--model", "b:2", "--count", "4"]
-    assertEqual "all" (args.all "model") #["a:1", "b:2"]
-    assertEqual "last" (args.getD "model" "") "b:2"
-    assertEqual "positional" args.positional #[],
-
-  test "a flag before another flag, or at the end, is a valueless switch" do
-    let args := parse ["--concurrent", "--count", "8"]
-    assertEqual "switch" (args.getD "concurrent" "unset") ""
-    assertEqual "isSet" (args.isSet "concurrent") true
-    assertEqual "count" (args.getD "count" "") "8"
-    assertEqual "trailing switch" ((parse ["--concurrent"]).isSet "concurrent") true,
-
-  test "numeric flags report the flag name on bad input" do
-    let args := parse ["--count", "x"]
-    assertEqual "default" (← assertOk (args.natD "missing" 8)) 8
-    assertError "count" (args.natD "count" 8) fun
-      | .configuration m => m.startsWith "--count expects a whole number"
-      | _ => false
-    let temperature ← assertOk ((parse ["--temperature", "0.25"]).floatD "temperature" 0.0)
-    assertEqual "float" temperature 0.25,
-
-  test "a value-taking flag given without a value is an error" do
-    assertEqual "absent" (← assertOk ((parse []).valueD "data" ".alaya")) ".alaya"
-    assertEqual "given" (← assertOk ((parse ["--data", "d"]).valueD "data" ".alaya")) "d"
-    assertError "switch" ((parse ["--data"]).valueD "data" ".alaya") fun
-      | .configuration m => m == "--data needs a value"
-      | _ => false,
-
-  test "require fails when a flag is missing or empty" do
-    assertError "missing" ((parse []).require "model" "hint") fun
-      | .configuration m => m.startsWith "--model is required"
-      | _ => false
-    assertError "empty" ((parse ["--model"]).require "model" "hint") fun
-      | .configuration m => m.startsWith "--model needs a value"
-      | _ => false,
-
+def taskSuite : Suite := suite "cli.task" #[
   test "a task file's middle reaches the first serialized model request as it is" do
     let path := (← scratch) / "MINIVERO_TASK.md"
     let contents := String.ofList (List.replicate 6500 '界') ++
       "\nDONE: implement every API and prove every fixed specification.\n" ++
       String.ofList (List.replicate 6500 '🦉') ++ "\n"
     IO.FS.writeFile path contents
-    let task ← assertOk ((parse ["--task-file", path.toString]).taskOf "usage")
+    let task ← assertOk (← task ["--task-file", path.toString])
     assertEqual "verbatim, trailing newline included" task contents
     let uname : Uname := { system := "Linux", release := "test", version := "test", machine := "test" }
     let logs := #[Agent.MiniSwe.initialLog {} task uname,
@@ -106,18 +58,20 @@ def argsSuite : Suite := suite "cli.args" #[
       assertError label result fun
         | .configuration m => expected m
         | _ => false
-    assertEqual "text" (← assertOk ((parse ["--task", "fix it"]).taskOf "usage")) "fix it"
-    -- The project may come before or after the flag; the value is the next token whatever it is.
-    for argv in [["root", "--task", "fix it", "./proj"], ["root", "./proj", "--task", "fix it"]] do
-      assertEqual "positional" (parse argv).positional #["root", "./proj"]
-    configuration "neither" ((parse []).taskOf "usage") (· == "usage")
-    configuration "both" ((parse ["--task", "a", "--task-file", "f"]).taskOf "usage") (·.startsWith "give either")
-    configuration "empty text" ((parse ["--task"]).taskOf "usage") (·.startsWith "--task needs a value")
-    configuration "missing value" ((parse ["--task-file"]).taskOf "usage") (·.startsWith "--task-file needs a value")
+    assertEqual "text" (← assertOk (← task ["--task", "fix it"])) "fix it"
+    let refused (label : String) (argv : List String) : TestM (Array String) :=
+      problemsOf label <| ((Cli.text "task" "the task").required "a task is required").parse argv
+    assertEqual "neither" (← refused "neither" []) #["a task is required"]
+    assertEqual "both" (← refused "both" ["--task", "a", "--task-file", "f"])
+      #["give either --task TEXT or --task-file FILE, not both"]
+    check ((← refused "empty" ["--task", ""])[0]!.startsWith "--task needs a value") "empty text"
+    check ((← refused "missing" ["--task-file"])[0]!.startsWith "--task-file needs a value") "missing value"
+    assertEqual "- is stdin" (← parsed "stdin" ((Cli.text "task" "").parse ["--task-file", "-"]))
+      (some .stdin)
     let path := (← scratch) / "missing"
-    configuration "missing file" ((parse ["--task-file", path.toString]).taskOf "usage") (·.startsWith "cannot read")
+    configuration "missing file" (← task ["--task-file", path.toString]) (·.startsWith "cannot read the task file")
     IO.FS.writeBinFile path ⟨#[255, 254]⟩
-    configuration "invalid UTF-8" ((parse ["--task-file", path.toString]).taskOf "usage") (·.endsWith "is not valid UTF-8")
+    configuration "invalid UTF-8" (← task ["--task-file", path.toString]) (·.endsWith "is not valid UTF-8")
 ]
 
 def endpointSuite : Suite := suite "cli.endpoint" #[
@@ -142,14 +96,13 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
     assertEqual "empty" (endpoint "  ").isSome false,
 
   test "--port overrides the port from --url, and works on its own" do
-    assertEqual "port only" (← assertOk (baseUrlOf ["--port", "9001"]))
+    assertEqual "port only" (← parsed "port" (baseUrlOf ["--port", "9001"]))
       (some "http://10.42.0.1:9001/v1")
-    assertEqual "url and port" (← assertOk (baseUrlOf ["--url", "spark.local:9000", "--port", "7000"]))
+    assertEqual "url and port" (← parsed "url" (baseUrlOf ["--url", "spark.local:9000", "--port", "7000"]))
       (some "http://spark.local:7000/v1")
-    assertEqual "neither" (← assertOk (baseUrlOf [])) none
-    assertError "bad url" (baseUrlOf ["--url", ":9000"]) fun
-      | .configuration m => m.startsWith "--url:"
-      | _ => false,
+    assertEqual "neither" (← parsed "neither" (baseUrlOf [])) none
+    let problems ← problemsOf "bad url" (baseUrlOf ["--url", ":9000"])
+    check (problems.size == 1 && problems[0]!.startsWith "--url is not an endpoint") s!"{problems}",
 
   test "an unknown provider names the ones that exist" do
     assertError "unknown" (Provider.fromSpec "nope:x" 0.0) fun
@@ -210,6 +163,109 @@ def agentsSuite : Suite := suite "cli.agents" #[
     check (tree.any fun l => (l.splitOn "root  [mini-swe]").length > 1) s!"tree names the family: {tree}"
 ]
 
-def suites : Array Suite := #[argsSuite, endpointSuite, agentsSuite]
+private def view : Cli.Spec (Bool × String) :=
+  Prod.mk <$> Cli.switch "view" "show the view" <*> Cli.arg "HASH" .string "the state"
+
+private def sample : Cli.Command where
+  name := "sample"
+  summary := "A command for the tests."
+  examples := #["alaya sample abc --count 3"]
+  spec := (fun (_ : String × Nat × Option String) (_ : Cli.Out) => (pure 0 : Result UInt32))
+    <$> (Prod.mk <$> Cli.arg "HASH" .string "the state"
+      <*> (Prod.mk <$> Cli.flag "count" .nat "how many" <*> Cli.flag? "note" .string "a note"))
+
+private def app : Cli.App := { name := "alaya", summary := "Tests.", commands := #[sample] }
+
+def specSuite : Suite := suite "cli.spec" #[
+  test "a switch never takes the next token, wherever it stands" do
+    assertEqual "before" (← parsed "before" (view.parse ["--view", "abc"])) (true, "abc")
+    assertEqual "after" (← parsed "after" (view.parse ["abc", "--view"])) (true, "abc")
+    assertEqual "absent" (← parsed "absent" (view.parse ["abc"])) (false, "abc")
+    assertEqual "no value" (← problemsOf "value" (view.parse ["abc", "--view=yes"]))
+      #["--view is a switch and takes no value"],
+
+  test "a valued flag takes the next token or its value after =" do
+    let note := Cli.flag? "note" .string "a note"
+    assertEqual "next" (← parsed "next" (note.parse ["--note", "x y"])) (some "x y")
+    assertEqual "equals" (← parsed "equals" (note.parse ["--note=--x"])) (some "--x")
+    assertEqual "equals twice" (← parsed "equals twice" (note.parse ["--note=a=b"])) (some "a=b")
+    assertEqual "dash" (← parsed "dash" (note.parse ["--note", "-"])) (some "-")
+    assertEqual "absent" (← parsed "absent" (note.parse [])) none
+    for argv in [["--note", "--x"], ["--note"], ["--note="], ["--note", ""]] do
+      let problems ← problemsOf s!"{argv}" (note.parse argv)
+      check ((problems[0]?.getD "").startsWith "--note needs a value") s!"{argv}: {problems}",
+
+  test "an unknown option is refused with the nearest name, and a typo keeps its value" do
+    let temperature := Cli.flagD "temperature" .float 0.0 "the temperature"
+    assertEqual "typo" (← problemsOf "typo" (temperature.parse ["--temprature", "0.7"]))
+      #["unknown option --temprature (did you mean --temperature?)"]
+    assertEqual "far" (← problemsOf "far" (temperature.parse ["--zzz"])) #["unknown option --zzz"]
+    assertEqual "short" (← problemsOf "short" (temperature.parse ["-m", "x"]))
+      #["unknown option -m (an argument that begins with - goes after --)", "unexpected argument 'x'"]
+    assertEqual "typed" (← parsed "typed" (temperature.parse ["--temperature", "0.25"])) 0.25
+    assertEqual "default" (← parsed "default" (temperature.parse [])) 0.0
+    assertEqual "not a number" (← problemsOf "nan" (temperature.parse ["--temperature", "warm"]))
+      #["--temperature expects a number, got 'warm'"],
+
+  test "a flag given twice is refused unless it is declared repeatable" do
+    assertEqual "twice" (← problemsOf "twice" ((Cli.flag? "model" .string "").parse ["--model", "a", "--model", "b"]))
+      #["--model is given more than once"]
+    assertEqual "repeated" (← parsed "repeated" ((Cli.repeated "hide" .string "").parse ["--hide", "a", "--hide=b"]))
+      #["a", "b"],
+
+  test "positionals are matched in order, and a missing or extra one is refused" do
+    let two := Prod.mk <$> Cli.arg "A" .string "the first" <*> Cli.arg? "B" .string "the second"
+    assertEqual "missing" (← problemsOf "missing" (two.parse [])) #["missing A: the first"]
+    assertEqual "one" (← parsed "one" (two.parse ["a"])) ("a", none)
+    assertEqual "two" (← parsed "two" (two.parse ["a", "b"])) ("a", some "b")
+    assertEqual "extra" (← problemsOf "extra" (two.parse ["a", "b", "c"])) #["unexpected argument 'c'"],
+
+  test "after -- everything is positional, empty strings and flag-like tokens included" do
+    let reply := Prod.mk <$> Cli.arg "HASH" .string "" <*> Cli.arg "TEXT" .string ""
+    for answer in ["", "--data", "-m", "--", "--json", "  answer\n--data other\n原文  "] do
+      assertEqual s!"answer {answer}" (← parsed "reply" (reply.parse ["--", "q", answer])) ("q", answer),
+
+  test "every problem is reported at once" do
+    let spec := Prod.mk <$> Cli.flag "count" .nat "how many" <*> Cli.flag "model" (.string "P:M") "the model"
+    assertEqual "both" (← problemsOf "both" (spec.parse ["--count", "x"]))
+      #["--count expects a whole number, got 'x'", "--model P:M is required: the model"],
+
+  test "a removed flag says what to use instead" do
+    let spec := Cli.switch "json" "" <* Cli.removed "path" "use --workdir PATH"
+    assertEqual "removed" (← problemsOf "removed" (spec.parse ["--path", "/x"]))
+      #["--path is no longer accepted: use --workdir PATH"],
+
+  test "an environment variable fills an absent flag, and a flag wins over it" do
+    let data := Cli.flagD "data" (.path "DIR") ".alaya" "the data directory" (env? := some "ALAYA_DATA")
+    let env := fun var => if var == "ALAYA_DATA" then some "/runs" else none
+    assertEqual "default" (← parsed "default" (data.parse [])) ".alaya"
+    assertEqual "env" (← parsed "env" (data.parse [] env)) "/runs"
+    assertEqual "flag" (← parsed "flag" (data.parse ["--data", "d"] env)) "d",
+
+  test "a declaration mistake is found before anything runs" do
+    let twice := Prod.mk <$> Cli.switch "json" "" <*> Cli.switch "json" ""
+    assertEqual "twice" twice.check #["--json is declared twice"]
+    let order := Prod.mk <$> Cli.arg? "A" .string "" <*> Cli.arg "B" .string ""
+    assertEqual "order" order.check #["B is required but follows an optional argument"]
+    let groups := Prod.mk <$> (Prod.mk <$> Provider.Choice.cli <*> Executor.Docker.RunOptions.cli)
+      <*> Cli.text "task" ""
+    assertEqual "the shared groups are disjoint" groups.check #[],
+
+  test "a command takes --json and --help, and says what it accepts" do
+    let .ok (_, json) := sample.parse ["abc", "--count", "3", "--json"]
+      | fail "sample did not parse"
+    check json "--json is seen"
+    assertEqual "usage" (sample.usage app) "alaya sample HASH --count N [OPTIONS]"
+    let help := sample.help app
+    for line in ["usage: alaya sample HASH --count N [OPTIONS]", "  --count N    how many (required)",
+        "  --note TEXT  a note", "  alaya sample abc --count 3"] do
+      check ((help.splitOn line).length > 1) s!"help lacks '{line}':\n{help}"
+    let .ok commands := app.describe.getObjValAs? (Array Lean.Json) "commands" | fail "no commands"
+    let .ok items := commands[0]!.getObjValAs? (Array Lean.Json) "items" | fail "no items"
+    let names := items.filterMap fun i => (i.getObjValAs? String "name").toOption
+    assertEqual "described" names #["HASH", "count", "note", "json", "help"]
+]
+
+def suites : Array Suite := #[taskSuite, specSuite, endpointSuite, agentsSuite]
 
 end CliTests
