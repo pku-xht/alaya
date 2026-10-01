@@ -713,20 +713,23 @@ function renderCards(state) {
     if (m.echo_reasoning) about.push('echoes reasoning');
     box.append(namedCard(card('model', m.name || '?', '', about.join(' · '))));
   }
+  // Time and tokens are a turn's: a state that sampled nothing spent neither, and the run's
+  // totals are shown below a turn's own.
   if (given(state.elapsedMs))
     box.append(card('time', duration(state.elapsedMs), '', 'run ' + duration(state.runElapsedMs)));
-  else if (state.runElapsedMs)
-    box.append(card('run time', duration(state.runElapsedMs), ''));
-  if (run.input) {
-    const turn = given(own.input);
-    box.append(card('input tokens', compact(turn ? own.input : run.input), turn ? cachedNote(own) : 'run',
-      turn ? 'run ' + compact(run.input) + (cachedNote(run) ? ' · ' + cachedNote(run) : '') : cachedNote(run)));
-  }
-  if (run.output) {
-    const turn = given(own.output);
-    const reasoning = u => u.reasoning ? 'incl. ' + compact(u.reasoning) + ' reasoning' : '';
-    box.append(card('output tokens', compact(turn ? own.output : run.output), turn ? reasoning(own) : 'run',
-      turn ? 'run ' + compact(run.output) : reasoning(run)));
+  if (given(own.input))
+    box.append(card('input tokens', compact(own.input), cachedNote(own),
+      'run ' + compact(run.input || 0) + (cachedNote(run) ? ' · ' + cachedNote(run) : '')));
+  if (given(own.output))
+    box.append(card('output tokens', compact(own.output),
+      own.reasoning ? 'incl. ' + compact(own.reasoning) + ' reasoning' : '', 'run ' + compact(run.output || 0)));
+  // A verdict: how many checks passed, and how long the grader took.
+  const e = state.evaluation;
+  if (e) {
+    const passed = e.checks.filter(c => c.ok).length;
+    box.append(card('verdict', e.checks.length ? passed + '/' + e.checks.length : e.status, e.status,
+      e.checks.length ? Math.round(100 * passed / e.checks.length) + '% of checks pass' : ''));
+    box.append(card('grader time', duration(e.elapsedMs), ''));
   }
   // An evaluation is a leaf nothing continues from, so it has no context to show.
   if (state.kind !== 'evaluation') {
