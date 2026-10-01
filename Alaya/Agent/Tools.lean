@@ -34,6 +34,17 @@ def act (executor : Executor) (workspace : Workspace) (command : String) : Resul
   let output ← Result.fromIO Error.storage (executor.bash workspace.dir command)
   pure output.toJson
 
+/-- The fields saying how a command ended, after `fields`. -/
+private def withStatus (o : Output) (fields : List (String × Lean.Json)) : Lean.Json :=
+  let fields := fields ++ [("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null)]
+  let fields := match o.error? with
+    | some error => fields ++ [("error", Lean.Json.str error)]
+    | none => fields
+  .mkObj fields
+
+/-- What an omitted output says in its place. -/
+def omittedNotice (file : String) : String := s!"[output omitted; full output: {file}]"
+
 /-- How the model sees an `Output`: as JSON, with `output` cut to its first and last `limit / 2`
 characters when it is `limit` or longer — mini's `observation_template`. With `file?`, where
 the whole output can be read, the warning names it instead, as the DeepSeek harness does. -/
@@ -49,11 +60,12 @@ def observation (o : Output) (limit : Nat) (file? : Option String := none) : Lea
        ("warning", match file? with
          | none => "Output too long."
          | some file => s!"[output truncated; full output: {file}]")]
-  let fields := fields ++ [("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null)]
-  let fields := match o.error? with
-    | some error => fields ++ [("error", Lean.Json.str error)]
-    | none => fields
-  .mkObj fields
+  withStatus o fields
+
+/-- How the model sees an `Output` it is no longer shown: the file holding it, in place of
+`output`, and how the command ended. -/
+def omitted (o : Output) (file : String) : Lean.Json :=
+  withStatus o [("output", omittedNotice file)]
 
 end Bash
 

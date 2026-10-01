@@ -2,6 +2,7 @@ import Alaya.Agent
 import Alaya.Executor
 import Alaya.Agent.Tools
 import Alaya.Agent.Config
+import Alaya.Models
 
 /-! A port of mini-SWE-agent's default tool-calling agent as an `Alaya.Agent.Agent`. See
 `docs/miniswe.md`. -/
@@ -19,6 +20,14 @@ def defaultExecutor : Executor.Config := {
   env := #[("PAGER", "cat"), ("MANPAGER", "cat"), ("LESS", "-R"),
            ("PIP_PROGRESS_BAR", "off"), ("TQDM_DISABLE", "1")] }
 
+/-- Which old outputs the view omits: those of the turns before a boundary that keeps the last
+`keepTurns` turns whole and moves `block` turns at a time, so between its moves the context only
+grows at its end and the provider's prompt cache holds. -/
+structure Masking where
+  keepTurns : Nat
+  block : Nat
+  deriving Inhabited, BEq, Repr
+
 structure Config where
   /-- Maximum model calls; 0 disables the limit (as in mini.yaml). -/
   stepLimit : Nat := 0
@@ -31,6 +40,14 @@ structure Config where
   recoverOutput : Bool := false
   /-- Offer yes/no, single-choice, and open-ended questions. -/
   askUser : Bool := false
+  /-- Tokens kept free for the next response when deciding whether the context is full, or the
+  model's `output_tokens` when that is less. -/
+  contextReserve : Nat := 8000
+  /-- Omit old outputs from the view (`Masking`); `none` shows them all. -/
+  masking? : Option Masking := none
+  /-- The tokens a request may hold: the model's context less the reserve, set from the model
+  when the agent is built (`agent`), and not part of the JSON; `none` is no check. -/
+  contextLimit? : Option Nat := none
   /-- Offer `time_budget`, which says how much of the run's time budget is left. Not a field of
   mini-swe's configuration: MiniVero sets it (`time_budget` in its own). -/
   timeBudget : Bool := false
@@ -46,14 +63,19 @@ def Config.toJson (config : Config) : Lean.Json :=
       ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
       ("env", .arr (config.executor.env.map fun (name, value) => .arr #[.str name, .str value]))]),
     ("recover_output", (config.recoverOutput : Lean.Json)),
-    ("ask_user", (config.askUser : Lean.Json))]
+    ("ask_user", (config.askUser : Lean.Json)),
+    ("context_reserve", (config.contextReserve : Lean.Json)),
+    ("mask_observations", match config.masking? with
+      | none => .null
+      | some m => .mkObj [("keep_turns", (m.keepTurns : Lean.Json)), ("block", (m.block : Lean.Json))])]
 
 /-- Reads a configuration; a field left out is `defaults`', and an unknown one is an error.
 `own` names the fields of an agent built on this one, which it reads itself. -/
 def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array String := #[]) :
     Except String Config := do
   let object ← ConfigJson.object json
-    (#["name", "step_limit", "max_consecutive_format_errors", "executor", "recover_output", "ask_user"] ++ own)
+    (#["name", "step_limit", "max_consecutive_format_errors", "executor", "recover_output", "ask_user",
+      "context_reserve", "mask_observations"] ++ own)
   let executor ← match ← object.field? "executor" with
     | none => pure defaults.executor
     | some json => do
@@ -62,12 +84,25 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array St
         | none => pure defaults.executor.env
         | some json => ConfigJson.pairs json
       pure { timeoutSeconds := ← object.nat "timeout_seconds" defaults.executor.timeoutSeconds, env }
+  let masking? ← match ← object.field? "mask_observations" with
+    | none => pure defaults.masking?
+    | some .null => pure none
+    | some json => do
+      let object ← ConfigJson.object json #["keep_turns", "block"]
+      let some keepTurns ← object.field? "keep_turns" |>.map (·.bind (·.getNat?.toOption))
+        | throw "'mask_observations' needs 'keep_turns', a non-negative integer"
+      let some block ← object.field? "block" |>.map (·.bind (·.getNat?.toOption))
+        | throw "'mask_observations' needs 'block', a positive integer"
+      if block == 0 then throw "'mask_observations.block' must be positive"
+      pure (some { keepTurns, block })
   pure {
     stepLimit := ← object.nat "step_limit" defaults.stepLimit
     maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors
     executor
     recoverOutput := ← object.bool "recover_output" defaults.recoverOutput
-    askUser := ← object.bool "ask_user" defaults.askUser }
+    askUser := ← object.bool "ask_user" defaults.askUser
+    contextReserve := ← object.nat "context_reserve" defaults.contextReserve
+    masking? }
 
 /-! ## Prompts
 
@@ -252,10 +287,38 @@ def outputFile (index : Nat) (id : String) : String :=
   let safe := id.map fun c => if c.isAlphanum || c == '-' || c == '_' || c == '.' then c else '_'
   s!"{index}-{safe}.txt"
 
+/-- How many turns from the first are omitted when the log holds `turns`: none until the
+boundary first moves, then a multiple of `block`. -/
+def Masking.omittedTurns (m : Masking) (turns : Nat) : Nat :=
+  if turns < m.keepTurns + m.block then 0 else ((turns - m.keepTurns) / m.block) * m.block
+
+/-- For each event of the log, whether it is in a turn the view omits. An event belongs to the
+turn of the response before it; the events before the first response, to the first. -/
+private def omittedEvents (config : Config) (log : Log) : Array Bool :=
+  let omitted := config.masking?.map (·.omittedTurns log.responses) |>.getD 0
+  -- Fold oldest first, counting the responses so far.
+  (log.foldl (init := (#[], 0)) fun (acc, seen) event =>
+    let seen := match event with | .response _ => seen + 1 | _ => seen
+    (acc.push (omitted > 0 && seen ≤ omitted), seen)).1
+
+/-- How the view shows a command's output: whole, cut to its head and tail, or omitted. -/
+private inductive Shown where
+  | whole | cut | omitted
+
+private def shown (omittedTurn : Bool) (file : String) (o : Output) : Shown :=
+  -- An output no longer than the notice is cheaper to keep.
+  if omittedTurn && o.output.length > (Tools.Bash.omittedNotice file).length then .omitted
+  else if o.output.length < outputLimit then .whole else .cut
+
+/-- The path the view gives for the output recorded at `index` by `id`. -/
+private def outputPath (index : Nat) (id : String) : String :=
+  s!"{Agent.outputsDir}/{outputFile index id}"
+
 /-- The view: a malformed response is shown as the format error, as a user turn; an observation
 as `Tools.Bash.observation` of the recorded `Output`, which with `recoverOutput` names the file
-a cut output is in. -/
+a cut output is in, or, in a turn masking omits, as `Tools.Bash.omitted`. -/
 def view (config : Config) (log : Log) : Dialogue :=
+  let omitted := omittedEvents config log
   log.mapIdx fun index event => match event with
     | .message m => m
     | .response r =>
@@ -263,21 +326,27 @@ def view (config : Config) (log : Log) : Dialogue :=
       | .actions _ => .assistant r.content? r.toolCalls r.reasoning?
       | .formatError message => .user message
     | .observation id content =>
+      let path := outputPath index id
       let json := match Output.fromJson? content with
-        | some output => Tools.Bash.observation output outputLimit
-            (if config.recoverOutput then some s!"{Agent.outputsDir}/{outputFile index id}" else none)
+        | some output => match shown (omitted[index]?.getD false) path output with
+          | .omitted => Tools.Bash.omitted output path
+          | _ => Tools.Bash.observation output outputLimit (if config.recoverOutput then some path else none)
         | none => content
       .tool id (.str json.pretty)
 
-/-- The files the view names: with `recoverOutput`, the whole of each output it cuts. -/
+/-- The files the view names: the whole of each output it omits, and with `recoverOutput`, of
+each it cuts. -/
 def outputs (config : Config) (log : Log) : Array (String × String) :=
-  if !config.recoverOutput then #[] else
-    (log.mapIdx fun index event => match event with
-      | .observation id content => match Output.fromJson? content with
-        | some output => if output.output.length < outputLimit then none
-          else some (outputFile index id, output.output)
-        | none => none
-      | _ => none).filterMap id
+  let omitted := omittedEvents config log
+  (log.mapIdx fun index event => match event with
+    | .observation id content => do
+      let output ← Output.fromJson? content
+      let named := match shown (omitted[index]?.getD false) (outputPath index id) output with
+        | .omitted => true
+        | .cut => config.recoverOutput
+        | .whole => false
+      if named then some (outputFile index id, output.output) else none
+    | _ => none).filterMap (·)
 
 /-- How many format-error responses end the log with no clean turn between them. A person's
 message in between does not reset the count; an observation does, since it means a turn ran. -/
@@ -298,7 +367,10 @@ private def trailingFormatErrors (config : Config) (log : Log) : Nat := Id.run d
 def next (config : Config) (session : Session) (log : Log) : Directive :=
   let sampleOrStop : Directive :=
     if config.stepLimit > 0 && log.responses >= config.stepLimit
-    then .done { status := "LimitsExceeded" } else .sample
+    then .done { status := "LimitsExceeded" }
+    else if config.contextLimit?.any (Agent.contextTokens (view config) log ≥ ·)
+    then .done { status := "ContextExceeded" }
+    else .sample
   match log.lastResponse? with
   | none => sampleOrStop
   | some response =>
@@ -327,8 +399,16 @@ def act (executor : Executor) (workspace : Agent.Workspace) (call : Chat.ToolCal
   | "bash", .ok command => Tools.Bash.act executor workspace command
   | _, _ => throw <| .input s!"not a runnable bash call: {call.name}"
 
-/-- The mini agent. -/
-def agent (config : Config) : Agent := {
+/-- The tokens a request to `model` may hold under `config`: its context less the room kept for
+a response; `none` when its context is not known. -/
+def contextLimit? (config : Config) (model : Models.Spec) : Option Nat :=
+  model.contextTokens?.map fun tokens =>
+    tokens - min config.contextReserve (model.outputTokens?.getD config.contextReserve)
+
+/-- The mini agent, for a run of `model`, whose context it keeps within. -/
+def agent (config : Config) (model : Models.Spec := default) : Agent :=
+  let config := { config with contextLimit? := contextLimit? config model }
+  {
   config := config.toJson
   initialLog := initialLog config
   executorConfig := config.executor

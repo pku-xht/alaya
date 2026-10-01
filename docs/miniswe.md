@@ -11,7 +11,7 @@ change behaviour are listed in §7.
 ## 1. The agent
 
 ```lean
-def agent (executor : Executor) (config : Config) : Agent := {
+def agent (config : Config) (model : Models.Spec) : Agent := {
   identity := config.toJson                   -- the configuration, as the root records it
   tools := tools config                       -- bash and submit; optional ask_user
   view := view config
@@ -19,9 +19,9 @@ def agent (executor : Executor) (config : Config) : Agent := {
   act := act executor }
 ```
 
-Two things are fixed when the agent is built. The **executor** is where its commands run — a
-container the trajectory pinned — and the **configuration**, a JSON object read by
-`Config.fromJson`, whose defaults `alaya config --agent mini-swe` prints:
+Two things are fixed when the agent is built: the run's **model spec**, whose context size bounds
+the run (§10), and the **configuration**, a JSON object read by `Config.fromJson`, whose
+defaults `alaya config --agent mini-swe` prints:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
@@ -31,6 +31,8 @@ container the trajectory pinned — and the **configuration**, a JSON object rea
 | `executor.timeout_seconds`, `executor.env` | 30, mini's overrides | how each command is run (`Executor.Config`) |
 | `recover_output` | false | name the file holding a cut output's whole (§9) |
 | `ask_user` | false | offer yes/no, single-choice, and open-ended questions |
+| `context_reserve` | 8000 | tokens kept free for the next response, or the model's `output_tokens` when less (§10) |
+| `mask_observations` | null | `{keep_turns, block}`: omit old outputs from the view (§10) |
 
 A field left out is its default; a misspelt one is an error. The task is not configuration: it
 is what `root --task` gives, and `initialLog config task uname` places it. The command line
@@ -134,7 +136,8 @@ flowchart LR
    `bash` there is `act` on that call. Calls after a `submit` in the same response never run.
 3. **When every call is answered**, `sample` — unless `stepLimit` is set and the log already
    holds that many responses, in which case `done LimitsExceeded`. The limit is checked before
-   the model call, as mini does.
+   the model call, as mini does. Nor when the next request would not fit in the model's
+   context: then `done ContextExceeded` (§10).
 
 `act executor workspace call` runs the `bash` call's script in the workspace through the
 executor and returns the `Output` as JSON. It is never given a `submit`: `next` ends the run
@@ -155,7 +158,9 @@ flowchart TD
   X --> A
   A -->|"none left"| L{"step limit reached?"}
   L -->|yes| D3["done LimitsExceeded"]
-  L -->|no| S
+  L -->|no| C{"context full?"}
+  C -->|yes| D4["done ContextExceeded"]
+  C -->|no| S
 ```
 
 ## 7. Running a command
@@ -188,7 +193,10 @@ and is gone when a branch is resumed later.
 - Error texts are plain, not Python's exception messages.
 - The environment is a snapshot of the working directory, not a persistent machine.
 - No per-model cost accounting, so mini's `cost_limit` is not enforced.
+- A run whose next request would not fit in the model's context ends with `ContextExceeded`,
+  rather than with the provider's error (§10).
 - With `recoverOutput` on: a cut output's warning names a file (§9).
+- With `mask_observations` set: old outputs are omitted from the view (§10).
 - With `ask_user` enabled (`--set agent.ask_user=true`): [yes/no, single-choice, and open-ended questions](ask-user.md), using the existing question/reply states.
 
 ## 9. Reading a long output back
@@ -202,8 +210,35 @@ warning on a cut output names a file holding the whole of it, as the DeepSeek ha
 
 and the agent reads it with `bash`. The files are derived from the log, like the view
 (`outputs`): each cut output of the branch, named by its position in the log, which never
-changes on a branch, and by its call id. The trajectory writes them into the command's scratch at
-each `resume` and after each command, and the container mounts that directory read-only at
+changes on a branch, and by its call id. The trajectory writes them into the command's scratch
+before each sample, and the container mounts that directory read-only at
 `/alaya/outputs`, outside the workdir. A fork or a new container sees its own branch's files;
 nothing is recorded, and no snapshot or grader sees them. The prompts and tools are mini's as
 they are, so only the warning differs.
+
+## 10. Context management
+
+**A full context ends the run cleanly.** When the model spec gives a `context_tokens`, `next`
+ends the run with `done ContextExceeded` instead of sampling a request that would not fit:
+when the request's size reaches the context less `context_reserve`, or less the model's
+`output_tokens` when that is smaller. The size needs no tokenizer (`Agent.contextTokens`): the
+latest response's recorded `usage` says how many tokens the request it answered held and how
+many it returned, and what the view has added since is estimated at four characters a token of
+its JSON. With no `usage`, or once the view has rewritten what was measured, the whole view is
+estimated. A model with no known context size is not checked.
+
+**Masking omits old outputs, in blocks.** With `mask_observations` `{keep_turns: K, block: B}`,
+the view omits the outputs of the oldest turns: none while the log holds fewer than `K + B`
+turns, then those of the first `((t - K) / B) * B` of its `t` turns. The boundary moves `B`
+turns at a time, so between its moves the context only grows at its end and the provider's
+prompt cache holds. An omitted output keeps its exit code and names the file holding it, which
+the agent reads with `bash`:
+
+```json
+{"output": "[output omitted; full output: /alaya/outputs/12-call_c7.txt]", "exit_code": 0}
+```
+
+Only command outputs are omitted, and only those longer than that notice: messages, responses
+and every other tool result stay. Masking depends on turn positions alone, never on the context
+size, so a log is shown the same way whatever the model; the files are derived from the log as
+in §9, with or without `recover_output`.

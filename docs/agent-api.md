@@ -188,16 +188,16 @@ structure Agent where
 ```
 
 `outputs` gives the files the view names, by file name, with their contents: like the view, a
-function of the log. The trajectory writes them before each turn and after each act, and the
-container mounts them read-only at `/alaya/outputs`, so a command can read what the view only
-cut, such as a long output (`docs/miniswe.md` §9). Nothing records them.
+function of the log. The trajectory writes them before each sample, and the container mounts
+them read-only at `/alaya/outputs`, so a command can read what the view cut or omitted
+(`docs/miniswe.md` §9–10). Nothing records them.
 
 The tools themselves live in `Alaya.Agent.Tools`, each defined on its own — schema, argument
 reading, and what answers a call — with no knowledge of any agent; an agent composes them.
 `Alaya.Agent.Catalog` is how the command line gets an agent: each agent it can name (`mini-swe`,
-`mini-vero`) has its defaults in code and reads a configuration into an `Agent`, and the root
-records its complete `config`, from which every later command builds the same agent again
-(`docs/cli.md` §5).
+`mini-vero`) has its defaults in code and reads a configuration into an `Agent` for the run's
+model spec, whose sizes it may keep within. The root records both, the complete `config` and
+the spec, from which every later command builds the same agent again (`docs/cli.md` §5).
 
 There is one loop that carries out directives, the trajectory's (`Trajectory.resume`,
 `docs/trajectory-schema.md` §2): follow `next` until it stops, sampling from `view log` and

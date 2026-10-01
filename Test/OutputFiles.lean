@@ -92,15 +92,15 @@ def suite : Suite := Testing.suite "output files" #[
                           agent := agent config }
     let root ← assertOk <| createRoot store workspaces (initialLog config "t" testUname ++ recorded) project
       (← testImage) (agent := testAgent) (model := testModel)
-    -- The root's own cut output is there before the first turn; the turn's own after it runs.
+    -- Each file is there before the model is shown the view that names it.
     let child ← stepped <| step rt root
-    assertEqual "after a turn" (← files outputsDir) #["3-c1.txt", "5-c2.txt"]
-    assertEqual "whole" (← IO.FS.readFile (outputsDir / "5-c2.txt")) longOutput
+    assertEqual "before the first turn" (← files outputsDir) #["3-c1.txt"]
     let _ ← stepped <| step rt child
-    assertEqual "the branch grows" (← files outputsDir) #["3-c1.txt", "5-c2.txt", "7-c3.txt"]
+    assertEqual "the branch grows" (← files outputsDir) #["3-c1.txt", "5-c2.txt"]
+    assertEqual "whole" (← IO.FS.readFile (outputsDir / "5-c2.txt")) longOutput
     -- A fork from the root: the other branch's files are gone.
     let _ ← stepped <| step rt root
-    assertEqual "a fork's files" (← files outputsDir) #["3-c1.txt", "5-c4.txt"]
+    assertEqual "a fork's files" (← files outputsDir) #["3-c1.txt"]
     -- Nothing reaches the workspace or the states.
     assertEqual "workspace untouched" (← files work) #["a.txt"]
     assertEqual "nothing recorded" (← assertOk <| getState store child).appended.size 2
