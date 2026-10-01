@@ -115,7 +115,7 @@ inductive Kind where
   | root
   /-- One model turn, or a stop recorded after a reply without another model sample. -/
   | turn
-  /-- A person's workspace change, with the parent's log — plus a notice, when they left one. -/
+  /-- A person's workspace change, with a notice to the agent listing what changed. -/
   | intervention
   /-- A grader's verdict on a state, with the checkout as the grader left it; always a leaf. -/
   | evaluation
@@ -147,12 +147,12 @@ def Kind.ofString? : String -> Option Kind
   | "reply" => some .reply
   | _ => none
 
-/-- What a person told the agent between turns, and what they changed. -/
+/-- What a person told the agent between turns, or what they changed. -/
 structure Intervention where
-  /-- The person's message, verbatim. -/
+  /-- The person's message, verbatim; empty for a workspace change, which says nothing more. -/
   message : String
-  /-- The workspace changes made alongside it, one `M path` / `+ path` / `- path` line each;
-  empty for a message alone. -/
+  /-- The workspace changes, one `M path` / `+ path` / `- path` line each; empty for a
+  message. -/
   changed : Array String := #[]
   deriving Inhabited
 
@@ -162,7 +162,8 @@ def interventionNotice (i : Intervention) : String :=
     if i.changed.isEmpty then "A person sent you a message while you were paused."
     else "A person changed the workspace while you were paused:"
   let changes := String.join (i.changed.toList.map fun line => "\n  " ++ line)
-  s!"<intervention>\n{header}{changes}\n{i.message}\n</intervention>"
+  let message := if i.message.isEmpty then "" else s!"\n{i.message}"
+  s!"<intervention>\n{header}{changes}{message}\n</intervention>"
 
 /-- A question the agent asked a person and is waiting on. `callId` is the asking tool call,
 so the eventual answer can be recorded as its result. -/
@@ -233,8 +234,8 @@ structure State where
   /-- On a model step (`turn`, `question`): its wall-clock time, from before the model call to
   after its last act and snapshot. A run's time is the sum along its path from the root. -/
   elapsedMs? : Option Nat := none
-  /-- What a person said and changed, on a `message` or `intervention` state that carried a
-  message. The notice in `appended` is `interventionNotice` of it. -/
+  /-- What a person said, on a `message`, or changed, on an `intervention`. The notice in
+  `appended` is `interventionNotice` of it. -/
   intervention? : Option Intervention := none
   /-- The open question, on a `question` state. Nothing but `reply` continues from it. -/
   question? : Option Question := none
@@ -404,6 +405,14 @@ partial def logOf (store : Store) (hash : Hash) : Result Log := do
     | none => pure #[]
   pure (ancestors ++ state.appended)
 
+/-- The states from the root to `hash`, in order. -/
+partial def branchOf (store : Store) (hash : Hash) : Result (Array (Hash × State)) := do
+  let state ← getState store hash
+  let before ← match state.parent? with
+    | some parent => branchOf store parent
+    | none => pure #[]
+  pure (before.push (hash, state))
+
 /-- How long the run up to `hash` has taken: its model steps' times, from the root. -/
 partial def elapsedMs (store : Store) (hash : Hash) : Result Nat := do
   let state ← getState store hash
@@ -570,26 +579,29 @@ the time budget was spent, not because the run ended or asked. -/
 structure Stopped where
   state : Hash
   outOfTime : Bool := false
+  /-- Stopped after the `turns?` this continuation was allowed, with the run still going. -/
+  outOfTurns : Bool := false
 
-/-- Grows a continuation from `hash` until the run ends, stops at a question, or spends the time
-budget, and returns where it stopped. Running out of time writes nothing: the last state is
-where a later `resume` continues. -/
+/-- Grows a continuation from `hash` until the run ends, stops at a question, spends the time
+budget, or has taken `turns?` turns, and returns where it stopped. Stopping for a limit writes
+nothing more: the last state is where a later `resume` continues. -/
 partial def resume (rt : Runtime) (note : String) (hash : Hash)
-    (onStep : Hash -> Result Unit) : Result Stopped := do
+    (onStep : Hash -> Result Unit) (turns? : Option Nat := none) : Result Stopped := do
   let start ← getState rt.store hash
   Result.fromExcept Error.configuration start.continuable
   let before ← elapsedMs rt.store hash
   if !withinBudget rt before then return { state := hash, outOfTime := true }
   checkoutInto rt.toSandbox start.workspace
-  let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed : Nat) : Result Stopped := do
+  let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed taken : Nat) : Result Stopped := do
     let (child, log, workspace, elapsed, halt) ← advance rt note parent log workspace elapsed
     onStep child
     match halt with
     | .continue =>
-      if withinBudget rt elapsed then go child log workspace elapsed
-      else pure { state := child, outOfTime := true }
+      if !withinBudget rt elapsed then pure { state := child, outOfTime := true }
+      else if turns?.any (taken + 1 ≥ ·) then pure { state := child, outOfTurns := true }
+      else go child log workspace elapsed (taken + 1)
     | _ => pure { state := child }
-  go hash (← logOf rt.store hash) start.workspace before
+  go hash (← logOf rt.store hash) start.workspace before 0
 
 /-! ## Evaluation -/
 
@@ -710,22 +722,22 @@ private def changedLines (workspaces : Workspaces) (before after : Hash) :
     | .removed => s!"- {change.path}"
     | .modified => s!"M {change.path}"
 
-/-- Records a hand-edited workspace `dir` as an intervention child of `hash`, with a notice to
-the model when `tell?` is given. -/
+/-- Records a hand-edited workspace `dir` as an intervention child of `hash`. The agent is always
+told: the child's one event is a notice listing what changed, so its view never disagrees with
+its files. A directory with no change is refused; `tell` sends a message alone. -/
 def commit (store : Store) (workspaces : Workspaces) (hash : Hash) (dir : System.FilePath)
-    (note? : Option String) (tell? : Option String := none) : Result Hash := do
+    (note? : Option String) : Result Hash := do
   let parent ← getState store hash
   buildable parent
   let workspace ← workspaces.snapshot dir
-  let intervention? ← match tell? with
-    | none => pure none
-    | some message =>
-      pure (some ({ message, changed := ← changedLines workspaces parent.workspace workspace } : Intervention))
+  let changed ← changedLines workspaces parent.workspace workspace
+  if changed.isEmpty then
+    throw <| .configuration s!"{dir} has no change from {hash.hex}: to send a message alone, use `tell`"
+  let intervention : Intervention := { message := "", changed }
   putState store {
     parent? := some hash, workspace, kind := .intervention, note?
-    appended := intervention?.map (fun i => #[Event.message (.user (interventionNotice i))])
-      |>.getD #[]
-    intervention?, image := parent.image, workdir := parent.workdir }
+    appended := #[.message (.user (interventionNotice intervention))]
+    intervention? := some intervention, image := parent.image, workdir := parent.workdir }
 
 /-- Records a person's message to the agent as a child of `hash`: same workspace, and the log
 grown by one user turn carrying the message in the intervention envelope. -/

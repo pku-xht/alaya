@@ -402,6 +402,8 @@ structure App where
   commands : Array Command
   /-- Printed at the end of the overview. -/
   epilog : String := ""
+  /-- Commands that are gone, each with what to use instead. -/
+  removed : Array (String × String) := #[]
   /-- The exit status of a command line that does not parse. -/
   usageExit : UInt32 := 1
   /-- The exit status of a command that failed. -/
@@ -545,6 +547,9 @@ def App.run (app : App) (argv : List String) : IO UInt32 := do
       usageError #[s!"unknown command {name}{didYouMean names name}"] s!"{app.name} help COMMAND"
         s!"commands: {", ".intercalate names.toList}"
   | name :: rest =>
+    if let some (_, instead) := app.removed.find? (·.1 == name) then
+      return ← usageError #[s!"{name} is no longer a command: {instead}"]
+        s!"{app.name} COMMAND [ARGUMENTS] [OPTIONS]" s!"commands: {", ".intercalate names.toList}"
     let some c := find name
       | usageError #[s!"unknown command {name}{didYouMean names name}"]
           s!"{app.name} COMMAND [ARGUMENTS] [OPTIONS]"

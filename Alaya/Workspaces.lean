@@ -129,6 +129,37 @@ def read (workspaces : Workspaces) (id : Hash) (path : String) : Result ByteArra
     | throw <| .storage s!"the snapshot file could not be read: {path}"
   pure bytes
 
+/-- The largest file a preview shows, in bytes. -/
+def previewBytes : Nat := 1024 * 1024
+
+/-- What a reader may show of an entry: UTF-8 text up to `previewBytes` verbatim, and of
+anything else only what it is. -/
+structure Preview where
+  /-- `text`, `binary`, `too_large`, `symlink`, `directory` or `other`. -/
+  kind : String
+  content? : Option String := none
+  size? : Option Nat := none
+  deriving BEq, Repr, Inhabited
+
+/-- A preview of the entry at `path` in snapshot `id`. A link is described, never followed, and
+only a regular file within the limit is read. -/
+def preview (workspaces : Workspaces) (id : Hash) (path : String) : Result Preview := do
+  let entry ← workspaces.entryAt id path
+  match entry.kind with
+  | .file =>
+    let some size := entry.size
+      | throw <| .storage s!"snapshot file has no size metadata: {path}"
+    if size > previewBytes then return { kind := "too_large", size? := some size }
+    let some bytes ← workspaces.readFile? id path
+      | throw <| .storage s!"the snapshot file could not be read: {path}"
+    let size? := some bytes.size
+    if bytes.size > previewBytes then return { kind := "too_large", size? }
+    if bytes.data.contains 0 then return { kind := "binary", size? }
+    match String.fromUTF8? bytes with
+    | some text => pure { kind := "text", content? := some text, size? }
+    | none => pure { kind := "binary", size? }
+  | kind => pure { kind := kind.toString, size? := entry.size }
+
 /-- `path` with its symbolic links resolved, as far as it exists: the rest is appended as given,
 so a directory that is yet to be created can be compared with ones that are there. -/
 partial def resolved (path : System.FilePath) : IO System.FilePath := do

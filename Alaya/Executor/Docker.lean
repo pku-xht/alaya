@@ -84,14 +84,20 @@ def Settings.pin (settings : Settings) : Result Settings := do
     | some pinned => pure { settings with image := pinned }
     | none => throw <| .configuration s!"image {reference} is not available after pulling it"
 
-/-- Checks that a recorded image is still available locally, so a resumed trajectory fails with
-a clear message rather than a container that cannot start. -/
-def Settings.verifyPresent (settings : Settings) : Result Unit := do
-  match ← Result.fromIO Error.configuration (inspect? settings.image "{{.Id}}") with
-  | some _ => pure ()
-  | none => throw <| .configuration <|
-      s!"image {settings.image} is recorded in this trajectory but is not available locally; " ++
-      "pull it, or pass --image to run a different one (which will be refused if it differs)"
+/-- Makes sure a recorded image is available locally, so a resumed trajectory fails with a clear
+message rather than a container that cannot start. A registry digest names bits anyone can
+fetch, so a missing one is pulled; a bare image ID is a local build's, which nothing can pull. -/
+def Settings.ensurePresent (settings : Settings) : Result Unit := do
+  let present : Result Bool := do
+    pure (← Result.fromIO Error.configuration (inspect? settings.image "{{.Id}}")).isSome
+  if ← present then return
+  if (settings.image.splitOn "@sha256:").length != 2 then
+    throw <| .configuration <|
+      s!"image {settings.image} is recorded in this trajectory but is not available locally, " ++
+      "and it is a local build's ID, which cannot be pulled: rebuild the image, or `docker load` it"
+  let _ ← docker #["pull", settings.image] s!"docker pull {settings.image}"
+  if !(← present) then
+    throw <| .configuration s!"image {settings.image} is not available after pulling it"
 
 /-- The host user, as Linux containers must run as it to leave a workspace the host still owns.
 Docker Desktop maps ownership itself, so macOS keeps the image's own user. -/
@@ -175,17 +181,17 @@ private def script (config : Config) (hasTimeout : Bool) : String :=
   else "exec /bin/sh -c \"$@\" 2>&1"
 
 private partial def poll (child : IO.Process.Child cfg) (readAll : IO String)
-    (deadlineMs : Nat) : IO (Option UInt32 × String) := do
+    (deadlineMs? : Option Nat) : IO (Option UInt32 × String) := do
   match ← child.tryWait with
   | some code => pure (some code, ← readAll)
   | none =>
-    if (← IO.monoMsNow) >= deadlineMs then
+    if deadlineMs?.any ((← IO.monoMsNow) ≥ ·) then
       child.kill
       let _ ← child.wait
       pure (none, ← readAll)
     else
       IO.sleep 20
-      poll child readAll deadlineMs
+      poll child readAll deadlineMs?
 
 /-- Docker's own failures (125, and 126/127 when it could not exec at all) come back on the
 client's stderr, while the command's own output arrives on stdout with its stderr already
@@ -220,7 +226,9 @@ private def execIn (ref : IO.Ref (Option Container)) (settings : Settings) (conf
     -- With an in-container `timeout` the host deadline is only a backstop, so it allows for the
     -- kill grace; without one it is the whole mechanism.
     let graceMs := if container.hasTimeout then 5000 else 0
-    let (code?, output) ← poll child readAll (start + config.timeoutSeconds * 1000 + graceMs)
+    let deadline? := if config.timeoutSeconds == 0 then none
+      else some (start + config.timeoutSeconds * 1000 + graceMs)
+    let (code?, output) ← poll child readAll deadline?
     let elapsedMs := (← IO.monoMsNow) - start
     match code? with
     | none =>
@@ -241,7 +249,7 @@ private def execIn (ref : IO.Ref (Option Container)) (settings : Settings) (conf
         -- busybox passes the signal status through (143 for TERM, 137 once `-k` sends KILL). A
         -- command can return any of those on its own, so a run that did not reach the limit is
         -- taken at its word.
-        if (code == 124 || code == 137 || code == 143) &&
+        if (code == 124 || code == 137 || code == 143) && config.timeoutSeconds > 0 &&
             elapsedMs >= config.timeoutSeconds * 1000 then
           pure (timedOut output display config.timeoutSeconds)
         else pure { output, exitCode? := some code }
@@ -337,12 +345,6 @@ def RunOptions.cli : Cli.Spec RunOptions :=
     <$> Cli.flag? "container-user" (.string "UID:GID")
       "the user commands run as; by default the host user on Linux, the image's own on macOS"
     <*> Cli.flagD "network" (.string "NAME") "none" "the docker network, e.g. bridge; none is no network"
-
-/-- A `--workdir` given after `root` must be the trajectory's own. -/
-def checkSameWorkdir (requested workdir : String) : Result Unit := do
-  if requested != workdir then
-    throw <| .configuration <|
-      s!"--workdir {requested} is not this trajectory's workdir, {workdir}; it is fixed at `root`"
 
 /-- Settings for a trajectory's image and workdir, run as `options` say. -/
 def settingsOf (options : RunOptions) (image : String) (workdir : String := defaultWorkdir) :

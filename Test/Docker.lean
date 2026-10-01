@@ -114,6 +114,18 @@ def suite : Suite := Testing.suite "docker" #[
       finally
         executor.close,
 
+  test "a timeout of 0 lets a command run as long as it takes" <| withDocker
+    fun settings => do
+      let work ← workspace
+      let executor ← assertOk (Docker.executor settings { config with timeoutSeconds := 0 })
+      try
+        -- Past the 5-second kill grace, which once was all a 0 allowed.
+        let out ← executor.exec work #["sleep 6; echo done"] "sleep 6; echo done"
+        assertEqual "no error" out.error? none
+        assertEqual "finished" out.output "done\n"
+      finally
+        executor.close,
+
   test "close leaves no container behind" <| withDocker
     fun settings => do
       let work ← workspace
@@ -334,17 +346,15 @@ def suite : Suite := Testing.suite "docker" #[
           | .configuration _ => true
           | _ => false,
 
-  test "a command refuses a --workdir other than the trajectory's" do
-    assertError "different" (Docker.checkSameWorkdir "/other" "/testbed") fun
-      | .configuration m => (m.splitOn "fixed at `root`").length > 1
-      | _ => false
-    assertOk <| Docker.checkSameWorkdir "/testbed" "/testbed",
-
-  test "a missing image is a configuration error naming it" <| withDocker
+  test "a missing recorded image is pulled by its digest, and a local build's ID cannot be" <| withDocker
     fun _ => do
       let missing : Docker.Settings := { image := "alaya.invalid/nope@sha256:0" }
-      assertError "verifyPresent" missing.verifyPresent fun
-        | .configuration m => (m.splitOn "alaya.invalid/nope").length > 1
+      assertError "digest" missing.ensurePresent fun
+        | .configuration m => (m.splitOn "docker pull alaya.invalid/nope@sha256:0").length > 1
+        | _ => false
+      let local_ : Docker.Settings := { image := "sha256:" ++ "0".pushn '0' 63 }
+      assertError "local" local_.ensurePresent fun
+        | .configuration m => (m.splitOn "cannot be pulled").length > 1
         | _ => false
 ]
 

@@ -42,6 +42,7 @@ class QuestionApplication:
             "__ALAYA_TOKEN__", self.token
         ).encode("utf-8")
         self.lock = threading.Lock()
+        self.listed: set[str] = set()
         # One shared CLI poller, regardless of the number of listening tabs.
         # Keep its notification lock separate so a slow CLI cannot block heartbeats.
         self.events_changed = threading.Condition()
@@ -52,12 +53,10 @@ class QuestionApplication:
         self.events_revision = 0
         self.events_message: bytes | None = None
 
-    def _run(self, verb: str, *args: str) -> str:
-        if verb != "waiting":
-            # Answers and snapshot paths such as "--data" are positional text.
-            argv = [*self.command, verb, "--data", self.data, "--", *args]
-        else:
-            argv = [*self.command, verb, *args, "--data", self.data]
+    def _run(self, verb: str, *args: str, json_output: bool = False) -> str:
+        # Answers and snapshot paths such as "--data" are positional text, after "--".
+        flags = ["--data", self.data] + (["--json"] if json_output else [])
+        argv = [*self.command, verb, *flags, "--", *args]
         try:
             result = subprocess.run(
                 argv,
@@ -83,7 +82,7 @@ class QuestionApplication:
         questions = []
         # JSON may contain literal Unicode line/paragraph separators in strings.
         # Only an actual LF terminates a record emitted by `waiting --json`.
-        for line in self._run("waiting", "--json").split("\n"):
+        for line in self._run("waiting", json_output=True).split("\n"):
             if not line.strip():
                 continue
             try:
@@ -102,6 +101,8 @@ class QuestionApplication:
             ):
                 raise ApiError(502, "Alaya returned an invalid question record.")
             questions.append(question)
+        # `ls` and `cat` read any state; this page shows only the questions it has listed.
+        self.listed.update(question["state"] for question in questions)
         return questions
 
     def questions(self) -> list[dict]:
@@ -182,10 +183,47 @@ class QuestionApplication:
         if self.events_thread is not None:
             self.events_thread.join(timeout=CLI_TIMEOUT_SECONDS + 1)
 
-    def inspect(self, verb: str, state: str, path: str | None = None) -> dict:
-        args = (state,) if path is None else (state, path)
+    def _listed(self, state: str) -> bool:
+        if state not in self.listed:
+            with self.lock:
+                self._waiting()
+        return state in self.listed
+
+    def context(self, state: str) -> dict:
+        """The branch from the root to the question, one step per state."""
+        if not self._listed(state):
+            raise ApiError(404, "This is not a question the page has listed.")
+        value = self._inspect(self._run("show", state, json_output=True), state)
+        history = value.get("history")
+        if value.get("kind") != "question" or not isinstance(history, list) or not all(
+            isinstance(step, dict) and isinstance(step.get("kind"), str)
+            and isinstance(step.get("events"), list) for step in history
+        ):
+            raise ApiError(502, "Alaya returned an invalid question history.")
+        return {"state": state, "workspace": value["workspace"], "history": history}
+
+    def files(self, state: str, path: str) -> dict:
+        """A directory of the question's snapshot."""
+        if not self._listed(state):
+            raise ApiError(404, "This is not a question the page has listed.")
+        value = self._inspect(self._run("ls", state, path, json_output=True), state, path)
+        if not isinstance(value.get("entries"), list):
+            raise ApiError(502, "Alaya returned an invalid directory listing.")
+        return value
+
+    def file(self, state: str, path: str) -> dict:
+        """A preview of one entry of the question's snapshot."""
+        if not self._listed(state):
+            raise ApiError(404, "This is not a question the page has listed.")
+        value = self._inspect(self._run("cat", state, path, json_output=True), state, path)
+        if not isinstance(value.get("kind"), str):
+            raise ApiError(502, "Alaya returned an invalid file preview.")
+        return value
+
+    @staticmethod
+    def _inspect(output: str, state: str, path: str | None = None) -> dict:
         try:
-            value = json.loads(self._run(verb, *args))
+            value = json.loads(output)
         except json.JSONDecodeError as error:
             raise ApiError(502, "Alaya returned invalid context JSON.") from error
         if (
@@ -319,9 +357,13 @@ class QuestionHandler(BaseHTTPRequestHandler):
                 path = query["path"][0] if "path" in query else None
                 if path is not None and ("\0" in path or len(path) > 4096):
                     raise ApiError(400, "Invalid snapshot path.")
-                verb = {"/api/context": "question-context", "/api/files": "question-files",
-                        "/api/file": "question-file"}[url.path]
-                self._json(200, self.server.application.inspect(verb, state, path))
+                application = self.server.application
+                if url.path == "/api/context":
+                    self._json(200, application.context(state))
+                elif url.path == "/api/files":
+                    self._json(200, application.files(state, path))
+                else:
+                    self._json(200, application.file(state, path))
             else:
                 raise ApiError(404, "Not found.")
         except ApiError as error:

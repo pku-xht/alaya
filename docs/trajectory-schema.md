@@ -61,7 +61,7 @@ flowchart LR
 Every state is one of seven kinds. The kind says what created the state and therefore what its
 `appended` and `workspace` hold. Four kinds come from the `alaya` commands a person runs (`commit`,
 `tell`, `reply`, `eval`); `root` comes from `root`; `turn` and `question` come from the agent,
-driven by `resume` or `step`.
+driven by `resume`.
 
 | Kind | Created by | `appended` | `workspace` |
 | --- | --- | --- | --- |
@@ -69,7 +69,7 @@ driven by `resume` or `step`.
 | `turn` | one model turn, or a stop after a reply | the response and observations; empty for a stop before sampling | the workspace after those calls ran, or the parent's when none ran |
 | `question` | a model turn whose call asked a person | the response, and the observations of the calls before the ask | the workspace after those calls ran |
 | `reply` | `alaya reply` or `reply-unavailable` | one observation: the person's verbatim answer string, or the explicit unavailable object | the parent's |
-| `intervention` | `alaya commit` | nothing, or one notice when `--tell` is given | the directory the person edited |
+| `intervention` | `alaya commit` | one notice listing what changed | the directory the person edited |
 | `message` | `alaya tell` | one notice carrying the person's text | the parent's |
 | `evaluation` | `alaya eval` | nothing; the verdict is on the state itself | the checkout after the grader ran |
 
@@ -125,7 +125,7 @@ person's commit and a turn that asked a question.
 
 ### A turn
 
-A **turn** is what `resume` and `step` add to the tree: one model sample and the tool calls that
+A **turn** is what `resume` adds to the tree: one model sample and the tool calls that
 follow it, until the agent's `next` wants to sample again, stops, or asks a person. Given a parent
 state, the trajectory:
 
@@ -150,12 +150,12 @@ flowchart TD
 ```
 
 ```sh
-alaya step 4f2c8b --model xmcp:ds/deepseek-v4-flash      # exactly one turn
-alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash    # turns until the run ends or asks
+alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash --turns 1   # exactly one turn
+alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash             # turns until the run ends or asks
 ```
 
-`step` prints the new child's hash; `resume` prints one line per new state and ends with
-`done: Submitted`, or with the question it stopped at.
+`resume` prints one line per new state and ends with `done: Submitted`, with the question it
+stopped at, or, when `--turns N` or `--time-budget S` stopped it first, with how to continue.
 
 ### Which draw
 
@@ -197,13 +197,13 @@ flowchart LR
 ```
 
 ```sh
-alaya step 2c7f0a --model M   # 2c7f0a has one turn child, e5a1c3 (draw 0),
-                                               # so this is draw 1: a new sample, a fork
-alaya step 2c7f0a --model M   # draw 2
-alaya tree                                     # 2c7f0a now has three turn children, siblings
+alaya resume 2c7f0a --model M --turns 1   # 2c7f0a has one turn child, e5a1c3 (draw 0),
+                                          # so this is draw 1: a new sample, a fork
+alaya resume 2c7f0a --model M --turns 1   # draw 2
+alaya tree                                # 2c7f0a now has three turn children, siblings
 ```
 
-Replay needs no command of its own. If the second `step` had been interrupted after the model
+Replay needs no command of its own. If the second `resume` had been interrupted after the model
 answered but before the child was written, running it again asks for draw 1 again and receives
 the recorded response without a provider call. Likewise `alaya rm HASH` followed by a `resume`
 from its parent reproduces the deleted branch draw for draw, as long as `.alaya/cache` is kept.
@@ -218,35 +218,35 @@ be forked like a model turn.
 
 ### Changing the workspace: `commit`
 
-`alaya commit HASH DIR [-m NOTE] [--tell TEXT]` snapshots the directory `DIR` and records it as
-an `intervention` child of `HASH`. The child's log is the parent's: without `--tell`, nothing is
-appended, and the agent learns of the change only by running commands, as it would if the files
-had changed under it. `-m NOTE` is provenance for the reader of the tree, not for the model.
-
-With `--tell TEXT`, one event is appended: a user message carrying a **notice**. The notice is
-rendered from a record the state also keeps, `intervention? = { message, changed }`, where
-`changed` lists the paths that differ between the parent's workspace and `DIR`, one `+ path`,
-`- path`, or `M path` line each:
+`alaya commit HASH DIR [--note NOTE]` snapshots the directory `DIR` and records it as an
+`intervention` child of `HASH`. The agent is always told: one event is appended, a user message
+carrying a **notice** that lists what changed, so what the agent believes about its files never
+disagrees with them. The notice is rendered from a record the state also keeps,
+`intervention? = { message, changed }`, where `changed` lists the paths that differ between the
+parent's workspace and `DIR`, one `+ path`, `- path`, or `M path` line each, and `message` is
+empty:
 
 ```
 <intervention>
 A person changed the workspace while you were paused:
   M src/bija/cli.py
   + tests/extra.bj
-I fixed the identifier lookup; re-run every sample without set -e.
 </intervention>
 ```
 
-The envelope is fixed so the model can tell a person's notice from the task and from tool
-output; the text inside is verbatim.
+A directory with no change is refused: a message alone is `tell`'s (below), and so is anything
+the person wants to say about the change, told to the new state. `--note NOTE` is provenance for
+the reader of the tree, not for the model. The envelope is fixed so the model can tell a
+person's notice from the task and from tool output.
 
 ```sh
 alaya checkout 4f2c8b ./fix                  # the state's files, to edit by hand
 $EDITOR ./fix/src/app.py
-alaya commit 4f2c8b ./fix --note "fixed the fixture" \
-  --tell "I fixed the identifier lookup in src/app.py; re-run the suite."
+alaya commit 4f2c8b ./fix --note "fixed the fixture"
 # 9d0e11a2b7c4
-alaya resume 9d0e11 --model M   # the agent continues, having read the notice
+alaya tell 9d0e11 "I fixed the identifier lookup in src/app.py; re-run the suite."
+# 3f81c0d2a9e4
+alaya resume 3f81c0 --model M   # the agent continues, having read both notices
 ```
 
 ```mermaid
@@ -291,7 +291,7 @@ records it as a `question` state:
   after it never ran;
 - `question? = { callId, text, questionType, options }` names the asking call and carries
   the prompt and answer controls for the person;
-- `resume`, `step`, `commit`, and `tell` refuse the state until it is answered.
+- `resume`, `commit`, and `tell` refuse the state until it is answered.
 
 `alaya reply HASH TEXT` validates the answer against the recorded question type before
 writing any state. Yes/no requires `yes` or `no`; single choice requires one integer
@@ -361,8 +361,8 @@ flowchart LR
 ### A program in the person's seat
 
 Everything above is a command, so a program — a supervising agent, say — can play the person's
-part by running `alaya` as a subprocess. `resume` and `step` exit with status `0` when the run
-ended and `3` when it stopped at a question; with `--json` each state they print is one object
+part by running `alaya` as a subprocess. `resume` exits with status `0` when the run
+ended, `3` when it stopped at a question, and `4` when `--turns` or `--time-budget` stopped it; with `--json` each state they print is one object
 with `state`, `kind`, `outcome`, `question`, `question_type`, and `options`;
 `waiting --json` prints `{state, question, question_type, options}` per open question.
 The loop is: resume; on exit 3 read the question, decide, `reply`; resume
@@ -521,22 +521,22 @@ structure Workspaces where
 | Operation | Used by |
 | --- | --- |
 | `snapshot` | `root`, every act of a turn, `commit`, `eval` (the grader's input and the graded checkout) |
-| `materialize` | the start of `step` and `resume`, `eval`, `checkout` |
-| `diff` | the notice of a `commit --tell`, `alaya diff`, the HTML report |
-| `readFiles` | the HTML report and question-page file previews |
-| `listEntries` | read-only question-page browsing, using metadata before reading a file |
+| `materialize` | the start of `resume`, `eval`, `checkout` |
+| `diff` | the notice of a `commit`, `alaya diff`, the HTML report |
+| `readFiles` | the HTML report, `cat` and its previews |
+| `listEntries` | `ls`, and `cat`'s check of a path, using metadata before reading a file |
 | `retainOnly` | `rm`, with the snapshots the surviving states name |
 
 `listEntries` defaults to an unsupported-operation error for older/custom stores.
 Restic implements it without restoring the workspace. An entry records name,
 relative path, kind (directory/file/symlink/other), and optional byte size; the
-empty path names the root. The question browser verifies ancestor directories
-and never follows symbolic links.
+empty path names the root. `ls` and `cat` verify ancestor directories and never
+follow symbolic links.
 
 An identifier is 64 hexadecimal digits and means something only to the store that issued it.
 **Equal directories need not get equal identifiers**, and nothing compares them: a state's hash
 covers its workspace identifier, which makes a state immutable, not reproducible — a run's
-observations carry timings and temporary paths, and a repeated `step` is a new draw, so two
+observations carry timings and temporary paths, and a repeated turn is a new draw, so two
 runs do not meet at the same state hash anyway. What the contract does require
 (`Test/Workspaces.lean`):
 
@@ -684,19 +684,15 @@ an entry is only ever appended to.
 ```
 alaya root --task TEXT PROJECT --agent FILE --image IMAGE [--workdir PATH]   create a root from a project directory
 alaya root --task TEXT --agent FILE --image IMAGE --workdir PATH   …or from the image's own PATH
-alaya resume HASH --model P:M [--time-budget S]  grow one continuation until it ends, asks, or spends S
-alaya step   HASH --model P:M [--time-budget S]  advance exactly one turn
+alaya resume HASH --model P:M [--turns N] [--time-budget S]   grow one continuation until it ends, asks, or reaches a limit
 alaya eval   HASH --grader CMD [--input DIR] [--grader-image IMAGE] [--timeout S]   grade a state (§4)
-alaya commit HASH DIR [--note NOTE] [--tell TEXT]  record a hand-edited workspace as a child
+alaya commit HASH DIR [--note NOTE]              record a hand-edited workspace as a child, telling the agent
 alaya tell   HASH TEXT                           send the agent a message, as a child
 alaya reply  HASH TEXT                           answer the question a state is waiting on
 alaya reply-unavailable HASH                     record that the person cannot answer
 alaya waiting                                    list every unanswered question
-alaya question-context HASH                      recorded task and root-to-question history as JSON
-alaya question-files HASH [PATH]                  list a question snapshot directory as JSON
-alaya question-file HASH PATH                     preview a file from that snapshot as JSON
 alaya ls HASH [PATH]                             list a directory of a state's workspace snapshot
-alaya cat HASH PATH                              print a file from a state's workspace snapshot
+alaya cat HASH PATH                              print a file from a state's workspace snapshot, or preview it
 alaya checkout HASH DIR                          materialize a state's workspace into DIR
 alaya tree                                       show the whole forest
 alaya show HASH [--view]                         metadata, the log, and optionally the view
@@ -724,13 +720,15 @@ an answer that begins with `-` is given. Every problem is reported at once. `ala
 `alaya help --json` describes every command as data. `--task-file -` reads the task from stdin.
 
 **JSON.** With `--json`, a command prints one JSON object per line. A command that creates a
-state — `root`, `resume`, `step`, `commit`, `tell`, `reply`, `reply-unavailable` — prints that
+state — `root`, `resume`, `commit`, `tell`, `reply`, `reply-unavailable` — prints that
 state as `{state, parent, kind, note, outcome, question, question_type, options}`, and `tree`
-prints every state that way. `show` prints the state object (§6) with its `state` hash, the
-run's `run_time_ms`, the whole `log` and, with `--view`, the `view`; `diff` prints
-`{a, b, changes}`, `checkout` `{state, workspace, directory}`, `html` `{file, bytes}` and `rm`
-`{removed}`. The `question-*` commands print JSON either way, and `cat` prints the file's bytes
-either way. A failure is one JSON object on stderr: `{"error": "usage", "problems": [...],
+prints every state that way; `resume` stopped at a limit prints `{state, turns_spent, turns}` or
+`{state, time_budget_spent, run_time_ms}`. `show` prints the state object (§6) with its `state`
+hash, the run's `run_time_ms`, its `history` — one `{state, kind, events}` per state from the
+root, whose events concatenate to the log — and, with `--view`, the `view`; `ls` prints
+`{state, workspace, path, entries}` and `cat` a preview, `{state, workspace, path, kind, content,
+size}`; `diff` prints `{a, b, changes}`, `checkout` `{state, workspace, directory}`, `html`
+`{file, bytes}` and `rm` `{removed}`. A failure is one JSON object on stderr: `{"error": "usage", "problems": [...],
 "usage": ...}` for a command line that does not parse, and `{"error": KIND, "message": ...}`
 for a command that failed, where KIND is `configuration`, `transport`, `http` (with `status`
 and `retry_after_ms`), `provider`, `protocol`, `structured_output`, `cache`, `storage` or
@@ -739,9 +737,12 @@ and `retry_after_ms`), `provider`, `protocol`, `structured_output`, `cache`, `st
 `ls` and `cat` read a state's snapshot directly, without restoring its workspace, which is how
 a report an evaluation left in its workspace is read. A path is clean and relative to the
 workspace's root (no `..`, no leading `/`); a symbolic link is listed, but never followed, and
-`cat` prints only regular files, byte for byte. `ls` prints each entry's size and path, with
-`/` after a directory and `@` after a link; `ls --json` prints the entries' names, paths, kinds
-and sizes.
+`cat` prints only regular files, byte for byte. `ls` prints each entry's size and path, by name,
+with `/` after a directory and `@` after a link; `ls --json` prints the entries' names, paths,
+kinds and sizes. `cat --json` previews any entry instead: a regular UTF-8 file of up to 1 MiB
+is `text` with its `content`, and anything else says only what it is — `binary`, `too_large`,
+`symlink`, `directory` or `other` — so a page can show a snapshot without reading what it should
+not.
 
 **The agent.** An agent is a *family* — `mini-swe` (`docs/miniswe.md`) or `mini-vero`
 (`docs/minivero.md`) — and a *configuration*: a JSON object with a `family` field and the
@@ -751,30 +752,31 @@ configure an agent. `agents/` in the repository holds the families' defaults,
 `mini-swe-default.json` and `mini-vero-default.json`, complete, which is the documentation of
 the fields; a variant for an experiment is a copy with a field changed, named for what it
 changes. The complete configuration is recorded in the root (§6, `agent`), shown by `show` and,
-by family, by `tree`, and every later command — `step`, `resume`, `html`, `show --view` — builds
-the agent from it, so a run is continued by the agent that started it. Given `--agent` again,
-such a command refuses a file describing another configuration, as `resume` refuses another
-`--image`.
+by family, by `tree`, and every later command — `resume`, `html`, `show --view` — builds
+the agent from it, so a run is continued by the agent that started it; none of them takes
+`--agent`.
 
 **Time.** Every model step records its wall-clock time on its state (`elapsed_ms`, §6), and a
 run's time is the sum along its path from the root: `show` prints both, `tree` each step's.
-`resume` and `step` take `--time-budget SECONDS` (default 0, no limit), which is this
-invocation's alone and recorded nowhere. Before each step it checks the run's time against the
-budget; once spent, it writes nothing, says so, and exits with status 4, and a later `resume` —
-with a larger budget, or none — continues from the same state. The budget never cuts a step
-short, so a run can overrun it by one step. An agent that paces itself reads the time left from
+`resume` takes `--time-budget SECONDS` (default 0, no limit), which is this invocation's alone
+and recorded nowhere. Before each step it checks the run's time against the budget; once spent,
+it writes nothing, says so, and exits with status 4, and a later `resume` — with a larger
+budget, or none — continues from the same state. The budget never cuts a step short, so a run
+can overrun it by one step. `--turns N` (default 0, no limit) stops the same way after this
+invocation's `N`th turn when the run has not ended: `--turns 1` is one step. An agent that paces itself reads the time left from
 its session (`docs/agent-api.md` §3), as MiniVero's `time_budget` tool does (`docs/minivero.md`).
 
-`root` requires `--image` and takes `--workdir`, `--container-user` and `--network`; `resume` and `step` take
-`--model`, `--temperature`, `--echo-reasoning`, `--network`, and the DGX flags `--url`/`--port`;
-`eval` takes `--input`, `--grader-image`, `--timeout` (default 900 s) and `--container-user` for
-the grader, which always runs without network. The image is resolved to a digest at `root` and recorded; every later command
-runs in it, and `resume` refuses an `--image` that resolves to anything else.
+`root` requires `--image` and takes `--workdir`; `resume` takes `--model`, `--temperature`,
+`--echo-reasoning`, the DGX flags `--url`/`--port`, and `--container-user` and `--network` for
+the run's commands; `eval` takes `--input`, `--grader-image`, `--timeout` (default 900 s, 0 for
+none) and `--container-user` for the grader, which always runs without network. The image is
+resolved to a digest at `root` and recorded, and every later command runs in it: `resume` takes
+no `--image`. A recorded image that is missing is pulled by its digest; one recorded as a local
+build's ID cannot be, and has to be rebuilt or `docker load`ed.
 
 **The workdir.** The workspace is mounted in the container at the root's `--workdir`, which is
 `/workspace` unless given, and commands run there. It is recorded on the root and inherited, like
-the image, so every later command and every grader sees the workspace at the same path; a
-`--workdir` given again must be the same one. Without a `PROJECT`, `root` copies the image's own
+the image, so every later command and every grader sees the workspace at the same path. Without a `PROJECT`, `root` copies the image's own
 `--workdir` out as the initial workspace: task images that install their project in place, such
 as SWE-bench's at `/testbed`, work as they are, compiled extensions and `.git` included. A workdir
 is an absolute, clean path other than `/`, and not `/grader` or `/out`, which the grader mounts.
@@ -782,8 +784,8 @@ A container runs with **no network** unless `--network` names one (`--network br
 Docker's default network): an agent with network access can go looking for its own reference
 solution, so an image should carry what a task legitimately needs.
 
-Exit status: 0 when a run ended, 3 when it stopped at a question, 4 when it stopped because its
-time budget was spent, 1 on an error or a command line that does not parse; `eval` exits with
+Exit status: 0 when a run ended, 3 when it stopped at a question, 4 when it stopped at its turns
+or its time budget, 1 on an error or a command line that does not parse; `eval` exits with
 its verdict (§4), and 5 for a command line that does not parse, as for any other missing verdict. Concurrent runs
 need separate data directories: the work directory and the cache are not shared safely.
 

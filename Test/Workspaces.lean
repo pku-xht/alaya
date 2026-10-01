@@ -285,7 +285,7 @@ def trajectorySuite : Suite := Testing.suite "workspaces.trajectory" #[
     let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t")
     IO.FS.writeFile (project / "README.md") "readme, by hand"
     writeSpec project #[("tests/extra.txt", "extra")]
-    let child ← assertOk <| commit store workspaces root project (some "by hand") (tell? := some "look")
+    let child ← assertOk <| commit store workspaces root project (some "by hand")
     assertEqual "diff" (← assertOk <| diffLines store workspaces root child) #["M README.md", "+ tests"]
     assertEqual "notice" ((← assertOk <| getState store child).intervention?.map (·.changed))
       (some #["M README.md", "+ tests"])

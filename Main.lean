@@ -49,68 +49,50 @@ private def openWork (data : DataDir) : Result WorkDir := do
   Result.fromIO Error.storage (IO.FS.createDirAll path)
   pure { path }
 
-/-- Where a run's commands go: the image and workdir the trajectory recorded, which an `--image`
-or `--workdir` given again must not override. -/
-private def executorFor (run : Executor.Docker.RunOptions) (image? workdir? : Option String)
-    (state : State) (config : Executor.Config) : Result Executor := do
-  if let some requested := workdir? then Executor.Docker.checkSameWorkdir requested state.workdir
+/-- Where a run's commands go: the image and workdir the trajectory recorded, pulled by its
+digest when it is missing. -/
+private def executorFor (run : Executor.Docker.RunOptions) (state : State) (config : Executor.Config) :
+    Result Executor := do
   let settings ← Executor.Docker.settingsOf run state.image state.workdir
-  match image? with
-  | none => settings.verifyPresent
-  | some requested =>
-    let requested ← ({ settings with image := requested } : Executor.Docker.Settings).pin
-    if requested.image != state.image then
-      throw <| .configuration <|
-        s!"--image resolves to {requested.image}, but this trajectory runs {state.image}; " ++
-        "a continuation has to run the same bits its earlier turns did"
+  settings.ensurePresent
   Executor.Docker.executor settings config
 
-/-- The agent of an existing run: what its root recorded. `--agent` is for `root`; given
-again, it must describe the same agent, as `--image` must name the same image, or the command
-refuses. -/
-private def recordedAgentAs (store : Store) (agent? : Option System.FilePath) (hash : Hash) :
-    Result Agent.Families.Instance := do
+/-- The agent of an existing run: what its root recorded. -/
+private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Families.Instance := do
   let some recorded ← agentOf store hash
     | throw <| .configuration "this run's root records no agent: it is from an earlier alaya"
-  let built ← Agent.Families.instanceOf recorded
-  if let some file := agent? then
-    let requested ← Agent.Families.fromFile file
-    if requested.config.compress != built.config.compress then
-      throw <| .configuration <|
-        "this run was created with another agent configuration; --agent is for `root`. " ++
-        s!"It records: {built.config.compress}"
-  pure built
+  Agent.Families.instanceOf recorded
 
-/-- What `resume` and `step` take. `--image`, `--workdir` and `--agent` are fixed at `root`;
-given again, each must name what the root recorded. -/
-private structure ContinueArgs where
+/-- What `resume` takes: what this invocation samples from, and its limits. The image, the
+workdir and the agent are the root's. -/
+private structure ResumeArgs where
   data : System.FilePath
   state : String
   model : Provider.Choice
   run : Executor.Docker.RunOptions
-  /-- Seconds this invocation may spend, not recorded; 0 is no limit. -/
+  /-- Seconds of run time, not recorded; 0 is no limit. -/
   budget : Nat
-  image? : Option String
-  workdir? : Option String
-  agent? : Option System.FilePath
+  /-- Turns this invocation may take; 0 is no limit. -/
+  turns : Nat
 
-private def ContinueArgs.cli : Cli.Spec ContinueArgs :=
-  ContinueArgs.mk
+private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
+  ResumeArgs.mk
     <$> dataDir
     <*> Cli.arg "HASH" .string "the state to continue from; any unambiguous prefix"
     <*> Provider.Choice.cli
     <*> Executor.Docker.RunOptions.cli
     <*> Cli.flagD "time-budget" (.nat "S") 0
-      "seconds of run time, summed from the root, after which no step starts; 0 is no limit"
-    <*> Cli.flag? "image" (.string "IMAGE") "must resolve to the image the root recorded"
-    <*> Cli.flag? "workdir" (.string "PATH") "must be the workdir the root recorded"
-    <*> Cli.flag? "agent" (.path "FILE") "must describe the agent the root recorded"
+      "seconds of run time, summed from the root, after which no turn starts; 0 is no limit"
+    <*> Cli.flagD "turns" .nat 0 "turns this invocation may take; 0 is no limit, 1 is one step"
+    <* Cli.removed "image" "a run continues in the image its root recorded"
+    <* Cli.removed "workdir" "a run continues at the workdir its root recorded"
+    <* Cli.removed "agent" "a run continues with the agent its root recorded"
 
-private def runtimeFor (data : DataDir) (work : WorkDir) (a : ContinueArgs) (start : Hash) :
+private def runtimeFor (data : DataDir) (work : WorkDir) (a : ResumeArgs) (start : Hash) :
     Result Runtime := do
-  let spec ← recordedAgentAs data.store a.agent? start
+  let spec ← recordedAgent data.store start
   let model ← buildModel a.model.spec a.model.temperature data.cache a.model.options
-  let executor ← executorFor a.run a.image? a.workdir? (← getState data.store start) spec.executorConfig
+  let executor ← executorFor a.run (← getState data.store start) spec.executorConfig
   pure { store := data.store, workspaces := data.workspaces, workDir := work.path, executor, model
          agent := spec.build executor
          budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
@@ -144,16 +126,9 @@ private def exitWaiting : UInt32 := 3
 input could not be had. A verdict exits 0 for pass, 1 for fail, 2 for error. -/
 private def exitNoVerdict : UInt32 := 5
 
-/-- Exit status when a run stopped because this invocation's time budget was spent: it has not
-ended, and a later `resume` continues it. -/
-private def exitOutOfTime : UInt32 := 4
-
-/-- Says a continuation stopped for the time budget, with how much of it the run has used. -/
-private def outOfTime (data : DataDir) (hash : Hash) (out : Cli.Out) : Result UInt32 := do
-  let used ← elapsedMs data.store hash
-  out.record (Lean.Json.mkObj [("state", hash.hex), ("time_budget_spent", true), ("run_time_ms", used)])
-    s!"time budget spent: {hash.hex} has run {seconds used}; resume it to continue"
-  pure exitOutOfTime
+/-- Exit status when a run stopped at a limit of this invocation, its time budget or its turns:
+it has not ended, and a later `resume` continues it. -/
+private def exitStopped : UInt32 := 4
 
 /-- What every command that prints a state says of it with `--json`. -/
 private def stateJson (hash : Hash) (state : State) : Lean.Json :=
@@ -200,7 +175,6 @@ private structure RootArgs where
   image : String
   workdir : String
   agent : System.FilePath
-  run : Executor.Docker.RunOptions
 
 private def RootArgs.cli : Cli.Spec RootArgs :=
   RootArgs.mk
@@ -214,7 +188,8 @@ private def RootArgs.cli : Cli.Spec RootArgs :=
       "where the workspace is mounted in the image"
     <*> Cli.flag "agent" (.path "FILE")
       s!"the agent configuration, e.g. agents/mini-swe-default.json; families: {Agent.Families.names}"
-    <*> Executor.Docker.RunOptions.cli
+    <* Cli.removed "network" "only the run's commands use a network: give it to `resume`"
+    <* Cli.removed "container-user" "only the run's commands run as a user: give it to `resume`"
     <* Cli.removed "path" ("--workdir PATH names where the workspace is mounted, and without a " ++
       "PROJECT the root copies it out of the image")
 
@@ -225,7 +200,7 @@ private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
     Workspaces.refuseOverlap "snapshot" project #[a.data]
   let data ← openDataAt a.data
   Executor.Docker.checkWorkdir a.workdir #[graderInput]
-  let settings ← (← Executor.Docker.settingsOf a.run a.image a.workdir).pin
+  let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
   let uname ← Executor.Docker.uname settings
   let spec ← Agent.Families.fromFile a.agent
   let log := spec.initialLog task uname
@@ -235,29 +210,27 @@ private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
   stateLine data out hash
   pure 0
 
-private def resumeRun (a : ContinueArgs) (out : Cli.Out) : Result UInt32 := do
+private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
   let data ← openDataAt a.data
   let start ← resolve data.store a.state
   let rt ← runtimeFor data (← openWork data) a start
   try
     let stopped ← resume rt a.model.spec start (stateLine data out)
-    if stopped.outOfTime then outOfTime data stopped.state out else
+      (turns? := if a.turns == 0 then none else some a.turns)
+    if stopped.outOfTime then
+      let used ← elapsedMs data.store stopped.state
+      out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("time_budget_spent", true),
+          ("run_time_ms", used)])
+        s!"time budget spent: {stopped.state.hex} has run {seconds used}; resume it to continue"
+      return exitStopped
+    if stopped.outOfTurns then
+      out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("turns_spent", true),
+          ("turns", a.turns)])
+        s!"{a.turns} turn(s) taken: resume {stopped.state.hex} to continue"
+      return exitStopped
     if let some o := (← getState data.store stopped.state).outcome? then
       out.note s!"done: {o.status}"
     exitFor data stopped.state
-  finally
-    Result.fromIO Error.storage rt.executor.close
-
-private def stepRun (a : ContinueArgs) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt a.data
-  let parent ← resolve data.store a.state
-  let rt ← runtimeFor data (← openWork data) a parent
-  try
-    match ← stepOnce rt a.model.spec parent with
-    | none => outOfTime data parent out
-    | some child =>
-      stateLine data out child
-      exitFor data child
   finally
     Result.fromIO Error.storage rt.executor.close
 
@@ -308,9 +281,9 @@ private def evalRun (a : EvalArgs) (out : Cli.Out) : Result UInt32 := do
 /-! ### A person in the tree -/
 
 private def commitRun (data : System.FilePath) (state : String) (dir : System.FilePath)
-    (note? tell? : Option String) (out : Cli.Out) : Result UInt32 := do
+    (note? : Option String) (out : Cli.Out) : Result UInt32 := do
   let data ← openDataAt data
-  let hash ← commit data.store data.workspaces (← resolve data.store state) dir note? (tell? := tell?)
+  let hash ← commit data.store data.workspaces (← resolve data.store state) dir note?
   stateLine data out hash
   pure 0
 
@@ -340,14 +313,6 @@ private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 
       s!"{hash.hex}  {q.toQuestion.render.quote}"
   pure 0
 
-/-- The question commands print JSON whether or not `--json` is given. -/
-private def questionRun (data : System.FilePath) (state : String)
-    (read : DataDir → Hash → Result Lean.Json) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  let json ← read data (← resolve data.store state)
-  out.record json json.compress
-  pure 0
-
 /-! ### Reading a run -/
 
 private def lsRun (data : System.FilePath) (state : String) (path? : Option String) (out : Cli.Out) :
@@ -367,15 +332,23 @@ private def lsRun (data : System.FilePath) (state : String) (path? : Option Stri
     lines
   pure 0
 
-/-- The file's bytes, exactly, with or without `--json`, which changes only how errors print. -/
-private def catRun (data : System.FilePath) (state path : String) (_ : Cli.Out) : Result UInt32 := do
+/-- The file's bytes, exactly; with `--json`, a preview of any entry: UTF-8 text up to 1 MiB,
+and otherwise what it is. -/
+private def catRun (data : System.FilePath) (state path : String) (out : Cli.Out) : Result UInt32 := do
   let data ← openDataAt data
-  let workspace := (← getState data.store (← resolve data.store state)).workspace
-  let bytes ← data.workspaces.read workspace path
-  Result.fromIO Error.storage do
-    let out ← IO.getStdout
-    out.write bytes
-    out.flush
+  let hash ← resolve data.store state
+  let workspace := (← getState data.store hash).workspace
+  if out.json then
+    let preview ← data.workspaces.preview workspace path
+    out.record (Lean.Json.mkObj [("state", hash.hex), ("workspace", workspace.hex), ("path", path),
+      ("kind", preview.kind), ("content", preview.content?.map Lean.Json.str |>.getD .null),
+      ("size", preview.size?.map (fun n => (n : Lean.Json)) |>.getD .null)]) ""
+  else
+    let bytes ← data.workspaces.read workspace path
+    Result.fromIO Error.storage do
+      let stdout ← IO.getStdout
+      stdout.write bytes
+      stdout.flush
   pure 0
 
 private def checkoutRun (data : System.FilePath) (state : String) (dir : System.FilePath)
@@ -401,15 +374,19 @@ private def showRun (data : System.FilePath) (state : String) (view : Bool) (out
     Result UInt32 := do
   let data ← openDataAt data
   let hash ← resolve data.store state
-  let view? ← if view then some <$> (·.view) <$> recordedAgentAs data.store none hash else pure none
+  let view? ← if view then some <$> (·.view) <$> recordedAgent data.store hash else pure none
   if out.json then
-    let state ← getState data.store hash
-    let log ← logOf data.store hash
+    let branch ← branchOf data.store hash
+    let some (_, state) := branch.back? | throw <| .storage s!"no state {hash.hex}"
+    let history := branch.map fun (h, s) => Lean.Json.mkObj [("state", h.hex),
+      ("kind", s.kind.toString), ("events", .arr (s.appended.map eventToJson))]
     let json := state.toJson |>.setObjVal! "state" hash.hex
       |>.setObjVal! "run_time_ms" (← elapsedMs data.store hash)
-      |>.setObjVal! "log" (.arr (log.map eventToJson))
+      |>.setObjVal! "history" (.arr history)
     let json := match view? with
-      | some view => json.setObjVal! "view" (.arr ((view log).map Chat.Message.toJson))
+      | some view =>
+        let log := branch.foldl (fun log (_, s) => log ++ s.appended) #[]
+        json.setObjVal! "view" (.arr ((view log).map Chat.Message.toJson))
       | none => json
     out.record json ""
   else emitLines (← showLines data.store hash view?)
@@ -434,9 +411,9 @@ private def htmlRun (data : System.FilePath) (file? : Option System.FilePath) (h
   -- The page has one view and one tool list, so the forest's roots must agree on the agent.
   let roots ← (← allStates data.store).filterM fun h => do pure (← getState data.store h).parent?.isNone
   let some first := roots[0]? | throw <| .configuration "nothing to report: the data directory holds no states"
-  let spec ← recordedAgentAs data.store none first
+  let spec ← recordedAgent data.store first
   for root in roots do
-    if (← recordedAgentAs data.store none root).config.compress != spec.config.compress then
+    if (← recordedAgent data.store root).config.compress != spec.config.compress then
       throw <| .configuration <|
         s!"the roots of {data.path} were created with different agents; a report renders one " ++
         "agent's runs, so give each its own data directory"
@@ -463,13 +440,10 @@ private def commands : Array Cli.Command := #[
       "alaya root --task-file TASK.md --agent agents/mini-vero-default.json --image my-task:1 --workdir /testbed"]
     spec := rootRun <$> RootArgs.cli },
   { name := "resume"
-    summary := "Grow one continuation until the run ends, asks a question, or spends its time budget."
-    examples := #["alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash --time-budget 3600 --json"]
-    spec := resumeRun <$> ContinueArgs.cli },
-  { name := "step"
-    summary := "Advance exactly one turn."
-    examples := #["alaya step 4f2c8b --model xmcp:ds/deepseek-v4-flash"]
-    spec := stepRun <$> ContinueArgs.cli },
+    summary := "Grow one continuation until the run ends, asks a question, or reaches a limit."
+    examples := #["alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash --time-budget 3600 --json",
+      "alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash --turns 1"]
+    spec := resumeRun <$> ResumeArgs.cli },
   { name := "eval"
     summary := "Grade a state: run a grader over a fresh copy and record its TAP verdict as a leaf."
     examples := #[
@@ -479,11 +453,12 @@ private def commands : Array Cli.Command := #[
     -- Exit 1 is a failing verdict, so a command line that does not parse records none.
     usageExit? := some exitNoVerdict },
   { name := "commit"
-    summary := "Record a hand-edited workspace as a child, optionally with a notice to the agent."
-    examples := #["alaya commit 4f2c8b ./fix --note 'fixed the fixture' --tell 'I fixed the fixture'"]
+    summary := "Record a hand-edited workspace as a child; the agent is told what changed."
+    examples := #["alaya commit 4f2c8b ./fix --note 'fixed the fixture'"]
     spec := commitRun <$> dataDir <*> hashArg <*> Cli.arg "DIR" .path "the edited workspace"
       <*> Cli.flag? "note" .string "provenance for the tree, not shown to the agent"
-      <*> Cli.flag? "tell" .string "a notice the agent sees, with the files that changed" },
+      <* Cli.removed "tell" ("the agent is always told what changed; " ++
+        "to say more, `alaya tell` the new state") },
   { name := "tell"
     summary := "Send the agent a message, as a child."
     examples := #["alaya tell 4f2c8b 'keep the old API'"]
@@ -500,31 +475,13 @@ private def commands : Array Cli.Command := #[
     summary := "List every unanswered question."
     examples := #["alaya waiting --json"]
     spec := waitingRun <$> dataDir },
-  { name := "question-context"
-    summary := "The task and the root-to-question history of a question, as JSON."
-    spec := (fun data state => questionRun data state fun d h => QuestionContext.context d.store h)
-      <$> dataDir <*> hashArg "the question state" },
-  { name := "question-files"
-    summary := "List a directory of a question's snapshot, as JSON."
-    spec := (fun data state path? => questionRun data state fun d h =>
-        match path? with
-        | some path => QuestionContext.directory d.store d.workspaces h path
-        | none => QuestionContext.directory d.store d.workspaces h)
-      <$> dataDir <*> hashArg "the question state"
-      <*> Cli.arg? "PATH" .string "a directory relative to the workspace; by default its root" },
-  { name := "question-file"
-    summary := "Preview a file of a question's snapshot, as JSON."
-    spec := (fun data state path => questionRun data state fun d h =>
-        QuestionContext.file d.store d.workspaces h path)
-      <$> dataDir <*> hashArg "the question state"
-      <*> Cli.arg "PATH" .string "a file relative to the workspace" },
   { name := "ls"
     summary := "List a directory of a state's workspace snapshot."
     examples := #["alaya ls 7b19d4 .report"]
     spec := lsRun <$> dataDir <*> hashArg
       <*> Cli.arg? "PATH" .string "a directory relative to the workspace; by default its root" },
   { name := "cat"
-    summary := "Print a file from a state's workspace snapshot, byte for byte."
+    summary := "Print a file from a state's workspace snapshot, byte for byte; --json previews any entry."
     examples := #["alaya cat 7b19d4 .report/summary.json"]
     spec := catRun <$> dataDir <*> hashArg <*> Cli.arg "PATH" .string "a file relative to the workspace" },
   { name := "checkout"
@@ -556,9 +513,13 @@ private def app : Cli.App where
   name := "alaya"
   summary := "Record agent runs as trees of content-addressed states: branch, replay, grade, intervene."
   commands := commands
+  removed := #[("step", "use `alaya resume HASH --turns 1`"),
+    ("question-context", "use `alaya show HASH --json`, whose history runs from the root"),
+    ("question-files", "use `alaya ls HASH [PATH] --json`"),
+    ("question-file", "use `alaya cat HASH PATH --json`, a preview of any entry")]
 
-/-- Exit 0 on success, 3 when a run stopped at a question (`exitWaiting`), 4 when it stopped
-because the time budget was spent (`exitOutOfTime`), 1 on an error or a command line that does
+/-- Exit 0 on success, 3 when a run stopped at a question (`exitWaiting`), 4 when it stopped at
+a limit of the invocation, its time budget or its turns (`exitStopped`), 1 on an error or a command line that does
 not parse. `eval` exits with its verdict: 0 pass, 1 fail, 2 error, and 5 when it recorded none
 (`exitNoVerdict`), a command line that does not parse included. -/
 def main (argv : List String) : IO UInt32 :=

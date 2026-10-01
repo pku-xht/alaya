@@ -42,20 +42,19 @@ data = Path(flags[flags.index("--data") + 1])
 questions_file = data / "questions.json"
 questions = json.loads(questions_file.read_text(encoding="utf-8"))
 if args[0] == "waiting":
-    assert "--json" in args
+    assert "--json" in flags
     for question in questions:
         print(json.dumps(question, ensure_ascii=False))
-elif args[0] in ("question-context", "question-files", "question-file"):
-    assert delimiter < len(args), "inspection requires a positional delimiter"
+elif args[0] in ("show", "ls", "cat"):
+    assert "--json" in flags, "reads ask for JSON"
+    assert delimiter < len(args), "reads require a positional delimiter"
     positional = args[delimiter + 1:]
     state = positional[0]
-    if state not in [q["state"] for q in questions]:
-        print("not a question", file=sys.stderr)
-        sys.exit(1)
     value = {"state": state, "workspace": "f" * 64}
-    if args[0] == "question-context":
+    if args[0] == "show":
         assert len(positional) == 1
-        value.update(task="Original task", history=[{"state": state, "kind": "question", "events": []}])
+        kind = "question" if state in [q["state"] for q in questions] else "turn"
+        value.update(kind=kind, history=[{"state": state, "kind": kind, "events": []}])
     else:
         assert len(positional) == 2
         path = positional[1]
@@ -63,7 +62,7 @@ elif args[0] in ("question-context", "question-files", "question-file"):
             print("invalid snapshot path", file=sys.stderr)
             sys.exit(1)
         value["path"] = path
-        if args[0] == "question-files":
+        if args[0] == "ls":
             value["entries"] = [{"name": "Main.lean", "path": "Main.lean", "kind": "file", "size": 4}]
         else:
             value.update(kind="text", content="code", size=4)
@@ -402,6 +401,20 @@ class QuestionHttpTests(unittest.TestCase):
         status, body, _ = self.request(path=f"/api/context?state={YES_NO}")
         self.assertEqual(status, 502)
         self.assertIn("unexpected state", body["error"])
+
+    def test_context_is_only_for_questions_the_page_listed(self):
+        for endpoint, query in [("context", {"state": "e" * 64}),
+                                ("files", {"state": "e" * 64, "path": ""}),
+                                ("file", {"state": "e" * 64, "path": "Main.lean"})]:
+            with self.subTest(endpoint=endpoint):
+                status, body, _ = self.request(path=f"/api/{endpoint}?{urlencode(query)}")
+                self.assertEqual(status, 404)
+                self.assertIn("not a question", body["error"])
+
+    def test_context_is_the_question_branch(self):
+        status, body, _ = self.request(path=f"/api/context?{urlencode({'state': YES_NO})}")
+        self.assertEqual((status, body), (200, {"state": YES_NO, "workspace": "f" * 64,
+            "history": [{"state": YES_NO, "kind": "question", "events": []}]}))
 
     def test_context_endpoints_require_token_and_same_origin(self):
         for endpoint, query in [("context", {"state": YES_NO}),
