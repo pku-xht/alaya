@@ -84,9 +84,6 @@ private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
     <*> Cli.flagD "time-budget" (.nat "S") 0
       "seconds of run time, summed from the root, after which no turn starts; 0 is no limit"
     <*> Cli.flagD "turns" .nat 0 "turns this invocation may take; 0 is no limit, 1 is one step"
-    <* Cli.removed "image" "a run continues in the image its root recorded"
-    <* Cli.removed "workdir" "a run continues at the workdir its root recorded"
-    <* Cli.removed "agent" "a run continues with the agent its root recorded"
 
 private def runtimeFor (data : DataDir) (work : WorkDir) (a : ResumeArgs) (start : Hash) :
     Result Runtime := do
@@ -188,10 +185,6 @@ private def RootArgs.cli : Cli.Spec RootArgs :=
       "where the workspace is mounted in the image"
     <*> Cli.flag "agent" (.path "FILE")
       s!"the agent configuration, e.g. agents/mini-swe-default.json; families: {Agent.Families.names}"
-    <* Cli.removed "network" "only the run's commands use a network: give it to `resume`"
-    <* Cli.removed "container-user" "only the run's commands run as a user: give it to `resume`"
-    <* Cli.removed "path" ("--workdir PATH names where the workspace is mounted, and without a " ++
-      "PROJECT the root copies it out of the image")
 
 private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
   let task ← a.task.read "task"
@@ -456,9 +449,7 @@ private def commands : Array Cli.Command := #[
     summary := "Record a hand-edited workspace as a child; the agent is told what changed."
     examples := #["alaya commit 4f2c8b ./fix --note 'fixed the fixture'"]
     spec := commitRun <$> dataDir <*> hashArg <*> Cli.arg "DIR" .path "the edited workspace"
-      <*> Cli.flag? "note" .string "provenance for the tree, not shown to the agent"
-      <* Cli.removed "tell" ("the agent is always told what changed; " ++
-        "to say more, `alaya tell` the new state") },
+      <*> Cli.flag? "note" .string "provenance for the tree, not shown to the agent" },
   { name := "tell"
     summary := "Send the agent a message, as a child."
     examples := #["alaya tell 4f2c8b 'keep the old API'"]
@@ -513,10 +504,6 @@ private def app : Cli.App where
   name := "alaya"
   summary := "Record agent runs as trees of content-addressed states: branch, replay, grade, intervene."
   commands := commands
-  removed := #[("step", "use `alaya resume HASH --turns 1`"),
-    ("question-context", "use `alaya show HASH --json`, whose history runs from the root"),
-    ("question-files", "use `alaya ls HASH [PATH] --json`"),
-    ("question-file", "use `alaya cat HASH PATH --json`, a preview of any entry")]
 
 /-- Exit 0 on success, 3 when a run stopped at a question (`exitWaiting`), 4 when it stopped at
 a limit of the invocation, its time budget or its turns (`exitStopped`), 1 on an error or a command line that does

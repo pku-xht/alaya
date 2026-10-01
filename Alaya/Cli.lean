@@ -72,8 +72,6 @@ inductive Shape where
   | valued (metavar : String) (repeatable : Bool)
   /-- A positional argument; its `Item.name` is its metavar. -/
   | argument (optional : Bool)
-  /-- A flag that no longer exists, refused with `message`. -/
-  | removed (message : String)
   deriving Repr, BEq, Inhabited
 
 /-- One declared thing a command line may contain. -/
@@ -184,10 +182,6 @@ def arg (metavar : String) (v : Value α) (help : String) : Spec α :=
     | some a => pure a
     | none => throw #[s!"missing {metavar}: {help}"]⟩
 
-/-- A flag that is gone; giving it is an error that says what to do instead. -/
-def removed (name message : String) : Spec Unit :=
-  ⟨#[{ name, shape := .removed message, help := "" }], fun _ => .ok ()⟩
-
 /-! ## Text -/
 
 /-- Where free text comes from. Parsing stays pure; the command reads it with `read`. -/
@@ -266,7 +260,7 @@ def tokenize (items : Array Item) (argv : List String) (env : String → Option 
   let mut values : Array (String × String) := #[]
   let mut switches : Array String := #[]
   let mut positional : Array String := #[]
-  let flagNames := (items.filter fun i => i.isFlag && !(i.shape matches .removed _)).map (·.name)
+  let flagNames := (items.filter (·.isFlag)).map (·.name)
   let mut rest := argv
   while true do
     match rest with
@@ -299,11 +293,6 @@ def tokenize (items : Array Item) (argv : List String) (env : String → Option 
             if !repeatable && values.any (·.1 == name) then
               problems := problems.push s!"--{name} is given more than once"
             else values := values.push (name, v)
-        | some { shape := .removed message, .. } =>
-          problems := problems.push s!"--{name} is no longer accepted: {message}"
-          -- Its value, if it had one, is not an argument.
-          if let v :: tail := more then
-            if inline?.isNone && !v.startsWith "-" then rest := tail
         | _ =>
           problems := problems.push s!"unknown option --{name}{didYouMean flagNames name "--"}"
           -- A typo of a valued flag keeps its value from reading as a stray argument.
@@ -402,8 +391,6 @@ structure App where
   commands : Array Command
   /-- Printed at the end of the overview. -/
   epilog : String := ""
-  /-- Commands that are gone, each with what to use instead. -/
-  removed : Array (String × String) := #[]
   /-- The exit status of a command line that does not parse. -/
   usageExit : UInt32 := 1
   /-- The exit status of a command that failed. -/
@@ -424,15 +411,11 @@ private def Item.token (item : Item) : String :=
   | .switch => s!"--{item.name}"
   | .valued metavar repeatable => s!"--{item.name} {metavar}" ++ (if repeatable then " …" else "")
   | .argument _ => item.name
-  | .removed _ => ""
-
-private def visible (items : Array Item) : Array Item :=
-  items.filter fun i => !(i.shape matches .removed _)
 
 /-- `alaya resume HASH --model P:M [OPTIONS]`: the arguments and what is required, with
 alternatives grouped; help lists the options. -/
 def Command.usage (app : App) (c : Command) : String := Id.run do
-  let items := visible c.full.items
+  let items := c.full.items
   let mut parts : Array String := #[]
   let mut groupsDone : Array String := #[]
   let ordered := items.filter (!·.isFlag) ++ items.filter (fun i => i.isFlag && i.required)
@@ -462,7 +445,7 @@ private def Item.describe (item : Item) : String :=
   if notes.isEmpty then item.help else s!"{item.help} ({"; ".intercalate notes})"
 
 def Command.help (app : App) (c : Command) : String := Id.run do
-  let items := visible c.full.items
+  let items := c.full.items
   let mut lines := #[s!"usage: {c.usage app}", "", c.summary]
   let arguments := items.filter (!·.isFlag)
   if !arguments.isEmpty then
@@ -487,7 +470,6 @@ private def Item.toJson (item : Item) : Lean.Json :=
     | .switch => "switch"
     | .valued .. => "option"
     | .argument _ => "argument"
-    | .removed _ => "removed"
   let metavar : Lean.Json := match item.shape with
     | .valued metavar _ => metavar
     | _ => .null
@@ -502,7 +484,7 @@ def App.describe (app : App) : Lean.Json :=
   .mkObj [("name", app.name), ("summary", app.summary), ("commands", .arr <| app.commands.map fun c =>
     .mkObj [("name", c.name), ("summary", c.summary), ("usage", c.usage app),
       ("examples", .arr (c.examples.map Lean.Json.str)),
-      ("items", .arr ((visible c.full.items).map (·.toJson)))])]
+      ("items", .arr ((c.full.items).map (·.toJson)))])]
 
 /-! ## Running -/
 
@@ -547,9 +529,6 @@ def App.run (app : App) (argv : List String) : IO UInt32 := do
       usageError #[s!"unknown command {name}{didYouMean names name}"] s!"{app.name} help COMMAND"
         s!"commands: {", ".intercalate names.toList}"
   | name :: rest =>
-    if let some (_, instead) := app.removed.find? (·.1 == name) then
-      return ← usageError #[s!"{name} is no longer a command: {instead}"]
-        s!"{app.name} COMMAND [ARGUMENTS] [OPTIONS]" s!"commands: {", ".intercalate names.toList}"
     let some c := find name
       | usageError #[s!"unknown command {name}{didYouMean names name}"]
           s!"{app.name} COMMAND [ARGUMENTS] [OPTIONS]"

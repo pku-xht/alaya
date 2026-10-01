@@ -230,11 +230,6 @@ def specSuite : Suite := suite "cli.spec" #[
     assertEqual "both" (← problemsOf "both" (spec.parse ["--count", "x"]))
       #["--count expects a whole number, got 'x'", "--model P:M is required: the model"],
 
-  test "a removed flag says what to use instead" do
-    let spec := Cli.switch "json" "" <* Cli.removed "path" "use --workdir PATH"
-    assertEqual "removed" (← problemsOf "removed" (spec.parse ["--path", "/x"]))
-      #["--path is no longer accepted: use --workdir PATH"],
-
   test "an environment variable fills an absent flag, and a flag wins over it" do
     let data := Cli.flagD "data" (.path "DIR") ".alaya" "the data directory" (env? := some "ALAYA_DATA")
     let env := fun var => if var == "ALAYA_DATA" then some "/runs" else none
