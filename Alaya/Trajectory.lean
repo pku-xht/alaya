@@ -876,7 +876,9 @@ partial def treeLines (store : Store) : Result (Array String) := do
 
 /-- A response's reasoning as `show` gives it: the text, and of encrypted items only their size. -/
 private def reasoningLines (r : Chat.Response) : Array String :=
-  let text := match r.reasoning? with | some text => #["[reasoning] " ++ text] | none => #[]
+  let text := match r.reasoning? with
+    | some text => if text.isEmpty then #[] else #["[reasoning] " ++ text]
+    | none => #[]
   let size := r.reasoningItems.foldl (fun n item => n + item.compress.length) 0
   if r.reasoningItems.isEmpty then text
   else text.push s!"[reasoning items] {r.reasoningItems.size}, {size} characters, encrypted"
