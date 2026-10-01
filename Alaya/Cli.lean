@@ -72,8 +72,6 @@ inductive Shape where
   | valued (metavar : String) (repeatable : Bool)
   /-- A positional argument; its `Item.name` is its metavar. -/
   | argument (optional : Bool)
-  /-- A flag that no longer exists, refused with `message`. -/
-  | removed (message : String)
   deriving Repr, BEq, Inhabited
 
 /-- One declared thing a command line may contain. -/
@@ -144,6 +142,14 @@ def flag? (name : String) (v : Value α) (help : String) (env? : Option String :
         | none => .ok none
       | none => .ok none⟩
 
+/-- `s` with a check on its whole value, for what the declarations alone cannot say, such as two
+items that exclude each other. -/
+def Spec.refine (s : Spec α) (f : α → Except String β) : Spec β :=
+  ⟨s.items, fun raw => do
+    match f (← s.decode raw) with
+    | .ok b => pure b
+    | .error e => throw #[e]⟩
+
 /-- Marks every item of `s` required and fails with `message` when it yields nothing. -/
 def Spec.required (s : Spec (Option α)) (message : String) : Spec α :=
   ⟨s.items.map ({ · with required := true }), fun raw => do
@@ -184,50 +190,38 @@ def arg (metavar : String) (v : Value α) (help : String) : Spec α :=
     | some a => pure a
     | none => throw #[s!"missing {metavar}: {help}"]⟩
 
-/-- A flag that is gone; giving it is an error that says what to do instead. -/
-def removed (name message : String) : Spec Unit :=
-  ⟨#[{ name, shape := .removed message, help := "" }], fun _ => .ok ()⟩
-
 /-! ## Text -/
 
 /-- Where free text comes from. Parsing stays pure; the command reads it with `read`. -/
 inductive TextSource where
   | inline (text : String)
   | file (path : System.FilePath)
-  | stdin
   deriving Repr, BEq, Inhabited
 
-/-- Free text: `--NAME TEXT`, or `--NAME-file FILE`, where FILE `-` is stdin; one of the two. -/
+/-- Free text: `--NAME TEXT`, or `--NAME-file FILE`; one of the two. Stdin is the file
+`/dev/stdin`. -/
 def text (name help : String) : Spec (Option TextSource) :=
   let fileFlag := s!"{name}-file"
   ⟨#[{ name, shape := .valued "TEXT" false, help, group? := some name },
      { name := fileFlag, shape := .valued "FILE" false, group? := some name,
-       help := s!"read the {name} from FILE, as it is; - reads stdin" }], fun raw =>
+       help := s!"read the {name} from FILE, as it is" }], fun raw =>
     match (raw.valuesOf name).back?, (raw.valuesOf fileFlag).back? with
     | some _, some _ => .error #[s!"give either --{name} TEXT or --{fileFlag} FILE, not both"]
     | some t, none => .ok (some (.inline t))
-    | none, some "-" => .ok (some .stdin)
     | none, some p => .ok (some (.file p))
     | none, none => .ok none⟩
-
-private partial def readAll (stream : IO.FS.Stream) (acc : ByteArray := .empty) : IO ByteArray := do
-  let chunk ← stream.read 65536
-  if chunk.isEmpty then pure acc else readAll stream (acc ++ chunk)
 
 /-- The text, exactly: a file is read on the host, not trimmed, and must be UTF-8. `name` is
 the flag's, for messages. -/
 def TextSource.read (name : String) : TextSource → Result String
   | .inline t => pure t
-  | source => do
-    let (what, action) := match source with
-      | .file path => (s!"the {name} file {path}", IO.FS.readBinFile path)
-      | _ => (s!"the {name} from stdin", do readAll (← IO.getStdin))
-    let bytes ← match ← (Result.fromIO Error.configuration action).toBaseIO with
+  | .file path => do
+    let bytes ← match ← (Result.fromIO Error.input (IO.FS.readBinFile path)).toBaseIO with
       | .ok bytes => pure bytes
-      | .error _ => throw <| .configuration s!"cannot read {what}"
+      | .error _ => throw <| .input s!"cannot read the {name} file {path}"
     match String.fromUTF8? bytes with
     | some t => pure t
-    | none => throw <| .configuration s!"{what} is not valid UTF-8"
+    | none => throw <| .input s!"the {name} file {path} is not valid UTF-8"
 
 /-! ## Parsing -/
 
@@ -266,7 +260,7 @@ def tokenize (items : Array Item) (argv : List String) (env : String → Option 
   let mut values : Array (String × String) := #[]
   let mut switches : Array String := #[]
   let mut positional : Array String := #[]
-  let flagNames := (items.filter fun i => i.isFlag && !(i.shape matches .removed _)).map (·.name)
+  let flagNames := (items.filter (·.isFlag)).map (·.name)
   let mut rest := argv
   while true do
     match rest with
@@ -299,11 +293,6 @@ def tokenize (items : Array Item) (argv : List String) (env : String → Option 
             if !repeatable && values.any (·.1 == name) then
               problems := problems.push s!"--{name} is given more than once"
             else values := values.push (name, v)
-        | some { shape := .removed message, .. } =>
-          problems := problems.push s!"--{name} is no longer accepted: {message}"
-          -- Its value, if it had one, is not an argument.
-          if let v :: tail := more then
-            if inline?.isNone && !v.startsWith "-" then rest := tail
         | _ =>
           problems := problems.push s!"unknown option --{name}{didYouMean flagNames name "--"}"
           -- A typo of a valued flag keeps its value from reading as a stray argument.
@@ -348,23 +337,34 @@ def Spec.check (s : Spec α) : Array String := Id.run do
 
 /-! ## Commands -/
 
-private def errorKind : Error → String
-  | .configuration _ => "configuration"
-  | .transport _ => "transport"
-  | .http .. => "http"
-  | .provider _ => "provider"
-  | .protocol _ => "protocol"
-  | .structuredOutput _ => "structured_output"
-  | .cache _ => "cache"
-  | .storage _ => "storage"
-  | .cancelled => "cancelled"
+/-! ## Failure
 
-private def errorJson (error : Error) : Lean.Json :=
+Every failure is one of a few classes, each with one exit status, the same for every command,
+and each above every status a command uses for an outcome (0 to 4). The numbers are
+`sysexits.h`'s. -/
+
+/-- The exit status of a command line that does not parse. -/
+def exitUsage : UInt32 := 64
+
+/-- The exit status of a command that is declared wrongly: the program's mistake. -/
+def exitInternal : UInt32 := 70
+
+/-- The exit status of a failure of class `c`. -/
+def exitFor : Error.Class → UInt32
+  | .input => 65
+  | .environment => 69
+  | .storage => 74
+  | .transient => 75
+  | .model => 76
+
+/-- A failure as one JSON object: its class, which says what to do and matches the exit status,
+a message for a person, and an HTTP failure's status and retry delay. -/
+def errorJson (error : Error) : Lean.Json :=
   let extra : List (String × Lean.Json) := match error with
     | .http status _ retry? => [("status", status),
         ("retry_after_ms", retry?.map (fun n => (n : Lean.Json)) |>.getD .null)]
     | _ => []
-  .mkObj ([("error", .str (errorKind error)), ("message", .str error.describe)] ++ extra)
+  .mkObj ([("error", .str error.class.toString), ("message", .str error.describe)] ++ extra)
 
 /-- Where a command writes: each record has a JSON form, for `--json`, and a readable one. -/
 structure Out where
@@ -392,9 +392,6 @@ structure Command where
   summary : String
   examples : Array String := #[]
   spec : Spec (Out → Result UInt32)
-  /-- The exit status of a command line that does not parse, when the app's would mean
-  something else for this command. -/
-  usageExit? : Option UInt32 := none
 
 structure App where
   name : String
@@ -402,10 +399,6 @@ structure App where
   commands : Array Command
   /-- Printed at the end of the overview. -/
   epilog : String := ""
-  /-- The exit status of a command line that does not parse. -/
-  usageExit : UInt32 := 1
-  /-- The exit status of a command that failed. -/
-  errorExit : Error → UInt32 := fun _ => 1
 
 /-- Every command takes these. -/
 private def builtins : Spec (Bool × Bool) :=
@@ -422,15 +415,11 @@ private def Item.token (item : Item) : String :=
   | .switch => s!"--{item.name}"
   | .valued metavar repeatable => s!"--{item.name} {metavar}" ++ (if repeatable then " …" else "")
   | .argument _ => item.name
-  | .removed _ => ""
-
-private def visible (items : Array Item) : Array Item :=
-  items.filter fun i => !(i.shape matches .removed _)
 
 /-- `alaya resume HASH --model P:M [OPTIONS]`: the arguments and what is required, with
 alternatives grouped; help lists the options. -/
 def Command.usage (app : App) (c : Command) : String := Id.run do
-  let items := visible c.full.items
+  let items := c.full.items
   let mut parts : Array String := #[]
   let mut groupsDone : Array String := #[]
   let ordered := items.filter (!·.isFlag) ++ items.filter (fun i => i.isFlag && i.required)
@@ -460,7 +449,7 @@ private def Item.describe (item : Item) : String :=
   if notes.isEmpty then item.help else s!"{item.help} ({"; ".intercalate notes})"
 
 def Command.help (app : App) (c : Command) : String := Id.run do
-  let items := visible c.full.items
+  let items := c.full.items
   let mut lines := #[s!"usage: {c.usage app}", "", c.summary]
   let arguments := items.filter (!·.isFlag)
   if !arguments.isEmpty then
@@ -485,7 +474,6 @@ private def Item.toJson (item : Item) : Lean.Json :=
     | .switch => "switch"
     | .valued .. => "option"
     | .argument _ => "argument"
-    | .removed _ => "removed"
   let metavar : Lean.Json := match item.shape with
     | .valued metavar _ => metavar
     | _ => .null
@@ -500,7 +488,7 @@ def App.describe (app : App) : Lean.Json :=
   .mkObj [("name", app.name), ("summary", app.summary), ("commands", .arr <| app.commands.map fun c =>
     .mkObj [("name", c.name), ("summary", c.summary), ("usage", c.usage app),
       ("examples", .arr (c.examples.map Lean.Json.str)),
-      ("items", .arr ((visible c.full.items).map (·.toJson)))])]
+      ("items", .arr ((c.full.items).map (·.toJson)))])]
 
 /-! ## Running -/
 
@@ -526,13 +514,13 @@ def App.run (app : App) (argv : List String) : IO UInt32 := do
       for p in problems do stderr.putStrLn s!"error: {p}"
       stderr.putStrLn s!"usage: {usage}"
       stderr.putStrLn hint
-    pure app.usageExit
+    pure exitUsage
   -- A declaration mistake is the program's, and says so before anything runs.
   for c in app.commands do
     let problems := c.full.check
     if !problems.isEmpty then
       stderr.putStrLn s!"internal error: `{c.name}` is declared wrongly: {"; ".intercalate problems.toList}"
-      return 70
+      return exitInternal
   let names := app.commands.map (·.name)
   let find (name : String) := app.commands.find? (·.name == name)
   match argv with
@@ -559,13 +547,12 @@ def App.run (app : App) (argv : List String) : IO UInt32 := do
     let env := fun var => values.lookup var
     match c.parse rest env with
     | .error problems =>
-      let code ← usageError problems (c.usage app) s!"run `{app.name} help {c.name}` for every option"
-      pure (c.usageExit?.getD code)
+      usageError problems (c.usage app) s!"run `{app.name} help {c.name}` for every option"
     | .ok (action, json) =>
       match ← (action { json }).toBaseIO with
       | .ok code => pure code
       | .error error =>
         let _ ← ((Out.mk json).fail error).toBaseIO
-        pure (app.errorExit error)
+        pure (exitFor error.class)
 
 end Alaya.Cli

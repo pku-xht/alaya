@@ -90,7 +90,9 @@ private def save (config : Config) (key : String) (responses : Array Chat.Respon
   let path := entryPath config key
   let directory := path.parent.getD config.directory
   IO.FS.createDirAll directory
-  let temporary := path.withExtension "tmp"
+  -- A name of its own, so two writers never share a half-written file.
+  let temporary : System.FilePath :=
+    s!"{path}.{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}.tmp"
   IO.FS.writeFile temporary <| (responsesToJson key responses).pretty
   IO.FS.rename temporary path
 

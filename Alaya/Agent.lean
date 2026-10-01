@@ -133,7 +133,7 @@ partial def run (agent : Agent) (workspace : Workspace) (sample : Dialogue -> Re
   match agent.next session log with
   | .done outcome => pure (log, .outcome outcome)
   | .ask callId question =>
-    Result.fromExcept Error.configuration question.validate
+    Result.fromExcept Error.input question.validate
     pure (log, .question callId question)
   | .sample =>
     let response ← sample (agent.view log)

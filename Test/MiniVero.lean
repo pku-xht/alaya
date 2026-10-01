@@ -217,7 +217,7 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     | .formatError message => check (contains message "Unknown tool 'time_budget'") "unknown"
     | .actions _ => fail "mini-swe must not accept time_budget"
     assertError "config" (Agent.Families.instanceOf (.mkObj [("family", "mini-swe"), ("time_budget", true)])) fun
-      | .configuration m => contains m "unknown field 'time_budget'"
+      | .input m => contains m "unknown field 'time_budget'"
       | _ => false,
 
   test "each step records its time, and the tool counts it against the budget" do

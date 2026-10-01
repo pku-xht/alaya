@@ -163,14 +163,14 @@ spent, Alaya stops without another model call.
 alaya root --task-file /path/to/source/MINIVERO_TASK.md /path/to/source \
   --agent mini-vero-questions.json --data /path/to/run
 alaya resume ROOT --model PROVIDER:MODEL --data /path/to/run --json
-# A question stops resume/step with exit code 3. Use its state hash below.
+# A question stops resume with exit code 3. Use its state hash below.
 alaya waiting --data /path/to/run
 # For a single-choice question, choose one model-provided candidate:
 alaya reply --data /path/to/run -- QUESTION '2'
 # Or, when none of the listed candidates is correct:
 alaya reply --data /path/to/run -- QUESTION 'none_of_above'
 # Alternatively, when the person cannot answer (all supported question types):
-alaya reply-unavailable QUESTION --data /path/to/run
+alaya reply --data /path/to/run --unavailable -- QUESTION
 alaya resume REPLY --model PROVIDER:MODEL --data /path/to/run --json
 ```
 
@@ -193,7 +193,7 @@ same workspace. Receiving an answer does not change the task's rules or imply
 that the answer is correct. `none_of_above` means none of the listed candidates is correct;
 it is not a substitute for an unavailable answer.
 
-`reply-unavailable` creates the same kind of reply child, but its observation is
+`reply --unavailable` creates the same kind of reply child, but its observation is
 the JSON object `{"status":"unavailable"}`. The next model request receives that
 object under the original `ask_user` call ID. Ordinary answers remain JSON strings
 with their exact text, so even an open answer containing the literal text
@@ -201,21 +201,22 @@ with their exact text, so even an open answer containing the literal text
 retain the question's workspace and the existing continuation limits. The caller
 resumes from the returned reply hash as usual.
 
-Read-only collectors can use the same snapshot inspection commands as the page:
+Read-only collectors use the same commands the page does:
 
 ```bash
-alaya question-context QUESTION --data /path/to/run
-alaya question-files QUESTION --data /path/to/run
-alaya question-files --data /path/to/run -- QUESTION src
-alaya question-file --data /path/to/run -- QUESTION src/Main.lean
+alaya show --data /path/to/run --json -- QUESTION
+alaya ls --data /path/to/run --json -- QUESTION ''
+alaya ls --data /path/to/run --json -- QUESTION src
+alaya cat --data /path/to/run --json -- QUESTION src/Main.lean
 ```
 
-These commands return JSON and accept question states even after they have been
-answered. Context contains `state`, `workspace`, `task` (or null) and root-to-question
-`history` entries with their original events. Directory results contain `path`
-and immediate `entries`; file results contain `path`, `kind`, `content` and `size`.
-The empty directory path names the project root. They do not sample a model,
-create a reply, or expose evaluation evidence.
+`show --json` gives the question's `history`: one `{state, kind, events}` per state from the
+root to the question, with their original events, the task among the root's. `ls --json` gives
+the `path` and its immediate `entries`, by name; `cat --json` previews an entry, with `path`,
+`kind` (`text`, `binary`, `too_large`, `symlink`, `directory` or `other`), `content` (only for
+`text`) and `size`. The empty directory path names the project root. None of them samples a
+model or creates a reply. They read any state, so the page reads only the questions it has
+listed, never an evaluation and the grader's evidence in it.
 
 This tool supplies the interaction. Answer collection, simulation, budgets and
 comparative grading remain the caller's policy.

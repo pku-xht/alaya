@@ -109,7 +109,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         (minimal.config.getObjValAs? Bool "ask_user").toOption (some false)
       let defaultPath : System.FilePath := "agents" / s!"{family.name}-default.json"
       let defaultText ← IO.FS.readFile defaultPath
-      let defaultJson ← assertOk <| Result.fromExcept Error.configuration (Lean.Json.parse defaultText)
+      let defaultJson ← assertOk <| Result.fromExcept Error.input (Lean.Json.parse defaultText)
       assertEqual "default JSON explicitly contains ask_user false"
         (defaultJson.getObjValAs? Bool "ask_user").toOption (some false)
       let request (spec : Families.Instance) : Lean.Json :=
@@ -182,7 +182,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       for bad in #[Lean.Json.null, .str "true", .num 1, .arr #[], .mkObj []] do
         assertError "ask_user type" (Families.instanceOf
           (.mkObj [("family", family.name), ("ask_user", bad)])) fun
-            | .configuration message => contains message "ask_user" && contains message "true or false"
+            | .input message => contains message "ask_user" && contains message "true or false"
             | _ => false,
 
   test "single choice adds a platform answer while retaining model candidates verbatim" do
@@ -320,7 +320,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "unanswered question count" (← assertOk <| waiting store).size 1
         assertEqual "unanswered question has no reply children" (← assertOk <| children store waitingHash).size 0
         assertError "cannot step while waiting" (stepOnce rt "scripted" waitingHash) fun
-          | .configuration _ => true
+          | .input _ => true
           | _ => false
         assertEqual "only question sampled" (← requests.get).size 1
         -- Changing the source file cannot disable the capability on a recorded run.
@@ -347,7 +347,7 @@ def suite : Suite := Testing.suite "ask_user" #[
           | _ => fail "a reply must append exactly the original answer as the asking call's observation"
           check (← assertOk <| waiting store).isEmpty
             "an explicit answer, including none_of_above, must differ from not answering"
-          let some recorded ← assertOk <| agentOf store answered | fail "missing root configuration"
+          let recorded ← assertOk <| agentOf store answered
           assertEqual "recorded root config" recorded.compress built.config.compress
           let restored ← assertOk <| Families.instanceOf recorded
           checkQuestionView (restored.view (← assertOk <| logOf store answered)) answer arguments
@@ -392,7 +392,7 @@ def suite : Suite := Testing.suite "ask_user" #[
           project (← testImage) (some "task") (agent := built.config)
         let before ← assertOk <| allStates store
         assertError "only a question accepts an unavailable reply" (replyUnavailable store root) fun
-          | .configuration _ => true
+          | .input _ => true
           | _ => false
         assertEqual "rejected reply writes no state" (← assertOk <| allStates store) before
         let question ← resumed <| resume rt "scripted" root (fun _ => pure ())
@@ -510,7 +510,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let original := (← assertOk <| getState reopened stopped).toJson.compress
         for answer in invalid do
           assertError s!"invalid {questionType} answer {repr answer}" (reply reopened stopped answer) fun
-            | .configuration _ => true
+            | .input _ => true
             | _ => false
           assertEqual "no new stored state" (← assertOk <| allStates reopened) before
           assertEqual "no reply child" (← assertOk <| children reopened stopped).size 0
@@ -531,17 +531,12 @@ def suite : Suite := Testing.suite "ask_user" #[
           (some "Submitted")
         assertEqual "one question and one continuation" (← requests.get).size 2,
 
-  test "stored question forms reject malformed metadata and retain legacy open text" do
-    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .question, appended := #[], question? := some { callId := "legacy", text := "Explain the change." } }
-    let legacyJson := seed.toJson.setObjVal! "question"
-      (.mkObj [("call_id", "legacy"), ("text", "Explain the change.")])
-    let legacy ← assertOk <| Result.fromExcept Error.storage (State.fromJson legacyJson)
-    let some legacyQuestion := legacy.question? | fail "legacy question missing"
-    assertEqual "legacy defaults to open text" legacyQuestion.questionType QuestionType.openEnded
-    assertEqual "legacy has no options" legacyQuestion.options #[]
+  test "a stored question form must be complete and well-formed" do
+    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .question, appended := #[], question? := some { callId := "q", text := "Choose." }, agent? := some testAgent }
     let questionJson (kind : Lean.Json) (options : Lean.Json) : Lean.Json :=
       .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", kind), ("options", options)]
     let malformed : Array Lean.Json := #[
+      .mkObj [("call_id", "q"), ("text", "Choose.")],
       .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", "yes_no")],
       .mkObj [("call_id", "q"), ("text", "Choose."), ("options", .arr #[])],
       questionJson "unknown" (.arr #[]), questionJson .null (.arr #[]),
@@ -559,13 +554,9 @@ def suite : Suite := Testing.suite "ask_user" #[
       match State.fromJson (seed.toJson.setObjVal! "question" question) with
       | .error _ => pure ()
       | .ok _ => fail s!"malformed stored form was accepted: {question.compress}"
-    let store ← assertOk <| Store.create ((← scratch) / "legacy-states")
-    let waitingHash ← assertOk <| putState store legacy
-    let text := "  Neither answer is suitable.\nKeep this legacy text unchanged.\n"
-    let answered ← assertOk <| reply store waitingHash text
-    match (← assertOk <| getState store answered).appended.toList with
-    | [.observation "legacy" (.str raw)] => assertEqual "legacy reply stays verbatim" raw text
-    | _ => fail "legacy open question lost its raw reply",
+    let parsed ← assertOk <| Result.fromExcept Error.storage
+      (State.fromJson (seed.toJson.setObjVal! "question" (questionJson "open_ended" (.arr #[]))))
+    assertEqual "a complete form reads back" (parsed.question?.map (·.questionType)) (some .openEnded),
 
   test "a question consumes its model turn and a reply does not reset the step limit" do
     let config : Config := { askUser := true, stepLimit := 1 }
@@ -606,7 +597,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let stopped ← resumed <| resume rt "scripted" root (fun _ => pure ())
         check (← assertOk <| getState store stopped).question?.isSome "the allowed model turn asks"
         let answered ← assertOk <| reply store stopped "2"
-        let some recorded ← assertOk <| agentOf store answered | fail "missing recorded configuration"
+        let recorded ← assertOk <| agentOf store answered
         let restored ← assertOk <| Families.instanceOf recorded
         let rebuilt := { rt with agent := restored.build executor }
         let final ← if useResume then
@@ -620,7 +611,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "one request in all" (← requests.get).size 1
         assertEqual "no execution" (← calls.get) 0
         assertError "terminal state cannot resume" (resume rebuilt "scripted" final (fun _ => pure ())) fun
-          | .configuration _ => true
+          | .input _ => true
           | _ => false
         assertEqual "refusing terminal resume does not sample" (← requests.get).size 1,
 
@@ -660,7 +651,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "answer inherits all recorded running time" (← assertOk <| elapsedMs reopened answer) 1000
         assertEqual "the human reply adds no running time"
           (← assertOk <| getState reopened answer).elapsedMs? none
-      let some recorded ← assertOk <| agentOf reopened answered | fail "missing recorded agent"
+      let recorded ← assertOk <| agentOf reopened answered
       let restored ← assertOk <| Families.instanceOf recorded
       let (executor, calls) ← countingExecutor
       let (model, requests) ← scripted #[response #[submit]]

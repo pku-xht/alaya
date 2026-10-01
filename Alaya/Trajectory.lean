@@ -115,7 +115,7 @@ inductive Kind where
   | root
   /-- One model turn, or a stop recorded after a reply without another model sample. -/
   | turn
-  /-- A person's workspace change, with the parent's log — plus a notice, when they left one. -/
+  /-- A person's workspace change, with a notice to the agent listing what changed. -/
   | intervention
   /-- A grader's verdict on a state, with the checkout as the grader left it; always a leaf. -/
   | evaluation
@@ -147,12 +147,12 @@ def Kind.ofString? : String -> Option Kind
   | "reply" => some .reply
   | _ => none
 
-/-- What a person told the agent between turns, and what they changed. -/
+/-- What a person told the agent between turns, or what they changed. -/
 structure Intervention where
-  /-- The person's message, verbatim. -/
+  /-- The person's message, verbatim; empty for a workspace change, which says nothing more. -/
   message : String
-  /-- The workspace changes made alongside it, one `M path` / `+ path` / `- path` line each;
-  empty for a message alone. -/
+  /-- The workspace changes, one `M path` / `+ path` / `- path` line each; empty for a
+  message. -/
   changed : Array String := #[]
   deriving Inhabited
 
@@ -162,7 +162,8 @@ def interventionNotice (i : Intervention) : String :=
     if i.changed.isEmpty then "A person sent you a message while you were paused."
     else "A person changed the workspace while you were paused:"
   let changes := String.join (i.changed.toList.map fun line => "\n  " ++ line)
-  s!"<intervention>\n{header}{changes}\n{i.message}\n</intervention>"
+  let message := if i.message.isEmpty then "" else s!"\n{i.message}"
+  s!"<intervention>\n{header}{changes}{message}\n</intervention>"
 
 /-- A question the agent asked a person and is waiting on. `callId` is the asking tool call,
 so the eventual answer can be recorded as its result. -/
@@ -233,8 +234,8 @@ structure State where
   /-- On a model step (`turn`, `question`): its wall-clock time, from before the model call to
   after its last act and snapshot. A run's time is the sum along its path from the root. -/
   elapsedMs? : Option Nat := none
-  /-- What a person said and changed, on a `message` or `intervention` state that carried a
-  message. The notice in `appended` is `interventionNotice` of it. -/
+  /-- What a person said, on a `message`, or changed, on an `intervention`. The notice in
+  `appended` is `interventionNotice` of it. -/
   intervention? : Option Intervention := none
   /-- The open question, on a `question` state. Nothing but `reply` continues from it. -/
   question? : Option Question := none
@@ -253,6 +254,14 @@ def continuable (state : State) : Except String Unit := do
   if let some q := state.question? then
     throw s!"this state is waiting for an answer to: {q.text}\nanswer it with `alaya reply HASH TEXT`"
 
+/-- A field `toJson` always writes, `null` for none. A missing field, or one of another type, is
+an error: nothing is read with a default. -/
+private def nullable (json : Lean.Json) (name : String) (read : Lean.Json → Except String α) :
+    Except String (Option α) := do
+  match ← json.getObjVal? name with
+  | .null => pure none
+  | value => some <$> read value
+
 def checkToJson (c : Grader.Check) : Lean.Json :=
   .mkObj [("ok", c.ok), ("name", c.name), ("directive", c.directive)]
 
@@ -269,7 +278,7 @@ def evaluationToJson (e : Evaluation) : Lean.Json :=
 private def evaluationFromJson (json : Lean.Json) : Except String Evaluation := do
   let command ← json.getObjVal? "command" >>= Lean.Json.getStr?
   let graderImage ← json.getObjVal? "graderImage" >>= Lean.Json.getStr?
-  let input? := (json.getObjVal? "input" >>= Lean.Json.getStr?).toOption.map (⟨·⟩)
+  let input? ← nullable json "input" fun j => (⟨·⟩) <$> j.getStr?
   let some status := Grader.Status.ofString? (← json.getObjVal? "status" >>= Lean.Json.getStr?)
     | throw "unknown evaluation status"
   let checks ← (← json.getObjVal? "checks" >>= Lean.Json.getArr?).mapM fun c => do
@@ -277,7 +286,7 @@ private def evaluationFromJson (json : Lean.Json) : Except String Evaluation := 
             name := ← c.getObjVal? "name" >>= Lean.Json.getStr?
             directive := ← c.getObjVal? "directive" >>= Lean.Json.getStr? } : Grader.Check)
   let reason ← json.getObjVal? "reason" >>= Lean.Json.getStr?
-  let returncode? := (json.getObjVal? "returncode" >>= Lean.Json.getInt?).toOption
+  let returncode? ← nullable json "returncode" Lean.Json.getInt?
   let elapsedMs ← json.getObjVal? "elapsedMs" >>= Lean.Json.getNat?
   let output ← json.getObjVal? "output"
   let stdout ← output.getObjVal? "stdout" >>= Lean.Json.getStr?
@@ -318,38 +327,27 @@ def fromJson (json : Lean.Json) : Except String State := do
   let version ← json.getObjVal? "v" >>= Lean.Json.getNat?
   if version != schemaVersion then
     throw s!"state object has schema version {version}; this build reads version {schemaVersion}"
-  let parent? := (json.getObjVal? "parent" >>= Lean.Json.getStr?).toOption.map (⟨·⟩)
+  let parent? ← nullable json "parent" fun j => (⟨·⟩) <$> j.getStr?
   let workspace : Hash := ⟨← json.getObjVal? "workspace" >>= Lean.Json.getStr?⟩
   let kind ← match Kind.ofString? (← json.getObjVal? "kind" >>= Lean.Json.getStr?) with
     | some kind => pure kind
     | none => throw "unknown state kind"
   let appended ← (← json.getObjVal? "appended" >>= Lean.Json.getArr?).mapM eventFromJson
-  let outcome? ← match json.getObjVal? "outcome" with
-    | .ok .null => pure none
-    | .ok o => some <$> outcomeFromJson o
-    | .error _ => pure none
-  let note? := (json.getObjVal? "note" >>= Lean.Json.getStr?).toOption
+  let outcome? ← nullable json "outcome" outcomeFromJson
+  let note? ← nullable json "note" Lean.Json.getStr?
   let image ← json.getObjVal? "image" >>= Lean.Json.getStr?
   let workdir ← json.getObjVal? "workdir" >>= Lean.Json.getStr?
-  let agent? := match json.getObjVal? "agent" with
-    | .ok (.obj _) => (json.getObjVal? "agent").toOption
-    | _ => none
-  let elapsedMs? := (json.getObjVal? "elapsed_ms" >>= Lean.Json.getNat?).toOption
-  let evaluation? ← match json.getObjVal? "evaluation" with
-    | .ok .null => pure none
-    | .ok e => some <$> evaluationFromJson e
-    | .error _ => pure none
-  let intervention? ← match json.getObjVal? "intervention" with
-    | .ok (.obj _) =>
-      let i := (json.getObjVal? "intervention").toOption.get!
-      let message ← i.getObjVal? "message" >>= Lean.Json.getStr?
-      let changed ← (← i.getObjVal? "changed" >>= Lean.Json.getArr?).mapM Lean.Json.getStr?
-      pure (some ({ message, changed } : Intervention))
-    | _ => pure none
-  let question? ← match json.getObjVal? "question" with
-    | .ok .null => pure none
-    | .error _ => pure none
-    | .ok q => some <$> Question.fromJson q
+  let agent? ← nullable json "agent" fun
+    | j@(.obj _) => pure j
+    | _ => throw "the agent configuration is not an object"
+  if parent?.isNone && agent?.isNone then throw "a root records its agent configuration"
+  let elapsedMs? ← nullable json "elapsed_ms" Lean.Json.getNat?
+  let evaluation? ← nullable json "evaluation" evaluationFromJson
+  let intervention? ← nullable json "intervention" fun i => do
+    let message ← i.getObjVal? "message" >>= Lean.Json.getStr?
+    let changed ← (← i.getObjVal? "changed" >>= Lean.Json.getArr?).mapM Lean.Json.getStr?
+    pure ({ message, changed } : Intervention)
+  let question? ← nullable json "question" Question.fromJson
   pure { parent?, workspace, kind, appended, outcome?, note?, image, workdir, agent?, elapsedMs?
          evaluation?, intervention?, question? }
 
@@ -393,8 +391,8 @@ def resolve (store : Store) (pfx : String) : Result Hash := do
   let hits := states.filter (·.hex.startsWith pfx)
   match hits.toList with
   | [hash] => pure hash
-  | [] => throw <| .configuration s!"no state matches {pfx}"
-  | _ => throw <| .configuration s!"ambiguous state prefix {pfx} ({hits.size} matches)"
+  | [] => throw <| .input s!"no state matches {pfx}"
+  | _ => throw <| .input s!"ambiguous state prefix {pfx} ({hits.size} matches)"
 
 /-- Reconstructs the full log at `hash` by concatenating appended events root→node. -/
 partial def logOf (store : Store) (hash : Hash) : Result Log := do
@@ -403,6 +401,14 @@ partial def logOf (store : Store) (hash : Hash) : Result Log := do
     | some parent => logOf store parent
     | none => pure #[]
   pure (ancestors ++ state.appended)
+
+/-- The states from the root to `hash`, in order. -/
+partial def branchOf (store : Store) (hash : Hash) : Result (Array (Hash × State)) := do
+  let state ← getState store hash
+  let before ← match state.parent? with
+    | some parent => branchOf store parent
+    | none => pure #[]
+  pure (before.push (hash, state))
 
 /-- How long the run up to `hash` has taken: its model steps' times, from the root. -/
 partial def elapsedMs (store : Store) (hash : Hash) : Result Nat := do
@@ -488,7 +494,7 @@ private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (ap
   | .sample => pure (appended, workspace, none, .continue)
   | .done outcome => pure (appended, workspace, none, .outcome outcome)
   | .ask callId toQuestion =>
-    Result.fromExcept Error.configuration toQuestion.validate
+    Result.fromExcept Error.input toQuestion.validate
     let question : Question := { callId, toQuestion }
     pure (appended, workspace, some question, .question question)
   | .act call =>
@@ -558,7 +564,7 @@ private def withinBudget (rt : Runtime) (elapsed : Nat) : Bool :=
 Returns `none` when the time budget is already spent, and then nothing is written. -/
 def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result (Option Hash) := do
   let state ← getState rt.store hash
-  Result.fromExcept Error.configuration state.continuable
+  Result.fromExcept Error.input state.continuable
   let before ← elapsedMs rt.store hash
   if !withinBudget rt before then return none
   checkoutInto rt.toSandbox state.workspace
@@ -570,26 +576,29 @@ the time budget was spent, not because the run ended or asked. -/
 structure Stopped where
   state : Hash
   outOfTime : Bool := false
+  /-- Stopped after the `turns?` this continuation was allowed, with the run still going. -/
+  outOfTurns : Bool := false
 
-/-- Grows a continuation from `hash` until the run ends, stops at a question, or spends the time
-budget, and returns where it stopped. Running out of time writes nothing: the last state is
-where a later `resume` continues. -/
+/-- Grows a continuation from `hash` until the run ends, stops at a question, spends the time
+budget, or has taken `turns?` turns, and returns where it stopped. Stopping for a limit writes
+nothing more: the last state is where a later `resume` continues. -/
 partial def resume (rt : Runtime) (note : String) (hash : Hash)
-    (onStep : Hash -> Result Unit) : Result Stopped := do
+    (onStep : Hash -> Result Unit) (turns? : Option Nat := none) : Result Stopped := do
   let start ← getState rt.store hash
-  Result.fromExcept Error.configuration start.continuable
+  Result.fromExcept Error.input start.continuable
   let before ← elapsedMs rt.store hash
   if !withinBudget rt before then return { state := hash, outOfTime := true }
   checkoutInto rt.toSandbox start.workspace
-  let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed : Nat) : Result Stopped := do
+  let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed taken : Nat) : Result Stopped := do
     let (child, log, workspace, elapsed, halt) ← advance rt note parent log workspace elapsed
     onStep child
     match halt with
     | .continue =>
-      if withinBudget rt elapsed then go child log workspace elapsed
-      else pure { state := child, outOfTime := true }
+      if !withinBudget rt elapsed then pure { state := child, outOfTime := true }
+      else if turns?.any (taken + 1 ≥ ·) then pure { state := child, outOfTurns := true }
+      else go child log workspace elapsed (taken + 1)
     | _ => pure { state := child }
-  go hash (← logOf rt.store hash) start.workspace before
+  go hash (← logOf rt.store hash) start.workspace before 0
 
 /-! ## Evaluation -/
 
@@ -627,13 +636,13 @@ def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePat
     (graderImage? : Option String := none) (timeoutSeconds : Nat := 900) : Result Hash := do
   let state ← getState store hash
   if state.kind == .evaluation then
-    throw <| .configuration "cannot evaluate an evaluation: it is already a leaf"
+    throw <| .input "cannot evaluate an evaluation: it is already a leaf"
   let graderImage ← match graderImage? with
     | some reference => pure (← Executor.Docker.Settings.pin { image := reference }).image
     | none => pure state.image
   let inputId? ← input?.mapM fun dir => do
     if !(← Result.fromIO Error.storage dir.isDir) then
-      throw <| .configuration s!"--input must be a directory: {dir}"
+      throw <| .input s!"--input must be a directory: {dir}"
     workspaces.snapshot dir
   Result.fromIO Error.storage (IO.FS.createDirAll scratch)
   let scratch ← Result.fromIO Error.storage (IO.FS.realPath scratch)
@@ -674,11 +683,11 @@ def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePat
 /-- Creates a root state from the initial project directory: the agent's opening log — its
 prompts — and a snapshot of `project`. -/
 def createRoot (store : Store) (workspaces : Workspaces) (log : Log) (project : System.FilePath)
-    (image : String) (note? : Option String := none) (agent : Lean.Json := .null)
+    (image : String) (note? : Option String := none) (agent : Lean.Json)
     (workdir : String := Executor.Docker.defaultWorkdir) : Result Hash := do
   let workspace ← workspaces.snapshot project
   putState store { parent? := none, workspace, kind := .root, appended := log, note?, image, workdir
-                   agent? := if agent.isNull then none else some agent }
+                   agent? := some agent }
 
 /-- The root of the tree `hash` is in. -/
 partial def rootOf (store : Store) (hash : Hash) : Result Hash := do
@@ -687,17 +696,20 @@ partial def rootOf (store : Store) (hash : Hash) : Result Hash := do
   | none => pure hash
 
 /-- The agent configuration the run of `hash` was created with, from its root. -/
-def agentOf (store : Store) (hash : Hash) : Result (Option Lean.Json) := do
-  pure (← getState store (← rootOf store hash)).agent?
+def agentOf (store : Store) (hash : Hash) : Result Lean.Json := do
+  let root ← rootOf store hash
+  let some agent := (← getState store root).agent?
+    | throw <| .storage s!"the root {root.hex} records no agent"
+  pure agent
 
 /-- A state a person may build on: anything but an evaluation, which is a leaf, or a state
 waiting for an answer, which `reply` alone grows. An ended run is fine: fixing something after a
 submission and continuing is what interventions are for. -/
 private def buildable (state : State) : Result Unit := do
   if state.kind == .evaluation then
-    throw <| .configuration "cannot build on an evaluation: it is a verdict, not a point in the run"
+    throw <| .input "cannot build on an evaluation: it is a verdict, not a point in the run"
   if let some q := state.question? then
-    throw <| .configuration
+    throw <| .input
       s!"this state is waiting for an answer to: {q.text}\nanswer it with `alaya reply HASH TEXT`"
 
 /-- The workspace changes from `before` to `after`, one line each. -/
@@ -710,22 +722,22 @@ private def changedLines (workspaces : Workspaces) (before after : Hash) :
     | .removed => s!"- {change.path}"
     | .modified => s!"M {change.path}"
 
-/-- Records a hand-edited workspace `dir` as an intervention child of `hash`, with a notice to
-the model when `tell?` is given. -/
+/-- Records a hand-edited workspace `dir` as an intervention child of `hash`. The agent is always
+told: the child's one event is a notice listing what changed, so its view never disagrees with
+its files. A directory with no change is refused; `tell` sends a message alone. -/
 def commit (store : Store) (workspaces : Workspaces) (hash : Hash) (dir : System.FilePath)
-    (note? : Option String) (tell? : Option String := none) : Result Hash := do
+    (note? : Option String) : Result Hash := do
   let parent ← getState store hash
   buildable parent
   let workspace ← workspaces.snapshot dir
-  let intervention? ← match tell? with
-    | none => pure none
-    | some message =>
-      pure (some ({ message, changed := ← changedLines workspaces parent.workspace workspace } : Intervention))
+  let changed ← changedLines workspaces parent.workspace workspace
+  if changed.isEmpty then
+    throw <| .input s!"{dir} has no change from {hash.hex}: to send a message alone, use `tell`"
+  let intervention : Intervention := { message := "", changed }
   putState store {
     parent? := some hash, workspace, kind := .intervention, note?
-    appended := intervention?.map (fun i => #[Event.message (.user (interventionNotice i))])
-      |>.getD #[]
-    intervention?, image := parent.image, workdir := parent.workdir }
+    appended := #[.message (.user (interventionNotice intervention))]
+    intervention? := some intervention, image := parent.image, workdir := parent.workdir }
 
 /-- Records a person's message to the agent as a child of `hash`: same workspace, and the log
 grown by one user turn carrying the message in the intervention envelope. -/
@@ -745,8 +757,8 @@ def reply (store : Store) (hash : Hash) (text : String) : Result Hash := do
   let parent ← getState store hash
   let question ← match parent.question? with
     | some q => pure q
-    | none => throw <| .configuration "this state is not waiting for an answer"
-  Result.fromExcept Error.configuration (question.toQuestion.validateReply text)
+    | none => throw <| .input "this state is not waiting for an answer"
+  Result.fromExcept Error.input (question.toQuestion.validateReply text)
   putState store {
     parent? := some hash, workspace := parent.workspace, kind := .reply
     appended := #[.observation question.callId (.str text)]
@@ -759,7 +771,7 @@ def replyUnavailable (store : Store) (hash : Hash) : Result Hash := do
   let parent ← getState store hash
   let question ← match parent.question? with
     | some q => pure q
-    | none => throw <| .configuration "this state is not waiting for an answer"
+    | none => throw <| .input "this state is not waiting for an answer"
   putState store {
     parent? := some hash, workspace := parent.workspace, kind := .reply
     appended := #[.observation question.callId (.mkObj [("status", "unavailable")])]

@@ -42,28 +42,27 @@ data = Path(flags[flags.index("--data") + 1])
 questions_file = data / "questions.json"
 questions = json.loads(questions_file.read_text(encoding="utf-8"))
 if args[0] == "waiting":
-    assert "--json" in args
+    assert "--json" in flags
     for question in questions:
         print(json.dumps(question, ensure_ascii=False))
-elif args[0] in ("question-context", "question-files", "question-file"):
-    assert delimiter < len(args), "inspection requires a positional delimiter"
+elif args[0] in ("show", "ls", "cat"):
+    assert "--json" in flags, "reads ask for JSON"
+    assert delimiter < len(args), "reads require a positional delimiter"
     positional = args[delimiter + 1:]
     state = positional[0]
-    if state not in [q["state"] for q in questions]:
-        print("not a question", file=sys.stderr)
-        sys.exit(1)
     value = {"state": state, "workspace": "f" * 64}
-    if args[0] == "question-context":
+    if args[0] == "show":
         assert len(positional) == 1
-        value.update(task="Original task", history=[{"state": state, "kind": "question", "events": []}])
+        kind = "question" if state in [q["state"] for q in questions] else "turn"
+        value.update(kind=kind, history=[{"state": state, "kind": kind, "events": []}])
     else:
         assert len(positional) == 2
         path = positional[1]
         if ".." in path.split("/") or path.startswith("/"):
             print("invalid snapshot path", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(65)
         value["path"] = path
-        if args[0] == "question-files":
+        if args[0] == "ls":
             value["entries"] = [{"name": "Main.lean", "path": "Main.lean", "kind": "file", "size": 4}]
         else:
             value.update(kind="text", content="code", size=4)
@@ -71,9 +70,13 @@ elif args[0] in ("question-context", "question-files", "question-file"):
     if override.exists():
         value = json.loads(override.read_text(encoding="utf-8"))
     print(json.dumps(value))
-elif args[0] in ("reply", "reply-unavailable"):
+elif args[0] == "reply":
     assert delimiter < len(args), "reply requires a positional delimiter"
-    if args[0] == "reply":
+    if (data / "busy").exists():
+        print("the data directory is in use by another alaya command: try again when it ends",
+              file=sys.stderr)
+        sys.exit(75)
+    if "--unavailable" not in flags:
         state, answer = args[delimiter + 1:]
         value = {"state": state, "answer": answer}
     else:
@@ -85,18 +88,18 @@ elif args[0] in ("reply", "reply-unavailable"):
     question = next(q for q in questions if q["state"] == state)
     if answer is not None and question["question_type"] == "yes_no" and answer not in ("yes", "no"):
         print("yes/no answers must be yes or no", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(65)
     if answer is not None and question["question_type"] == "single_choice":
         choices = {str(index) for index in range(1, len(question["options"]) + 1)}
         if answer not in choices | {"none_of_above"}:
             print("single-choice answers must select one option or none_of_above", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(65)
     # Match JavaScript String.trim(), including NBSP and ideographic space but
     # excluding Python-only whitespace such as NEL and record separators.
     js_whitespace = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
     if answer is not None and question["question_type"] == "open_ended" and not answer.strip(js_whitespace):
         print("open-ended answers must not be blank", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(65)
     time.sleep(0.05)
     questions_file.write_text(json.dumps([q for q in questions if q["state"] != state]), encoding="utf-8")
     print("d" * 64)
@@ -403,6 +406,20 @@ class QuestionHttpTests(unittest.TestCase):
         self.assertEqual(status, 502)
         self.assertIn("unexpected state", body["error"])
 
+    def test_context_is_only_for_questions_the_page_listed(self):
+        for endpoint, query in [("context", {"state": "e" * 64}),
+                                ("files", {"state": "e" * 64, "path": ""}),
+                                ("file", {"state": "e" * 64, "path": "Main.lean"})]:
+            with self.subTest(endpoint=endpoint):
+                status, body, _ = self.request(path=f"/api/{endpoint}?{urlencode(query)}")
+                self.assertEqual(status, 404)
+                self.assertIn("not a question", body["error"])
+
+    def test_context_is_the_question_branch(self):
+        status, body, _ = self.request(path=f"/api/context?{urlencode({'state': YES_NO})}")
+        self.assertEqual((status, body), (200, {"state": YES_NO, "workspace": "f" * 64,
+            "history": [{"state": YES_NO, "kind": "question", "events": []}]}))
+
     def test_context_endpoints_require_token_and_same_origin(self):
         for endpoint, query in [("context", {"state": YES_NO}),
                                 ("files", {"state": YES_NO, "path": ""}),
@@ -410,6 +427,14 @@ class QuestionHttpTests(unittest.TestCase):
             path = f"/api/{endpoint}?{urlencode(query)}"
             for headers in ({"X-Alaya-Token": None}, {"Origin": "http://elsewhere.test"}):
                 self.assertEqual(self.request(path=path, headers=headers)[0], 403)
+
+    def test_a_busy_data_directory_is_a_retryable_failure(self):
+        (self.directory / "busy").write_text("", encoding="utf-8")
+        status, body, _ = self.request("POST", "/api/reply", {"state": YES_NO, "answer": "yes"})
+        self.assertEqual(status, 503)
+        self.assertIn("try again", body["error"])
+        (self.directory / "busy").unlink()
+        self.assertEqual(self.request("POST", "/api/reply", {"state": YES_NO, "answer": "yes"})[0], 200)
 
     def test_stale_question_never_calls_reply(self):
         status, body, _ = self.request("POST", "/api/reply", {"state": "e" * 64, "answer": "yes"})

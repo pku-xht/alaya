@@ -19,7 +19,7 @@ private structure Backend where
   «open» : TestM Workspaces
 
 private def backends : Array Backend := #[
-  { name := "restic", «open» := do assertOk <| Workspaces.Restic.open ((← scratch) / "restic") },
+  { name := "restic", «open» := do assertOk <| Workspaces.Restic.open ((← scratch) / "restic") ((← scratch) / "restic-scratch") },
   { name := "copies", «open» := Testing.workspaces }]
 
 private def run (args : Array String) : TestM Unit := do
@@ -177,7 +177,7 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     assertEqual "nested" (describe (← assertOk <| workspaces.list id "src"))
       #[("src/lib", "directory", none), ("src/main.lean", "file", some 13)]
     assertError "a file is not a directory" (workspaces.list id "README.md") fun
-      | .configuration m => (m.splitOn "not a directory").length > 1
+      | .input m => (m.splitOn "not a directory").length > 1
       | _ => false,
 
   onEach "read gives a file's bytes; a directory, a link, or an absent path is an error" fun workspaces => do
@@ -192,7 +192,7 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     for (path, message) in [("src", "not a regular file"), ("link", "not a regular file"),
         ("missing.txt", "no such path"), ("src/missing.txt", "no such path")] do
       assertError path (workspaces.read id path) fun
-        | .configuration m => (m.splitOn message).length > 1
+        | .input m => (m.splitOn message).length > 1
         | _ => false,
 
   onEach "a path through a symbolic link is refused, even to a directory in the snapshot" fun workspaces => do
@@ -202,10 +202,10 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     let id ← assertOk <| workspaces.snapshot source
     for path in ["alias/main.lean", "alias/lib/util.lean"] do
       assertError path (workspaces.read id path) fun
-        | .configuration m => (m.splitOn "crosses a non-directory").length > 1
+        | .input m => (m.splitOn "crosses a non-directory").length > 1
         | _ => false
     assertError "listing" (workspaces.list id "alias") fun
-      | .configuration m => (m.splitOn "not a directory").length > 1
+      | .input m => (m.splitOn "not a directory").length > 1
       | _ => false,
 
   onEach "a path that is not clean and relative is refused" fun workspaces => do
@@ -215,7 +215,7 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     for path in ["../README.md", "/README.md", "src/../README.md", "./README.md", "src//main.lean",
         "src/", "src\\main.lean"] do
       assertError path (workspaces.read id path) fun
-        | .configuration m => (m.splitOn "not a clean relative path").length > 1
+        | .input m => (m.splitOn "not a clean relative path").length > 1
         | _ => false,
 
   onEach "retainOnly keeps the listed snapshots usable" fun workspaces => do
@@ -238,10 +238,10 @@ def pathSuite : Suite := Testing.suite "workspaces.paths" #[
   test "a path that does not exist yet resolves against the directories that do" do
     let base ← IO.FS.realPath (← scratch)
     assertEqual "absolute" (← Workspaces.resolved ((← scratch) / "new" / "deeper")) (base / "new" / "deeper")
-    -- A bare name, as the default data directory `.alaya` is, is relative to where we are.
+    -- A bare name, such as a data directory given as `--data runs`, is relative to where we are.
     assertEqual "bare name" (← Workspaces.resolved "no-such-directory-here")
       ((← IO.FS.realPath (← IO.currentDir)) / "no-such-directory-here")
-    check (Workspaces.overlap (base / "p") (base / "p" / ".alaya")) "a directory overlaps what it holds"
+    check (Workspaces.overlap (base / "p") (base / "p" / "runs")) "a directory overlaps what it holds"
     check (!Workspaces.overlap (base / "p") (base / "p2")) "a shared name prefix is not an overlap",
 
   test "safeRelativePath accepts only clean relative paths" do
@@ -256,13 +256,13 @@ def resticSuite : Suite := Testing.suite "workspaces.restic" #[
   test "the run's own storage is refused as a checkout target and as a snapshot source" do
     let data := (← scratch) / "data"
     let store ← assertOk <| Trajectory.Store.create (data / "states")
-    let workspaces ← assertOk <| Workspaces.Restic.open (data / "restic") (keep := #[store.dir])
+    let workspaces ← assertOk <| Workspaces.Restic.open (data / "restic") (data / "restic-scratch") (keep := #[store.dir])
     let project ← source
     writeSpec project baseSpec
-    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t")
+    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t") (agent := testAgent)
     let id := (← assertOk <| getState store root).workspace
     let refused (label : String) (action : Result Unit) : TestM Unit :=
-      assertError label action fun | .configuration _ => true | _ => false
+      assertError label action fun | .input _ => true | _ => false
     -- `restore --delete` into any of these would delete the states or the repository.
     for target in [data, (← scratch), data / "states", data / "restic", data / "restic" / "inside"] do
       refused s!"checkout into {target}" (workspaces.materialize id target)
@@ -279,13 +279,13 @@ def resticSuite : Suite := Testing.suite "workspaces.restic" #[
 def trajectorySuite : Suite := Testing.suite "workspaces.trajectory" #[
   test "a root, a commit, its diff, an evaluation and a removal, over restic" do
     let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
-    let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic")
+    let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic") ((← scratch) / "restic-scratch")
     let project ← source
     writeSpec project baseSpec
-    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t")
+    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t") (agent := testAgent)
     IO.FS.writeFile (project / "README.md") "readme, by hand"
     writeSpec project #[("tests/extra.txt", "extra")]
-    let child ← assertOk <| commit store workspaces root project (some "by hand") (tell? := some "look")
+    let child ← assertOk <| commit store workspaces root project (some "by hand")
     assertEqual "diff" (← assertOk <| diffLines store workspaces root child) #["M README.md", "+ tests"]
     assertEqual "notice" ((← assertOk <| getState store child).intervention?.map (·.changed))
       (some #["M README.md", "+ tests"])

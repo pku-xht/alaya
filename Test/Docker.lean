@@ -114,6 +114,18 @@ def suite : Suite := Testing.suite "docker" #[
       finally
         executor.close,
 
+  test "a timeout of 0 lets a command run as long as it takes" <| withDocker
+    fun settings => do
+      let work ← workspace
+      let executor ← assertOk (Docker.executor settings { config with timeoutSeconds := 0 })
+      try
+        -- Past the 5-second kill grace, which once was all a 0 allowed.
+        let out ← executor.exec work #["sleep 6; echo done"] "sleep 6; echo done"
+        assertEqual "no error" out.error? none
+        assertEqual "finished" out.output "done\n"
+      finally
+        executor.close,
+
   test "close leaves no container behind" <| withDocker
     fun settings => do
       let work ← workspace
@@ -140,7 +152,7 @@ def suite : Suite := Testing.suite "docker" #[
       try
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
-          settings.image (some "t")
+          settings.image (some "t") (agent := testAgent)
         let child ← stepped <| stepOnce rt "test:model" root
         let state ← assertOk (getState store child)
         assertEqual "image inherited" state.image settings.image
@@ -164,11 +176,11 @@ def suite : Suite := Testing.suite "docker" #[
       check (← assertOk ((← workspaces).readFile? snapshot "world")).isSome
         "expected /etc/apk/world in the snapshot",
 
-  test "a path that is not in the image is a configuration error" <| withDocker
+  test "a path that is not in the image is an input error" <| withDocker
     fun settings => do
       let work ← workspace
       assertError "copyOut" (Docker.copyOut settings "/no/such/path" work) fun
-        | .configuration m => (m.splitOn "/no/such/path").length > 1
+        | .input m => (m.splitOn "/no/such/path").length > 1
         | _ => false,
 
   test "a grader runs in the trajectory's image and sees what a turn wrote" <| withDocker
@@ -182,7 +194,7 @@ def suite : Suite := Testing.suite "docker" #[
       try
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
-          settings.image (some "t")
+          settings.image (some "t") (agent := testAgent)
         let child ← stepped <| stepOnce rt "test:model" root
         -- The image's own file shows the grader is in the container, not on the host.
         let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") child
@@ -204,7 +216,7 @@ def suite : Suite := Testing.suite "docker" #[
       let model ← scripted #[toolResponse "awk 'BEGIN {for(i=0;i<6000;i++) printf \"a\"; printf \"MIDDLE\"; for(i=0;i<6000;i++) printf \"z\"}'"]
       let first ← runtime settings work store model
       let saved ← try
-        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
+        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
         stepped <| stepOnce first "produce" root
       finally first.executor.close
       let log ← assertOk <| logOf store saved
@@ -239,7 +251,7 @@ def suite : Suite := Testing.suite "docker" #[
       let input := (← scratch) / "input"
       writeSpec input #[("data.txt", "trusted")]
       let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
-      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
+      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
       -- Without network the routing table has its header line and nothing else.
       let grader := "echo noise >&2; test \"$(wc -l < /proc/net/route)\" = 1 && " ++
         "test \"$(pwd)\" = /workspace && test \"$(cat /grader/data.txt)\" = trusted && " ++
@@ -261,7 +273,7 @@ def suite : Suite := Testing.suite "docker" #[
       let project := (← scratch) / "proj"
       IO.FS.createDirAll project
       let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
-      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
+      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
       -- Complete TAP before the timeout does not make it a pass.
       let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root
         "printf '1..1\\nok 1\\n'; sleep 30" settings.user? (timeoutSeconds := 1)
@@ -280,7 +292,7 @@ def suite : Suite := Testing.suite "docker" #[
       IO.FS.createDirAll project
       let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
       -- The trajectory's own image does not exist, so only the grader image can run it.
-      let root ← assertOk <| createRoot store (← workspaces) #[] project recordedImage
+      let root ← assertOk <| createRoot store (← workspaces) #[] project recordedImage (agent := testAgent)
       let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root
         "test -f /etc/alpine-release && printf '1..1\\nok 1\\n'" settings.user?
         (graderImage? := some testImageReference)
@@ -290,7 +302,7 @@ def suite : Suite := Testing.suite "docker" #[
       -- A grader image that cannot be had is no verdict at all.
       assertError "missing" (evaluate store (← workspaces) ((← scratch) / "eval") root "true"
           settings.user? (graderImage? := some "alaya.invalid/nope:1")) fun
-        | .configuration m => (m.splitOn "alaya.invalid/nope").length > 1
+        | .environment m => (m.splitOn "alaya.invalid/nope").length > 1
         | _ => false
       -- Without one, the trajectory's missing image is an error verdict with docker's message.
       let broken ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root "true" settings.user?
@@ -308,7 +320,7 @@ def suite : Suite := Testing.suite "docker" #[
       let model ← scripted #[toolResponse "pwd > where.txt"]
       let rt ← runtime settings work store model
       try
-        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image
+        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
           (workdir := "/testbed")
         let child ← stepped <| stepOnce rt "test:model" root
         let state ← assertOk (getState store child)
@@ -331,20 +343,18 @@ def suite : Suite := Testing.suite "docker" #[
         assertOk <| Docker.checkWorkdir good #["/grader", "/out"]
       for bad in ["workspace", "/", "/a/../b", "/a//b", "/a/", "/a/./b", "/grader", "/out/x"] do
         assertError bad (Docker.checkWorkdir bad #["/grader", "/out"]) fun
-          | .configuration _ => true
+          | .input _ => true
           | _ => false,
 
-  test "a command refuses a --workdir other than the trajectory's" do
-    assertError "different" (Docker.checkSameWorkdir "/other" "/testbed") fun
-      | .configuration m => (m.splitOn "fixed at `root`").length > 1
-      | _ => false
-    assertOk <| Docker.checkSameWorkdir "/testbed" "/testbed",
-
-  test "a missing image is a configuration error naming it" <| withDocker
+  test "a missing recorded image is pulled by its digest, and a local build's ID cannot be" <| withDocker
     fun _ => do
       let missing : Docker.Settings := { image := "alaya.invalid/nope@sha256:0" }
-      assertError "verifyPresent" missing.verifyPresent fun
-        | .configuration m => (m.splitOn "alaya.invalid/nope").length > 1
+      assertError "digest" missing.ensurePresent fun
+        | .environment m => (m.splitOn "docker pull alaya.invalid/nope@sha256:0").length > 1
+        | _ => false
+      let local_ : Docker.Settings := { image := "sha256:" ++ "0".pushn '0' 63 }
+      assertError "local" local_.ensurePresent fun
+        | .environment m => (m.splitOn "cannot be pulled").length > 1
         | _ => false
 ]
 

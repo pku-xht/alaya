@@ -35,7 +35,7 @@ host, or a container the trajectory pinned — and the **configuration**, a JSON
 A field left out is its default; a misspelt one is an error. The task is not configuration: it
 is what `root --task` gives, and `initialLog config task uname` places it. The command line
 names a configuration file at `root` (`--agent agents/mini-swe-default.json`;
-`docs/trajectory-schema.md` §8) and the root records it.
+`docs/cli.md` §5) and the root records it.
 
 The tools are not this agent's: `Alaya.Agent.Tools` defines each on its own — its schema for the
 model, how its arguments are read, and what answers a call — with no knowledge of which agent

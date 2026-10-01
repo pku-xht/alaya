@@ -83,6 +83,21 @@ private def askingRuntime (responses : Array Chat.Response) : TestM Runtime := d
   pure { rt with agent := askingAgent rt.executor }
 
 def suite : Suite := Testing.suite "trajectory" #[
+  test "a continuation stops after the turns it was allowed, and a later one goes on" do
+    let rt ← cachedRuntime #[responseWith #[call "a" "bash" "echo 1"],
+      responseWith #[call "b" "bash" "echo 2"], responseWith #[call "c" "bash" "echo 3"]]
+    let root ← mkRoot rt (← emptyProject)
+    let seen ← IO.mkRef #[]
+    let first ← assertOk <| resume rt "test:model" root (fun h => seen.modify (·.push h)) (turns? := some 2)
+    check first.outOfTurns "stopped for its turns"
+    check (!first.outOfTime) "not for time"
+    assertEqual "two turns, the last is where it stopped" (← seen.get).back? (some first.state)
+    assertEqual "two turns" (← seen.get).size 2
+    let second ← assertOk <| resume rt "test:model" first.state (fun _ => pure ()) (turns? := some 1)
+    check second.outOfTurns "one more turn"
+    assertEqual "from where the first stopped" (← assertOk (getState rt.store second.state)).parent?
+      (some first.state),
+
   test "tell records a notice the model sees, and the run continues from it" do
     let rt ← cachedRuntime #[responseWith #[call "a" "bash" "echo ok"]]
     let root ← mkRoot rt (← emptyProject)
@@ -123,26 +138,28 @@ def suite : Suite := Testing.suite "trajectory" #[
       ("toDir", "removed", some "was a file", none), ("toDir", "added", none, none),
       ("toFile", "removed", none, none), ("toFile", "added", none, some "now a file")],
 
-  test "commit --tell lists the changed paths in the notice" do
+  test "a commit always tells the agent what changed, and refuses a directory with no change" do
     let rt ← cachedRuntime #[]
     let root ← mkRoot rt (← emptyProject)
+    let unchanged ← emptyProject
+    assertError "no change" (commit rt.store rt.workspaces root unchanged (some "nothing")) fun
+      | .input m => (m.splitOn "use `tell`").length > 1
+      | _ => false
     let edited := (← scratch) / "edited"
     assertOk <| Result.fromIO Error.storage do
       IO.FS.createDirAll edited
       IO.FS.writeFile (edited / "fix.txt") "fixed\n"
-    let silent ← assertOk <| commit rt.store rt.workspaces root edited (some "fix")
-    check (← assertOk (getState rt.store silent)).appended.isEmpty "without --tell a commit stays silent"
-    let child ← assertOk <| commit rt.store rt.workspaces root edited (some "fix") (tell? := some "I added a file.")
+    let child ← assertOk <| commit rt.store rt.workspaces root edited (some "fix")
     let state ← assertOk (getState rt.store child)
-    check (state.kind == .intervention) "still an intervention"
+    check (state.kind == .intervention) "an intervention"
     match state.intervention? with
     | some i => assertEqual "changed paths" i.changed #["+ fix.txt"]
     | none => fail "expected the intervention record"
-    match state.appended.back? with
-    | some (.message (.user notice)) =>
-      check (contains notice "+ fix.txt" && contains notice "I added a file.")
-        "the notice lists the added path and the message"
-    | _ => fail "expected a notice",
+    match state.appended with
+    | #[.message (.user notice)] =>
+      assertEqual "the notice" notice
+        "<intervention>\nA person changed the workspace while you were paused:\n  + fix.txt\n</intervention>"
+    | _ => fail "expected exactly the notice",
 
   test "an ask_user call stops the run at a question, and a reply continues it" do
     let ask : Chat.ToolCall :=
@@ -221,6 +238,7 @@ def suite : Suite := Testing.suite "trajectory" #[
     let child ← stepped <| stepOnce rt "test:model" root
     assertEqual "turn" (← assertOk (getState rt.store child)).image pinned
     let edited ← emptyProject
+    IO.FS.writeFile (edited / "by-hand.txt") "by hand"
     let intervention ← assertOk <| commit rt.store rt.workspaces child edited (some "by hand")
     assertEqual "intervention" (← assertOk (getState rt.store intervention)).image pinned,
 
@@ -267,10 +285,10 @@ def suite : Suite := Testing.suite "trajectory" #[
       "a grader's files must never reach a state the agent continues from"
     -- Nothing may continue from the evaluation.
     assertError "step" (stepOnce rt "test:model" node) fun
-      | .configuration m => (m.splitOn "cannot continue from an evaluation").length > 1
+      | .input m => (m.splitOn "cannot continue from an evaluation").length > 1
       | _ => false
     assertError "commit" (commit rt.store rt.workspaces node (← emptyProject) none) fun
-      | .configuration m => (m.splitOn "cannot build on an evaluation").length > 1
+      | .input m => (m.splitOn "cannot build on an evaluation").length > 1
       | _ => false,
 
   test "a failing check is a failing verdict, and re-evaluating adds a new evaluation" do

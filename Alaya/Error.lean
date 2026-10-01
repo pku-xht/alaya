@@ -1,8 +1,16 @@
 namespace Alaya
 
 inductive Error where
-  /-- Invalid local Alaya configuration, such as a missing API key or non-finite temperature. -/
-  | configuration (message : String)
+  /-- The request names something that is not there, is not in the condition the operation
+  needs, or is malformed: an unknown state, a question already answered, an agent file that is
+  not JSON, a temperature that is not finite. The caller fixes the request. -/
+  | input (message : String)
+  /-- The machine lacks something the operation needs: docker or its daemon, an image, restic, an
+  API key. The caller fixes the machine. -/
+  | environment (message : String)
+  /-- Another process is writing the data directory (`Alaya.Lock`); this one may try again when
+  it ends. -/
+  | busy (message : String)
   /-- The request could not be delivered or its result is unknown; retrying may duplicate work. -/
   | transport (message : String)
   /-- A provider returned an HTTP response; the status and body support retry and diagnostics. -/
@@ -17,13 +25,13 @@ inductive Error where
   | cache (message : String)
   /-- Reading or writing the states, or a workspace snapshot, failed. -/
   | storage (message : String)
-  /-- The operation was intentionally cancelled. -/
-  | cancelled
   deriving Repr, Inhabited
 
 /-- One line naming the failure, for a command-line front end. -/
 def Error.describe : Error -> String
-  | .configuration m => m
+  | .input m => m
+  | .environment m => m
+  | .busy m => m
   | .transport m => s!"transport: {m}"
   | .http status body _ => s!"http {status}: {body}"
   | .provider m => s!"provider: {m}"
@@ -31,7 +39,42 @@ def Error.describe : Error -> String
   | .structuredOutput m => s!"structured output: {m}"
   | .cache m => s!"cache: {m}"
   | .storage m => s!"storage: {m}"
-  | .cancelled => "cancelled"
+
+/-- What a caller does about a failure; each class has one exit status (`Alaya.Cli`). -/
+inductive Error.Class where
+  /-- Fix the request. -/
+  | input
+  /-- Fix the machine. -/
+  | environment
+  /-- Try again later: another command is writing the data directory, or the provider was
+  unreachable, throttled, or failing and the retries `Alaya.Retry` makes have run out. -/
+  | transient
+  /-- The provider refused the request or answered it wrongly; trying again will not help. -/
+  | model
+  /-- The data directory could not be read or written. -/
+  | storage
+  deriving Repr, BEq, Inhabited
+
+def Error.Class.toString : Error.Class -> String
+  | .input => "input"
+  | .environment => "environment"
+  | .transient => "transient"
+  | .model => "model"
+  | .storage => "storage"
+
+/-- An HTTP status worth retrying: a timeout, a conflict, too early, a rate limit, or the
+server's own failure. `Alaya.Retry` retries these, and what is still failing after it is
+transient. -/
+def Error.retryableStatus (status : Nat) : Bool :=
+  status == 408 || status == 409 || status == 425 || status == 429 || (500 <= status && status < 600)
+
+def Error.class : Error -> Error.Class
+  | .input _ => .input
+  | .environment _ => .environment
+  | .busy _ | .transport _ => .transient
+  | .http status _ _ => if Error.retryableStatus status then .transient else .model
+  | .provider _ | .protocol _ | .structuredOutput _ => .model
+  | .cache _ | .storage _ => .storage
 
 abbrev Result (α : Type) := EIO Error α
 

@@ -1,3 +1,4 @@
+import Lean.Data.Json
 import Alaya.Error
 
 /-!
@@ -51,6 +52,9 @@ def recordedImage : String := "alaya.test/image@sha256:0"
 
 /-- The workdir of states a test builds by hand. -/
 def recordedWorkdir : String := "/workspace"
+
+/-- The agent a root records when the test does not care which: MiniSwe with its defaults. -/
+def testAgent : Lean.Json := .mkObj [("family", "mini-swe")]
 
 def fail (message : String) : TestM alpha := do
   throw <| IO.userError s!"{(← read).name}: {message}"

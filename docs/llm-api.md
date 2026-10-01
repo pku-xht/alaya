@@ -288,7 +288,7 @@ name may contain colons, so only the first splits.
 | `apiyi` | `https://api.apiyi.com/v1` | `APIYI_API_KEY` | `APIYI_BASE_URL` |
 | `dgx` | `http://10.42.0.1:8000/v1` | `DGX_API_KEY`, default `EMPTY` | `DGX_BASE_URL`, or `--url`/`--port` |
 
-A missing key is a configuration error, except for `dgx`, where `EMPTY` is the vLLM convention for
+A missing key is an environment error, except for `dgx`, where `EMPTY` is the vLLM convention for
 a server that needs no credential. `--url` accepts anything from a bare host to a full URL and
 fills in `http`, port `8000`, and `/v1`; `--port` wins over a port inside `--url`; passing either
 turns off the `DGX_BASE_URL` fallback.
@@ -327,7 +327,7 @@ backoff and jitter.
 | HTTP 429 | yes, on a separate larger budget (8), honouring the server's `Retry-After` |
 | transport (timeout, dropped connection) | only with `retryUnknownDelivery`: the provider may have processed the request before the line died |
 | structured-output mismatch, malformed response | only with `retryStructuredOutput` / `retryMalformedResponse`: another sample may satisfy the schema, but one the model cannot satisfy fails the same way every time |
-| configuration, provider, cache, cancelled | never |
+| input, environment, busy, provider, cache, storage | never |
 
 ```lean
 let model ← model.retry { retryUnknownDelivery := true }
@@ -370,7 +370,7 @@ Concurrent streams in one process serialize extensions of the same entry; a cach
 not be written by two processes.
 
 ```lean
-let model ← Cache.persistent model { directory := ".alaya/cache" }
+let model ← Cache.persistent model { directory := "runs/cache" }
 ```
 
 *A cache lookup by draw index: replay on a hit, a provider call for the missing draws on a miss.*
@@ -403,17 +403,20 @@ The same identity, the same request, and the same index always yield the same re
 
 ## 4. Errors
 
-Every operation runs in `Result α := EIO Error α`. The classes decide what is retryable and how a
-front end reports it.
+Every operation runs in `Result α := EIO Error α`. The constructors decide what is retryable, and
+each belongs to one `Error.Class` — what a caller does about it — which is how a front end
+reports it: the `alaya` command line exits with one status per class
+(`docs/cli.md` §4).
 
-| Class | Meaning |
-| --- | --- |
-| `configuration` | a local mistake: missing key, unknown provider, a state that cannot be continued |
-| `transport` | the request may or may not have arrived |
-| `http status body retryAfterMs?` | the provider answered with a failure |
-| `provider` | a provider-specific failure that is none of the above |
-| `protocol` | a payload that is not the chat protocol |
-| `structuredOutput` | the reply did not satisfy the requested schema |
-| `cache` | the response cache could not be read or extended |
-| `storage` | reading or writing the states, or a workspace snapshot, failed |
-| `cancelled` | stopped on purpose |
+| Constructor | Meaning | Class |
+| --- | --- | --- |
+| `input` | the request names something that is not there, is in the wrong condition, or is malformed: an unknown state, an answered question, an agent file that is not JSON, a non-finite temperature | `input` |
+| `environment` | the machine lacks something: docker or its daemon, an image, restic, an API key | `environment` |
+| `busy` | another process is writing the data directory (`Alaya.Lock`) | `transient` |
+| `transport` | the request may or may not have arrived | `transient` |
+| `http status body retryAfterMs?` | the provider answered with a failure | `transient` for 408, 409, 425, 429 and 5xx, the statuses `Retry` retries; `model` otherwise |
+| `provider` | a provider-specific failure that is none of the above | `model` |
+| `protocol` | a payload that is not the chat protocol | `model` |
+| `structuredOutput` | the reply did not satisfy the requested schema | `model` |
+| `cache` | the response cache could not be read or extended | `storage` |
+| `storage` | reading or writing the states, or a workspace snapshot, failed | `storage` |

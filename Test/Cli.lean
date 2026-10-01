@@ -56,7 +56,7 @@ def taskSuite : Suite := suite "cli.task" #[
   test "a task is given as text or as a file, one of the two, and the file must be readable UTF-8" do
     let configuration (label : String) (result : Result String) (expected : String -> Bool) : TestM Unit :=
       assertError label result fun
-        | .configuration m => expected m
+        | .input m => expected m
         | _ => false
     assertEqual "text" (← assertOk (← task ["--task", "fix it"])) "fix it"
     let refused (label : String) (argv : List String) : TestM (Array String) :=
@@ -66,8 +66,8 @@ def taskSuite : Suite := suite "cli.task" #[
       #["give either --task TEXT or --task-file FILE, not both"]
     check ((← refused "empty" ["--task", ""])[0]!.startsWith "--task needs a value") "empty text"
     check ((← refused "missing" ["--task-file"])[0]!.startsWith "--task-file needs a value") "missing value"
-    assertEqual "- is stdin" (← parsed "stdin" ((Cli.text "task" "").parse ["--task-file", "-"]))
-      (some .stdin)
+    assertEqual "- is a file like any other" (← parsed "dash" ((Cli.text "task" "").parse ["--task-file", "-"]))
+      (some (.file "-"))
     let path := (← scratch) / "missing"
     configuration "missing file" (← task ["--task-file", path.toString]) (·.startsWith "cannot read the task file")
     IO.FS.writeBinFile path ⟨#[255, 254]⟩
@@ -106,10 +106,10 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
 
   test "an unknown provider names the ones that exist" do
     assertError "unknown" (Provider.fromSpec "nope:x" 0.0) fun
-      | .configuration m => m.startsWith "unknown provider: nope"
+      | .input m => m.startsWith "unknown provider: nope"
       | _ => false
     assertError "not a spec" (Provider.fromSpec "dgx" 0.0) fun
-      | .configuration m => m.endsWith "(e.g. dgx:gpt-oss-120b)"
+      | .input m => m.endsWith "(e.g. dgx:gpt-oss-120b)"
       | _ => false
 ]
 
@@ -129,7 +129,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
   test "a configuration may leave fields out, but not misname or mistype one" do
     let refused (label : String) (json : Lean.Json) (expected : String) : TestM Unit :=
       assertError label (Agent.Families.instanceOf json) fun
-        | .configuration m => (m.splitOn expected).length > 1
+        | .input m => (m.splitOn expected).length > 1
         | _ => false
     refused "no family" (.mkObj [("step_limit", 1)]) "needs a \"family\""
     refused "unknown family" (.mkObj [("family", "mini-swf")]) "unknown agent family"
@@ -142,7 +142,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let built ← assertOk <| Agent.Families.fromFile file
     assertEqual "tools follow the file" (built.tools.map (·.name)) #["bash", "submit", "read_output", "time_budget"]
     assertError "missing file" (Agent.Families.fromFile ((← scratch) / "none.json")) fun
-      | .configuration m => m.startsWith "cannot read"
+      | .input m => m.startsWith "cannot read"
       | _ => false,
 
   test "a root records its agent, and every state of the run finds it there" do
@@ -154,8 +154,8 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let root ← assertOk <| Trajectory.createRoot store workspaces #[] project (← testImage) (some "t")
       (agent := built.config)
     let child ← assertOk <| Trajectory.tell store root "hello"
-    assertEqual "root" ((← assertOk <| Trajectory.agentOf store root).map compressed) (some (compressed built.config))
-    assertEqual "child" ((← assertOk <| Trajectory.agentOf store child).map compressed) (some (compressed built.config))
+    assertEqual "root" (compressed (← assertOk <| Trajectory.agentOf store root)) (compressed built.config)
+    assertEqual "child" (compressed (← assertOk <| Trajectory.agentOf store child)) (compressed built.config)
     check (← assertOk <| Trajectory.getState store child).agent?.isNone "a child carries no record itself"
     let lines ← assertOk <| Trajectory.showLines store root
     check (lines.any fun l => l.startsWith "agent    " && (l.splitOn "\"step_limit\":7").length > 1) "show prints it"
@@ -225,20 +225,45 @@ def specSuite : Suite := suite "cli.spec" #[
     for answer in ["", "--data", "-m", "--", "--json", "  answer\n--data other\n原文  "] do
       assertEqual s!"answer {answer}" (← parsed "reply" (reply.parse ["--", "q", answer])) ("q", answer),
 
+  test "a refined spec checks the whole value, after every item has parsed" do
+    let answer := (Prod.mk <$> Cli.arg? "TEXT" .string "" <*> Cli.switch "unavailable" "").refine
+      fun
+      | (some text, false) => .ok (some text)
+      | (none, true) => .ok none
+      | _ => .error "give the answer or --unavailable"
+    assertEqual "text" (← parsed "text" (answer.parse ["yes"])) (some "yes")
+    assertEqual "unavailable" (← parsed "unavailable" (answer.parse ["--unavailable"])) none
+    assertEqual "both" (← problemsOf "both" (answer.parse ["yes", "--unavailable"]))
+      #["give the answer or --unavailable"]
+    assertEqual "neither" (← problemsOf "neither" (answer.parse [])) #["give the answer or --unavailable"],
+
+  test "every failure has a class, and each class one exit status above every outcome" do
+    let cases : List (Error × String × UInt32) := [
+      (.input "no state matches x", "input", 65), (.environment "cannot run docker", "environment", 69),
+      (.transport "timed out", "transient", 75), (.http 429 "slow down" (some 30000), "transient", 75),
+      (.http 503 "down", "transient", 75), (.http 400 "bad request", "model", 76),
+      (.http 401 "no key", "model", 76), (.protocol "not JSON", "model", 76),
+      (.structuredOutput "no field", "model", 76), (.provider "refused", "model", 76),
+      (.cache "unreadable", "storage", 74), (.storage "disk full", "storage", 74)]
+    for (error, name, code) in cases do
+      assertEqual s!"{error.describe} class" error.class.toString name
+      assertEqual s!"{error.describe} exit" (Cli.exitFor error.class) code
+      check (Cli.exitFor error.class > 4) "above every outcome status"
+    assertEqual "usage" Cli.exitUsage 64
+    assertEqual "an http failure's JSON" (Cli.errorJson (.http 429 "slow down" (some 30000))).compress
+      "{\"error\":\"transient\",\"message\":\"http 429: slow down\",\"retry_after_ms\":30000,\"status\":429}"
+    assertEqual "an input failure's JSON" (Cli.errorJson (.input "no state matches x")).compress
+      "{\"error\":\"input\",\"message\":\"no state matches x\"}",
+
   test "every problem is reported at once" do
     let spec := Prod.mk <$> Cli.flag "count" .nat "how many" <*> Cli.flag "model" (.string "P:M") "the model"
     assertEqual "both" (← problemsOf "both" (spec.parse ["--count", "x"]))
       #["--count expects a whole number, got 'x'", "--model P:M is required: the model"],
 
-  test "a removed flag says what to use instead" do
-    let spec := Cli.switch "json" "" <* Cli.removed "path" "use --workdir PATH"
-    assertEqual "removed" (← problemsOf "removed" (spec.parse ["--path", "/x"]))
-      #["--path is no longer accepted: use --workdir PATH"],
-
   test "an environment variable fills an absent flag, and a flag wins over it" do
-    let data := Cli.flagD "data" (.path "DIR") ".alaya" "the data directory" (env? := some "ALAYA_DATA")
+    let data := Cli.flagD "data" (.path "DIR") "runs" "the data directory" (env? := some "ALAYA_DATA")
     let env := fun var => if var == "ALAYA_DATA" then some "/runs" else none
-    assertEqual "default" (← parsed "default" (data.parse [])) ".alaya"
+    assertEqual "default" (← parsed "default" (data.parse [])) "runs"
     assertEqual "env" (← parsed "env" (data.parse [] env)) "/runs"
     assertEqual "flag" (← parsed "flag" (data.parse ["--data", "d"] env)) "d",
 

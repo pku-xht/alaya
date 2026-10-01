@@ -84,8 +84,8 @@ CONFIG=benchmarks/vero/mini-vero-codeproof.json
 # For MODE=proof: CONFIG=agents/mini-vero-default.json
 ROOT=$(.lake/build/bin/alaya root "$RUN/source" \
   --task-file "$RUN/MINIVERO_TASK.md" --agent "$CONFIG" \
-  --image "$AGENT" --container-user "$(id -u):$(id -g)" --data "$RUN/audit")
-.lake/build/bin/alaya resume "$ROOT" --model PROVIDER:MODEL \
+  --image "$AGENT" --data "$RUN/audit")
+.lake/build/bin/alaya resume "$ROOT" --model PROVIDER:MODEL --container-user "$(id -u):$(id -g)" \
   --time-budget 60 --data "$RUN/audit" --json > "$RUN/first.jsonl"
 ```
 
@@ -104,8 +104,8 @@ checkpoint. A submitted run exits 0. The model provider requires its usual
 credentials; the deterministic acceptance test below does not.
 
 On Linux, Alaya defaults to the host UID:GID; the explicit `--container-user`
-above documents that choice. Every command, the grader's included, runs as that
-user. The root records the resolved image ID and the workdir (`/workspace`
+above documents that choice. Every command of the run, and by default the grader,
+runs as that user. The root records the resolved image ID and the workdir (`/workspace`
 unless `root --workdir` says otherwise), and every step and evaluation inherits
 them.
 

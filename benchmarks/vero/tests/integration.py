@@ -195,12 +195,13 @@ def test_mode(args, mode):
         mounts = run("docker", "inspect", "--format", "{{json .Mounts}}", container,
                      codes=(0, 1))
         if mounts.returncode == 0:
-            assert not any(m["Source"].startswith(str(data / "eval") + "/")
+            assert not any(m["Source"].startswith(str(data / "tmp") + "/")
                            for m in json.loads(mounts.stdout)), "grader container survived timeout"
     retried = alaya("eval", root, "--grader",
                    "test ! -e stale.txt && printf '1..1\\nok 1 - clean retry\\n'")
     assert read_state(state_hash(retried.stdout))["evaluation"]["status"] == "pass"
-    assert not list((data / "eval").iterdir())
+    # Every command's scratch, a grader's checkout included, is gone when the command ends.
+    assert not list((data / "tmp").iterdir())
     alaya("html", directory / "report.html")
     result = {"mode": mode, "root": root, "agent_image": root_state["image"],
               "blank": blank, "correct": correct, "tampered": rejected,

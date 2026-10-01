@@ -318,7 +318,7 @@ def act (executor : Executor) (workspace : Agent.Workspace) (call : Chat.ToolCal
     Result Lean.Json := do
   match call.name, Tools.Bash.command call.arguments with
   | "bash", .ok command => Tools.Bash.act executor workspace command
-  | _, _ => throw <| .configuration s!"not a runnable bash call: {call.name}"
+  | _, _ => throw <| .input s!"not a runnable bash call: {call.name}"
 
 /-- The mini agent over an executor. -/
 def agent (executor : Executor) (config : Config) : Agent := {
