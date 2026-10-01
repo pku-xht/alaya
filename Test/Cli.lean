@@ -116,33 +116,31 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
 private def compressed (json : Lean.Json) : String := json.compress
 
 def agentsSuite : Suite := suite "cli.agents" #[
-  test "each family's default file reads back as itself, complete" do
-    for family in Agent.Families.all do
-      let path := ("agents" : System.FilePath) / s!"{family.name}-default.json"
-      let built ← assertOk <| Agent.Families.fromFile path
-      let .ok onDisk := Lean.Json.parse (← IO.FS.readFile path) | fail s!"{path} is not JSON"
-      assertEqual s!"{family.name} defaults" (compressed built.config) (compressed onDisk)
-      -- A file naming only the family is the same agent: the file lists every default.
-      let minimal ← assertOk <| Agent.Families.fromJson (.mkObj [("family", family.name)])
-      assertEqual s!"{family.name} minimal" (compressed minimal.config) (compressed onDisk),
+  test "an agent's name alone is its complete defaults, and they read back as themselves" do
+    for definition in Agent.Catalog.all do
+      let defaults ← assertOk <| Agent.Catalog.resolve definition.name #[]
+      assertEqual s!"{definition.name} names itself" (defaults.config.getObjValAs? String "name").toOption
+        (some definition.name)
+      let again ← assertOk <| Agent.Catalog.fromJson defaults.config
+      assertEqual s!"{definition.name} round-trips" (compressed again.config) (compressed defaults.config),
 
   test "a configuration may leave fields out, but not misname or mistype one" do
     let refused (label : String) (json : Lean.Json) (expected : String) : TestM Unit :=
-      assertError label (Agent.Families.fromJson json) fun
+      assertError label (Agent.Catalog.fromJson json) fun
         | .input m => (m.splitOn expected).length > 1
         | _ => false
-    refused "no family" (.mkObj [("step_limit", 1)]) "needs a \"family\""
-    refused "unknown family" (.mkObj [("family", "mini-swf")]) "unknown agent family"
-    refused "typo" (.mkObj [("family", "mini-swe"), ("step_limt", 1)]) "unknown field 'step_limt'"
-    refused "type" (.mkObj [("family", "mini-swe"), ("recover_output", "yes")]) "must be true or false"
-    refused "mode" (.mkObj [("family", "mini-vero"), ("mode", "both")]) "unknown mode"
-    refused "nested" (.mkObj [("family", "mini-swe"), ("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
-    let file := (← scratch) / "arm.json"
-    IO.FS.writeFile file "{\"family\": \"mini-vero\", \"mode\": \"codeproof\", \"recover_output\": true}"
-    let built ← assertOk <| Agent.Families.fromFile file
-    assertEqual "tools follow the file" (built.tools.map (·.name)) #["bash", "submit", "read_output", "time_budget"]
-    assertError "missing file" (Agent.Families.fromFile ((← scratch) / "none.json")) fun
-      | .input m => m.startsWith "cannot read"
+    refused "no name" (.mkObj [("step_limit", 1)]) "needs a \"name\""
+    refused "unknown agent" (.mkObj [("name", "mini-swf")]) "unknown agent"
+    refused "typo" (.mkObj [("name", "mini-swe"), ("step_limt", 1)]) "unknown field 'step_limt'"
+    refused "type" (.mkObj [("name", "mini-swe"), ("recover_output", "yes")]) "must be true or false"
+    refused "mode" (.mkObj [("name", "mini-vero"), ("mode", "both")]) "unknown mode"
+    refused "nested" (.mkObj [("name", "mini-swe"), ("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
+    refused "own field, misnamed" (.mkObj [("name", "mini-vero"), ("stepp", 1)]) "mode, time_budget"
+    let built ← assertOk <| Agent.Catalog.resolve "mini-vero" #[(["mode"], "codeproof"), (["recover_output"], true)]
+    assertEqual "tools follow the settings" (built.tools.map (·.name)) #["bash", "submit", "read_output", "time_budget"]
+    assertEqual "a nested setting" ((← assertOk <| Agent.Catalog.resolve "mini-swe" #[(["executor", "timeout_seconds"], 5)]).executorConfig.timeoutSeconds) 5
+    assertError "the name is not a setting" (Agent.Catalog.resolve "mini-swe" #[(["name"], "mini-vero")]) fun
+      | .input m => (m.splitOn "--agent NAME").length > 1
       | _ => false,
 
   test "a root records its agent, and every state of the run finds it there" do
@@ -150,7 +148,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let workspaces ← Testing.workspaces
     let project := (← scratch) / "proj"
     IO.FS.createDirAll project
-    let built ← assertOk <| Agent.Families.fromJson (.mkObj [("family", "mini-swe"), ("step_limit", 7)])
+    let built ← assertOk <| Agent.Catalog.fromJson (.mkObj [("name", "mini-swe"), ("step_limit", 7)])
     let root ← assertOk <| Trajectory.createRoot store workspaces #[] project (← testImage) (some "t")
       (agent := built.config)
     let child ← assertOk <| Trajectory.tell store root "hello"
@@ -160,7 +158,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let lines ← assertOk <| Trajectory.showLines store root
     check (lines.any fun l => l.startsWith "agent    " && (l.splitOn "\"step_limit\":7").length > 1) "show prints it"
     let tree ← assertOk <| Trajectory.treeLines store
-    check (tree.any fun l => (l.splitOn "root  [mini-swe]").length > 1) s!"tree names the family: {tree}"
+    check (tree.any fun l => (l.splitOn "root  [mini-swe]").length > 1) s!"tree names the agent: {tree}"
 ]
 
 private def view : Cli.Spec (Bool × String) :=

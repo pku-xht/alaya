@@ -56,7 +56,7 @@ cannot download, since they run without network. From the repository root:
 docker build -t alaya-bija example/bija
 
 export ALAYA_DATA=$PWD/bija-runs   # created by root; every command below uses it
-root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agent agents/mini-swe-default.json \
+root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agent mini-swe \
   --image alaya-bija)
 
 alaya resume "$root" --model dgx:gpt-oss-120b

@@ -45,8 +45,7 @@ def main():
 
     def grade(name, source, mode, status, passed, total, benchmark=FIXTURE, command=None):
         root = state_hash(run(alaya, "root", source, "--task", name,
-                              "--agent", ROOT / ("agents/mini-vero-default.json" if mode == "proof" else
-                                                "benchmarks/vero/mini-vero-codeproof.json"),
+                              "--agent", "mini-vero", "--set", f"agent.mode={mode}",
                               "--image", args.agent_image, "--data", data).stdout)
         command = command or f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader"
         result = run(alaya, "eval", root, "--input", benchmark,

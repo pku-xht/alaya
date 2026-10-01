@@ -77,7 +77,7 @@ private def executorFor (run : Executor.Docker.RunOptions) (state : State) (conf
 
 /-- The agent of an existing run: what its root recorded. -/
 private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Agent := do
-  Agent.Families.fromJson (← agentOf store hash)
+  Agent.Catalog.fromJson (← agentOf store hash)
 
 /-- What `resume` takes: what this invocation samples from, and its limits. The image, the
 workdir and the agent are the root's. -/
@@ -172,6 +172,26 @@ private def hashArg (help : String := "the state; any unambiguous prefix") : Cli
 
 /-! ### Creating and growing a run -/
 
+/-- `--agent NAME`: an agent the catalog has. -/
+private def agentName : Cli.Value String :=
+  .enum "NAME" (Agent.Catalog.all.map fun d => (d.name, d.name)).toList
+
+/-- `--set agent.PATH=VALUE`: one field of the agent's configuration, over its defaults. The
+value is read as JSON when it parses, and as a string otherwise. -/
+private def setting : Cli.Value (List String × Lean.Json) := ⟨"agent.PATH=VALUE", fun text =>
+  match text.splitOn "=" with
+  | path :: value :: rest =>
+    let value := "=".intercalate (value :: rest)
+    match path.splitOn "." with
+    | "agent" :: keys@(_ :: _) =>
+      if keys.any (·.isEmpty) then .error s!"has an empty key in '{path}'"
+      else .ok (keys, (Lean.Json.parse value).toOption.getD (.str value))
+    | _ => .error s!"sets a field of the agent, agent.FIELD, not '{path}'"
+  | _ => .error s!"expects agent.PATH=VALUE, got '{text}'"⟩
+
+private def agentSettings : Cli.Spec (Array (List String × Lean.Json)) :=
+  Cli.repeated "set" setting "a field of the agent's configuration, over its defaults, e.g. agent.mode=codeproof"
+
 /-- What `root` takes. -/
 private structure RootArgs where
   data : System.FilePath
@@ -179,7 +199,8 @@ private structure RootArgs where
   project? : Option System.FilePath
   image : String
   workdir : String
-  agent : System.FilePath
+  agent : String
+  settings : Array (List String × Lean.Json)
 
 private def RootArgs.cli : Cli.Spec RootArgs :=
   RootArgs.mk
@@ -191,10 +212,12 @@ private def RootArgs.cli : Cli.Spec RootArgs :=
     <*> Cli.flag "image" (.string "IMAGE") "the container image every command runs in, pinned by digest"
     <*> Cli.flagD "workdir" (.string "PATH") Executor.Docker.defaultWorkdir
       "where the workspace is mounted in the image"
-    <*> Cli.flag "agent" (.path "FILE")
-      s!"the agent configuration, e.g. agents/mini-swe-default.json; families: {Agent.Families.names}"
+    <*> Cli.flag "agent" agentName s!"the agent: {Agent.Catalog.names}"
+    <*> agentSettings
 
 private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
+  -- A configuration that is wrong is said so before anything is created.
+  let spec ← Agent.Catalog.resolve a.agent a.settings
   let task ← a.task.read "task"
   -- Before the data directory is created: inside the project it would become part of it.
   if let some project := a.project? then
@@ -203,7 +226,6 @@ private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
     Executor.Docker.checkWorkdir a.workdir #[graderInput]
     let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
     let uname ← Executor.Docker.uname settings
-    let spec ← Agent.Families.fromFile a.agent
     let log := spec.initialLog task uname
     let project ← rootProject data settings (a.project?.map (·.toString))
     let hash ← createRoot data.store data.workspaces log project settings.image (some task) spec.config
@@ -238,6 +260,22 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
       | .continue => pure 0
     finally
       Result.fromIO Error.storage rt.executor.close
+
+/-! ### Configuration -/
+
+/-- The agents and their defaults, or the configuration `root` would record for these flags. -/
+private def configRun (agent? : Option String) (settings : Array (List String × Lean.Json))
+    (out : Cli.Out) : Result UInt32 := do
+  match agent? with
+  | none =>
+    if !settings.isEmpty then throw <| .input "--set needs --agent NAME, the agent it changes"
+    for definition in Agent.Catalog.all do
+      let agent ← Agent.Catalog.resolve definition.name #[]
+      out.record (.mkObj [("agent", agent.config)]) agent.config.pretty
+  | some name =>
+    let agent ← Agent.Catalog.resolve name settings
+    out.record (.mkObj [("agent", agent.config)]) agent.config.pretty
+  pure 0
 
 /-! ### Grading -/
 
@@ -446,9 +484,14 @@ private def commands : Array Cli.Command := #[
     summary := "Create a root: the agent's opening prompts for a task, and a snapshot of the project."
     examples := #[
       "alaya root --task 'Add a hello.py that prints hello' ./project " ++
-        "--agent agents/mini-swe-default.json --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
-      "alaya root --task-file TASK.md --agent agents/mini-vero-default.json --image my-task:1 --workdir /testbed"]
+        "--agent mini-swe --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
+      "alaya root --task-file TASK.md --agent mini-vero --set agent.mode=codeproof --image my-task:1 --workdir /testbed"]
     spec := rootRun <$> RootArgs.cli },
+  { name := "config"
+    summary := "The agents with their defaults, or the configuration root would record; creates nothing."
+    examples := #["alaya config", "alaya config --agent mini-vero --set agent.mode=codeproof"]
+    spec := configRun <$> Cli.flag? "agent" agentName s!"the agent: {Agent.Catalog.names}"
+      <*> agentSettings },
   { name := "resume"
     summary := "Grow one continuation until the run ends, asks a question, or reaches a limit."
     examples := #["alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash --time-budget 3600 --json",

@@ -38,11 +38,10 @@ structure Config where
   timeBudget : Bool := false
   deriving Inhabited
 
-/-- The configuration as JSON: the shape of `agents/mini-swe-default.json`, and what a root
-records. -/
+/-- The configuration as JSON: what a root records, and what `alaya config` shows. -/
 def Config.toJson (config : Config) : Lean.Json :=
   .mkObj [
-    ("family", "mini-swe"),
+    ("name", "mini-swe"),
     ("step_limit", (config.stepLimit : Lean.Json)),
     ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
     ("executor", .mkObj [
@@ -51,10 +50,12 @@ def Config.toJson (config : Config) : Lean.Json :=
     ("recover_output", (config.recoverOutput : Lean.Json)),
     ("ask_user", (config.askUser : Lean.Json))]
 
-/-- Reads a configuration; a field left out is `defaults`', and an unknown one is an error. -/
-def Config.fromJson (json : Lean.Json) (defaults : Config := {}) : Except String Config := do
+/-- Reads a configuration; a field left out is `defaults`', and an unknown one is an error.
+`own` names the fields of an agent built on this one, which it reads itself. -/
+def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array String := #[]) :
+    Except String Config := do
   let object ← ConfigJson.object json
-    #["family", "step_limit", "max_consecutive_format_errors", "executor", "recover_output", "ask_user"]
+    (#["name", "step_limit", "max_consecutive_format_errors", "executor", "recover_output", "ask_user"] ++ own)
   let executor ← match ← object.field? "executor" with
     | none => pure defaults.executor
     | some json => do

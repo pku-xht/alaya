@@ -94,21 +94,16 @@ private def checkQuestionView (dialogue : Dialogue) (answer : String)
   checkQuestionResult dialogue (.str answer) expectedArguments
 
 def suite : Suite := Testing.suite "ask_user" #[
-  test "both families keep their default prompts and tools when asking is disabled" do
-    for family in Families.all do
-      let minimal ← assertOk <| Families.fromJson (.mkObj [("family", family.name)])
-      let off ← assertOk <| Families.fromJson
-        (.mkObj [("family", family.name), ("ask_user", false)])
-      let timeTools := if family.name == "mini-vero" then #["time_budget"] else #[]
+  test "both agents keep their default prompts and tools when asking is disabled" do
+    for definition in Catalog.all do
+      let minimal ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name)])
+      let off ← assertOk <| Catalog.fromJson
+        (.mkObj [("name", definition.name), ("ask_user", false)])
+      let timeTools := if definition.name == "mini-vero" then #["time_budget"] else #[]
       assertEqual "default tools" (minimal.tools.map (·.name)) (#["bash", "submit"] ++ timeTools)
       assertEqual "explicit off config" off.config.compress minimal.config.compress
       assertEqual "default serializes ask_user false"
         (minimal.config.getObjValAs? Bool "ask_user").toOption (some false)
-      let defaultPath : System.FilePath := "agents" / s!"{family.name}-default.json"
-      let defaultText ← IO.FS.readFile defaultPath
-      let defaultJson ← assertOk <| Result.fromExcept Error.input (Lean.Json.parse defaultText)
-      assertEqual "default JSON explicitly contains ask_user false"
-        (defaultJson.getObjValAs? Bool "ask_user").toOption (some false)
       let request (spec : Agent) : Lean.Json :=
         ({ messages := spec.view (spec.initialLog "task" testUname), tools := spec.tools } : Chat.Request).toJson
       assertEqual "explicit off opening" (request off).compress (request minimal).compress
@@ -126,8 +121,8 @@ def suite : Suite := Testing.suite "ask_user" #[
       "AT LEAST ONE tool call: bash, or read_output", "Every response needs at least one tool call: 'bash'",
       "exactly one bash tool call"]
     for recover in #[false, true] do
-      for family in Families.all do
-        let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name),
+      for definition in Catalog.all do
+        let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name),
           ("ask_user", true), ("recover_output", recover)])
         let opening := (built.initialLog "task" testUname).foldl (init := "") fun text event =>
           match event with
@@ -158,25 +153,22 @@ def suite : Suite := Testing.suite "ask_user" #[
         | .actions actions => check (actions.size == 1) "a lone ask is valid with recovery and time-budget tools"
         | _ => fail "other optional tools must not prevent a lone ask",
 
-  test "JSON files enable asking in both families, round-trip, and reject wrong types" do
-    for family in Families.all do
-      let path := (← scratch) / s!"{family.name}.json"
-      let json := Lean.Json.mkObj [("family", family.name), ("ask_user", true),
-        ("recover_output", true), ("step_limit", 11), ("max_consecutive_format_errors", 2)]
-      IO.FS.writeFile path json.pretty
-      let built ← assertOk <| Families.fromFile path
-      let timeTools := if family.name == "mini-vero" then #["time_budget"] else #[]
+  test "settings enable asking in both agents, round-trip, and reject wrong types" do
+    for definition in Catalog.all do
+      let built ← assertOk <| Catalog.resolve definition.name #[(["ask_user"], true),
+        (["recover_output"], true), (["step_limit"], 11), (["max_consecutive_format_errors"], 2)]
+      let timeTools := if definition.name == "mini-vero" then #["time_budget"] else #[]
       assertEqual "enabled tools" (built.tools.map (·.name))
         (#["bash", "submit", "read_output"] ++ timeTools ++ #["ask_user"])
       assertEqual "recordable flag" (built.config.getObjValAs? Bool "ask_user").toOption (some true)
-      let restored ← assertOk <| Families.fromJson built.config
+      let restored ← assertOk <| Catalog.fromJson built.config
       assertEqual "complete config round-trip" restored.config.compress built.config.compress
       check ((built.initialLog "task" testUname).any fun
         | .message (.user text) => contains text "ask_user"
         | _ => false) "the enabled agent must tell the model it can ask"
       for bad in #[Lean.Json.null, .str "true", .num 1, .arr #[], .mkObj []] do
-        assertError "ask_user type" (Families.fromJson
-          (.mkObj [("family", family.name), ("ask_user", bad)])) fun
+        assertError "ask_user type" (Catalog.fromJson
+          (.mkObj [("name", definition.name), ("ask_user", bad)])) fun
             | .input message => contains message "ask_user" && contains message "true or false"
             | _ => false,
 
@@ -277,13 +269,11 @@ def suite : Suite := Testing.suite "ask_user" #[
       ("open_ended", args "How should we handle the boundary case?" #[] "open_ended",
         #["  Keep the public API.\nPreserve the literal \"[]\" in the response.\n理由：边界条件不同。\n",
           "[]", String.ofList [Char.ofNat 0x200B]])]
-    for family in Families.all do
+    for definition in Catalog.all do
       for (questionType, arguments, answers) in cases do
-        let base := (← scratch) / s!"{family.name}-{questionType}"
+        let base := (← scratch) / s!"{definition.name}-{questionType}"
         IO.FS.createDirAll base
-        let configPath := base / "agent.json"
-        IO.FS.writeFile configPath (Lean.Json.mkObj [("family", family.name), ("ask_user", true)]).pretty
-        let built ← assertOk <| Families.fromFile configPath
+        let built ← assertOk <| Catalog.resolve definition.name #[(["ask_user"], true)]
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
@@ -318,8 +308,6 @@ def suite : Suite := Testing.suite "ask_user" #[
           | .input _ => true
           | _ => false
         assertEqual "only question sampled" (← requests.get).size 1
-        -- Changing the source file cannot disable the capability on a recorded run.
-        IO.FS.writeFile configPath (Lean.Json.mkObj [("family", family.name), ("ask_user", false)]).pretty
         -- Reopening the store must reconstruct the form before enforcing its answer rules.
         let reopened ← assertOk <| Store.create (base / "states")
         let some persistedQuestion := (← assertOk <| getState reopened waitingHash).question?
@@ -344,7 +332,7 @@ def suite : Suite := Testing.suite "ask_user" #[
             "an explicit answer, including none_of_above, must differ from not answering"
           let recorded ← assertOk <| agentOf store answered
           assertEqual "recorded root config" recorded.compress built.config.compress
-          let restored ← assertOk <| Families.fromJson recorded
+          let restored ← assertOk <| Catalog.fromJson recorded
           checkQuestionView (restored.view (← assertOk <| logOf store answered)) answer arguments
           let rebuilt : Runtime := { rt with agent := restored }
           let final ← resumed <| resume rebuilt "scripted" answered (fun _ => pure ())
@@ -371,11 +359,11 @@ def suite : Suite := Testing.suite "ask_user" #[
       ("yes_no", args "Keep the public API?" #[] "yes_no", "no"),
       ("single_choice", args, "none_of_above"),
       ("open_ended", args "What should change?" #[] "open_ended", unavailable.compress)]
-    for family in Families.all do
+    for definition in Catalog.all do
       for (questionType, arguments, ordinaryAnswer) in cases do
-        let base := (← scratch) / s!"{family.name}-{questionType}"
+        let base := (← scratch) / s!"{definition.name}-{questionType}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name), ("ask_user", true)])
+        let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name), ("ask_user", true)])
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
@@ -430,10 +418,10 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "HTML report retains structured status" content.compress unavailable.compress,
 
   test "unavailable answers retain exhausted time and step limits" do
-    for family in Families.all do
-      let base := (← scratch) / family.name
+    for definition in Catalog.all do
+      let base := (← scratch) / definition.name
       IO.FS.createDirAll base
-      let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name),
+      let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name),
         ("ask_user", true), ("step_limit", 1)])
       let store ← assertOk <| Store.create (base / "states")
       let workspaces ← Testing.workspaces
@@ -485,11 +473,11 @@ def suite : Suite := Testing.suite "ask_user" #[
           "{\"status\":\"unavailable\"}"], "none_of_above"),
       ("open_ended", args "What should change?" #[] "open_ended", blanks,
         String.ofList [Char.ofNat 0x00A0] ++ " Keep the API. \n" ++ String.ofList [Char.ofNat 0x3000])]
-    for family in Families.all do
+    for definition in Catalog.all do
       for (questionType, arguments, invalid, valid) in cases do
-        let base := (← scratch) / s!"{family.name}-{questionType}"
+        let base := (← scratch) / s!"{definition.name}-{questionType}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name), ("ask_user", true)])
+        let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name), ("ask_user", true)])
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
@@ -573,11 +561,11 @@ def suite : Suite := Testing.suite "ask_user" #[
     expectSample (next { enabled with stepLimit := 0 } {} answered),
 
   test "step and resume enforce the recorded limit before sampling after a reply" do
-    for family in Families.all do
+    for definition in Catalog.all do
       for useResume in #[false, true] do
-        let base := (← scratch) / s!"{family.name}-{useResume}"
+        let base := (← scratch) / s!"{definition.name}-{useResume}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name),
+        let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name),
           ("ask_user", true), ("step_limit", 1)])
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
@@ -593,7 +581,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         check (← assertOk <| getState store stopped).question?.isSome "the allowed model turn asks"
         let answered ← assertOk <| reply store stopped "2"
         let recorded ← assertOk <| agentOf store answered
-        let restored ← assertOk <| Families.fromJson recorded
+        let restored ← assertOk <| Catalog.fromJson recorded
         let rebuilt := { rt with agent := restored }
         let final ← if useResume then
             resumed <| resume rebuilt "scripted" answered (fun _ => pure ())
@@ -611,10 +599,10 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "refusing terminal resume does not sample" (← requests.get).size 1,
 
   test "reply preserves recorded running time and an exhausted budget never samples" do
-    for family in Families.all do
-      let base := (← scratch) / family.name
+    for definition in Catalog.all do
+      let base := (← scratch) / definition.name
       IO.FS.createDirAll base
-      let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name), ("ask_user", true)])
+      let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name), ("ask_user", true)])
       let store ← assertOk <| Store.create (base / "states")
       let workspaces ← Testing.workspaces
       let project := base / "project"
@@ -647,7 +635,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "the human reply adds no running time"
           (← assertOk <| getState reopened answer).elapsedMs? none
       let recorded ← assertOk <| agentOf reopened answered
-      let restored ← assertOk <| Families.fromJson recorded
+      let restored ← assertOk <| Catalog.fromJson recorded
       let (executor, calls) ← countingExecutor
       let (model, requests) ← scripted #[response #[submit]]
       let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", executor, model, agent := restored, budgetMs? := some 1000 }

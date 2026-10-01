@@ -216,7 +216,7 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     match MiniSwe.parseActions (turn #[call "t" "time_budget"]) with
     | .formatError message => check (contains message "Unknown tool 'time_budget'") "unknown"
     | .actions _ => fail "mini-swe must not accept time_budget"
-    assertError "config" (Agent.Families.fromJson (.mkObj [("family", "mini-swe"), ("time_budget", true)])) fun
+    assertError "config" (Agent.Catalog.fromJson (.mkObj [("name", "mini-swe"), ("time_budget", true)])) fun
       | .input m => contains m "unknown field 'time_budget'"
       | _ => false,
 

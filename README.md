@@ -38,7 +38,7 @@ export ALAYA_DATA=$PWD/runs    # the data directory; `root` creates it
 
 # Run the agent until it submits, then grade where it ended.
 root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton \
-  --agent agents/mini-swe-default.json --image alaya-bija)
+  --agent mini-swe --image alaya-bija)
 alaya resume "$root" --model PROVIDER:MODEL    # one line per new state; providers: docs/llm-api.md
 alaya eval END --input example/bija --grader /grader/grade.py --timeout 1800
 

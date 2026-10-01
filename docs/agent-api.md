@@ -189,9 +189,10 @@ structure Agent where
 
 The tools themselves live in `Alaya.Agent.Tools`, each defined on its own — schema, argument
 reading, and what answers a call — with no knowledge of any agent; an agent composes them.
-`Alaya.Agent.Families` is how the command line gets an agent: a *family* (`mini-swe`,
-`mini-vero`) reads a JSON configuration into an `Agent`, and the root records its `config`, from
-which every later command builds the same agent again (`docs/cli.md` §5).
+`Alaya.Agent.Catalog` is how the command line gets an agent: each agent it can name (`mini-swe`,
+`mini-vero`) has its defaults in code and reads a configuration into an `Agent`, and the root
+records its complete `config`, from which every later command builds the same agent again
+(`docs/cli.md` §5).
 
 There is one loop that carries out directives, the trajectory's (`Trajectory.resume`,
 `docs/trajectory-schema.md` §2): follow `next` until it stops, sampling from `view log` and

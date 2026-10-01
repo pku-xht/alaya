@@ -9,8 +9,9 @@ how it fails.
 ## 1. Commands
 
 ```
-alaya root --task TEXT PROJECT --agent FILE --image IMAGE [--workdir PATH]   create a root from a project directory
-alaya root --task TEXT --agent FILE --image IMAGE --workdir PATH   …or from the image's own PATH
+alaya root --task TEXT PROJECT --agent NAME [--set agent.PATH=VALUE …] --image IMAGE [--workdir PATH]   create a root
+alaya root --task TEXT --agent NAME --image IMAGE --workdir PATH   …from the image's own PATH
+alaya config [--agent NAME] [--set agent.PATH=VALUE …]   the agents and their defaults, or what root would record
 alaya resume HASH --model P:M [--turns N] [--time-budget S]   grow one continuation until it ends, asks, or reaches a limit
 alaya eval   HASH --grader CMD [--input DIR] [--grader-image IMAGE] [--timeout S]   grade a state
 alaya commit HASH DIR [--note NOTE]              record a hand-edited workspace as a child, telling the agent
@@ -125,17 +126,21 @@ opening log and the root's note, so the first request carries all of it without 
 task specification too long for a command's output preview reaches the model whole, its middle
 included.
 
-**The agent.** An agent is a *family* — `mini-swe` (`docs/miniswe.md`) or `mini-vero`
-(`docs/minivero.md`) — and a *configuration*: a JSON object with a `family` field and the
-family's own fields, every one of which may be left out for its default, and none of which may
-be misspelt. A configuration is a file: `root --agent FILE` names it, and that is the one way to
-configure an agent. `agents/` in the repository holds the families' defaults,
-`mini-swe-default.json` and `mini-vero-default.json`, complete, which is the documentation of
-the fields; a variant for an experiment is a copy with a field changed, named for what it
-changes. The complete configuration is recorded in the root (`docs/trajectory-schema.md` §6,
-`agent`), shown by `show` and, by family, by `tree`, and every later command — `resume`, `html`,
-`show --view` — builds the agent from it, so a run is continued by the agent that started it;
-none of them takes `--agent`.
+**The agent.** `--agent NAME` names an agent — `mini-swe` (`docs/miniswe.md`) or `mini-vero`
+(`docs/minivero.md`) — whose defaults are in code. `--set agent.PATH=VALUE`, repeatable and
+applied in order, overrides one field: PATH continues into the configuration
+(`agent.mode`, `agent.step_limit`, `agent.executor.timeout_seconds`), and VALUE is read as
+JSON when it parses and as a string otherwise. Each `--set` replaces exactly one key, with no
+deep merging; an unknown field, or a value of the wrong type, is an input error naming it.
+There are no configuration files: an experiment's arms are named in the script that runs it.
+
+`alaya config` lists every agent with its complete defaults, and
+`alaya config --agent NAME --set …` prints exactly the configuration `root` would record,
+creating nothing — so a variant can be checked before a run is spent on it. With `--json`, each
+is one `{agent}` object. The complete configuration — the agent's `name` and every field — is
+recorded in the root (`docs/trajectory-schema.md` §6, `agent`), shown by `show` and, by name, by
+`tree`, and every later command — `resume`, `html`, `show --view` — builds the agent from it, so
+a run is continued by the agent that started it; none of them takes `--agent` or `--set`.
 
 **The image.** `root` requires `--image`. The image is resolved to a digest and recorded, and
 every later command runs in it: `resume` takes no `--image`. A recorded image that is missing is
