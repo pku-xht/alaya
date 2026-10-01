@@ -133,6 +133,9 @@ def suite : Suite := Testing.suite "trajectory" #[
     -- The context button's figures: the estimate, and the root's model's context size.
     check ((state.getObjValAs? Nat "contextTokens").toOption.any (· > 0)) "no context estimate"
     assertEqual "context size" (state.getObjValAs? Nat "contextSize").toOption (some 131072)
+    let some rootJson := states.find? fun s => (s.getObjVal? "parent").toOption == some .null
+      | fail "the root is missing from the report"
+    assertEqual "the root's model" ((rootJson.getObjVal? "model").toOption.map (·.compress)) (some testModel.compress)
     let changes ← assertOk <| Result.fromExcept Error.storage (state.getObjVal? "changes" >>= Lean.Json.getArr?)
     let rows := changes.map fun c =>
       ((c.getObjVal? "path" >>= Lean.Json.getStr?).toOption.getD "",
