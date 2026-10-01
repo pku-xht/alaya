@@ -134,7 +134,8 @@ named in the script that runs it.
   (`docs/minivero.md`). `--model NAME` names a model by its ID as its creator publishes it, with
   no provider prefix — `gpt-oss-120b`, `gpt-6-luna`, `deepseek-v4.1-flash` — whose defaults are a row of the
   model table: its context and output sizes when known, default `params`, and whether its earlier
-  reasoning is sent back (`echo_reasoning`, on for thinking-mode DeepSeek models).
+  reasoning is sent back (`echo_reasoning`: `text` for thinking-mode DeepSeek models, `items`
+  for OpenAI reasoning models through the Responses API, `none` otherwise; `docs/llm-api.md` §3).
 - `--set PATH=VALUE`, repeatable and applied in order, overrides one field. PATH starts with
   `agent.` or `model.` and continues into that object (`agent.mode`,
   `agent.executor.timeout_seconds`, `model.params.reasoning_effort`, `model.context_tokens`), and

@@ -125,14 +125,20 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
 
   test "a route that cannot meet the recorded model refuses it before any request" do
     let some dgx := Provider.named? "dgx" | fail "no dgx"
-    let spec : Models.Spec := { name := "m", echoReasoning := true, contextTokens? := some 100000 }
+    let spec : Models.Spec := { name := "m", echoReasoning := .text, contextTokens? := some 100000 }
     let refused (label : String) (route : Provider.Route) (expected : String) : TestM Unit := do
       match Provider.check dgx spec route with
       | .error m => check ((m.splitOn expected).length > 1) s!"{label}: {m}"
       | .ok _ => fail s!"{label}: accepted"
     refused "echo rejected" { name := "m", reasoningEcho := .rejected } "rejects"
     refused "short context" { name := "m", contextTokens? := some 32768 } "short of the run's 100000"
-    match Provider.check dgx { spec with echoReasoning := false } { name := "m", reasoningEcho := .required } with
+    refused "text through Responses" { name := "m", api := .responses } "has no field for"
+    match Provider.check dgx { spec with echoReasoning := .items } { name := "m" } with
+    | .error m => check ((m.splitOn "need the Responses API").length > 1) m
+    | .ok _ => fail "items through Chat Completions"
+    check (Provider.check dgx { spec with echoReasoning := .items } { name := "m", api := .responses }).toOption.isSome
+      "items through Responses"
+    match Provider.check dgx { spec with echoReasoning := .none } { name := "m", reasoningEcho := .required } with
     | .error m => check ((m.splitOn "needs m's earlier reasoning").length > 1) m
     | .ok _ => fail "echo required but not sent"
     check (Provider.check dgx spec { name := "m", contextTokens? := some 200000 }).toOption.isSome

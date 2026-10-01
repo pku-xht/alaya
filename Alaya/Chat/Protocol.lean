@@ -14,10 +14,11 @@ structure ToolCall where
 inductive Message where
   | system (content : String)
   | user (content : String)
-  /-- The provider's `reasoning_content`, carried so it can be echoed back when a provider
-  requires it. -/
+  /-- `reasoning?` is the reasoning as text: DeepSeek's `reasoning_content`, carried so it can be
+  echoed back when a provider requires it, or the Responses API's summary. `reasoningItems` are
+  the Responses API's reasoning items, opaque and encrypted, sent back as they were received. -/
   | assistant (content? : Option String := none) (toolCalls : Array ToolCall := #[])
-      (reasoning? : Option String := none)
+      (reasoning? : Option String := none) (reasoningItems : Array Lean.Json := #[])
   | tool (callId : String) (content : Lean.Json)
   deriving Inhabited
 
@@ -37,7 +38,8 @@ private def toolCallToJson (call : ToolCall) : Lean.Json :=
 def toJson : Message -> Lean.Json
   | .system content => .mkObj [("role", "system"), ("content", content)]
   | .user content => .mkObj [("role", "user"), ("content", content)]
-  | .assistant content? toolCalls reasoning? =>
+  -- Reasoning items have no Chat Completions form; the Responses transport sends them.
+  | .assistant content? toolCalls reasoning? _ =>
     let json := Lean.Json.mkObj [("role", "assistant")]
     let json := match content? with | some content => json.setObjVal! "content" content | none => json
     let json := match reasoning? with
@@ -134,13 +136,22 @@ private def addFallbackInstruction (messages : Array Message) (schema : JsonSche
     | message :: rest => message :: addToLastUser rest
   (addToLastUser messages.toList.reverse).reverse.toArray
 
+/-- The messages as sent with `structuredOutput`: a fenced-JSON instruction added when the
+provider has no native structured output. -/
+def messagesFor (request : Request) (structuredOutput : StructuredOutput) : Array Message :=
+  match structuredOutput, request.responseFormat with
+  | .markdownCodeFence, .jsonSchema _ schema => addFallbackInstruction request.messages schema
+  | _, _ => request.messages
+
+/-- The response format as sent with `structuredOutput`. -/
+def responseFormatFor (request : Request) (structuredOutput : StructuredOutput) : ResponseFormat :=
+  match structuredOutput with
+  | .native => request.responseFormat
+  | .markdownCodeFence => .text
+
 def toJson (request : Request) (structuredOutput := StructuredOutput.native) : Lean.Json :=
-  let messages := match structuredOutput, request.responseFormat with
-    | .markdownCodeFence, .jsonSchema _ schema => addFallbackInstruction request.messages schema
-    | _, _ => request.messages
-  let responseFormat := match structuredOutput with
-    | .native => request.responseFormat
-    | .markdownCodeFence => .text
+  let messages := request.messagesFor structuredOutput
+  let responseFormat := request.responseFormatFor structuredOutput
   let json := Lean.Json.mkObj [
     ("messages", .arr <| messages.map Message.toJson),
     ("response_format", responseFormat.toJson)
@@ -171,12 +182,17 @@ structure Response where
   usage? : Option TokenUsage := none
   /-- The provider's `finish_reason` for this choice, when reported. -/
   finishReason? : Option String := none
-  /-- The provider's `reasoning_content`, when it reports one (see `Message.assistant`). -/
+  /-- The reasoning as text, when the provider reports it (see `Message.assistant`). -/
   reasoning? : Option String := none
+  /-- The Responses API's reasoning items, opaque (see `Message.assistant`). -/
+  reasoningItems : Array Lean.Json := #[]
   structuredOutput : StructuredOutput := .native
   deriving Inhabited
 
 namespace Response
+
+/-- The assistant message a response is when sent back: everything a later request needs. -/
+def message (r : Response) : Message := .assistant r.content? r.toolCalls r.reasoning? r.reasoningItems
 
 private def liftJson (error : String) (result : Except String α) : Except String α :=
   result.mapError fun _ => error
@@ -191,7 +207,8 @@ private def parseToolCall (json : Lean.Json) : Except String ToolCall := do
   | .ok arguments => pure { id, name, arguments }
   | .error _ => pure { id, name, arguments := .null, invalidArguments? := some raw }
 
-private def usageFromJson? (raw : Lean.Json) : Option TokenUsage :=
+/-- The token counts of a response's `usage`, in Chat Completions' names or the Responses API's. -/
+def usageFromJson? (raw : Lean.Json) : Option TokenUsage :=
   match raw.getObjVal? "usage" with
   | .ok usage =>
     let input? := (usage.getObjVal? "prompt_tokens" >>= Lean.Json.getNat?).toOption.orElse fun _ =>
@@ -199,12 +216,14 @@ private def usageFromJson? (raw : Lean.Json) : Option TokenUsage :=
     let output? := (usage.getObjVal? "completion_tokens" >>= Lean.Json.getNat?).toOption.orElse fun _ =>
       (usage.getObjVal? "output_tokens" >>= Lean.Json.getNat?).toOption
     let total? := (usage.getObjVal? "total_tokens" >>= Lean.Json.getNat?).toOption
-    let reasoning? := (usage.getObjVal? "completion_tokens_details" >>= (·.getObjVal? "reasoning_tokens")
-      >>= Lean.Json.getNat?).toOption
-    -- OpenAI's form, and DeepSeek's own.
-    let cached? := (usage.getObjVal? "prompt_tokens_details" >>= (·.getObjVal? "cached_tokens")
-      >>= Lean.Json.getNat?).toOption.orElse fun _ =>
-        (usage.getObjVal? "prompt_cache_hit_tokens" >>= Lean.Json.getNat?).toOption
+    let detail (outer inner : String) : Option Nat :=
+      (usage.getObjVal? outer >>= (·.getObjVal? inner) >>= Lean.Json.getNat?).toOption
+    let reasoning? := (detail "completion_tokens_details" "reasoning_tokens").orElse fun _ =>
+      detail "output_tokens_details" "reasoning_tokens"
+    -- OpenAI's Chat Completions form, DeepSeek's own, and the Responses API's.
+    let cached? := (detail "prompt_tokens_details" "cached_tokens").orElse (fun _ =>
+        (usage.getObjVal? "prompt_cache_hit_tokens" >>= Lean.Json.getNat?).toOption) |>.orElse fun _ =>
+      detail "input_tokens_details" "cached_tokens"
     some { input?, output?, total?, reasoning?, cached? }
   | .error _ => none
 

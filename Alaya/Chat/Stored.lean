@@ -62,14 +62,15 @@ namespace Response
 /-- A response as stored. Its structured-output mode is the model's, stamped where it is read. -/
 def toStored (r : Response) : Lean.Json :=
   .mkObj [("content", orNull r.content? .str), ("tool_calls", .arr (r.toolCalls.map (·.toStored))),
-    ("reasoning", orNull r.reasoning? .str), ("finish_reason", orNull r.finishReason? .str),
-    ("usage", orNull r.usage? (·.toStored))]
+    ("reasoning", orNull r.reasoning? .str), ("reasoning_items", .arr r.reasoningItems),
+    ("finish_reason", orNull r.finishReason? .str), ("usage", orNull r.usage? (·.toStored))]
 
 def ofStored (json : Lean.Json) : Except String Response := do
   pure {
     content? := ← nullable json "content" Lean.Json.getStr?
     toolCalls := ← callsOfStored json
     reasoning? := ← nullable json "reasoning" Lean.Json.getStr?
+    reasoningItems := ← json.getObjVal? "reasoning_items" >>= Lean.Json.getArr?
     finishReason? := ← nullable json "finish_reason" Lean.Json.getStr?
     usage? := ← nullable json "usage" TokenUsage.ofStored }
 
@@ -80,9 +81,9 @@ namespace Message
 def toStored : Message → Lean.Json
   | .system content => .mkObj [("role", "system"), ("content", content)]
   | .user content => .mkObj [("role", "user"), ("content", content)]
-  | .assistant content? toolCalls reasoning? => .mkObj [("role", "assistant"),
+  | .assistant content? toolCalls reasoning? items => .mkObj [("role", "assistant"),
       ("content", orNull content? .str), ("reasoning", orNull reasoning? .str),
-      ("tool_calls", .arr (toolCalls.map (·.toStored)))]
+      ("reasoning_items", .arr items), ("tool_calls", .arr (toolCalls.map (·.toStored)))]
   | .tool callId content => .mkObj [("role", "tool"), ("tool_call_id", callId), ("content", content)]
 
 def ofStored (json : Lean.Json) : Except String Message := do
@@ -91,7 +92,8 @@ def ofStored (json : Lean.Json) : Except String Message := do
   | "user" => .user <$> (json.getObjVal? "content" >>= Lean.Json.getStr?)
   | "assistant" =>
     pure (.assistant (← nullable json "content" Lean.Json.getStr?) (← callsOfStored json)
-      (← nullable json "reasoning" Lean.Json.getStr?))
+      (← nullable json "reasoning" Lean.Json.getStr?)
+      (← json.getObjVal? "reasoning_items" >>= Lean.Json.getArr?))
   | "tool" =>
     pure (.tool (← json.getObjVal? "tool_call_id" >>= Lean.Json.getStr?) (← json.getObjVal? "content"))
   | other => throw s!"unknown message role: {other}"

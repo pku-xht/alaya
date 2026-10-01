@@ -1,6 +1,7 @@
 import Alaya.Cli
 import Alaya.Models
 import Alaya.Provider.ChatCompletions
+import Alaya.Provider.Responses
 import Alaya.Provider.Dgx
 
 /-!
@@ -16,7 +17,14 @@ namespace Alaya.Provider
 
 open Alaya (Result Error Model)
 
-/-- Whether an API wants earlier reasoning sent back. -/
+/-- The API a route speaks. -/
+inductive Api where
+  | chatCompletions
+  /-- OpenAI's Responses API: what keeps an OpenAI reasoning model's reasoning across turns. -/
+  | responses
+  deriving BEq, Repr, Inhabited
+
+/-- Whether an API wants earlier reasoning sent back as text. -/
 inductive EchoSupport where
   | required
   | accepted
@@ -27,6 +35,7 @@ inductive EchoSupport where
 structure Route where
   /-- The provider's name for the model. -/
   name : String
+  api : Api := .chatCompletions
   nativeBatching : Bool := true
   structuredOutput : Chat.StructuredOutput := .native
   reasoningEcho : EchoSupport := .accepted
@@ -60,7 +69,8 @@ def all : Array Provider := #[
     routes := [("deepseek-v4.1-flash", { name := "ds/deepseek-v4-flash" }),
       ("gpt-5.6-luna", { name := "closeai/gpt-5.6-luna" })] },
   { name := "apiyi", baseUrl := "https://api.apiyi.com/v1", baseUrlVar? := some "APIYI_BASE_URL",
-    keyVar := "APIYI_API_KEY" },
+    keyVar := "APIYI_API_KEY"
+    routes := [("gpt-6-luna", { name := "gpt-6-luna", api := .responses })] },
   { name := "fireworks", baseUrl := "https://api.fireworks.ai/inference/v1",
     baseUrlVar? := some "FIREWORKS_BASE_URL", keyVar := "FIREWORKS_API_KEY", anyModel := false
     routes := [("deepseek-v4.1-flash", { name := "accounts/fireworks/models/deepseek-v4p1-flash" })] },
@@ -82,12 +92,19 @@ def Provider.route (provider : Provider) (model : String) : Except String Route 
 
 /-- What a route must meet of a recorded model, or the first requirement it does not. -/
 def check (provider : Provider) (spec : Models.Spec) (route : Route) : Except String Unit := do
-  match route.reasoningEcho, spec.echoReasoning with
-  | .required, false =>
-    throw s!"{provider.name} needs {spec.name}'s earlier reasoning sent back, which this run does not do"
-  | .rejected, true =>
-    throw s!"this run sends {spec.name} its earlier reasoning, which {provider.name} rejects"
-  | _, _ => pure ()
+  match route.api, spec.echoReasoning with
+  | .chatCompletions, .items =>
+    throw s!"this run sends {spec.name} its earlier reasoning items, which need the Responses API; {provider.name} serves {spec.name} through Chat Completions"
+  | .responses, .text =>
+    throw s!"this run sends {spec.name} its earlier reasoning as text, which the Responses API {provider.name} serves it through has no field for"
+  | .chatCompletions, echo =>
+    match route.reasoningEcho, echo with
+    | .required, .none =>
+      throw s!"{provider.name} needs {spec.name}'s earlier reasoning sent back, which this run does not do"
+    | .rejected, .text =>
+      throw s!"this run sends {spec.name} its earlier reasoning, which {provider.name} rejects"
+    | _, _ => pure ()
+  | .responses, _ => pure ()
   if let (some capacity, some needed) := (route.contextTokens?, spec.contextTokens?) then
     if capacity < needed then
       throw s!"{provider.name} accepts a context of {capacity} tokens for {spec.name}, short of the run's {needed}"
@@ -112,10 +129,15 @@ def serve (provider : Provider) (spec : Models.Spec) (baseUrl? : Option String :
     | some url, _ => pure url
     | none, some var => pure ((← env var).getD provider.baseUrl)
     | none, none => pure provider.baseUrl
-  pure <| ChatCompletions.model {
-    provider := provider.name, baseUrl, apiKey, name := route.name, identity := spec.toJson
-    params := spec.params, echoReasoning := spec.echoReasoning
-    structuredOutput := route.structuredOutput, nativeBatching := route.nativeBatching }
+  let http : Http.Config := { provider := provider.name, baseUrl, apiKey }
+  pure <| match route.api with
+    | .chatCompletions => ChatCompletions.model {
+        http, name := route.name, identity := spec.toJson, params := spec.params
+        echoReasoning := spec.echoReasoning == .text
+        structuredOutput := route.structuredOutput, nativeBatching := route.nativeBatching }
+    | .responses => Responses.model {
+        http, name := route.name, identity := spec.toJson, params := spec.params
+        echoItems := spec.echoReasoning == .items, structuredOutput := route.structuredOutput }
 
 /-- `--url` and `--port`: where this invocation's `dgx` server listens. -/
 def endpointCli : Cli.Spec (Option Dgx.Endpoint) :=

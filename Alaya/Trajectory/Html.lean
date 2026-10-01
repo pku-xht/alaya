@@ -96,7 +96,7 @@ private def eventJson : Event -> Lean.Json
     match m with
     | .system c => .mkObj [("type", "message"), ("role", "system"), ("content", c)]
     | .user c => .mkObj [("type", "message"), ("role", "user"), ("content", c)]
-    | .assistant c? calls reasoning? => .mkObj [
+    | .assistant c? calls reasoning? _ => .mkObj [
         ("type", "message"), ("role", "assistant"),
         ("content", c?.map Lean.Json.str |>.getD .null),
         ("reasoning", reasoning?.map Lean.Json.str |>.getD .null),
@@ -107,6 +107,8 @@ private def eventJson : Event -> Lean.Json
       ("type", "response"),
       ("content", r.content?.map Lean.Json.str |>.getD .null),
       ("reasoning", r.reasoning?.map Lean.Json.str |>.getD .null),
+      -- With encrypted items, the reasoning text is their summary; without, the reasoning itself.
+      ("reasoningItems", (r.reasoningItems.size : Lean.Json)),
       ("finishReason", r.finishReason?.map Lean.Json.str |>.getD .null),
       ("calls", .arr (r.toolCalls.map callJson))]
   | .observation id content => .mkObj [
@@ -300,6 +302,9 @@ button.card:hover{border-color:#3a6ea5;background:#f3f7fc}
 .card .meter>div.high{background:#c07a1a}.card .meter>div.full{background:#b02020}
 .msg>.head .chip{text-transform:none;letter-spacing:0;margin-left:8px}
 .field-key{color:#8a94a0;font-size:11px;margin:6px 0 2px}
+details.reasoning{margin:0 0 6px}
+details.reasoning>summary{cursor:pointer;color:#8a94a0;font-size:11px}
+details.reasoning[open]>summary{margin-bottom:4px}
 .card .val.name{font-size:15px}
 /* A root: its task as prose, and the agent's and model's settings side by side. */
 .task{white-space:pre-wrap;max-width:88ch;line-height:1.6;padding:10px 14px;border:1px solid #e3e6ea;
@@ -705,14 +710,7 @@ function renderCards(state) {
       (v && typeof v === 'object' && !Array.isArray(v) && k !== 'executor'))).map(([k]) => k);
     box.append(namedCard(card('agent', state.agent.name || '?', '', on.join(' · '))));
   }
-  if (state.model) {
-    const m = state.model, about = [];
-    if (m.context_tokens) about.push(compact(m.context_tokens) + ' context');
-    if (m.output_tokens) about.push(compact(m.output_tokens) + ' output');
-    for (const [k, v] of Object.entries(m.params || {})) about.push(k + ' ' + JSON.stringify(v));
-    if (m.echo_reasoning) about.push('echoes reasoning');
-    box.append(namedCard(card('model', m.name || '?', '', about.join(' · '))));
-  }
+  if (state.model) box.append(namedCard(card('model', state.model.name || '?', '')));
   // Time and tokens are a turn's: a state that sampled nothing spent neither, and the run's
   // totals are shown below a turn's own.
   if (given(state.elapsedMs))
@@ -881,6 +879,17 @@ function renderContent(content, head) {
   return box;
 }
 
+/** A response's reasoning, folded until opened: the reasoning itself, or, for encrypted
+reasoning, its summary. */
+function renderReasoning(body, event) {
+  if (!event.reasoning) return;
+  const label = event.reasoningItems ? 'reasoning summary' : 'reasoning';
+  const box = el('details', 'reasoning');
+  box.append(el('summary', null, label + ' (' + event.reasoning.split('\\n').length + ' lines)'),
+    el('pre', 'muted', event.reasoning));
+  body.append(box);
+}
+
 /** One recorded event: a message placed verbatim, a model response, or a tool's observation. */
 function renderEvent(event) {
   const card = el('div', 'msg');
@@ -889,14 +898,14 @@ function renderEvent(event) {
   if (event.type === 'message') {
     head.append(document.createTextNode(event.role));
     if (event.callId) head.append(el('span', 'id', 'tool_call_id ' + event.callId));
-    if (event.reasoning) { body.append(el('div', 'muted', 'reasoning')); body.append(foldable(el('pre', 'muted', event.reasoning))); }
+    renderReasoning(body, event);
     if (event.role === 'tool') body.append(renderContent(event.content, head));
     else if (event.content) body.append(foldable(el('pre', null, event.content)));
     for (const call of event.calls || []) body.append(renderCall(call));
   } else if (event.type === 'response') {
     head.append(document.createTextNode('response'));
     if (event.finishReason) head.append(el('span', 'id', 'finish_reason ' + event.finishReason));
-    if (event.reasoning) { body.append(el('div', 'muted', 'reasoning')); body.append(foldable(el('pre', 'muted', event.reasoning))); }
+    renderReasoning(body, event);
     if (event.content) body.append(foldable(el('pre', null, event.content)));
     for (const call of event.calls || []) body.append(renderCall(call));
   } else {

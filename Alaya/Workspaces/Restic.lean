@@ -175,13 +175,19 @@ def listEntries (settings : Settings) (id : Hash) (path : String) : Result (Arra
     entries := entries.push ({ name, path := relative, kind, size } : Entry)
   pure (entries.qsort fun a b => a.path < b.path)
 
+/-- Numbers this process's read directories. A clock alone is not enough: reads run
+concurrently (the HTML report reads several states at once), two can see the same tick, and
+the first to finish would remove the directory the other is reading from. -/
+private initialize readCounter : IO.Ref Nat ← IO.mkRef 0
+
 /-- One `restore` of just these paths into a scratch directory, read back from there: a process
 per file would spend most of a second each on deriving the repository key. -/
 def readFiles (settings : Settings) (id : Hash) (paths : Array String) :
     Result (Array (Option ByteArray)) := do
   let wanted := paths.filter safeRelativePath
   if wanted.isEmpty then return paths.map fun _ => none
-  let scratch := settings.scratch / s!"read-{← Result.fromIO Error.storage IO.monoNanosNow}"
+  let n ← Result.fromIO Error.storage (readCounter.modifyGet fun n => (n, n + 1))
+  let scratch := settings.scratch / s!"read-{← Result.fromIO Error.storage IO.monoNanosNow}-{n}"
   Result.fromIO Error.storage (IO.FS.createDirAll scratch)
   try
     let mut rest := wanted

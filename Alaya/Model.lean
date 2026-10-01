@@ -54,11 +54,17 @@ structure Model where
 namespace Model
 
 def cacheKey (model : Model) (request : Chat.Request) : String :=
-  Lean.Json.mkObj [
+  -- Reasoning items have no Chat Completions form, so the request's JSON leaves them out; two
+  -- requests that differ only in them are different requests. A request with none keys as before.
+  let items := (request.messages.mapIdx fun index message => match message with
+    | .assistant _ _ _ items => if items.isEmpty then none else some (Lean.Json.arr #[index, .arr items])
+    | _ => none).filterMap id
+  let fields := [
     ("model", model.identity),
     ("structured_output", model.structuredOutput.toJson),
-    ("request", request.toJson model.structuredOutput)
-  ] |>.compress
+    ("request", request.toJson model.structuredOutput)]
+  Lean.Json.mkObj (if items.isEmpty then fields else fields ++ [("reasoning_items", .arr items)])
+    |>.compress
 
 /-- Retries each single response operation before a batching adapter fans it out. -/
 def retry (inner : Model) (config : Retry.Config) : Result Model :=
