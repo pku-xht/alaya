@@ -8,6 +8,9 @@ inductive Error where
   /-- The machine lacks something the operation needs: docker or its daemon, an image, restic, an
   API key. The caller fixes the machine. -/
   | environment (message : String)
+  /-- Another process is writing the data directory (`Alaya.Lock`); this one may try again when
+  it ends. -/
+  | busy (message : String)
   /-- The request could not be delivered or its result is unknown; retrying may duplicate work. -/
   | transport (message : String)
   /-- A provider returned an HTTP response; the status and body support retry and diagnostics. -/
@@ -28,6 +31,7 @@ inductive Error where
 def Error.describe : Error -> String
   | .input m => m
   | .environment m => m
+  | .busy m => m
   | .transport m => s!"transport: {m}"
   | .http status body _ => s!"http {status}: {body}"
   | .provider m => s!"provider: {m}"
@@ -42,8 +46,8 @@ inductive Error.Class where
   | input
   /-- Fix the machine. -/
   | environment
-  /-- Try again later: the provider was unreachable, throttled, or failing, and the retries
-  `Alaya.Retry` makes have run out. -/
+  /-- Try again later: another command is writing the data directory, or the provider was
+  unreachable, throttled, or failing and the retries `Alaya.Retry` makes have run out. -/
   | transient
   /-- The provider refused the request or answered it wrongly; trying again will not help. -/
   | model
@@ -67,7 +71,7 @@ def Error.retryableStatus (status : Nat) : Bool :=
 def Error.class : Error -> Error.Class
   | .input _ => .input
   | .environment _ => .environment
-  | .transport _ => .transient
+  | .busy _ | .transport _ => .transient
   | .http status _ _ => if Error.retryableStatus status then .transient else .model
   | .provider _ | .protocol _ | .structuredOutput _ => .model
   | .cache _ | .storage _ => .storage

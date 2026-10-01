@@ -1,4 +1,5 @@
 import Alaya.Error
+import Alaya.Lock
 import Alaya.Retry
 import Alaya.Tap
 import Alaya.Grader

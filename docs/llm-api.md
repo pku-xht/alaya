@@ -327,7 +327,7 @@ backoff and jitter.
 | HTTP 429 | yes, on a separate larger budget (8), honouring the server's `Retry-After` |
 | transport (timeout, dropped connection) | only with `retryUnknownDelivery`: the provider may have processed the request before the line died |
 | structured-output mismatch, malformed response | only with `retryStructuredOutput` / `retryMalformedResponse`: another sample may satisfy the schema, but one the model cannot satisfy fails the same way every time |
-| input, environment, provider, cache, storage | never |
+| input, environment, busy, provider, cache, storage | never |
 
 ```lean
 let model ← model.retry { retryUnknownDelivery := true }
@@ -412,6 +412,7 @@ reports it: the `alaya` command line exits with one status per class
 | --- | --- | --- |
 | `input` | the request names something that is not there, is in the wrong condition, or is malformed: an unknown state, an answered question, an agent file that is not JSON, a non-finite temperature | `input` |
 | `environment` | the machine lacks something: docker or its daemon, an image, restic, an API key | `environment` |
+| `busy` | another process is writing the data directory (`Alaya.Lock`) | `transient` |
 | `transport` | the request may or may not have arrived | `transient` |
 | `http status body retryAfterMs?` | the provider answered with a failure | `transient` for 408, 409, 425, 429 and 5xx, the statuses `Retry` retries; `model` otherwise |
 | `provider` | a provider-specific failure that is none of the above | `model` |

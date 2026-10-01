@@ -72,6 +72,10 @@ elif args[0] in ("show", "ls", "cat"):
     print(json.dumps(value))
 elif args[0] == "reply":
     assert delimiter < len(args), "reply requires a positional delimiter"
+    if (data / "busy").exists():
+        print("the data directory is in use by another alaya command: try again when it ends",
+              file=sys.stderr)
+        sys.exit(75)
     if "--unavailable" not in flags:
         state, answer = args[delimiter + 1:]
         value = {"state": state, "answer": answer}
@@ -423,6 +427,14 @@ class QuestionHttpTests(unittest.TestCase):
             path = f"/api/{endpoint}?{urlencode(query)}"
             for headers in ({"X-Alaya-Token": None}, {"Origin": "http://elsewhere.test"}):
                 self.assertEqual(self.request(path=path, headers=headers)[0], 403)
+
+    def test_a_busy_data_directory_is_a_retryable_failure(self):
+        (self.directory / "busy").write_text("", encoding="utf-8")
+        status, body, _ = self.request("POST", "/api/reply", {"state": YES_NO, "answer": "yes"})
+        self.assertEqual(status, 503)
+        self.assertIn("try again", body["error"])
+        (self.directory / "busy").unlink()
+        self.assertEqual(self.request("POST", "/api/reply", {"state": YES_NO, "answer": "yes"})[0], 200)
 
     def test_stale_question_never_calls_reply(self):
         status, body, _ = self.request("POST", "/api/reply", {"state": "e" * 64, "answer": "yes"})

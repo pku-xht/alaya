@@ -498,10 +498,11 @@ holds none.
 | `D/states/<64 hex>.json` | one file per state object, named by the SHA-256 of its bytes; the set of these files *is* the forest |
 | `D/restic/` | the [restic](https://restic.net) repository holding every workspace snapshot |
 | `D/cache/v1/<hash>.json` | model response cache entries (§7) |
+| `D/lock`, `D/lock.holder` | the lock a writing command holds, and the pid of the command holding it (`docs/cli.md` §4) |
 | `D/tmp/<id>/` | one command's scratch, removed when it ends: `work/`, the working directory, re-materialized at every checkout; `eval/`, a grader's checkout; `restic/`, where files read out of a snapshot land |
 
-Everything but `tmp/` lasts. Each command has a scratch directory of its own, so commands on one
-data directory do not share a working directory.
+Everything but `tmp/` lasts. Each command has a scratch directory of its own, and one command at
+a time writes (`docs/cli.md` §4).
 
 A state is written once, as a finished temporary file renamed into place, and never changes: its
 name is the hash of its bytes, which is also what its children's `parent` holds. `rm` deletes

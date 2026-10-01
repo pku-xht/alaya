@@ -26,23 +26,30 @@ private def DataDir.cache (data : DataDir) : System.FilePath := data.path / "cac
 
 /-- Opens the data directory at `path` for one command and runs `f` on it. Only `root` creates
 one (`create`): any other command needs one that exists, so a wrong path is an error rather than
-an empty forest. The command's scratch directory is removed when it ends, however it ends. -/
-private def withData (path : System.FilePath) (f : DataDir → Result α) (create := false) :
-    Result α := do
+an empty forest. A command that writes (`write`) holds the directory's lock throughout, so it is
+the only writer, and is refused at once when another has it; one that only reads takes no lock.
+The command's scratch directory is removed when it ends, however it ends. -/
+private def withData (path : System.FilePath) (f : DataDir → Result α) (write := false)
+    (create := false) : Result α := do
   if !create && !(← Result.fromIO Error.storage (path / "states").isDir) then
     throw <| .input s!"no data directory at {path}: `alaya root --data {path}` creates one"
-  let store ← Store.create (path / "states")
-  let id := s!"{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"
-  let scratch := path / "tmp" / id
-  Result.fromIO Error.storage (IO.FS.createDirAll scratch)
+  Result.fromIO Error.storage (IO.FS.createDirAll path)
+  let lock? ← if write then some <$> Lock.acquire path else pure none
   try
-    -- The states and the model cache are as much the run as the repository is.
-    let workspaces ← Workspaces.Restic.open (path / "restic") (scratch / "restic")
-      (keep := #[store.dir, path / "cache"])
-    f { path, store, workspaces, scratch }
+    let store ← Store.create (path / "states")
+    let id := s!"{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"
+    let scratch := path / "tmp" / id
+    Result.fromIO Error.storage (IO.FS.createDirAll scratch)
+    try
+      -- The states and the model cache are as much the run as the repository is.
+      let workspaces ← Workspaces.Restic.open (path / "restic") (scratch / "restic")
+        (keep := #[store.dir, path / "cache"])
+      f { path, store, workspaces, scratch }
+    finally
+      Workspaces.makeWritable scratch
+      Result.fromIO Error.storage (IO.FS.removeDirAll scratch)
   finally
-    Workspaces.makeWritable scratch
-    Result.fromIO Error.storage (IO.FS.removeDirAll scratch)
+    if let some lock := lock? then lock.release
 
 /-- `--data`, which every command takes, or `ALAYA_DATA`: there is no default, so a command run
 from the wrong directory cannot quietly start a new data directory. -/
@@ -196,7 +203,7 @@ private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
   -- Before the data directory is created: inside the project it would become part of it.
   if let some project := a.project? then
     Workspaces.refuseOverlap "snapshot" project #[a.data]
-  withData a.data (create := true) fun data => do
+  withData a.data (write := true) (create := true) fun data => do
     Executor.Docker.checkWorkdir a.workdir #[graderInput]
     let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
     let uname ← Executor.Docker.uname settings
@@ -209,7 +216,7 @@ private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
     pure 0
 
 private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
-  withData a.data fun data => do
+  withData a.data (write := true) fun data => do
     let start ← resolve data.store a.state
     let rt ← runtimeFor data (← openWork data) a start
     try
@@ -259,7 +266,7 @@ private def EvalArgs.cli : Cli.Spec EvalArgs :=
 /-- Exits with the verdict: 0 pass, 1 fail, 2 error. A failure before a verdict is recorded
 exits with its class's status, as for any command, all of them above the verdict's. -/
 private def evalRun (a : EvalArgs) (out : Cli.Out) : Result UInt32 := do
-  withData a.data fun data => do
+  withData a.data (write := true) fun data => do
     let target ← resolve data.store a.state
     let targetState ← getState data.store target
     let settings ← Executor.Docker.settingsOf { user? := a.user? } targetState.image targetState.workdir
@@ -277,13 +284,13 @@ private def evalRun (a : EvalArgs) (out : Cli.Out) : Result UInt32 := do
 
 private def commitRun (data : System.FilePath) (state : String) (dir : System.FilePath)
     (note? : Option String) (out : Cli.Out) : Result UInt32 := do
-  withData data fun data => do
+  withData data (write := true) fun data => do
     let hash ← commit data.store data.workspaces (← resolve data.store state) dir note?
     stateLine data out hash
     pure 0
 
 private def tellRun (data : System.FilePath) (state text : String) (out : Cli.Out) : Result UInt32 := do
-  withData data fun data => do
+  withData data (write := true) fun data => do
     stateLine data out (← tell data.store (← resolve data.store state) text)
     pure 0
 
@@ -300,7 +307,7 @@ private def replyAnswer : Cli.Spec (Option String) :=
 
 private def replyRun (data : System.FilePath) (state : String) (answer? : Option String)
     (out : Cli.Out) : Result UInt32 := do
-  withData data fun data => do
+  withData data (write := true) fun data => do
     let waiting ← resolve data.store state
     stateLine data out (← match answer? with
       | some text => reply data.store waiting text
@@ -427,7 +434,7 @@ private def htmlRun (data : System.FilePath) (file : System.FilePath) (hide : Ar
     pure 0
 
 private def rmRun (data : System.FilePath) (state : String) (out : Cli.Out) : Result UInt32 := do
-  withData data fun data => do
+  withData data (write := true) fun data => do
     let n ← removeSubtree data.store data.workspaces (← resolve data.store state)
     out.record (Lean.Json.mkObj [("removed", n)]) s!"removed {n} state(s)"
     pure 0

@@ -25,8 +25,10 @@ MAX_BODY_BYTES = 1024 * 1024
 CLI_TIMEOUT_SECONDS = 30
 EVENT_POLL_SECONDS = 1
 EVENT_HEARTBEAT_SECONDS = 5
-# Alaya's exit status for a request that names something wrong (`docs/cli.md` §4).
+# Alaya's exit statuses (`docs/cli.md` §4): a request that names something wrong, and a reason to
+# try again later, such as another command writing the data directory.
 INPUT_ERROR = 65
+TRY_AGAIN = 75
 
 
 class ApiError(Exception):
@@ -79,7 +81,8 @@ class QuestionApplication:
             detail = (result.stderr or result.stdout).strip()[:2000]
             # Alaya exits 65 when the request names something wrong, such as an invalid answer
             # or a path not in the snapshot: the page's request was bad. Anything else is Alaya's.
-            status = 400 if verb != "waiting" and result.returncode == INPUT_ERROR else 502
+            status = (400 if verb != "waiting" and result.returncode == INPUT_ERROR
+                      else 503 if result.returncode == TRY_AGAIN else 502)
             raise ApiError(status, detail or f"Alaya exited with code {result.returncode}.")
         return result.stdout
 

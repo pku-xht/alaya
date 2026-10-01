@@ -88,7 +88,7 @@ same for every command:
 | 65 | `input`: it names something not there, in the wrong condition, or malformed | fix the request |
 | 69 | `environment`: the machine lacks docker, an image, restic or an API key | fix the machine |
 | 74 | `storage`: the data directory could not be read or written | look at the data directory |
-| 75 | `transient`: the provider was unreachable, throttled or failing, after alaya's own retries | try again later |
+| 75 | `transient`: another command is writing the data directory, or the provider was unreachable, throttled or failing after alaya's own retries | try again later |
 | 76 | `model`: the provider refused the request or answered it wrongly | fix the model's settings |
 
 The classes are `Error.Class`, one per constructor of `Alaya.Error` (`docs/llm-api.md` §4). A
@@ -100,8 +100,19 @@ A failed `resume` leaves the states it wrote: to continue after one, resume from
 it printed, since resuming the state it started from again begins a new branch beside the
 first (`docs/trajectory-schema.md` §2).
 
-Commands may run concurrently on one data directory, each in its own scratch, except that two
-appending to the same model cache entry at once can lose a draw.
+**One writer at a time.** A command that writes the data directory — `root`, `resume`, `eval`,
+`commit`, `tell`, `reply`, `rm` — holds its lock (`DATA/lock`, `Alaya.Lock`) from start to end.
+A second writer is refused at once, with status 75 and the holder's pid, rather than left
+waiting for as long as a `resume` runs; the operating system drops the lock when its holder
+exits, however it exits, so none is ever left behind. Commands that only read — `tree`, `show`,
+`ls`, `cat`, `diff`, `waiting`, `html`, `checkout` — take no lock and run beside a writer, so a
+run can be watched while it grows; one that reads while an `rm` deletes can fail with `storage`.
+
+One writer is what keeps a data directory consistent: the model cache is extended by one
+process, two continuations of a state never take the same draw, and `rm` never drops a snapshot
+that a state about to be written refers to. Work in parallel goes to several data directories,
+one per worker or per arm of an experiment, each its own forest with its own cache. A command
+killed outright leaves its scratch under `DATA/tmp/` behind.
 
 ## 5. Commands in detail
 
