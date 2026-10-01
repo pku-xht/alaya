@@ -300,6 +300,14 @@ button.card:hover{border-color:#3a6ea5;background:#f3f7fc}
 .card .meter>div.high{background:#c07a1a}.card .meter>div.full{background:#b02020}
 .msg>.head .chip{text-transform:none;letter-spacing:0;margin-left:8px}
 .field-key{color:#8a94a0;font-size:11px;margin:6px 0 2px}
+.card .val.name{font-size:15px}
+/* A root: its task as prose, and the agent's and model's settings side by side. */
+.task{white-space:pre-wrap;max-width:88ch;line-height:1.6;padding:10px 14px;border:1px solid #e3e6ea;
+border-radius:6px;background:#fbfcfd}
+.config{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px 28px}
+.config h3{font-size:11px;margin:0 0 4px;color:#8a94a0;font-weight:600;text-transform:uppercase;
+letter-spacing:.05em}
+.config table.meta td:last-child{word-break:break-word}
 .headbar h1{margin:0}
 /* The model's context, in a modal over the page: what a continuation from the selected state
    is sampled from, in the form the provider receives. */
@@ -685,11 +693,26 @@ function card(label, value, note, sub, tag = 'div') {
   return box;
 }
 
+const namedCard = box => { box.querySelector('.val').classList.add('name'); return box; };
+
 /** The selected state's own time and tokens, the run's up to it, and how full the context a
 continuation from it would be sampled from is. */
 function renderCards(state) {
   const box = el('div', 'cards');
   const run = state.runUsage || {}, own = state.usage || {};
+  if (state.agent) {
+    const on = Object.entries(state.agent).filter(([k, v]) => k !== 'name' && (v === true ||
+      (v && typeof v === 'object' && !Array.isArray(v) && k !== 'executor'))).map(([k]) => k);
+    box.append(namedCard(card('agent', state.agent.name || '?', '', on.join(' · '))));
+  }
+  if (state.model) {
+    const m = state.model, about = [];
+    if (m.context_tokens) about.push(compact(m.context_tokens) + ' context');
+    if (m.output_tokens) about.push(compact(m.output_tokens) + ' output');
+    for (const [k, v] of Object.entries(m.params || {})) about.push(k + ' ' + JSON.stringify(v));
+    if (m.echo_reasoning) about.push('echoes reasoning');
+    box.append(namedCard(card('model', m.name || '?', '', about.join(' · '))));
+  }
   if (given(state.elapsedMs))
     box.append(card('time', duration(state.elapsedMs), '', 'run ' + duration(state.runElapsedMs)));
   else if (state.runElapsedMs)
@@ -723,6 +746,46 @@ function renderCards(state) {
     box.append(context);
   }
   return box;
+}
+
+/** A configuration as rows of dotted paths: `[name, value]` pairs as `name=value`, nothing as
+a dash. */
+function settingRows(json, prefix = '') {
+  const rows = [];
+  for (const [key, value] of Object.entries(json || {})) {
+    const path = prefix + key;
+    if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length)
+      rows.push(...settingRows(value, path + '.'));
+    else if (Array.isArray(value) && value.every(v => Array.isArray(v) && v.length === 2))
+      rows.push([path, value.map(([k, v]) => k + '=' + v).join('  ') || '—']);
+    else rows.push([path, value === null ? '—' : typeof value === 'string' ? value : JSON.stringify(value)]);
+  }
+  return rows;
+}
+
+function settingsTable(title, json) {
+  const box = el('div');
+  box.append(el('h3', null, title));
+  const table = el('table', 'meta');
+  // The name is on the card above.
+  for (const [k, v] of settingRows(json).filter(([k]) => k !== 'name')) {
+    const row = el('tr');
+    row.append(el('td', null, k), el('td', 'mono', v));
+    table.append(row);
+  }
+  box.append(table);
+  return box;
+}
+
+/** What a root sets up: the task, and the agent and the model with all their settings. */
+function renderRoot(parent, state) {
+  if (state.note) section(parent, 'Task').append(foldable(el('div', 'task', state.note)));
+  if (state.agent || state.model) {
+    const config = el('div', 'config');
+    if (state.agent) config.append(settingsTable('agent', state.agent));
+    if (state.model) config.append(settingsTable('model', state.model));
+    section(parent, 'Configuration').append(config);
+  }
 }
 
 function section(parent, title) {
@@ -1015,11 +1078,13 @@ function select(hash) {
   headbar.append(el('h1', null, state.kind + '  ' + short(hash)));
   detail.append(headbar, renderCards(state));
   const meta = el('table', 'meta');
-  const rows = [['hash', hash], ['parent', state.parent || '(root)'], ['workspace', state.workspace]];
-  if (state.note) rows.push(['note', state.note]);
+  const root = state.kind === 'root';
+  const rows = [['hash', hash]];
+  if (!root) rows.push(['parent', state.parent]);
+  rows.push(['workspace', state.workspace]);
+  // A root's note is its task, shown as prose below.
+  if (state.note && !root) rows.push(['note', state.note]);
   if (state.image) rows.push(['image', state.image]);
-  if (state.agent) rows.push(['agent', JSON.stringify(state.agent)]);
-  if (state.model) rows.push(['model', JSON.stringify(state.model)]);
   if (state.outcome) rows.push(['outcome', state.outcome.status]);
   if (state.question) rows.push(['question', state.question.displayText || state.question.text]);
   if (state.intervention) rows.push(['message', state.intervention.message]);
@@ -1029,6 +1094,7 @@ function select(hash) {
     meta.append(row);
   }
   detail.append(meta);
+  if (root) renderRoot(detail, state);
   if (state.outcome && state.outcome.submission)
     detail.append(foldable(el('pre', null, state.outcome.submission)));
   renderEvaluation(detail, state);
