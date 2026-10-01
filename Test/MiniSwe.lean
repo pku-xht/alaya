@@ -16,7 +16,7 @@ namespace MiniSweTests
 open Testing
 open Scripted
 open Alaya
-open Alaya.Agent (Dialogue Outcome Event Log Stop)
+open Alaya.Agent (Dialogue Outcome Event Log)
 open Alaya.Agent.MiniSwe
 open Alaya.Agent.Tools.Bash (observation)
 open Alaya.Trajectory
@@ -207,22 +207,20 @@ def parseSuite : Suite := suite "mini-swe.parse" #[
 /-! ## End-to-end runs of the agent in a container -/
 
 
-/-- Runs the mini agent with a scripted model through the reference loop, then snapshots the
-workspace. Returns the view of the final log, the snapshot, and the outcome. -/
+/-- Runs the mini agent with a scripted model through the trajectory's loop, in a container.
+Returns the view of the final log, the final workspace, and the outcome. -/
 private def runAgent (config : Config) (responses : Array Chat.Response) :
     TestM (Dialogue × Hash × Outcome) := do
-  let work ← workDir
   let model ← scriptedModel responses
   let executor ← containerExecutor config.executor
-  let mini := agent executor config
-  let sample (dialogue : Dialogue) : Result Chat.Response := do
-    (← model.sample { messages := dialogue, tools := mini.tools }).next
-  let (log, stop) ← try assertOk <| Agent.run mini { dir := work } sample (initialLog config "t" testUname)
+  let (rt, state, halt) ← try drive (agent config) executor model (initialLog config "t" testUname)
     finally executor.close
-  let env ← assertOk <| (← workspaces).snapshot work
-  match stop with
+  let log ← assertOk <| Trajectory.logOf rt.store state
+  let env := (← assertOk <| Trajectory.getState rt.store state).workspace
+  match halt with
   | .outcome outcome => pure (view config log, env, outcome)
-  | .question _ q => fail s!"unexpected question: {q.render}"
+  | .question q => fail s!"unexpected question: {q.text}"
+  | _ => fail "the run neither ended nor asked"
 
 def runSuite : Suite := suite "mini-swe.run" #[
   test "a two-step run edits the workspace and submits" do

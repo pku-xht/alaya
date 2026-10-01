@@ -76,8 +76,8 @@ private def executorFor (run : Executor.Docker.RunOptions) (state : State) (conf
   Executor.Docker.executor settings config
 
 /-- The agent of an existing run: what its root recorded. -/
-private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Families.Instance := do
-  Agent.Families.instanceOf (← agentOf store hash)
+private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Agent := do
+  Agent.Families.fromJson (← agentOf store hash)
 
 /-- What `resume` takes: what this invocation samples from, and its limits. The image, the
 workdir and the agent are the root's. -/
@@ -107,7 +107,7 @@ private def runtimeFor (data : DataDir) (work : WorkDir) (a : ResumeArgs) (start
   let model ← buildModel a.model.spec a.model.temperature data.cache a.model.options
   let executor ← executorFor a.run (← getState data.store start) spec.executorConfig
   pure { store := data.store, workspaces := data.workspaces, workDir := work.path, executor, model
-         agent := spec.build executor
+         agent := spec
          budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
 
 /-- Empties the work directory. Both a checkout and an extraction from an image need it to start
@@ -163,10 +163,6 @@ private def stateLine (data : DataDir) (out : Cli.Out) (child : Hash) : Result U
 private def report (out : Cli.Out) (json : Lean.Json) (lines : Array String) : Result Unit :=
   if out.json then out.record json "" else emitLines lines
 
-/-- The exit status for the state a run stopped at. -/
-private def exitFor (data : DataDir) (hash : Hash) : Result UInt32 := do
-  pure (if (← getState data.store hash).question?.isSome then exitWaiting else 0)
-
 /-! ## Commands
 
 Each command declares what it takes (`Alaya.Cli`), and `main` runs the table. -/
@@ -220,22 +216,26 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
     let start ← resolve data.store a.state
     let rt ← runtimeFor data (← openWork data) a start
     try
-      let stopped ← resume rt a.model.spec start (stateLine data out)
+      let (stopped, halt) ← resume rt a.model.spec start (stateLine data out)
         (turns? := if a.turns == 0 then none else some a.turns)
-      if stopped.outOfTime then
-        let used ← elapsedMs data.store stopped.state
-        out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("time_budget_spent", true),
+      match halt with
+      | .outOfTime =>
+        let used ← elapsedMs data.store stopped
+        out.record (Lean.Json.mkObj [("state", stopped.hex), ("time_budget_spent", true),
             ("run_time_ms", used)])
-          s!"time budget spent: {stopped.state.hex} has run {seconds used}; resume it to continue"
-        return exitStopped
-      if stopped.outOfTurns then
-        out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("turns_spent", true),
+          s!"time budget spent: {stopped.hex} has run {seconds used}; resume it to continue"
+        pure exitStopped
+      | .outOfTurns =>
+        out.record (Lean.Json.mkObj [("state", stopped.hex), ("turns_spent", true),
             ("turns", a.turns)])
-          s!"{a.turns} turn(s) taken: resume {stopped.state.hex} to continue"
-        return exitStopped
-      if let some o := (← getState data.store stopped.state).outcome? then
+          s!"{a.turns} turn(s) taken: resume {stopped.hex} to continue"
+        pure exitStopped
+      | .question _ => pure exitWaiting
+      | .outcome o =>
         out.note s!"done: {o.status}"
-      exitFor data stopped.state
+        pure 0
+      -- A continuation only stops for one of the above.
+      | .continue => pure 0
     finally
       Result.fromIO Error.storage rt.executor.close
 
@@ -387,7 +387,7 @@ private def showRun (data : System.FilePath) (state : String) (view : Bool) (out
     let hash ← resolve data.store state
     let view? ← if view then some <$> (·.view) <$> recordedAgent data.store hash else pure none
     if out.json then
-      let branch ← branchOf data.store hash
+      let branch ← ancestors data.store hash
       let some (_, state) := branch.back? | throw <| .storage s!"no state {hash.hex}"
       let history := branch.map fun (h, s) => Lean.Json.mkObj [("state", h.hex),
         ("kind", s.kind.toString), ("events", .arr (s.appended.map eventToJson))]

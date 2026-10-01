@@ -1,4 +1,5 @@
 import Alaya.Agent
+import Alaya.Chat.Stored
 import Alaya.Trajectory.Store
 import Alaya.Workspaces
 import Alaya.Cache
@@ -17,91 +18,16 @@ open Alaya.Agent (Agent Event Log Dialogue Outcome Directive View Session)
 
 /-! ## Event serialization -/
 
-private def toolCallToJson (call : Chat.ToolCall) : Lean.Json :=
-  .mkObj [
-    ("id", call.id), ("name", call.name), ("arguments", call.arguments),
-    ("invalid_arguments", call.invalidArguments?.map Lean.Json.str |>.getD .null)]
-
-private def toolCallFromJson (json : Lean.Json) : Except String Chat.ToolCall := do
-  let id ← json.getObjVal? "id" >>= Lean.Json.getStr?
-  let name ← json.getObjVal? "name" >>= Lean.Json.getStr?
-  let arguments ← json.getObjVal? "arguments"
-  let invalidArguments? := (json.getObjVal? "invalid_arguments" >>= Lean.Json.getStr?).toOption
-  pure { id, name, arguments, invalidArguments? }
-
-private def toolCallsFromJson (json : Lean.Json) : Except String (Array Chat.ToolCall) :=
-  match json.getObjVal? "tool_calls" with
-  | .ok (.arr calls) => calls.mapM toolCallFromJson
-  | _ => pure #[]
-
-def messageToJson : Chat.Message -> Lean.Json
-  | .system content => .mkObj [("role", "system"), ("content", content)]
-  | .user content => .mkObj [("role", "user"), ("content", content)]
-  | .assistant content? toolCalls reasoning? => .mkObj [
-      ("role", "assistant"),
-      ("content", content?.map Lean.Json.str |>.getD .null),
-      ("reasoning", reasoning?.map Lean.Json.str |>.getD .null),
-      ("tool_calls", .arr (toolCalls.map toolCallToJson))]
-  | .tool callId content => .mkObj [
-      ("role", "tool"), ("tool_call_id", callId), ("content", content)]
-
-def messageFromJson (json : Lean.Json) : Except String Chat.Message := do
-  match ← json.getObjVal? "role" >>= Lean.Json.getStr? with
-  | "system" => .system <$> (json.getObjVal? "content" >>= Lean.Json.getStr?)
-  | "user" => .user <$> (json.getObjVal? "content" >>= Lean.Json.getStr?)
-  | "assistant" =>
-    let content? := (json.getObjVal? "content" >>= Lean.Json.getStr?).toOption
-    let calls ← toolCallsFromJson json
-    let reasoning? := (json.getObjVal? "reasoning" >>= Lean.Json.getStr?).toOption
-    pure (.assistant content? calls reasoning?)
-  | "tool" =>
-    let callId ← json.getObjVal? "tool_call_id" >>= Lean.Json.getStr?
-    let content ← json.getObjVal? "content"
-    pure (.tool callId content)
-  | other => throw s!"unknown message role: {other}"
-
-private def usageToJson (u : Chat.TokenUsage) : Lean.Json :=
-  .mkObj [
-    ("input", u.input?.map (Lean.Json.num ·) |>.getD .null),
-    ("output", u.output?.map (Lean.Json.num ·) |>.getD .null),
-    ("total", u.total?.map (Lean.Json.num ·) |>.getD .null)]
-
-private def usageFromJson? (json : Lean.Json) : Option Chat.TokenUsage :=
-  match json.getObjVal? "usage" with
-  | .ok (.obj _) =>
-    let usage := (json.getObjVal? "usage").toOption.get!
-    some {
-      input? := (usage.getObjVal? "input" >>= Lean.Json.getNat?).toOption
-      output? := (usage.getObjVal? "output" >>= Lean.Json.getNat?).toOption
-      total? := (usage.getObjVal? "total" >>= Lean.Json.getNat?).toOption }
-  | _ => none
-
-/-- A response, as recorded. -/
-def responseToJson (r : Chat.Response) : Lean.Json :=
-  .mkObj [
-    ("content", r.content?.map Lean.Json.str |>.getD .null),
-    ("tool_calls", .arr (r.toolCalls.map toolCallToJson)),
-    ("reasoning", r.reasoning?.map Lean.Json.str |>.getD .null),
-    ("finish_reason", r.finishReason?.map Lean.Json.str |>.getD .null),
-    ("usage", r.usage?.map usageToJson |>.getD .null)]
-
-def responseFromJson (json : Lean.Json) : Except String Chat.Response := do
-  let content? := (json.getObjVal? "content" >>= Lean.Json.getStr?).toOption
-  let toolCalls ← toolCallsFromJson json
-  let reasoning? := (json.getObjVal? "reasoning" >>= Lean.Json.getStr?).toOption
-  let finishReason? := (json.getObjVal? "finish_reason" >>= Lean.Json.getStr?).toOption
-  pure { content?, toolCalls, reasoning?, finishReason?, usage? := usageFromJson? json }
-
 def eventToJson : Event -> Lean.Json
-  | .message m => .mkObj [("type", "message"), ("message", messageToJson m)]
-  | .response r => .mkObj [("type", "response"), ("response", responseToJson r)]
+  | .message m => .mkObj [("type", "message"), ("message", m.toStored)]
+  | .response r => .mkObj [("type", "response"), ("response", r.toStored)]
   | .observation callId content =>
     .mkObj [("type", "observation"), ("call_id", callId), ("content", content)]
 
 def eventFromJson (json : Lean.Json) : Except String Event := do
   match ← json.getObjVal? "type" >>= Lean.Json.getStr? with
-  | "message" => .message <$> (json.getObjVal? "message" >>= messageFromJson)
-  | "response" => .response <$> (json.getObjVal? "response" >>= responseFromJson)
+  | "message" => .message <$> (json.getObjVal? "message" >>= Chat.Message.ofStored)
+  | "response" => .response <$> (json.getObjVal? "response" >>= Chat.Response.ofStored)
   | "observation" =>
     let callId ← json.getObjVal? "call_id" >>= Lean.Json.getStr?
     let content ← json.getObjVal? "content"
@@ -113,18 +39,16 @@ def eventFromJson (json : Lean.Json) : Except String Event := do
 /-- What produced a state, for display and provenance. -/
 inductive Kind where
   | root
-  /-- One model turn, or a stop recorded after a reply without another model sample. -/
+  /-- One model turn, or a stop recorded after a reply without another model sample. A turn
+  whose agent asked a person something carries the `question?` it waits on, and only `reply`
+  grows it. -/
   | turn
-  /-- A person's workspace change, with a notice to the agent listing what changed. -/
+  /-- A person's notice to the agent: a change to the workspace, listing what changed (`commit`),
+  or a message alone, with no change (`tell`). -/
   | intervention
   /-- A grader's verdict on a state, with the checkout as the grader left it; always a leaf. -/
   | evaluation
-  /-- A person's message to the agent with no workspace change: see `tell`. -/
-  | message
-  /-- A turn that ended with the agent asking a person something. The run waits here, and only
-  `reply` grows it. -/
-  | question
-  /-- A person's answer to a `question`, recorded as the tool result of the asking call. -/
+  /-- A person's answer to a question, recorded as the tool result of the asking call. -/
   | reply
   deriving BEq, Repr, Inhabited
 
@@ -133,8 +57,6 @@ def Kind.toString : Kind -> String
   | .turn => "turn"
   | .intervention => "intervention"
   | .evaluation => "evaluation"
-  | .message => "message"
-  | .question => "question"
   | .reply => "reply"
 
 def Kind.ofString? : String -> Option Kind
@@ -142,8 +64,6 @@ def Kind.ofString? : String -> Option Kind
   | "turn" => some .turn
   | "intervention" => some .intervention
   | "evaluation" => some .evaluation
-  | "message" => some .message
-  | "question" => some .question
   | "reply" => some .reply
   | _ => none
 
@@ -394,29 +314,27 @@ def resolve (store : Store) (pfx : String) : Result Hash := do
   | [] => throw <| .input s!"no state matches {pfx}"
   | _ => throw <| .input s!"ambiguous state prefix {pfx} ({hits.size} matches)"
 
-/-- Reconstructs the full log at `hash` by concatenating appended events root→node. -/
-partial def logOf (store : Store) (hash : Hash) : Result Log := do
-  let state ← getState store hash
-  let ancestors ← match state.parent? with
-    | some parent => logOf store parent
-    | none => pure #[]
-  pure (ancestors ++ state.appended)
+/-- The states from the root to `hash`, inclusive, oldest first: the one walk up the tree, which
+the log, the run's time and the root are read from. Corrupt data whose parents form a cycle is
+an error, not a walk that never ends. -/
+partial def ancestors (store : Store) (hash : Hash) : Result (Array (Hash × State)) := do
+  let rec climb (hash : Hash) (seen : Std.HashSet Hash) (above : List (Hash × State)) :
+      Result (Array (Hash × State)) := do
+    if seen.contains hash then throw <| .storage s!"the states above {hash.hex} form a cycle"
+    let state ← getState store hash
+    let above := (hash, state) :: above
+    match state.parent? with
+    | some parent => climb parent (seen.insert hash) above
+    | none => pure above.toArray
+  climb hash {} []
 
-/-- The states from the root to `hash`, in order. -/
-partial def branchOf (store : Store) (hash : Hash) : Result (Array (Hash × State)) := do
-  let state ← getState store hash
-  let before ← match state.parent? with
-    | some parent => branchOf store parent
-    | none => pure #[]
-  pure (before.push (hash, state))
+/-- The full log at `hash`: the events each state appended, from the root. -/
+def logOf (store : Store) (hash : Hash) : Result Log := do
+  pure ((← ancestors store hash).foldl (fun log (_, state) => log ++ state.appended) #[])
 
 /-- How long the run up to `hash` has taken: its model steps' times, from the root. -/
-partial def elapsedMs (store : Store) (hash : Hash) : Result Nat := do
-  let state ← getState store hash
-  let before ← match state.parent? with
-    | some parent => elapsedMs store parent
-    | none => pure 0
-  pure (before + state.elapsedMs?.getD 0)
+def elapsedMs (store : Store) (hash : Hash) : Result Nat := do
+  pure ((← ancestors store hash).foldl (fun ms (_, state) => ms + state.elapsedMs?.getD 0) 0)
 
 /-- The transitive subtree rooted at `hash` (inclusive). -/
 partial def subtree (store : Store) (hash : Hash) : Result (Array Hash) := do
@@ -475,7 +393,10 @@ run already spent. -/
 private def sessionAt (rt : Runtime) (before started : Nat) : Result Session := do
   pure { elapsedMs := before + ((← nowMs) - started), budgetMs? := rt.budgetMs? }
 
-/-- Why a turn handed control back to the driver. -/
+/-- Why a turn handed control back, or a continuation stopped. A turn ends with one of the first
+three; the limits are the driver's, checked between turns and never inside one, since a turn
+stopped between its tool calls would leave calls unanswered. A limit is not recorded: a later
+`resume` continues from the state it stopped at. -/
 inductive Halt where
   /-- The turn went normally; the run goes on. -/
   | continue
@@ -483,7 +404,11 @@ inductive Halt where
   | outcome (outcome : Outcome)
   /-- The turn asked a person something; the run waits for `reply`. -/
   | question (question : Question)
-  deriving Inhabited
+  /-- The continuation's time budget was spent. -/
+  | outOfTime
+  /-- The continuation took the turns it was allowed. -/
+  | outOfTurns
+  deriving Inhabited, BEq
 
 /-- Follows the agent's directives after a sample until it wants to sample again or stops,
 recording each observation and snapshotting the workspace after each act. Returns the events
@@ -498,7 +423,7 @@ private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (ap
     let question : Question := { callId, toQuestion }
     pure (appended, workspace, some question, .question question)
   | .act call =>
-    let content ← rt.agent.act { dir := rt.workDir } call
+    let content ← rt.agent.act rt.executor { dir := rt.workDir } call
     let workspace ← rt.workspaces.snapshot rt.workDir
     let event := Event.observation call.id content
     follow rt before started (log.push event) (appended.push event) workspace
@@ -542,7 +467,7 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
   let elapsed := (← nowMs) - started
   let child ← putState rt.store {
     parent? := some parent, workspace, appended, outcome?, question?
-    kind := if question?.isSome then .question else .turn
+    kind := .turn
     note? := some note, image, workdir, elapsedMs? := some elapsed }
   pure (child, log ++ appended, workspace, before + elapsed, halt)
 
@@ -560,44 +485,27 @@ private def withinBudget (rt : Runtime) (elapsed : Nat) : Bool :=
   | some budget => elapsed < budget
   | none => true
 
-/-- Advances one model turn, or records the agent's stop after a reply without sampling.
-Returns `none` when the time budget is already spent, and then nothing is written. -/
-def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result (Option Hash) := do
-  let state ← getState rt.store hash
-  Result.fromExcept Error.input state.continuable
-  let before ← elapsedMs rt.store hash
-  if !withinBudget rt before then return none
-  checkoutInto rt.toSandbox state.workspace
-  let (child, _, _, _, _) ← advance rt note hash (← logOf rt.store hash) state.workspace before
-  pure (some child)
-
-/-- Where a continuation stopped: the state it reached, and whether it stopped there because
-the time budget was spent, not because the run ended or asked. -/
-structure Stopped where
-  state : Hash
-  outOfTime : Bool := false
-  /-- Stopped after the `turns?` this continuation was allowed, with the run still going. -/
-  outOfTurns : Bool := false
-
 /-- Grows a continuation from `hash` until the run ends, stops at a question, spends the time
-budget, or has taken `turns?` turns, and returns where it stopped. Stopping for a limit writes
-nothing more: the last state is where a later `resume` continues. -/
+budget, or has taken `turns?` turns, and returns the state it reached and why it stopped there.
+Stopping for a limit writes nothing more: that state is where a later `resume` continues. One
+turn is `turns? := some 1`. -/
 partial def resume (rt : Runtime) (note : String) (hash : Hash)
-    (onStep : Hash -> Result Unit) (turns? : Option Nat := none) : Result Stopped := do
+    (onStep : Hash -> Result Unit) (turns? : Option Nat := none) : Result (Hash × Halt) := do
   let start ← getState rt.store hash
   Result.fromExcept Error.input start.continuable
   let before ← elapsedMs rt.store hash
-  if !withinBudget rt before then return { state := hash, outOfTime := true }
+  if !withinBudget rt before then return (hash, .outOfTime)
   checkoutInto rt.toSandbox start.workspace
-  let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed taken : Nat) : Result Stopped := do
+  let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed taken : Nat) :
+      Result (Hash × Halt) := do
     let (child, log, workspace, elapsed, halt) ← advance rt note parent log workspace elapsed
     onStep child
     match halt with
     | .continue =>
-      if !withinBudget rt elapsed then pure { state := child, outOfTime := true }
-      else if turns?.any (taken + 1 ≥ ·) then pure { state := child, outOfTurns := true }
+      if !withinBudget rt elapsed then pure (child, .outOfTime)
+      else if turns?.any (taken + 1 ≥ ·) then pure (child, .outOfTurns)
       else go child log workspace elapsed (taken + 1)
-    | _ => pure { state := child }
+    | halt => pure (child, halt)
   go hash (← logOf rt.store hash) start.workspace before 0
 
 /-! ## Evaluation -/
@@ -690,9 +598,9 @@ def createRoot (store : Store) (workspaces : Workspaces) (log : Log) (project : 
                    agent? := some agent }
 
 /-- The root of the tree `hash` is in. -/
-partial def rootOf (store : Store) (hash : Hash) : Result Hash := do
-  match (← getState store hash).parent? with
-  | some parent => rootOf store parent
+def rootOf (store : Store) (hash : Hash) : Result Hash := do
+  match (← ancestors store hash)[0]? with
+  | some (root, _) => pure root
   | none => pure hash
 
 /-- The agent configuration the run of `hash` was created with, from its root. -/
@@ -746,7 +654,7 @@ def tell (store : Store) (hash : Hash) (message : String) : Result Hash := do
   buildable parent
   let intervention : Intervention := { message }
   putState store {
-    parent? := some hash, workspace := parent.workspace, kind := .message
+    parent? := some hash, workspace := parent.workspace, kind := .intervention
     appended := #[.message (.user (interventionNotice intervention))]
     intervention? := some intervention
     image := parent.image, workdir := parent.workdir }
@@ -833,15 +741,17 @@ private def label (state : State) : String :=
       | some family => s!"[{family}]  "
       | none => ""
     "root  " ++ family ++ flatten (state.note?.getD "")
-  | .turn | .question =>
+  | .turn =>
     let calls := state.calls
     let first := match calls[0]? with
       | some call => callSummary call
       | none => "turn  (no tool call)"
     let more := if calls.size > 1 then s!"  (+{calls.size - 1})" else ""
     first ++ more
-  | .intervention => "commit  " ++ (state.note?.getD "")
-  | .message => "tell  " ++ flatten (state.intervention?.map (·.message) |>.getD "")
+  | .intervention =>
+    match state.intervention? with
+    | some { changed := #[], message } => "tell  " ++ flatten message
+    | _ => "commit  " ++ (state.note?.getD "")
   | .reply =>
     let text := match state.appended[0]? with
       | some (Event.observation _ (Lean.Json.str s)) => s

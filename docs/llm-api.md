@@ -264,7 +264,7 @@ flowchart BT
     Transport -- "adds model, temperature, n>1; parses Chat.Response" --> Retry
     Retry -- "retries 408/409/425/429/5xx; bigger 429 budget, honors Retry-After" --> Batch
     Batch -- "native / concurrent (semaphore) / sequential n draws" --> Cache
-    Cache -- "replays cache/v1/hash(key).json; extends entry on miss" --> Caller
+    Cache -- "replays cache/hash(key).json; extends entry on miss" --> Caller
 
     Iface["Model = { identity: Json, structuredOutput, sample: Request -> Stream }"]
     Iface -.shared shape.-> Transport
@@ -362,7 +362,7 @@ let shared ← model.independent
 ### Persistent cache
 
 `Cache.persistent config` replays recorded draws from disk and extends the entry on a miss. The
-entry for a key lives at `cache/v1/<hash key>.json` (Lean's generic `hash` of the key string) and
+entry for a key lives at `cache/<hash key>.json` (Lean's generic `hash` of the key string) and
 holds every draw recorded so far. A stream over a request walks the entry from index 0; `nextN n`
 returns cached draws and asks the inner model only for the missing ones, then saves atomically.
 In `readOnly` mode a miss is an error, which is how a replay proves it never called a provider.
@@ -384,7 +384,7 @@ sequenceDiagram
     Note over T: has used draws 0..n-1 of this request before
     T->>C: sample(request).nextN(n+1)
     C->>C: key = compress({model: identity, structured_output, request})
-    C->>C: load cache/v1/hash(key).json -> responses[0..k)
+    C->>C: load cache/hash(key).json -> responses[0..k)
     alt k >= n+1
         Note over C: replay - no provider call
         C-->>T: responses[0..n]

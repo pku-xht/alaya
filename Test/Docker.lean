@@ -48,7 +48,7 @@ private def runtime (settings : Docker.Settings) (work : System.FilePath) (store
     (model : Model) (agentConfig : Agent.MiniSwe.Config := miniConfig) : TestM Runtime := do
   let executor ← assertOk (Docker.executor settings config)
   pure { store, workspaces := ← workspaces, workDir := work, executor, model
-         agent := Agent.MiniSwe.agent executor agentConfig }
+         agent := Agent.MiniSwe.agent agentConfig }
 
 def suite : Suite := Testing.suite "docker" #[
   test "pins the image to exact bits and reads uname from it, not the host" <| withDocker
@@ -153,7 +153,7 @@ def suite : Suite := Testing.suite "docker" #[
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
           settings.image (some "t") (agent := testAgent)
-        let child ← stepped <| stepOnce rt "test:model" root
+        let child ← stepped <| step rt "test:model" root
         let state ← assertOk (getState store child)
         assertEqual "image inherited" state.image settings.image
         -- The container wrote it, the host snapshotted it.
@@ -195,7 +195,7 @@ def suite : Suite := Testing.suite "docker" #[
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
           settings.image (some "t") (agent := testAgent)
-        let child ← stepped <| stepOnce rt "test:model" root
+        let child ← stepped <| step rt "test:model" root
         -- The image's own file shows the grader is in the container, not on the host.
         let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") child
           "test -f /etc/alpine-release && echo 1..1 && echo \"ok 1 - $(cat made.txt)\"" settings.user?
@@ -217,7 +217,7 @@ def suite : Suite := Testing.suite "docker" #[
       let first ← runtime settings work store model
       let saved ← try
         let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
-        stepped <| stepOnce first "produce" root
+        stepped <| step first "produce" root
       finally first.executor.close
       let log ← assertOk <| logOf store saved
       let some produced := log.findSome? (fun
@@ -235,7 +235,7 @@ def suite : Suite := Testing.suite "docker" #[
       try
         -- Start an actual replacement container before reading through the resumed driver.
         assertEqual "new container starts" (← second.executor.bash work "true").exitCode? (some 0)
-        let child ← stepped <| stepOnce second "read" saved
+        let child ← stepped <| step second "read" saved
         let page? := (← assertOk <| logOf reopened child).reverse.findSome? fun
           | .observation "read" content => (content.getObjVal? "text" >>= Lean.Json.getStr?).toOption
           | _ => none
@@ -322,7 +322,7 @@ def suite : Suite := Testing.suite "docker" #[
       try
         let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
           (workdir := "/testbed")
-        let child ← stepped <| stepOnce rt "test:model" root
+        let child ← stepped <| step rt "test:model" root
         let state ← assertOk (getState store child)
         assertEqual "workdir inherited" state.workdir "/testbed"
         assertEqual "the command ran there"

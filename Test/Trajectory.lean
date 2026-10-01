@@ -13,7 +13,7 @@ namespace TrajectoryTests
 open Testing
 open Scripted
 open Alaya
-open Alaya.Agent (Dialogue Outcome Event Log Stop)
+open Alaya.Agent (Dialogue Outcome Event Log)
 open Alaya.Agent.MiniSwe
 open Alaya.Trajectory
 
@@ -27,7 +27,7 @@ private def cachedRuntime (responses : Array Chat.Response) (config : Config := 
   let work ← workDir
   let executor ← containerExecutor config.executor
   pure { store, workspaces := ← workspaces, workDir := work, executor, model := cached
-         agent := agent executor config }
+         agent := agent config }
 
 /-- A root for the test task over `project`. -/
 private def mkRoot (rt : Runtime) (project : System.FilePath) (image? : Option String := none) :
@@ -60,8 +60,10 @@ private def askTool : Chat.ToolDefinition := {
   parameters := .object #[("message", .string)]
 }
 
-private def askingAgent (executor : Executor) : Agent.Agent := {
-  identity := .mkObj [("agent", "asking-test-agent")]
+private def askingAgent : Agent.Agent := {
+  config := .mkObj [("agent", "asking-test-agent")]
+  initialLog := fun _ _ => #[]
+  executorConfig := {}
   tools := #[Alaya.Agent.Tools.Bash.definition, askTool]
   view := fun log => log.map fun
     | .message m => m
@@ -75,12 +77,12 @@ private def askingAgent (executor : Executor) : Agent.Agent := {
         .ask call.id { text := ((call.arguments.getObjVal? "message" >>= Lean.Json.getStr?).toOption.getD "?") }
       else if call.name == "submit" then .done { status := "Submitted" }
       else .act call
-  act := act executor
+  act
 }
 
 private def askingRuntime (responses : Array Chat.Response) : TestM Runtime := do
   let rt ← cachedRuntime responses
-  pure { rt with agent := askingAgent rt.executor }
+  pure { rt with agent := askingAgent }
 
 def suite : Suite := Testing.suite "trajectory" #[
   test "a continuation stops after the turns it was allowed, and a later one goes on" do
@@ -88,29 +90,29 @@ def suite : Suite := Testing.suite "trajectory" #[
       responseWith #[call "b" "bash" "echo 2"], responseWith #[call "c" "bash" "echo 3"]]
     let root ← mkRoot rt (← emptyProject)
     let seen ← IO.mkRef #[]
-    let first ← assertOk <| resume rt "test:model" root (fun h => seen.modify (·.push h)) (turns? := some 2)
-    check first.outOfTurns "stopped for its turns"
-    check (!first.outOfTime) "not for time"
-    assertEqual "two turns, the last is where it stopped" (← seen.get).back? (some first.state)
+    let (first, halt) ← assertOk <| resume rt "test:model" root (fun h => seen.modify (·.push h)) (turns? := some 2)
+    check (halt == .outOfTurns) "stopped for its turns, not for time"
+    assertEqual "two turns, the last is where it stopped" (← seen.get).back? (some first)
     assertEqual "two turns" (← seen.get).size 2
-    let second ← assertOk <| resume rt "test:model" first.state (fun _ => pure ()) (turns? := some 1)
-    check second.outOfTurns "one more turn"
-    assertEqual "from where the first stopped" (← assertOk (getState rt.store second.state)).parent?
-      (some first.state),
+    let (second, halt) ← assertOk <| resume rt "test:model" first (fun _ => pure ()) (turns? := some 1)
+    check (halt == .outOfTurns) "one more turn"
+    assertEqual "from where the first stopped" (← assertOk (getState rt.store second)).parent?
+      (some first),
 
   test "tell records a notice the model sees, and the run continues from it" do
     let rt ← cachedRuntime #[responseWith #[call "a" "bash" "echo ok"]]
     let root ← mkRoot rt (← emptyProject)
     let told ← assertOk <| tell rt.store root "Please re-run your checks."
     let state ← assertOk (getState rt.store told)
-    check (state.kind == .message) "a tell is a message state"
+    check (state.kind == .intervention && state.intervention?.map (·.changed.isEmpty) == some true)
+      "a tell is an intervention with no change"
     check (state.workspace == (← assertOk (getState rt.store root)).workspace) "a tell keeps the workspace"
     match (view {} (← assertOk (logOf rt.store told))).back? with
     | some (.user notice) =>
       check (contains notice "Please re-run your checks.") "the notice carries the message verbatim"
       check (contains notice "<intervention>") "the notice is enveloped"
     | _ => fail "expected the notice as the last user turn"
-    let next ← stepped <| stepOnce rt "test:model" told
+    let next ← stepped <| step rt "test:model" told
     check ((← assertOk (getState rt.store next)).kind == .turn) "the run continues after a tell",
 
   test "the report gives a file replaced by a directory, or the reverse, no text on the directory row" do
@@ -169,16 +171,16 @@ def suite : Suite := Testing.suite "trajectory" #[
                      call "b" "bash" "echo after > after.txt"],
       responseWith #[submitCall "c"]]
     let root ← mkRoot rt (← emptyProject)
-    let stopped := (← assertOk <| resume rt "test:model" root (fun _ => pure ())).state
+    let stopped := (← assertOk <| resume rt "test:model" root (fun _ => pure ())).1
     let state ← assertOk (getState rt.store stopped)
-    check (state.kind == .question) "the run stops at a question"
+    check (state.kind == .turn && state.question?.isSome) "the run stops at a question"
     assertEqual "question" state.question? (some { callId := "q1", text := "Exact wording or mine?" })
     check (← assertOk (rt.workspaces.readFile? state.workspace "before.txt")).isSome
       "the call before the question ran"
     check (← assertOk (rt.workspaces.readFile? state.workspace "after.txt")).isNone
       "the call after the question did not run"
     check ((← assertOk (waiting rt.store)).size == 1) "the question is open"
-    match ← (stepOnce rt "test:model" stopped).toBaseIO with
+    match ← (step rt "test:model" stopped).toBaseIO with
     | .ok _ => fail "a waiting state must not be continued without a reply"
     | .error _ => pure ()
     let answered ← assertOk <| reply rt.store stopped "Exact wording."
@@ -187,7 +189,7 @@ def suite : Suite := Testing.suite "trajectory" #[
     | some (.observation "q1" (.str "Exact wording.")) => pure ()
     | _ => fail "the reply is the observation of the asking call, verbatim"
     check (← assertOk (waiting rt.store)).isEmpty "an answered question is not open"
-    let final := (← assertOk <| resume rt "test:model" answered (fun _ => pure ())).state
+    let final := (← assertOk <| resume rt "test:model" answered (fun _ => pure ())).1
     check ((← assertOk (getState rt.store final)).outcome?.isSome)
       "the run continues to its outcome after the reply",
 
@@ -196,8 +198,8 @@ def suite : Suite := Testing.suite "trajectory" #[
       responseWith #[call "a" "bash" "echo one", call "b" "bash" "echo two"],
       responseWith #[]]   -- a format error: the view substitutes a user turn, and the wire has it
     let root ← mkRoot rt (← emptyProject)
-    let first ← stepped <| stepOnce rt "test:model" root
-    let second ← stepped <| stepOnce rt "test:model" first
+    let first ← stepped <| step rt "test:model" root
+    let second ← stepped <| step rt "test:model" first
     let page ← assertOk <| Html.dataJson rt.store rt.workspaces (view {}) (tools {})
     let states ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "states" >>= Lean.Json.getArr?)
     let envelope ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "request")
@@ -235,7 +237,7 @@ def suite : Suite := Testing.suite "trajectory" #[
     let pinned := "example.test/img@sha256:0123456789abcdef"
     let root ← mkRoot rt (← emptyProject) (some pinned)
     assertEqual "root" (← assertOk (getState rt.store root)).image pinned
-    let child ← stepped <| stepOnce rt "test:model" root
+    let child ← stepped <| step rt "test:model" root
     assertEqual "turn" (← assertOk (getState rt.store child)).image pinned
     let edited ← emptyProject
     IO.FS.writeFile (edited / "by-hand.txt") "by hand"
@@ -247,11 +249,11 @@ def suite : Suite := Testing.suite "trajectory" #[
       responseWith #[call "a" "bash" "echo junk > junk.txt"],
       responseWith #[call "b" "bash" "echo other > other.txt"]]
     let root ← mkRoot rt (← emptyProject)
-    let first ← stepped <| stepOnce rt "test:model" root
+    let first ← stepped <| step rt "test:model" root
     check (← assertOk (rt.workspaces.readFile? (← assertOk (getState rt.store first)).workspace "junk.txt")).isSome
       "the first branch should have written junk.txt"
     -- Forking checks the root's workspace out again: the first branch's file must be gone.
-    let second ← stepped <| stepOnce rt "test:model" root
+    let second ← stepped <| step rt "test:model" root
     let state ← assertOk (getState rt.store second)
     check (← assertOk (rt.workspaces.readFile? state.workspace "other.txt")).isSome
       "the second branch should have written other.txt"
@@ -280,11 +282,11 @@ def suite : Suite := Testing.suite "trajectory" #[
     -- the root does not see the tests.
     check (← assertOk (rt.workspaces.readFile? state.workspace "tests/extra.txt")).isSome
       "the evaluation's workspace holds what the grader did"
-    let child ← stepped <| stepOnce rt "test:model" root
+    let child ← stepped <| step rt "test:model" root
     check (← assertOk (rt.workspaces.readFile? (← assertOk (getState rt.store child)).workspace "tests/extra.txt")).isNone
       "a grader's files must never reach a state the agent continues from"
     -- Nothing may continue from the evaluation.
-    assertError "step" (stepOnce rt "test:model" node) fun
+    assertError "step" (step rt "test:model" node) fun
       | .input m => (m.splitOn "cannot continue from an evaluation").length > 1
       | _ => false
     assertError "commit" (commit rt.store rt.workspaces node (← emptyProject) none) fun
@@ -342,7 +344,7 @@ def suite : Suite := Testing.suite "trajectory" #[
       responseWith #[call "c1" "bash" "echo hi > a.txt"],
       responseWith #[submitCall "c2" "done"]]
     let root ← mkRoot rt (← emptyProject)
-    let final := (← assertOk <| resume rt "test:model" root (fun _ => pure ())).state
+    let final := (← assertOk <| resume rt "test:model" root (fun _ => pure ())).1
     let fstate ← assertOk <| getState rt.store final
     assertEqual "submitted" (fstate.outcome?.map (·.status)) (some "Submitted")
     assertEqual "submission" (fstate.outcome?.map (·.submission)) (some "done")
@@ -366,15 +368,15 @@ def suite : Suite := Testing.suite "trajectory" #[
       responseWith #[call "c1" "bash" "echo hi > a.txt"],
       responseWith #[submitCall "c2"]]
     let root ← mkRoot rt (← emptyProject)
-    let first ← stepped <| stepOnce rt "test:model" root
+    let first ← stepped <| step rt "test:model" root
     -- A second continuation from the root asks for draw 1: the scripted model's next response.
-    let sibling ← stepped <| stepOnce rt "test:model" root
+    let sibling ← stepped <| step rt "test:model" root
     check (first != sibling) "a new continuation is a fresh sibling"
     assertEqual "two turn children" (← assertOk (children rt.store root)).size 2
     -- The scripted model is exhausted now, so any further sample would fail; a reply, tell, or
     -- commit child does not consume a draw and does not ask.
     let told ← assertOk <| tell rt.store root "note"
-    check ((← assertOk (getState rt.store told)).kind == .message) "a tell is recorded without a sample"
+    check ((← assertOk (getState rt.store told)).kind == .intervention) "a tell is recorded without a sample"
 ]
 
 end TrajectoryTests

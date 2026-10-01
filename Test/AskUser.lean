@@ -56,9 +56,6 @@ private def scripted (responses : Array Chat.Response) : IO (Model × IO.Ref (Ar
         | some r => pure r
         | none => throw <| Error.protocol "scripted model exhausted" } }, requests)
 
-private def sampleWith (model : Model) (a : Agent) (dialogue : Dialogue) : Result Chat.Response := do
-  (← model.sample { messages := dialogue, tools := a.tools }).next
-
 private def expectDone (directive : Directive) (status : String) : TestM Unit := do
   match directive with
   | .done outcome => assertEqual "stop status" outcome.status status
@@ -69,10 +66,10 @@ private def expectSample (directive : Directive) : TestM Unit := do
   | .sample => pure ()
   | _ => fail "expected another model sample"
 
-private def resumed (result : Result Stopped) : TestM Hash := do
-  let stopped ← assertOk result
-  check (!stopped.outOfTime) "this continuation must stop at its question or outcome, not its time budget"
-  pure stopped.state
+private def resumed (result : Result (Hash × Halt)) : TestM Hash := do
+  let (state, halt) ← assertOk result
+  check (halt != .outOfTime) "this continuation must stop at its question or outcome, not its time budget"
+  pure state
 
 private def checkQuestionResult (dialogue : Dialogue) (answer : Lean.Json)
     (expectedArguments : Lean.Json := args) : TestM Unit := do
@@ -99,8 +96,8 @@ private def checkQuestionView (dialogue : Dialogue) (answer : String)
 def suite : Suite := Testing.suite "ask_user" #[
   test "both families keep their default prompts and tools when asking is disabled" do
     for family in Families.all do
-      let minimal ← assertOk <| Families.instanceOf (.mkObj [("family", family.name)])
-      let off ← assertOk <| Families.instanceOf
+      let minimal ← assertOk <| Families.fromJson (.mkObj [("family", family.name)])
+      let off ← assertOk <| Families.fromJson
         (.mkObj [("family", family.name), ("ask_user", false)])
       let timeTools := if family.name == "mini-vero" then #["time_budget"] else #[]
       assertEqual "default tools" (minimal.tools.map (·.name)) (#["bash", "submit"] ++ timeTools)
@@ -112,7 +109,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let defaultJson ← assertOk <| Result.fromExcept Error.input (Lean.Json.parse defaultText)
       assertEqual "default JSON explicitly contains ask_user false"
         (defaultJson.getObjValAs? Bool "ask_user").toOption (some false)
-      let request (spec : Families.Instance) : Lean.Json :=
+      let request (spec : Agent) : Lean.Json :=
         ({ messages := spec.view (spec.initialLog "task" testUname), tools := spec.tools } : Chat.Request).toJson
       assertEqual "explicit off opening" (request off).compress (request minimal).compress
       check (!contains (request minimal).compress "ask_user") "the default opening must not offer questions"
@@ -130,7 +127,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       "exactly one bash tool call"]
     for recover in #[false, true] do
       for family in Families.all do
-        let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name),
+        let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name),
           ("ask_user", true), ("recover_output", recover)])
         let opening := (built.initialLog "task" testUname).foldl (init := "") fun text event =>
           match event with
@@ -172,15 +169,13 @@ def suite : Suite := Testing.suite "ask_user" #[
       assertEqual "enabled tools" (built.tools.map (·.name))
         (#["bash", "submit", "read_output"] ++ timeTools ++ #["ask_user"])
       assertEqual "recordable flag" (built.config.getObjValAs? Bool "ask_user").toOption (some true)
-      let restored ← assertOk <| Families.instanceOf built.config
+      let restored ← assertOk <| Families.fromJson built.config
       assertEqual "complete config round-trip" restored.config.compress built.config.compress
-      let (executor, _) ← countingExecutor
-      assertEqual "agent identity" (restored.build executor).identity.compress built.config.compress
       check ((built.initialLog "task" testUname).any fun
         | .message (.user text) => contains text "ask_user"
         | _ => false) "the enabled agent must tell the model it can ask"
       for bad in #[Lean.Json.null, .str "true", .num 1, .arr #[], .mkObj []] do
-        assertError "ask_user type" (Families.instanceOf
+        assertError "ask_user type" (Families.fromJson
           (.mkObj [("family", family.name), ("ask_user", bad)])) fun
             | .input message => contains message "ask_user" && contains message "true or false"
             | _ => false,
@@ -264,12 +259,11 @@ def suite : Suite := Testing.suite "ask_user" #[
       let (executor, calls) ← countingExecutor
       let (model, _) ← scripted #[bad]
       let config := { enabled with maxConsecutiveFormatErrors := 1 }
-      let a := agent executor config
-      let (_, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-        (initialLog config "task" testUname)
-      match stop with
+      let a := agent config
+      let (_, _, halt) ← drive a executor model (initialLog config "task" testUname)
+      match halt with
       | .outcome outcome => assertEqual "rejected turn outcome" outcome.status "RepeatedFormatError"
-      | .question _ _ => fail "an invalid question must not wait for an answer"
+      | _ => fail "an invalid question must not wait for an answer"
       assertEqual "executor calls" (← calls.get) 0,
 
   test "typed questions record candidate, none-of-above, yes/no, and open replies after reconstruction" do
@@ -298,12 +292,13 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (executor, calls) ← countingExecutor
         let continuations := (List.replicate answers.size (response #[submit])).toArray
         let (model, requests) ← scripted (#[response #[ask "q" arguments]] ++ continuations)
-        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
+        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config)
         let waitingHash ← resumed <| resume rt "scripted" root (fun _ => pure ())
         let questionState ← assertOk <| getState store waitingHash
-        assertEqual "waiting kind" questionState.kind Kind.question
+        assertEqual "waiting kind" questionState.kind Kind.turn
+        check questionState.question?.isSome "the turn waits on its question"
         let some question := questionState.question? | fail "missing recorded question"
         assertEqual "call id" question.callId "q"
         let expected ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
@@ -319,7 +314,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "waiting workspace" questionState.workspace (← assertOk <| getState store root).workspace
         assertEqual "unanswered question count" (← assertOk <| waiting store).size 1
         assertEqual "unanswered question has no reply children" (← assertOk <| children store waitingHash).size 0
-        assertError "cannot step while waiting" (stepOnce rt "scripted" waitingHash) fun
+        assertError "cannot step while waiting" (step rt "scripted" waitingHash) fun
           | .input _ => true
           | _ => false
         assertEqual "only question sampled" (← requests.get).size 1
@@ -349,9 +344,9 @@ def suite : Suite := Testing.suite "ask_user" #[
             "an explicit answer, including none_of_above, must differ from not answering"
           let recorded ← assertOk <| agentOf store answered
           assertEqual "recorded root config" recorded.compress built.config.compress
-          let restored ← assertOk <| Families.instanceOf recorded
+          let restored ← assertOk <| Families.fromJson recorded
           checkQuestionView (restored.view (← assertOk <| logOf store answered)) answer arguments
-          let rebuilt : Runtime := { rt with agent := restored.build executor }
+          let rebuilt : Runtime := { rt with agent := restored }
           let final ← resumed <| resume rebuilt "scripted" answered (fun _ => pure ())
           let finalState ← assertOk <| getState store final
           assertEqual "resumed submission" (finalState.outcome?.map (·.status)) (some "Submitted")
@@ -380,14 +375,14 @@ def suite : Suite := Testing.suite "ask_user" #[
       for (questionType, arguments, ordinaryAnswer) in cases do
         let base := (← scratch) / s!"{family.name}-{questionType}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name), ("ask_user", true)])
+        let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name), ("ask_user", true)])
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
         IO.FS.createDirAll project
         let (executor, calls) ← countingExecutor
         let (model, requests) ← scripted #[response #[ask "q" arguments], response #[bash], response #[submit]]
-        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
+        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config)
         let before ← assertOk <| allStates store
@@ -438,7 +433,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     for family in Families.all do
       let base := (← scratch) / family.name
       IO.FS.createDirAll base
-      let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name),
+      let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name),
         ("ask_user", true), ("step_limit", 1)])
       let store ← assertOk <| Store.create (base / "states")
       let workspaces ← Testing.workspaces
@@ -451,18 +446,18 @@ def suite : Suite := Testing.suite "ask_user" #[
       let question ← assertOk <| putState store {
         image := recordedImage
         workdir := recordedWorkdir
-        parent? := some root, workspace, kind := .question, elapsedMs? := some 1000
+        parent? := some root, workspace, kind := .turn, elapsedMs? := some 1000
         appended := #[.response (response #[ask])]
         question? := some { callId := "q", toQuestion := form } }
       let answered ← assertOk <| replyUnavailable store question
       let (executor, calls) ← countingExecutor
       let (model, requests) ← scripted #[]
-      let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor, budgetMs? := some 1000 }
+      let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built, budgetMs? := some 1000 }
       let before ← assertOk <| allStates store
-      assertEqual "step cannot sample after exhausted time" (← assertOk <| stepOnce rt "scripted" answered) none
-      let stopped ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
-      check stopped.outOfTime "unavailable retains the exhausted budget"
-      assertEqual "budget leaves reply resumable" stopped.state answered
+      check ((← assertOk <| step rt "scripted" answered).2 == .outOfTime) "step cannot sample after exhausted time"
+      let (stopped, halt) ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
+      check (halt == .outOfTime) "unavailable retains the exhausted budget"
+      assertEqual "budget leaves reply resumable" stopped answered
       assertEqual "budget writes no new state" (← assertOk <| allStates store) before
       let final ← resumed <| resume { rt with budgetMs? := none } "scripted" answered (fun _ => pure ())
       let terminal ← assertOk <| getState store final
@@ -494,14 +489,14 @@ def suite : Suite := Testing.suite "ask_user" #[
       for (questionType, arguments, invalid, valid) in cases do
         let base := (← scratch) / s!"{family.name}-{questionType}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name), ("ask_user", true)])
+        let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name), ("ask_user", true)])
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
         IO.FS.createDirAll project
         let (executor, calls) ← countingExecutor
         let (model, requests) ← scripted #[response #[ask "q" arguments], response #[submit]]
-        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
+        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config)
         let stopped ← resumed <| resume rt "scripted" root (fun _ => pure ())
@@ -532,7 +527,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "one question and one continuation" (← requests.get).size 2,
 
   test "a stored question form must be complete and well-formed" do
-    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .question, appended := #[], question? := some { callId := "q", text := "Choose." }, agent? := some testAgent }
+    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .turn, appended := #[], question? := some { callId := "q", text := "Choose." }, agent? := some testAgent }
     let questionJson (kind : Lean.Json) (options : Lean.Json) : Lean.Json :=
       .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", kind), ("options", options)]
     let malformed : Array Lean.Json := #[
@@ -562,15 +557,15 @@ def suite : Suite := Testing.suite "ask_user" #[
     let config : Config := { askUser := true, stepLimit := 1 }
     let (executor, calls) ← countingExecutor
     let (model, requests) ← scripted #[response #[ask]]
-    let a := agent executor config
-    let (log, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-      (initialLog config "task" testUname)
-    match stop with
-    | .question "q" _ => pure ()
+    let a := agent config
+    let (rt, asked, halt) ← drive a executor model (initialLog config "task" testUname)
+    match halt with
+    | .question q => assertEqual "the asking call" q.callId "q"
     | _ => fail "the last allowed model turn may still ask its question"
-    let answered := log.push (.observation "q" (.str "2"))
-    let (_, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a) answered
-    match stop with
+    let replied ← assertOk <| reply rt.store asked "2"
+    let answered ← assertOk <| logOf rt.store replied
+    let (_, halt) ← assertOk <| resume rt "test" replied (fun _ => pure ())
+    match halt with
     | .outcome outcome => assertEqual "limit after reply" outcome.status "LimitsExceeded"
     | _ => fail "reply must not grant another model turn"
     assertEqual "sample count" (← requests.get).size 1
@@ -582,7 +577,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       for useResume in #[false, true] do
         let base := (← scratch) / s!"{family.name}-{useResume}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name),
+        let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name),
           ("ask_user", true), ("step_limit", 1)])
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
@@ -591,18 +586,18 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (executor, calls) ← countingExecutor
         -- Exhausted after the question: any accidental second model call is a test failure.
         let (model, requests) ← scripted #[response #[ask]]
-        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor }
+        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config)
         let stopped ← resumed <| resume rt "scripted" root (fun _ => pure ())
         check (← assertOk <| getState store stopped).question?.isSome "the allowed model turn asks"
         let answered ← assertOk <| reply store stopped "2"
         let recorded ← assertOk <| agentOf store answered
-        let restored ← assertOk <| Families.instanceOf recorded
-        let rebuilt := { rt with agent := restored.build executor }
+        let restored ← assertOk <| Families.fromJson recorded
+        let rebuilt := { rt with agent := restored }
         let final ← if useResume then
             resumed <| resume rebuilt "scripted" answered (fun _ => pure ())
-          else stepped <| stepOnce rebuilt "scripted" answered
+          else stepped <| step rebuilt "scripted" answered
         let terminal ← assertOk <| getState store final
         assertEqual "limit outcome" (terminal.outcome?.map (·.status)) (some "LimitsExceeded")
         assertEqual "terminal parent" terminal.parent? (some answered)
@@ -619,7 +614,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     for family in Families.all do
       let base := (← scratch) / family.name
       IO.FS.createDirAll base
-      let built ← assertOk <| Families.instanceOf (.mkObj [("family", family.name), ("ask_user", true)])
+      let built ← assertOk <| Families.fromJson (.mkObj [("family", family.name), ("ask_user", true)])
       let store ← assertOk <| Store.create (base / "states")
       let workspaces ← Testing.workspaces
       let project := base / "project"
@@ -640,7 +635,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let question ← assertOk <| putState store {
         image := recordedImage
         workdir := recordedWorkdir
-        parent? := some first, workspace, kind := .question, elapsedMs? := some 300
+        parent? := some first, workspace, kind := .turn, elapsedMs? := some 300
         appended := #[.response (response #[ask])]
         question? := some { callId := "q", toQuestion := form } }
       let reopened ← assertOk <| Store.create (base / "states")
@@ -652,15 +647,15 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "the human reply adds no running time"
           (← assertOk <| getState reopened answer).elapsedMs? none
       let recorded ← assertOk <| agentOf reopened answered
-      let restored ← assertOk <| Families.instanceOf recorded
+      let restored ← assertOk <| Families.fromJson recorded
       let (executor, calls) ← countingExecutor
       let (model, requests) ← scripted #[response #[submit]]
-      let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", executor, model, agent := restored.build executor, budgetMs? := some 1000 }
+      let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", executor, model, agent := restored, budgetMs? := some 1000 }
       let before ← assertOk <| allStates reopened
-      let stopped ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
-      check stopped.outOfTime "the inherited time exhausts this invocation's budget"
-      assertEqual "resume leaves the reply available for later continuation" stopped.state answered
-      assertEqual "step also refuses another sample" (← assertOk <| stepOnce rt "scripted" answered) none
+      let (stopped, halt) ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
+      check (halt == .outOfTime) "the inherited time exhausts this invocation's budget"
+      assertEqual "resume leaves the reply available for later continuation" stopped answered
+      check ((← assertOk <| step rt "scripted" answered).2 == .outOfTime) "step also refuses another sample"
       assertEqual "the budget writes no terminal or model state" (← assertOk <| allStates reopened) before
       assertEqual "no model request after the exhausted budget" (← requests.get).size 0
       assertEqual "no command after the exhausted budget" (← calls.get) 0
@@ -690,17 +685,17 @@ def suite : Suite := Testing.suite "ask_user" #[
     let readCall : Chat.ToolCall := { id := "r", name := "read_output", arguments := .mkObj [("call_id", "b"), ("offset", 1500), ("limit", 2)] }
     let (executor, calls) ← countingExecutor
     let (model, _) ← scripted #[response #[ask "q" arguments], response #[readCall], response #[submit]]
-    let a := agent executor config
-    let (log, firstStop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-      (initialLog config "task" testUname ++ history)
-    match firstStop with
-    | .question "q" _ => pure ()
+    let a := agent config
+    let (rt, asked, halt) ← drive a executor model (initialLog config "task" testUname ++ history)
+    match halt with
+    | .question q => assertEqual "the asking call" q.callId "q"
     | _ => fail "the recovery-enabled agent should ask normally"
-    let (finalLog, finalStop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-      (log.push (.observation "q" (.str "Inspect the middle lines.\nKeep the output unchanged.")))
-    match finalStop with
+    let replied ← assertOk <| reply rt.store asked "Inspect the middle lines.\nKeep the output unchanged."
+    let (final, halt) ← assertOk <| resume rt "test" replied (fun _ => pure ())
+    match halt with
     | .outcome outcome => assertEqual "submitted after reading" outcome.status "Submitted"
     | _ => fail "expected submission after output recovery"
+    let finalLog ← assertOk <| logOf rt.store final
     let page := finalLog.findSome? fun
       | .observation "r" json => (json.getObjValAs? String "text").toOption
       | _ => none

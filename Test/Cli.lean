@@ -123,12 +123,12 @@ def agentsSuite : Suite := suite "cli.agents" #[
       let .ok onDisk := Lean.Json.parse (← IO.FS.readFile path) | fail s!"{path} is not JSON"
       assertEqual s!"{family.name} defaults" (compressed built.config) (compressed onDisk)
       -- A file naming only the family is the same agent: the file lists every default.
-      let minimal ← assertOk <| Agent.Families.instanceOf (.mkObj [("family", family.name)])
+      let minimal ← assertOk <| Agent.Families.fromJson (.mkObj [("family", family.name)])
       assertEqual s!"{family.name} minimal" (compressed minimal.config) (compressed onDisk),
 
   test "a configuration may leave fields out, but not misname or mistype one" do
     let refused (label : String) (json : Lean.Json) (expected : String) : TestM Unit :=
-      assertError label (Agent.Families.instanceOf json) fun
+      assertError label (Agent.Families.fromJson json) fun
         | .input m => (m.splitOn expected).length > 1
         | _ => false
     refused "no family" (.mkObj [("step_limit", 1)]) "needs a \"family\""
@@ -150,7 +150,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let workspaces ← Testing.workspaces
     let project := (← scratch) / "proj"
     IO.FS.createDirAll project
-    let built ← assertOk <| Agent.Families.instanceOf (.mkObj [("family", "mini-swe"), ("step_limit", 7)])
+    let built ← assertOk <| Agent.Families.fromJson (.mkObj [("family", "mini-swe"), ("step_limit", 7)])
     let root ← assertOk <| Trajectory.createRoot store workspaces #[] project (← testImage) (some "t")
       (agent := built.config)
     let child ← assertOk <| Trajectory.tell store root "hello"

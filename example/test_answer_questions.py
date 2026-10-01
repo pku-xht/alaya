@@ -53,8 +53,9 @@ elif args[0] in ("show", "ls", "cat"):
     value = {"state": state, "workspace": "f" * 64}
     if args[0] == "show":
         assert len(positional) == 1
-        kind = "question" if state in [q["state"] for q in questions] else "turn"
-        value.update(kind=kind, history=[{"state": state, "kind": kind, "events": []}])
+        asked = next((q for q in questions if q["state"] == state), None)
+        value.update(kind="turn", question=asked and {"text": asked["question"]},
+                     history=[{"state": state, "kind": "turn", "events": []}])
     else:
         assert len(positional) == 2
         path = positional[1]
@@ -418,7 +419,7 @@ class QuestionHttpTests(unittest.TestCase):
     def test_context_is_the_question_branch(self):
         status, body, _ = self.request(path=f"/api/context?{urlencode({'state': YES_NO})}")
         self.assertEqual((status, body), (200, {"state": YES_NO, "workspace": "f" * 64,
-            "history": [{"state": YES_NO, "kind": "question", "events": []}]}))
+            "history": [{"state": YES_NO, "kind": "turn", "events": []}]}))
 
     def test_context_endpoints_require_token_and_same_origin(self):
         for endpoint, query in [("context", {"state": YES_NO}),

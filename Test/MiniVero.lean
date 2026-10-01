@@ -115,16 +115,16 @@ def suite : Suite := Testing.suite "mini-vero" #[
     let executor : Executor := {
       exec := fun _ _ _ => pure { output := "Lean type mismatch", exitCode? := some 1 }
       uname := pure default }
-    let agent := MiniVero.agent executor config
+    let agent := MiniVero.agent config
     let call : Chat.ToolCall := { id := "c", name := "bash", arguments := .mkObj [("command", "lake lean Proof.lean")] }
-    let output ← assertOk <| agent.act { dir := "." } call
+    let output ← assertOk <| agent.act executor { dir := "." } call
     check ((output.getObjVal? "exit_code").toOption == some 1) "wrong exit code"
     let log : Log := #[.response { toolCalls := #[call] }, .observation "c" output]
     match agent.next {} log with
     | .sample => pure ()
     | _ => fail "should continue after compiler feedback",
   test "submit is terminal but is not claimed to be a passing evaluation" do
-    let agent := MiniVero.agent noCommands config
+    let agent := MiniVero.agent config
     let log : Log := #[.response { toolCalls := #[{
       id := "s", name := "submit", arguments := .mkObj [("message", "done")] }] }]
     match agent.next {} log with
@@ -132,7 +132,7 @@ def suite : Suite := Testing.suite "mini-vero" #[
     | _ => fail "expected submission",
   test "the step limit is enforced and long output stays in the raw log" do
     let cfg : MiniVero.Config := { config with base := { config.base with stepLimit := 1 } }
-    let agent := MiniVero.agent noCommands cfg
+    let agent := MiniVero.agent cfg
     let call : Chat.ToolCall := { id := "c", name := "bash", arguments := .mkObj [("command", "lake build")] }
     let raw := String.ofList (List.replicate 12000 'x')
     let log : Log := #[.response { toolCalls := #[call] },
@@ -178,7 +178,7 @@ private def runtime (responses : Array Chat.Response) (budgetMs? : Option Nat) :
   IO.FS.createDirAll work
   let executor ← containerExecutor config.base.executor
   let rt : Trajectory.Runtime := { store, workspaces, workDir := work, executor, model := ← scripted responses
-                                   agent := MiniVero.agent executor config, budgetMs? }
+                                   agent := MiniVero.agent config, budgetMs? }
   let uname : Uname := { system := "Linux", release := "", version := "", machine := "x86_64" }
   let root ← assertOk <| Trajectory.createRoot store workspaces (MiniVero.initialLog config "t" uname)
     project (← testImage) (some "t") (agent := config.toJson)
@@ -202,7 +202,7 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     assertEqual "tools" ((MiniVero.tools config).map (·.name)) #["bash", "submit", "time_budget"],
 
   test "time_budget records the seconds left, or that there is none, and runs nothing" do
-    let agent := MiniVero.agent noCommands config
+    let agent := MiniVero.agent config
     let log : Log := #[.response (turn #[call "t" "time_budget"])]
     match agent.next { elapsedMs := 60500, budgetMs? := some 3600000 } log with
     | .record "t" json => assertEqual "left" (json.getObjVal? "seconds_left" |>.toOption |>.map (·.compress)) (some "3539")
@@ -216,17 +216,17 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     match MiniSwe.parseActions (turn #[call "t" "time_budget"]) with
     | .formatError message => check (contains message "Unknown tool 'time_budget'") "unknown"
     | .actions _ => fail "mini-swe must not accept time_budget"
-    assertError "config" (Agent.Families.instanceOf (.mkObj [("family", "mini-swe"), ("time_budget", true)])) fun
+    assertError "config" (Agent.Families.fromJson (.mkObj [("family", "mini-swe"), ("time_budget", true)])) fun
       | .input m => contains m "unknown field 'time_budget'"
       | _ => false,
 
   test "each step records its time, and the tool counts it against the budget" do
     let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
       turn #[call "t" "time_budget"], turn #[call "s" "submit"]] (some 3600000)
-    let first ← stepped <| Trajectory.stepOnce rt "m" root
+    let first ← stepped <| step rt "m" root
     let slept := (← assertOk <| Trajectory.getState rt.store first).elapsedMs?.getD 0
     check (slept >= 200) s!"the step took the sleep, recorded {slept} ms"
-    let second ← stepped <| Trajectory.stepOnce rt "m" first
+    let second ← stepped <| step rt "m" first
     match (← assertOk <| Trajectory.getState rt.store second).appended.back? with
     | some (.observation "t" json) =>
       let left := (json.getObjVal? "seconds_left" >>= Lean.Json.getNat?).toOption.getD 0
@@ -237,17 +237,18 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
   test "a spent budget stops resume before a step, writes nothing, and a later resume continues" do
     let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
       turn #[call "s" "submit" (.mkObj [("message", "done")])]] (some 100)
-    let stopped ← assertOk <| Trajectory.resume rt "m" root (fun _ => pure ())
-    check stopped.outOfTime "the budget stopped it"
-    check ((← assertOk <| Trajectory.getState rt.store stopped.state).outcome?.isNone) "the run has not ended"
+    let (stopped, halt) ← assertOk <| Trajectory.resume rt "m" root (fun _ => pure ())
+    check (halt == .outOfTime) "the budget stopped it"
+    check ((← assertOk <| Trajectory.getState rt.store stopped).outcome?.isNone) "the run has not ended"
     let count := (← assertOk <| Trajectory.allStates rt.store).size
-    let again ← assertOk <| Trajectory.resume rt "m" stopped.state (fun _ => pure ())
-    check (again.outOfTime && again.state == stopped.state) "spent before a step: nothing more"
+    let (again, halt) ← assertOk <| Trajectory.resume rt "m" stopped (fun _ => pure ())
+    check (halt == .outOfTime && again == stopped) "spent before a step: nothing more"
     assertEqual "no state written" (← assertOk <| Trajectory.allStates rt.store).size count
-    assertEqual "step says so too" (← assertOk <| Trajectory.stepOnce rt "m" stopped.state) none
-    let final ← assertOk <| Trajectory.resume { rt with budgetMs? := none } "m" stopped.state (fun _ => pure ())
-    check (!final.outOfTime) "without a budget it runs on"
-    assertEqual "submitted" ((← assertOk <| Trajectory.getState rt.store final.state).outcome?.map (·.status)) (some "Submitted")
+    let (_, halt) ← assertOk <| step rt "m" stopped
+    check (halt == .outOfTime) "one step is refused too"
+    let (final, halt) ← assertOk <| Trajectory.resume { rt with budgetMs? := none } "m" stopped (fun _ => pure ())
+    check (halt != .outOfTime) "without a budget it runs on"
+    assertEqual "submitted" ((← assertOk <| Trajectory.getState rt.store final).outcome?.map (·.status)) (some "Submitted")
 ]
 
 end MiniVeroTests

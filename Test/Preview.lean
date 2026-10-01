@@ -111,10 +111,26 @@ def suite : Suite := Testing.suite "preview" #[
     let root ← put none .root "task"
     let middle ← put (some root) .turn "middle"
     let _ ← put (some root) .turn "sibling"
-    let leaf ← put (some middle) .message "leaf"
-    let branch ← assertOk <| branchOf store leaf
+    let leaf ← put (some middle) .intervention "leaf"
+    let branch ← assertOk <| ancestors store leaf
     assertEqual "states" (branch.map (·.1)) #[root, middle, leaf]
-    assertEqual "kinds" (branch.map (·.2.kind.toString)) #["root", "turn", "message"]
+    assertEqual "kinds" (branch.map (·.2.kind.toString)) #["root", "turn", "intervention"]
+    assertEqual "the log is theirs" ((← assertOk <| logOf store leaf).size) 3
+    assertEqual "the root" (← assertOk <| rootOf store leaf) root,
+
+  test "parents that form a cycle are an error, not an endless walk" do
+    let store ← assertOk <| Store.create ((← scratch) / "states")
+    -- Content-addressed states cannot form a cycle; files edited by hand can.
+    let a : Hash := ⟨"".pushn 'a' 64⟩
+    let b : Hash := ⟨"".pushn 'b' 64⟩
+    let state (parent : Hash) : State :=
+      { image := recordedImage, workdir := recordedWorkdir, parent? := some parent, workspace
+        kind := .turn, appended := #[] }
+    IO.FS.writeFile (store.dir / s!"{a.hex}.json") (state b).toJson.compress
+    IO.FS.writeFile (store.dir / s!"{b.hex}.json") (state a).toJson.compress
+    assertError "cycle" (ancestors store a) fun
+      | .storage m => (m.splitOn "form a cycle").length > 1
+      | _ => false
 ]
 
 end PreviewTests
