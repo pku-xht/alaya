@@ -26,7 +26,7 @@ private def cachedRuntime (responses : Array Chat.Response) (config : Config := 
   let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
   let work ← workDir
   let executor ← containerExecutor config.executor
-  pure { store, workspaces := ← workspaces, workDir := work, executor, model := cached
+  pure { store, workspaces := ← workspaces, workDir := work, outputsDir := work.withFileName "outputs", executor, model := cached
          agent := agent config }
 
 /-- A root for the test task over `project`. -/

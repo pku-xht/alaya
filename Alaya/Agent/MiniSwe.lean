@@ -26,10 +26,8 @@ structure Config where
   maxConsecutiveFormatErrors : Nat := 3
   /-- How commands are run. -/
   executor : Executor.Config := defaultExecutor
-  /-- Offer `read_output`, which shows any lines of a long output the view cut to its head and
-  tail. Off, the agent is mini to the byte: its tools, its prompts, its observations. On, the
-  tool is offered and the two sentences that require a bash call in every response say "a
-  tool call" instead (`withExtraTools`). -/
+  /-- Name, in a long output's warning, the file under `outputsDir` that holds the whole of it
+  (`outputs`). Off, the agent is mini to the byte; on, only that warning differs. -/
   recoverOutput : Bool := false
   /-- Offer yes/no, single-choice, and open-ended questions. -/
   askUser : Bool := false
@@ -136,7 +134,6 @@ def instanceMessage (task system release version machine : String) : String :=
 
 /-- The tools besides `bash` and `submit` a configuration offers, with what each is for. -/
 def extraTools (config : Config) : List (String × String) :=
-  (if config.recoverOutput then [("read_output", "see more of an earlier command's output")] else []) ++
   (if config.timeBudget then [("time_budget", "see how much time is left")] else []) ++
   (if config.askUser then [("ask_user", "ask a person a question")] else [])
 
@@ -190,17 +187,15 @@ def outputLimit : Nat := 10000
 /-- The tools offered on every sample. -/
 def tools (config : Config) : Array Chat.ToolDefinition :=
   #[Tools.Bash.definition, Tools.Submit.definition] ++
-    (if config.recoverOutput then #[Tools.ReadOutput.definition] else #[]) ++
     (if config.timeBudget then #[Tools.TimeBudget.definition] else #[]) ++
     (if config.askUser then #[Tools.AskUser.definition] else #[])
 
 /-! ## Reading a response -/
 
-/-- One parsed tool call: a command to run, a read answered from the log, or the call that
-ends the run. -/
+/-- One parsed tool call: a command to run, a question for the session or a person, or the
+call that ends the run. -/
 inductive Action where
   | bash (id : String) (command : String)
-  | readOutput (id : String) (arguments : Lean.Json)
   | timeBudget (id : String)
   | ask (id : String) (question : Question)
   | submit (id : String) (message : String)
@@ -208,7 +203,6 @@ inductive Action where
 
 def Action.id : Action -> String
   | .bash id _ => id
-  | .readOutput id _ => id
   | .timeBudget id => id
   | .ask id _ => id
   | .submit id _ => id
@@ -219,7 +213,7 @@ inductive Parsed where
   | formatError (message : String)
 
 /-- Reads a response's tool calls; the first call with a problem makes the turn a format error.
-`read_output`, `time_budget`, and `ask_user` are known only when offered; an ask must be alone. -/
+`time_budget` and `ask_user` are known only when offered; an ask must be alone. -/
 def parseActions (response : Chat.Response) (config : Config := {}) : Parsed := Id.run do
   if response.toolCalls.isEmpty then
     return .formatError <| formatErrorMessage
@@ -237,9 +231,6 @@ def parseActions (response : Chat.Response) (config : Config := {}) : Parsed := 
       else match call.name with
         | "submit" => .ok (.submit call.id (Tools.Submit.message call.arguments))
         | "bash" => (Tools.Bash.command call.arguments).map (.bash call.id ·)
-        | "read_output" =>
-          if !config.recoverOutput then .error "Unknown tool 'read_output'."
-          else (Tools.ReadOutput.parse call.arguments).map fun _ => .readOutput call.id call.arguments
         | "time_budget" =>
           if !config.timeBudget then .error "Unknown tool 'time_budget'." else .ok (.timeBudget call.id)
         | "ask_user" =>
@@ -254,11 +245,18 @@ def parseActions (response : Chat.Response) (config : Config := {}) : Parsed := 
 
 /-! ## The agent: view, control, action -/
 
+/-- The file holding the whole of the output recorded at `index` of the log by call `id`: named
+by its position, which never changes on a branch, with the id, made safe for a file name, for
+reading. -/
+def outputFile (index : Nat) (id : String) : String :=
+  let safe := id.map fun c => if c.isAlphanum || c == '-' || c == '_' || c == '.' then c else '_'
+  s!"{index}-{safe}.txt"
+
 /-- The view: a malformed response is shown as the format error, as a user turn; an observation
-as `Tools.Bash.observation` of the recorded `Output`. A page of `read_output` is not an
-`Output` and is shown as recorded. -/
+as `Tools.Bash.observation` of the recorded `Output`, which with `recoverOutput` names the file
+a cut output is in. -/
 def view (config : Config) (log : Log) : Dialogue :=
-  log.map fun
+  log.mapIdx fun index event => match event with
     | .message m => m
     | .response r =>
       match parseActions r config with
@@ -267,9 +265,19 @@ def view (config : Config) (log : Log) : Dialogue :=
     | .observation id content =>
       let json := match Output.fromJson? content with
         | some output => Tools.Bash.observation output outputLimit
-            (if config.recoverOutput then some id else none)
+            (if config.recoverOutput then some s!"{Agent.outputsDir}/{outputFile index id}" else none)
         | none => content
       .tool id (.str json.pretty)
+
+/-- The files the view names: with `recoverOutput`, the whole of each output it cuts. -/
+def outputs (config : Config) (log : Log) : Array (String × String) :=
+  if !config.recoverOutput then #[] else
+    (log.mapIdx fun index event => match event with
+      | .observation id content => match Output.fromJson? content with
+        | some output => if output.output.length < outputLimit then none
+          else some (outputFile index id, output.output)
+        | none => none
+      | _ => none).filterMap id
 
 /-- How many format-error responses end the log with no clean turn between them. A person's
 message in between does not reset the count; an observation does, since it means a turn ran. -/
@@ -305,8 +313,6 @@ def next (config : Config) (session : Session) (log : Log) : Directive :=
       match actions.find? (fun action => pending.any (·.id == action.id)) with
       | none => sampleOrStop
       | some (.submit _ message) => .done { status := "Submitted", submission := message }
-      | some (.readOutput id arguments) =>
-        .record id (Tools.ReadOutput.read log arguments outputLimit)
       | some (.timeBudget id) => .record id (Tools.TimeBudget.answer session)
       | some (.ask id question) => .ask id question
       | some (.bash id _) =>
@@ -330,6 +336,7 @@ def agent (config : Config) : Agent := {
   view := view config
   next := next config
   act
+  outputs := outputs config
 }
 
 end Alaya.Agent.MiniSwe

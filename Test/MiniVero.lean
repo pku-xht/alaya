@@ -177,7 +177,7 @@ private def runtime (responses : Array Chat.Response) (budgetMs? : Option Nat) :
   let work := (← scratch) / "work"
   IO.FS.createDirAll work
   let executor ← containerExecutor config.base.executor
-  let rt : Trajectory.Runtime := { store, workspaces, workDir := work, executor, model := ← scripted responses
+  let rt : Trajectory.Runtime := { store, workspaces, workDir := work, outputsDir := work.withFileName "outputs", executor, model := ← scripted responses
                                    agent := MiniVero.agent config, budgetMs? }
   let uname : Uname := { system := "Linux", release := "", version := "", machine := "x86_64" }
   let root ← assertOk <| Trajectory.createRoot store workspaces (MiniVero.initialLog config "t" uname)

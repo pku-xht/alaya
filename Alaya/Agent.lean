@@ -70,6 +70,10 @@ structure Workspace where
   dir : System.FilePath
   deriving Inhabited
 
+/-- Where the commands of a run find the files an agent's view names (`Agent.outputs`):
+read-only, and outside any workdir. -/
+def outputsDir : String := "/alaya/outputs"
+
 /-- An agent: what a run records of it, how it opens a run and runs commands, the tools it
 offers, and the pure functions it decides by. -/
 structure Agent where
@@ -86,6 +90,9 @@ structure Agent where
   /-- Runs one tool call in the workspace through the executor, and returns the observation to
   record. The executor is the run's, chosen after the agent is built. -/
   act : Executor -> Workspace -> Chat.ToolCall -> Result Lean.Json
+  /-- The files the view names in `outputsDir`, by file name, with their contents: like the
+  view, a function of the log, so each branch sees its own. Nothing records them. -/
+  outputs : Log -> Array (String × String) := fun _ => #[]
 
 namespace Log
 

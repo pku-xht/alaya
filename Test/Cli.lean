@@ -213,7 +213,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     refused "nested" (.mkObj [("name", "mini-swe"), ("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
     refused "own field, misnamed" (.mkObj [("name", "mini-vero"), ("stepp", 1)]) "mode, time_budget"
     let built ← assertOk <| Agent.Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
-    assertEqual "tools follow the settings" (built.tools.map (·.name)) #["bash", "submit", "read_output", "time_budget"]
+    assertEqual "tools follow the settings" (built.tools.map (·.name)) #["bash", "submit", "time_budget"]
     assertEqual "a nested setting" ((← assertOk <| Agent.Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]).executorConfig.timeoutSeconds) 5
     assertError "the name is not a setting" (Agent.Catalog.resolve "mini-swe" #[agentSet ["name"] "mini-vero"]) fun
       | .input m => (m.splitOn "--agent NAME").length > 1

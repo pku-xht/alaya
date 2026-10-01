@@ -129,7 +129,7 @@ def drive (agent : Agent.Agent) (executor : Executor) (model : Model) (log : Age
   let workspaces ← workspaces
   let root ← assertOk <| Trajectory.createRoot store workspaces log (base / "project") recordedImage
     (agent := testAgent) (model := testModel)
-  let rt : Trajectory.Runtime := { store, workspaces, workDir := work, executor, model, agent }
+  let rt : Trajectory.Runtime := { store, workspaces, workDir := work, outputsDir := work.withFileName "outputs", executor, model, agent }
   let (state, halt) ← assertOk <| Trajectory.resume rt root (fun _ => pure ())
   pure (rt, state, halt)
 
