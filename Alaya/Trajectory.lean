@@ -394,29 +394,27 @@ def resolve (store : Store) (pfx : String) : Result Hash := do
   | [] => throw <| .input s!"no state matches {pfx}"
   | _ => throw <| .input s!"ambiguous state prefix {pfx} ({hits.size} matches)"
 
-/-- Reconstructs the full log at `hash` by concatenating appended events root→node. -/
-partial def logOf (store : Store) (hash : Hash) : Result Log := do
-  let state ← getState store hash
-  let ancestors ← match state.parent? with
-    | some parent => logOf store parent
-    | none => pure #[]
-  pure (ancestors ++ state.appended)
+/-- The states from the root to `hash`, inclusive, oldest first: the one walk up the tree, which
+the log, the run's time and the root are read from. Corrupt data whose parents form a cycle is
+an error, not a walk that never ends. -/
+partial def ancestors (store : Store) (hash : Hash) : Result (Array (Hash × State)) := do
+  let rec climb (hash : Hash) (seen : Std.HashSet Hash) (above : List (Hash × State)) :
+      Result (Array (Hash × State)) := do
+    if seen.contains hash then throw <| .storage s!"the states above {hash.hex} form a cycle"
+    let state ← getState store hash
+    let above := (hash, state) :: above
+    match state.parent? with
+    | some parent => climb parent (seen.insert hash) above
+    | none => pure above.toArray
+  climb hash {} []
 
-/-- The states from the root to `hash`, in order. -/
-partial def branchOf (store : Store) (hash : Hash) : Result (Array (Hash × State)) := do
-  let state ← getState store hash
-  let before ← match state.parent? with
-    | some parent => branchOf store parent
-    | none => pure #[]
-  pure (before.push (hash, state))
+/-- The full log at `hash`: the events each state appended, from the root. -/
+def logOf (store : Store) (hash : Hash) : Result Log := do
+  pure ((← ancestors store hash).foldl (fun log (_, state) => log ++ state.appended) #[])
 
 /-- How long the run up to `hash` has taken: its model steps' times, from the root. -/
-partial def elapsedMs (store : Store) (hash : Hash) : Result Nat := do
-  let state ← getState store hash
-  let before ← match state.parent? with
-    | some parent => elapsedMs store parent
-    | none => pure 0
-  pure (before + state.elapsedMs?.getD 0)
+def elapsedMs (store : Store) (hash : Hash) : Result Nat := do
+  pure ((← ancestors store hash).foldl (fun ms (_, state) => ms + state.elapsedMs?.getD 0) 0)
 
 /-- The transitive subtree rooted at `hash` (inclusive). -/
 partial def subtree (store : Store) (hash : Hash) : Result (Array Hash) := do
@@ -680,9 +678,9 @@ def createRoot (store : Store) (workspaces : Workspaces) (log : Log) (project : 
                    agent? := some agent }
 
 /-- The root of the tree `hash` is in. -/
-partial def rootOf (store : Store) (hash : Hash) : Result Hash := do
-  match (← getState store hash).parent? with
-  | some parent => rootOf store parent
+def rootOf (store : Store) (hash : Hash) : Result Hash := do
+  match (← ancestors store hash)[0]? with
+  | some (root, _) => pure root
   | none => pure hash
 
 /-- The agent configuration the run of `hash` was created with, from its root. -/

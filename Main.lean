@@ -387,7 +387,7 @@ private def showRun (data : System.FilePath) (state : String) (view : Bool) (out
     let hash ← resolve data.store state
     let view? ← if view then some <$> (·.view) <$> recordedAgent data.store hash else pure none
     if out.json then
-      let branch ← branchOf data.store hash
+      let branch ← ancestors data.store hash
       let some (_, state) := branch.back? | throw <| .storage s!"no state {hash.hex}"
       let history := branch.map fun (h, s) => Lean.Json.mkObj [("state", h.hex),
         ("kind", s.kind.toString), ("events", .arr (s.appended.map eventToJson))]
