@@ -61,7 +61,8 @@ verdicts compare the same run with and without the correction.
 `alaya html report.html` writes the whole forest as one page: each state with its time, tokens
 and how full the context is, its events, and its workspace changes. Below is
 [such a page](example/bija/report.html) for a gpt-6-luna run on Bija, branched by a message
-(`alaya tell`) after a turn, at the first turn of the new branch.
+(`alaya tell`) in the middle of the run, at a turn of the new branch; the two branches' verdicts
+are the leaves at the bottom of the tree.
 
 ![The HTML report of a gpt-6-luna run on Bija](example/bija/report.png)
 
