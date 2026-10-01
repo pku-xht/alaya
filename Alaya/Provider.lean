@@ -82,10 +82,10 @@ def Provider.route (provider : Provider) (model : String) : Except String Route 
 
 /-- What a route must meet of a recorded model, or the first requirement it does not. -/
 def check (provider : Provider) (spec : Models.Spec) (route : Route) : Except String Unit := do
-  match route.reasoningEcho, spec.echoReasoning? with
-  | .required, none =>
+  match route.reasoningEcho, spec.echoReasoning with
+  | .required, false =>
     throw s!"{provider.name} needs {spec.name}'s earlier reasoning sent back, which this run does not do"
-  | .rejected, some _ =>
+  | .rejected, true =>
     throw s!"this run sends {spec.name} its earlier reasoning, which {provider.name} rejects"
   | _, _ => pure ()
   if let (some capacity, some needed) := (route.contextTokens?, spec.contextTokens?) then
@@ -114,7 +114,7 @@ def serve (provider : Provider) (spec : Models.Spec) (baseUrl? : Option String :
     | none, none => pure provider.baseUrl
   pure <| ChatCompletions.model {
     provider := provider.name, baseUrl, apiKey, name := route.name, identity := spec.toJson
-    params := spec.params, echoWindow? := spec.echoReasoning?
+    params := spec.params, echoReasoning := spec.echoReasoning
     structuredOutput := route.structuredOutput, nativeBatching := route.nativeBatching }
 
 /-- `--url` and `--port`: where this invocation's `dgx` server listens. -/

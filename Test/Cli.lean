@@ -125,18 +125,36 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
 
   test "a route that cannot meet the recorded model refuses it before any request" do
     let some dgx := Provider.named? "dgx" | fail "no dgx"
-    let spec : Models.Spec := { name := "m", echoReasoning? := some 2, contextTokens? := some 100000 }
+    let spec : Models.Spec := { name := "m", echoReasoning := true, contextTokens? := some 100000 }
     let refused (label : String) (route : Provider.Route) (expected : String) : TestM Unit := do
       match Provider.check dgx spec route with
       | .error m => check ((m.splitOn expected).length > 1) s!"{label}: {m}"
       | .ok _ => fail s!"{label}: accepted"
     refused "echo rejected" { name := "m", reasoningEcho := .rejected } "rejects"
     refused "short context" { name := "m", contextTokens? := some 32768 } "short of the run's 100000"
-    match Provider.check dgx { spec with echoReasoning? := none } { name := "m", reasoningEcho := .required } with
+    match Provider.check dgx { spec with echoReasoning := false } { name := "m", reasoningEcho := .required } with
     | .error m => check ((m.splitOn "needs m's earlier reasoning").length > 1) m
     | .ok _ => fail "echo required but not sent"
     check (Provider.check dgx spec { name := "m", contextTokens? := some 200000 }).toOption.isSome
       "a route with room enough serves it",
+
+  test "echoed reasoning keeps every recorded trace, so a message reads the same on every request" do
+    let assistant (content : String) (reasoning? : Option String) : Lean.Json :=
+      Chat.Message.toJson (.assistant (some content) #[] reasoning?)
+    let user : Lean.Json := Chat.Message.toJson (.user "go on")
+    let payload (messages : Array Lean.Json) : Lean.Json := .mkObj [("messages", .arr messages)]
+    let traceOf (json : Lean.Json) : Option String := (json.getObjVal? "reasoning_content" >>= Lean.Json.getStr?).toOption
+    let early := #[user, assistant "a" (some "thought a"), user, assistant "b" none]
+    let later := early ++ #[user, assistant "c" (some "thought c"), user, assistant "d" (some "thought d")]
+    let messagesOf (json : Lean.Json) : Array Lean.Json := (json.getObjValAs? (Array Lean.Json) "messages").toOption.getD #[]
+    let echoed := messagesOf (Provider.ChatCompletions.echoReasoning (payload later))
+    assertEqual "traces as recorded, empty where none" (echoed.filterMap traceOf)
+      #["thought a", "", "thought c", "thought d"]
+    check (echoed.all fun m => (m.getObjVal? "role" >>= Lean.Json.getStr?).toOption != some "user" || traceOf m == none)
+      "a user message carries no reasoning"
+    let prefix_ := messagesOf (Provider.ChatCompletions.echoReasoning (payload early))
+    assertEqual "a stable prefix" ((prefix_.map (·.compress)).toList)
+      ((echoed.extract 0 prefix_.size).map (·.compress)).toList,
 
   test "a served model's identity is its recorded spec, whoever serves it" do
     let spec ← assertOk <| Models.resolve "deepseek-v4.1-flash" #[modelSet ["params", "reasoning_effort"] "high"]

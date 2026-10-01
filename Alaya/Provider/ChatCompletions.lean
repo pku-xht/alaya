@@ -20,9 +20,9 @@ structure Config where
   /-- Abort connection establishment after this many milliseconds. -/
   connectTimeoutMs : Nat := 30000
   /-- Give every assistant message a `reasoning_content`, as DeepSeek's thinking mode requires:
-  the recorded trace on this many of the most recent assistant turns, and the empty string on
-  older ones, since traces are large. `none` sends no such field, which other models reject. -/
-  echoWindow? : Option Nat := none
+  one that carried a recorded trace already sends it, as it was received, and one that did not —
+  another model's turn, a person's — sends the empty string. Off, no field is added. -/
+  echoReasoning : Bool := false
 
 private def validateResponses (config : Config) (request : Chat.Request)
     (responses : Array Chat.Response) : Result (Array Chat.Response) :=
@@ -91,26 +91,17 @@ private def retryAfterMs? (headers : String) : Option Nat :=
       else none
   (value? "retry-after-ms").orElse fun _ => (value? "retry-after").map (· * 1000)
 
-/-- Gives every assistant message of a payload a `reasoning_content`: its recorded trace on the
-last `window` assistant turns, the empty string on every other. -/
-private def echoReasoning (window : Nat) (payload : Lean.Json) : Lean.Json :=
+/-- Gives every assistant message of a payload a `reasoning_content`, the empty string where it
+has none. A recorded trace is never changed, so a message reads the same on every request and
+the provider can keep reusing the prefix it has cached. -/
+def echoReasoning (payload : Lean.Json) : Lean.Json :=
   match payload.getObjVal? "messages" with
   | .ok (.arr messages) =>
-    let isAssistant (message : Lean.Json) : Bool :=
-      (message.getObjVal? "role" >>= Lean.Json.getStr?).toOption == some "assistant"
-    let assistants := messages.filter isAssistant |>.size
-    let (_, rewritten) := messages.foldl (init := (0, #[])) fun (seen, acc) message =>
-      if !isAssistant message then (seen, acc.push message)
-      else
-        let recent := seen + window >= assistants
-        let message :=
-          if recent then
-            match message.getObjVal? "reasoning_content" with
-            | .ok _ => message
-            | .error _ => message.setObjVal! "reasoning_content" ""
-          else message.setObjVal! "reasoning_content" ""
-        (seen + 1, acc.push message)
-    payload.setObjVal! "messages" (.arr rewritten)
+    payload.setObjVal! "messages" <| .arr <| messages.map fun message =>
+      let assistant := (message.getObjVal? "role" >>= Lean.Json.getStr?).toOption == some "assistant"
+      if assistant && !(message.getObjVal? "reasoning_content").isOk then
+        message.setObjVal! "reasoning_content" ""
+      else message
   | _ => payload
 
 private def complete (config : Config) (request : Chat.Request) (n : Nat) :
@@ -119,9 +110,7 @@ private def complete (config : Config) (request : Chat.Request) (n : Nat) :
   let payload := match config.params with
     | .obj fields => fields.foldl (fun payload key value => payload.setObjVal! key value) payload
     | _ => payload
-  let payload := match config.echoWindow? with
-    | some window => echoReasoning window payload
-    | none => payload
+  let payload := if config.echoReasoning then echoReasoning payload else payload
   -- Omit `n` for single completions so providers without multi-sample support stay compatible.
   let payload := if n == 1 then payload else payload.setObjVal! "n" n
   let result ← Result.fromIO Error.transport <| requestIO config payload.compress

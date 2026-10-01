@@ -230,7 +230,7 @@ served them.
 serialized as one JSON object with sorted keys and no whitespace:
 
 ```json
-{"model":{"context_tokens":null,"echo_reasoning":null,"name":"gpt-5.6-luna","output_tokens":null,"params":{"temperature":0}},
+{"model":{"context_tokens":null,"echo_reasoning":false,"name":"gpt-5.6-luna","output_tokens":null,"params":{"temperature":0}},
  "request":{"messages":[{"content":"You can run bash.","role":"system"},{"content":"List the files.","role":"user"}],
             "response_format":{"type":"text"},"tool_choice":"auto","tools":[...]},
  "structured_output":"native"}
@@ -282,7 +282,7 @@ flowchart BT
 A model is named independently of who serves it, by its ID as its creator publishes it
 (`gpt-oss-120b`, `deepseek-v4.1-flash`), and its defaults are a row of the model table,
 `Alaya.Models`: a `Spec` of `params` — request fields sent as they are, such as `temperature`
-or `reasoning_effort` — the number of recent turns whose reasoning is sent back, and the context
+or `reasoning_effort` — whether its earlier reasoning is sent back, and the context
 and output sizes when known. A root records the complete spec (`docs/cli.md` §5).
 
 A provider is who serves it, chosen per invocation (`resume --provider NAME`). Providers are
@@ -323,17 +323,20 @@ let model ← Provider.serve apiyi spec
 ```
 
 **Reasoning echo.** A thinking-mode model such as DeepSeek returns, with each assistant message,
-a `reasoning_content`: the trace it thought through before answering. On the next request it
-demands that field back on *every* assistant message in the history, and rejects the request if
-one lacks it. Two things get in the way. Turns written by another model have no trace at all. And
-a trace runs to tens of kilobytes, so sending every trace back made a twenty-turn request exceed
-half a megabyte and time out.
+a `reasoning_content`: the trace it thought through before answering. The view keeps it, so the
+transport sends each recorded trace back with its message, as it was received. With tool calls,
+DeepSeek's API also rejects a request in which an earlier assistant message lacks the field, and
+a gateway that re-encodes the conversation for another vendor may need it on every reasoned turn
+to reconstruct it. So with `echo_reasoning` on in the model's spec — as `deepseek-v4.1-flash` has
+it — the transport gives every assistant message the field: its own recorded trace, or `""`
+where none was recorded, such as another model's turn or a person's, which the provider accepts
+as present. Off, no field is added; other models reject the unknown field.
 
-With `echo_reasoning: N` in the model's spec — `deepseek-v4.1-flash` defaults to 2 — the
-transport fills the field in when it serializes the request: the N most recent assistant messages
-get their recorded trace, and every older assistant message gets `""`, an empty trace, which the
-provider accepts as present. The recorded dialogue is untouched; only the request differs. It is
-off for other models, which reject the unknown field.
+A recorded trace is never changed or dropped, so a message serializes the same on every later
+request and the provider can keep reusing the prefix it has cached. The cost is the earlier
+traces in input tokens. This is how the DeepSeek harness handles it too (its
+`dsh-llm-deepseek` adapter). Shortening the context, if requests grow too large, must keep the
+prefix stable in the same way: dropping old reasoning in large blocks, not a sliding window.
 
 ### Retry
 
