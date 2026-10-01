@@ -1,44 +1,62 @@
 # Alaya
 
-A Lean 4 library for typed chat models and recorded agent runs. An agent's run is a tree of
-immutable states, each a file named by the hash of its content, with their workspaces in a
-restic repository beside them: every model turn, every tool result, and every workspace snapshot
-is kept exactly as it happened, so a run can be replayed, branched at any point, evaluated
-against hidden tests, and interrupted by a person.
+Alaya is a framework for experimenting with coding agents that focuses on:
 
-The library is organised in four layers, each documented on its own page, with a command line
-over them.
+**Agents as pure functions.** Agent runs are stochastic, depend on their environment, and take
+long, so they are hard to reproduce and compare. In Alaya, an agent is a pure function of its
+run's log, and everything impure — model responses, tool results, workspaces — is recorded as a
+tree of immutable states. Any run can be continued, branched, or replayed from any state.
+
+**Agent-native operation.** Research is increasingly automated by AI. Alaya is designed to be
+operated entirely by an external agent, such as Claude Code, through a strict, self-describing
+command line with JSON output and exit codes that say what happened.
+
+**Long-horizon tasks, benchmarks, and human interaction.** Runs can be paused and resumed across
+invocations, execute in a benchmark's own container images, and are graded separately against
+hidden tests. A person can answer the agent's questions or step into a run at any point. Alaya
+includes MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for the Vero benchmark of
+verified Lean code.
+
+## Getting started
 
 ```sh
 lake build              # the alaya executable, in .lake/build/bin/
 lake exe tests          # the test suite; pass a substring to run a subset
 ```
 
-Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls these programs:
+Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls `curl` for every request to
+a model provider, `docker` for every command an agent or a grader runs, and
+[`restic`](https://restic.net) 0.17 or later for workspace snapshots. A running Docker daemon is
+required, for the tests too.
 
-| Program | Used for |
-| --- | --- |
-| `curl` | every request to a model provider |
-| `docker` | running every command an agent or a grader runs, in a pinned container image |
-| `restic` (0.17 or later) | snapshotting a workspace, writing one back out, and diffing two ([restic.net](https://restic.net)) |
-| `chmod` | making a directory replaceable |
-
-Nothing an agent or a grader asks for runs on the host: every trajectory is created with
-`--image`, its commands run in that image, and its graders in that image or one of their own,
-so a running docker daemon is required, for the tests too. `restic` is a single binary, and `chmod` is on any Unix host.
-
-A first run needs a data directory, an image, a project directory, a task, and a model
-(`docs/llm-api.md` lists the providers). Every command names the data directory with `--data DIR`
-or reads `ALAYA_DATA`; `root` creates it. `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` —
-Debian, Python 3.12, and `uv` — is a good default image; `alaya` records it by digest:
+A typical session, on the [Bija example benchmark](example/bija/README.md): implement a small
+language from its specification, graded against programs the agent never sees.
 
 ```sh
-export ALAYA_DATA=$PWD/runs
-root=$(alaya root --task "Add a hello.py that prints hello" ./project \
-  --agent agents/mini-swe-default.json --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
-alaya resume "$root" --model PROVIDER:MODEL
+docker build -t alaya-bija example/bija
+export ALAYA_DATA=$PWD/runs    # the data directory; `root` creates it
+
+# Run the agent until it submits, then grade where it ended.
+root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton \
+  --agent agents/mini-swe-default.json --image alaya-bija)
+alaya resume "$root" --model PROVIDER:MODEL    # one line per new state; providers: docs/llm-api.md
+alaya eval END --input example/bija --grader /grader/grade.py --timeout 1800
+
+# Find the turn where it went wrong, and see what the model was sent there.
 alaya tree
+alaya show TURN --view
+
+# Correct the workspace at that turn by hand, let the agent go on from the correction, and grade
+# the new branch.
+alaya checkout TURN fix    # its files, to edit by hand in fix/
+fixed=$(alaya commit TURN fix --note "corrected by hand")
+alaya resume "$fixed" --model PROVIDER:MODEL
+alaya eval END2 --input example/bija --grader /grader/grade.py --timeout 1800
 ```
+
+`END`, `TURN` and `END2` stand for state hashes, or any unambiguous prefix of one: `resume`
+prints each state it adds, and `tree` the whole forest. The first branch is untouched, so the two
+verdicts compare the same run with and without the correction.
 
 ## Documentation
 
@@ -76,9 +94,3 @@ tool to pace a run by, graded by the Vero benchmark in `benchmarks/vero/`.
 [`docs/ask-user.md`](docs/ask-user.md) — `ask_user`, the tool with which MiniSwe and MiniVero
 ask a person a question and wait: yes/no, single-choice and open-ended forms, answering with
 `alaya reply`, and a local page that serves the waiting questions.
-
-## Example
-
-[`example/bija/`](example/bija/README.md) is a benchmark for alaya: Bija, a small language to be
-implemented from its specification, with a skeleton to start from, an image to run in, and a
-grader that scores an attempt against 232 programs the agent never sees.
