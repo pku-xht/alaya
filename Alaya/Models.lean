@@ -72,6 +72,9 @@ gives it. -/
 def all : Array Spec := #[
   { name := "gpt-oss-120b", contextTokens? := some 131072 },
   { name := "gpt-5.6-luna" },
+  -- OpenAI's light GPT-6, released 2026-09-22: 1,050,000 tokens of context, of which up to
+  -- 128,000 may be output.
+  { name := "gpt-6-luna", contextTokens? := some 1050000, outputTokens? := some 128000 },
   -- A thinking-mode DeepSeek model: with tool calls, its API rejects a request whose earlier
   -- assistant messages lack their reasoning, and a gateway may need it on every reasoned turn
   -- to reconstruct the conversation. 1,000,000 tokens of context, per DeepSeek's documentation.

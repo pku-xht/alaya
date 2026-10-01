@@ -132,7 +132,7 @@ named in the script that runs it.
 
 - `--agent NAME` names an agent — `mini-swe` (`docs/miniswe.md`) or `mini-vero`
   (`docs/minivero.md`). `--model NAME` names a model by its ID as its creator publishes it, with
-  no provider prefix — `gpt-oss-120b`, `deepseek-v4.1-flash` — whose defaults are a row of the
+  no provider prefix — `gpt-oss-120b`, `gpt-6-luna`, `deepseek-v4.1-flash` — whose defaults are a row of the
   model table: its context and output sizes when known, default `params`, and whether its earlier
   reasoning is sent back (`echo_reasoning`, on for thinking-mode DeepSeek models).
 - `--set PATH=VALUE`, repeatable and applied in order, overrides one field. PATH starts with
