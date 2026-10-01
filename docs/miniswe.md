@@ -225,7 +225,9 @@ when the request's size reaches the context less `context_reserve`, or less the 
 latest response's recorded `usage` says how many tokens the request it answered held and how
 many it returned, and what the view has added since is estimated at four characters a token of
 its JSON. With no `usage`, or once the view has rewritten what was measured, the whole view is
-estimated. A model with no known context size is not checked.
+estimated. A model with no known context size is not checked. Whatever the estimate, a request
+the provider refuses as too long ends the run the same way, recorded by the trajectory with the
+provider's words (`docs/trajectory-schema.md` §2), so a run never fails on a full context.
 
 **Masking omits old outputs, in blocks.** With `mask_observations` `{keep_turns: K, block: B}`,
 the view omits the outputs of the oldest turns: none while the log holds fewer than `K + B`

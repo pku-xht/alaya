@@ -1,4 +1,6 @@
 import Test.Framework
+import Test.DirectoryWorkspaces
+import Test.Container
 import Alaya
 
 /-! Context management in MiniSwe: a run stops cleanly before its context is full, and the
@@ -6,7 +8,7 @@ view may omit old outputs in blocks, naming the files that hold them. -/
 
 namespace ContextTests
 
-open Testing Alaya Alaya.Agent
+open Testing Alaya Alaya.Agent Alaya.Trajectory
 open Alaya.Agent.MiniSwe
 
 private def bashCall (id : String) : Chat.ToolCall :=
@@ -38,6 +40,24 @@ private def status : Directive → String
   | .done outcome => outcome.status
   | .sample => "sample"
   | _ => "other"
+
+/-- How apiyi refused a request too long for the model, through each API. -/
+private def deepseekRefusal : String :=
+  "{\"error\":{\"message\":\"This model's maximum context length is 1048576 tokens. However, you requested 2600030 tokens (2600030 in the messages, 0 in the completion). Please reduce the length of the messages or completion.\",\"type\":\"invalid_request_error\",\"code\":\"invalid_request_error\"}}"
+
+private def lunaRefusal : String :=
+  "{\"error\":{\"message\":\"Your input exceeds the context window of this model. Please adjust your input and try again.\",\"type\":\"invalid_request_error\",\"param\":\"input\",\"code\":\"context_length_exceeded\"}}"
+
+/-- A model that answers `answers` first, then refuses every request as too long. -/
+private def refusing (answers : Array Chat.Response) : IO Model := do
+  let index ← IO.mkRef 0
+  pure {
+    identity := .mkObj [("model", "refusing")]
+    sample := fun _ => pure { next := do
+      let i ← Result.fromIO Error.cache <| index.modifyGet fun i => (i, i + 1)
+      match answers[i]? with
+      | some response => pure response
+      | none => throw <| .contextExceeded "This model's maximum context length is 100 tokens." } }
 
 def suite : Suite := Testing.suite "context" #[
   iotest "the configuration records the reserve and masking, and rejects a bad block" do
@@ -116,6 +136,53 @@ def suite : Suite := Testing.suite "context" #[
       let unbounded ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name)])
       assertEqual s!"{definition.name} bounded" (status (bounded.next {} log)) "ContextExceeded"
       assertEqual s!"{definition.name} unbounded" (status (unbounded.next {} log)) "sample"
+,
+
+  iotest "a provider's refusal of a too-long request is recognised, in either API's words" do
+    for (label, status, body) in [("deepseek", 400, deepseekRefusal), ("luna", 400, lunaRefusal),
+        ("too large", 413, "{\"error\":{\"message\":\"prompt is too long: 210000 tokens > 200000 maximum\"}}")] do
+      if (Provider.Http.contextExceeded? status body).isNone then throw <| IO.userError s!"{label} not recognised"
+    if Provider.Http.contextExceeded? 400 deepseekRefusal != some
+        "This model's maximum context length is 1048576 tokens. However, you requested 2600030 tokens (2600030 in the messages, 0 in the completion). Please reduce the length of the messages or completion." then
+      throw <| IO.userError "the provider's message is not kept"
+    for (label, status, body) in [("another refusal", 400, "{\"error\":{\"message\":\"temperature must be finite\"}}"),
+        ("a server failure", 500, deepseekRefusal), ("rate limit", 429, lunaRefusal)] do
+      if (Provider.Http.contextExceeded? status body).isSome then throw <| IO.userError s!"{label} taken for an overflow"
+    match ← (Provider.Responses.responseOf (Lean.Json.parse
+        "{\"status\":\"failed\",\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"too long\"},\"output\":[]}"
+        |>.toOption.getD .null)).toBaseIO with
+    | .error (.contextExceeded "too long") => pure ()
+    | _ => throw <| IO.userError "a failed Responses overflow is not one",
+
+  test "a refused request ends the run as ContextExceeded, recorded, and a later draw is not lost" do
+    let store ← assertOk <| Store.create ((← scratch) / "states")
+    let workspaces ← Testing.workspaces
+    let project := (← scratch) / "proj"
+    IO.FS.createDirAll project
+    let work := (← scratch) / "work"
+    IO.FS.createDirAll work
+    let executor : Executor := { exec := fun _ _ _ => pure { output := "ok", exitCode? := some 0 }
+                                 uname := pure default }
+    let outputsDir := (← scratch) / "outputs"
+    let rt (model : Model) : Runtime :=
+      { store, workspaces, workDir := work, outputsDir, executor, model, agent := agent {} }
+    let root ← assertOk <| createRoot store workspaces #[.message (.user "task")] project
+      (← testImage) (agent := testAgent) (model := testModel)
+    let first ← refusing #[response "c1"]
+    let (ended, halt) ← assertOk <| resume (rt first) root (fun _ => pure ())
+    match halt with
+    | .outcome o => assertEqual "status" o.status "ContextExceeded"
+    | _ => fail "the run did not end"
+    let state ← assertOk <| getState store ended
+    assertEqual "nothing sampled" state.appended.size 0
+    check (state.note?.any fun note => (note.splitOn "maximum context length is 100 tokens").length > 1)
+      s!"the provider's words are not kept: {state.note?}"
+    check ((← assertOk <| getState store (state.parent?.getD root)).appended.size > 0) "the turn before was not kept"
+    -- The refusal took no draw: from the same parent, the next sample is its first draw again.
+    let parent := state.parent?.getD root
+    let again ← refusing #[response "c2"]
+    let (_, halt) ← assertOk <| resume (rt again) parent (fun _ => pure ()) (turns? := some 1)
+    check (halt != .outcome { status := "ContextExceeded" }) "the parent's first draw was spent by the refusal"
 ]
 
 end ContextTests

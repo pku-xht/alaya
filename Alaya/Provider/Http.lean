@@ -74,6 +74,22 @@ private def retryAfterMs? (headers : String) : Option Nat :=
       else none
   (value? "retry-after-ms").orElse fun _ => (value? "retry-after").map (· * 1000)
 
+/-- The provider's message when an HTTP refusal says the request does not fit in the model's
+context. Providers word it differently: OpenAI's code `context_length_exceeded` ("Your input
+exceeds the context window of this model"), and vLLM's and DeepSeek's "This model's maximum
+context length is N tokens", which gateways pass on as they are. Only a refusal of the request
+(400, 413, 422) counts, never a server's own failure. -/
+def contextExceeded? (status : Nat) (body : String) : Option String :=
+  if !(status == 400 || status == 413 || status == 422) then none else
+  let error := (Lean.Json.parse body).toOption.bind fun json => (json.getObjVal? "error").toOption
+  let field (key : String) := error.bind fun e => (e.getObjVal? key >>= Lean.Json.getStr?).toOption
+  let message := (field "message").getD body
+  let lower := message.toLower
+  let says := ["maximum context length", "context window", "context length", "context_length_exceeded",
+    "prompt is too long", "input is too long", "too many tokens"].any fun phrase =>
+    (lower.splitOn phrase).length > 1
+  if field "code" == some "context_length_exceeded" || says then some message else none
+
 /-- Posts `payload` to `path` under the provider's base URL and returns the JSON it answers. -/
 def post (config : Config) (path : String) (payload : Lean.Json) : Result Lean.Json := do
   let result ← Result.fromIO Error.transport <| requestIO config path payload.compress
@@ -85,6 +101,8 @@ def post (config : Config) (path : String) (payload : Lean.Json) : Result Lean.J
   let status ← match result.statusOutput.trimAscii.toString.toNat? with
     | some status => pure status
     | none => throw <| .transport s!"{config.provider} returned no HTTP status"
+  if let some message := contextExceeded? status result.body then
+    throw <| .contextExceeded s!"{config.provider}: {message}"
   if status < 200 || status >= 300 then throw <| .http status result.body (retryAfterMs? result.headers)
   Result.fromExcept Error.protocol <| Lean.Json.parse result.body
 

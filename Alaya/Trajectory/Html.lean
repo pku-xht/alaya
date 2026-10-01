@@ -362,6 +362,8 @@ function summary(state) {
   }
   const call = firstCall(state);
   const asked = state.question ? ' ask: ' + (state.question.text || '') : '';
+  // A turn that sampled nothing says why: the provider's refusal, in its note.
+  if (!call && !(state.events || []).length && state.note) return flat(state.note);
   return (call ? call.name + '  ' + flat(call.summary) : '(no tool call)') + asked;
 }
 

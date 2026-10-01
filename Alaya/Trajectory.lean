@@ -478,8 +478,24 @@ def advance (rt : Runtime) (parent : Hash) (log : Log) (workspace : Hash)
   let workdir := parentState.workdir
   let started ← nowMs
   writeOutputs rt log
-  let stream ← rt.model.sample { messages := rt.agent.view log, tools := rt.agent.tools }
-  let responses ← stream.nextN (childCount + 1)
+  let sampled : Result (Array Chat.Response) := do
+    let stream ← rt.model.sample { messages := rt.agent.view log, tools := rt.agent.tools }
+    stream.nextN (childCount + 1)
+  let sampled ← tryCatch (Sum.inr <$> sampled) fun
+    | .contextExceeded message => pure (Sum.inl message)
+    | error => throw error
+  let responses ← match sampled with
+    | .inr responses => pure responses
+    | .inl message =>
+      -- A request too long for the model's context ends the run, recorded, rather than failing
+      -- it: the state says so and keeps the provider's words, and nothing was sampled.
+      let outcome : Outcome := { status := "ContextExceeded" }
+      let elapsed := (← nowMs) - started
+      let child ← putState rt.store {
+        parent? := some parent, workspace, appended := #[], outcome? := some outcome
+        kind := .turn, image, workdir, elapsedMs? := some elapsed
+        note? := some s!"the provider refused the request: {message}" }
+      return (child, log, workspace, before + elapsed, .outcome outcome)
   let response ← match responses[childCount]? with
     | some response => pure response
     | none => throw <| .protocol "model returned too few responses"
@@ -779,7 +795,10 @@ private def label (state : State) : String :=
     let calls := state.calls
     let first := match calls[0]? with
       | some call => callSummary call
-      | none => "turn  (no tool call)"
+      -- A turn that sampled nothing says why: the provider's refusal, in its note.
+      | none => match state.note?, state.appended.isEmpty with
+        | some note, true => "turn  " ++ flatten note
+        | _, _ => "turn  (no tool call)"
     let more := if calls.size > 1 then s!"  (+{calls.size - 1})" else ""
     first ++ more
   | .intervention =>

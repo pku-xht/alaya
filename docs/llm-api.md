@@ -473,6 +473,7 @@ reports it: the `alaya` command line exits with one status per class
 | `busy` | another process is writing the data directory (`Alaya.Lock`) | `transient` |
 | `transport` | the request may or may not have arrived | `transient` |
 | `http status body retryAfterMs?` | the provider answered with a failure | `transient` for 408, 409, 425, 429 and 5xx, the statuses `Retry` retries; `model` otherwise |
+| `contextExceeded` | the provider refused the request as too long for the model's context: a 400, 413 or 422 whose error says so, in OpenAI's code `context_length_exceeded` or the usual words ("maximum context length", "context window", "prompt is too long"); a run ends on it with `ContextExceeded` (`docs/trajectory-schema.md` §2) rather than failing | `model` |
 | `provider` | a provider-specific failure that is none of the above | `model` |
 | `protocol` | a payload that is not the chat protocol | `model` |
 | `structuredOutput` | the reply did not satisfy the requested schema | `model` |

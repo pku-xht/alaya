@@ -107,7 +107,12 @@ private def callOf (item : Lean.Json) : Except String Chat.ToolCall := do
 
 /-- Reads a response: its text, tool calls, reasoning items and their summaries, usage, and a
 finish reason in Chat Completions' terms (`tool_calls`, `stop`, `length`), which agents read. -/
-def responseOf (raw : Lean.Json) : Result Chat.Response :=
+def responseOf (raw : Lean.Json) : Result Chat.Response := do
+  -- A response can fail after it was accepted, the context overflowing among other reasons.
+  if (raw.getObjVal? "status" >>= Lean.Json.getStr?).toOption == some "failed" then
+    let error := (raw.getObjVal? "error").toOption.getD .null
+    if (error.getObjVal? "code" >>= Lean.Json.getStr?).toOption == some "context_length_exceeded" then
+      throw <| .contextExceeded ((error.getObjVal? "message" >>= Lean.Json.getStr?).toOption.getD error.compress)
   Result.fromExcept Error.protocol do
     let status := (raw.getObjVal? "status" >>= Lean.Json.getStr?).toOption.getD "completed"
     if status == "failed" then
