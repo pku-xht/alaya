@@ -505,7 +505,7 @@ private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (ap
     let question : Question := { callId, toQuestion }
     pure (appended, workspace, some question, .question question)
   | .act call =>
-    let content ← rt.agent.act { dir := rt.workDir } call
+    let content ← rt.agent.act rt.executor { dir := rt.workDir } call
     let workspace ← rt.workspaces.snapshot rt.workDir
     let event := Event.observation call.id content
     follow rt before started (log.push event) (appended.push event) workspace

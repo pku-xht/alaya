@@ -27,7 +27,7 @@ private def cachedRuntime (responses : Array Chat.Response) (config : Config := 
   let work ← workDir
   let executor ← containerExecutor config.executor
   pure { store, workspaces := ← workspaces, workDir := work, executor, model := cached
-         agent := agent executor config }
+         agent := agent config }
 
 /-- A root for the test task over `project`. -/
 private def mkRoot (rt : Runtime) (project : System.FilePath) (image? : Option String := none) :
@@ -60,8 +60,10 @@ private def askTool : Chat.ToolDefinition := {
   parameters := .object #[("message", .string)]
 }
 
-private def askingAgent (executor : Executor) : Agent.Agent := {
-  identity := .mkObj [("agent", "asking-test-agent")]
+private def askingAgent : Agent.Agent := {
+  config := .mkObj [("agent", "asking-test-agent")]
+  initialLog := fun _ _ => #[]
+  executorConfig := {}
   tools := #[Alaya.Agent.Tools.Bash.definition, askTool]
   view := fun log => log.map fun
     | .message m => m
@@ -75,12 +77,12 @@ private def askingAgent (executor : Executor) : Agent.Agent := {
         .ask call.id { text := ((call.arguments.getObjVal? "message" >>= Lean.Json.getStr?).toOption.getD "?") }
       else if call.name == "submit" then .done { status := "Submitted" }
       else .act call
-  act := act executor
+  act
 }
 
 private def askingRuntime (responses : Array Chat.Response) : TestM Runtime := do
   let rt ← cachedRuntime responses
-  pure { rt with agent := askingAgent rt.executor }
+  pure { rt with agent := askingAgent }
 
 def suite : Suite := Testing.suite "trajectory" #[
   test "a continuation stops after the turns it was allowed, and a later one goes on" do

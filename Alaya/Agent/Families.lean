@@ -14,47 +14,20 @@ from that.
 
 namespace Alaya.Agent.Families
 
-open Alaya (Result Error Executor Uname)
-open Alaya.Agent (Agent Log View)
-
-/-- An agent built from a configuration: what the command line needs of it. -/
-structure Instance where
-  /-- The opening log of a run for a task, on a machine described by `uname`. -/
-  initialLog : String -> Uname -> Log
-  executorConfig : Executor.Config
-  build : Executor -> Agent
-  view : View
-  tools : Array Chat.ToolDefinition
-  /-- The configuration, complete and in canonical form: what a root records. -/
-  config : Lean.Json
+open Alaya (Result Error)
+open Alaya.Agent (Agent)
 
 structure Family where
   name : String
-  make : Lean.Json -> Except String Instance
+  make : Lean.Json -> Except String Agent
 
 def miniSwe : Family := {
   name := "mini-swe"
-  make := fun json => do
-    let config ← MiniSwe.Config.fromJson json
-    pure {
-      initialLog := MiniSwe.initialLog config
-      executorConfig := config.executor
-      build := fun executor => MiniSwe.agent executor config
-      view := MiniSwe.view config
-      tools := MiniSwe.tools config
-      config := config.toJson } }
+  make := fun json => do pure (MiniSwe.agent (← MiniSwe.Config.fromJson json)) }
 
 def miniVero : Family := {
   name := "mini-vero"
-  make := fun json => do
-    let config ← MiniVero.Config.fromJson json
-    pure {
-      initialLog := MiniVero.initialLog config
-      executorConfig := config.base.executor
-      build := fun executor => MiniVero.agent executor config
-      view := MiniVero.view config
-      tools := MiniVero.tools config
-      config := config.toJson } }
+  make := fun json => do pure (MiniVero.agent (← MiniVero.Config.fromJson json)) }
 
 def all : Array Family := #[miniSwe, miniVero]
 
@@ -63,7 +36,7 @@ def names : String := ", ".intercalate (all.map (·.name)).toList
 def family? (name : String) : Option Family := all.find? (·.name == name)
 
 /-- The agent a configuration names, or what is wrong with the configuration. -/
-def instanceOf (json : Lean.Json) : Result Instance := do
+def fromJson (json : Lean.Json) : Result Agent := do
   let name ← match json.getObjVal? "family" with
     | .ok (.str name) => pure name
     | _ => throw <| .input s!"an agent configuration needs a \"family\": one of {names}"
@@ -74,12 +47,12 @@ def instanceOf (json : Lean.Json) : Result Instance := do
   | .error message => throw <| .input s!"{name} configuration: {message}"
 
 /-- The agent a configuration file names. -/
-def fromFile (path : System.FilePath) : Result Instance := do
+def fromFile (path : System.FilePath) : Result Agent := do
   let text ← match ← (Result.fromIO Error.input (IO.FS.readFile path)).toBaseIO with
     | .ok text => pure text
     | .error _ => throw <| .input s!"cannot read the agent configuration {path}"
   match Lean.Json.parse text with
-  | .ok json => instanceOf json
+  | .ok json => fromJson json
   | .error message => throw <| .input s!"{path} is not JSON: {message}"
 
 end Alaya.Agent.Families

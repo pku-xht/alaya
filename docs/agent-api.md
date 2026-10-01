@@ -168,8 +168,9 @@ structure Workspace where
 
 A `Workspace` is the directory an agent's tools act in.
 
-`act : Workspace -> Chat.ToolCall -> Result Json` runs one call in the workspace and returns the
-observation to record. The shape of the observation is the agent's to define, and its view is
+`act : Executor -> Workspace -> Chat.ToolCall -> Result Json` runs one call in the workspace,
+through the run's executor, and returns the observation to record. The executor is an argument
+because it is chosen after the agent is built: by the run, from `executorConfig`. The shape of the observation is the agent's to define, and its view is
 what renders it. An agent that fails to execute a call returns an observation saying so rather
 than throwing, so that a run survives a failed command.
 
@@ -177,18 +178,20 @@ than throwing, so that a run survives a failed command.
 
 ```lean
 structure Agent where
-  identity : Lean.Json                   -- its configuration: what a root records
+  config : Lean.Json                     -- its complete configuration: what a root records
+  initialLog : String -> Uname -> Log    -- the opening log of a run for a task, on a machine
+  executorConfig : Executor.Config       -- how its commands run: timeout and environment
   tools : Array Chat.ToolDefinition      -- offered on every sample
   view : View
   next : Session -> Log -> Directive
-  act : Workspace -> Chat.ToolCall -> Result Lean.Json
+  act : Executor -> Workspace -> Chat.ToolCall -> Result Lean.Json
 ```
 
 The tools themselves live in `Alaya.Agent.Tools`, each defined on its own — schema, argument
 reading, and what answers a call — with no knowledge of any agent; an agent composes them.
 `Alaya.Agent.Families` is how the command line gets an agent: a *family* (`mini-swe`,
-`mini-vero`) reads a JSON configuration into an `Instance` — its opening log, tools, view and
-`build` — and the root records the configuration (`docs/cli.md` §5).
+`mini-vero`) reads a JSON configuration into an `Agent`, and the root records its `config`, from
+which every later command builds the same agent again (`docs/cli.md` §5).
 
 There is one loop that carries out directives, the trajectory's (`Trajectory.resume`,
 `docs/trajectory-schema.md` §2): follow `next` until it stops, sampling from `view log` and

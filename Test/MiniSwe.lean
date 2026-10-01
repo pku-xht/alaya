@@ -213,7 +213,7 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
     TestM (Dialogue × Hash × Outcome) := do
   let model ← scriptedModel responses
   let executor ← containerExecutor config.executor
-  let (rt, state, halt) ← try drive (agent executor config) executor model (initialLog config "t" testUname)
+  let (rt, state, halt) ← try drive (agent config) executor model (initialLog config "t" testUname)
     finally executor.close
   let log ← assertOk <| Trajectory.logOf rt.store state
   let env := (← assertOk <| Trajectory.getState rt.store state).workspace

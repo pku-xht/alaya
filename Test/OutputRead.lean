@@ -104,7 +104,7 @@ def suite : Suite := Testing.suite "read_output" #[
     let executor : Executor := { exec := fun _ _ _ => throw (IO.userError "ran a command"), uname := pure default }
     let model ← scripted #[response #[readCall "r" "c1" 2 2], response #[bashCall "c2"]]
     let rt : Runtime := { store, workspaces, workDir := work, executor, model
-                          agent := agent executor config }
+                          agent := agent config }
     let root ← assertOk <| createRoot store workspaces (initialLog config "t" testUname ++ recorded) project
       (← testImage) (agent := testAgent)
     let child ← stepped <| step rt "test" root

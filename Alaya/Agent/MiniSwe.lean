@@ -320,13 +320,15 @@ def act (executor : Executor) (workspace : Agent.Workspace) (call : Chat.ToolCal
   | "bash", .ok command => Tools.Bash.act executor workspace command
   | _, _ => throw <| .input s!"not a runnable bash call: {call.name}"
 
-/-- The mini agent over an executor. -/
-def agent (executor : Executor) (config : Config) : Agent := {
-  identity := config.toJson
+/-- The mini agent. -/
+def agent (config : Config) : Agent := {
+  config := config.toJson
+  initialLog := initialLog config
+  executorConfig := config.executor
   tools := tools config
   view := view config
   next := next config
-  act := act executor
+  act
 }
 
 end Alaya.Agent.MiniSwe

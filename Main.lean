@@ -76,8 +76,8 @@ private def executorFor (run : Executor.Docker.RunOptions) (state : State) (conf
   Executor.Docker.executor settings config
 
 /-- The agent of an existing run: what its root recorded. -/
-private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Families.Instance := do
-  Agent.Families.instanceOf (← agentOf store hash)
+private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Agent := do
+  Agent.Families.fromJson (← agentOf store hash)
 
 /-- What `resume` takes: what this invocation samples from, and its limits. The image, the
 workdir and the agent are the root's. -/
@@ -107,7 +107,7 @@ private def runtimeFor (data : DataDir) (work : WorkDir) (a : ResumeArgs) (start
   let model ← buildModel a.model.spec a.model.temperature data.cache a.model.options
   let executor ← executorFor a.run (← getState data.store start) spec.executorConfig
   pure { store := data.store, workspaces := data.workspaces, workDir := work.path, executor, model
-         agent := spec.build executor
+         agent := spec
          budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
 
 /-- Empties the work directory. Both a checkout and an extraction from an image need it to start
