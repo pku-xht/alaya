@@ -77,9 +77,9 @@ private def executorFor (run : Executor.Docker.RunOptions) (state : State) (conf
   settings.ensurePresent
   Executor.Docker.executor settings config
 
-/-- The agent of an existing run: what its root recorded. -/
+/-- The agent of an existing run, for its model: what its root recorded. -/
 private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Agent := do
-  Agent.Catalog.fromJson (← agentOf store hash)
+  Agent.Catalog.fromJson (← agentOf store hash) (← Models.fromJson (← modelOf store hash))
 
 /-- `--provider NAME`: who serves the run's model, for this invocation. -/
 private def providerName : Cli.Value Provider.Provider :=
@@ -228,8 +228,8 @@ private def RootArgs.cli : Cli.Spec RootArgs :=
 
 private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
   -- A configuration that is wrong is said so before anything is created.
-  let spec ← Agent.Catalog.resolve a.agent a.settings
   let model ← Models.resolve a.model a.settings
+  let spec ← Agent.Catalog.resolve a.agent a.settings model
   let task ← a.task.read "task"
   -- Before the data directory is created: inside the project it would become part of it.
   if let some project := a.project? then

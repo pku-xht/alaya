@@ -397,8 +397,8 @@ structure Runtime extends Sandbox where
   agent : Agent
   budgetMs? : Option Nat := none
 
-/-- Writes the agent's files for `log` that are not written yet. A branch's log only grows, so
-a file once written stays right. -/
+/-- Writes the agent's files for `log` that are not written yet, before the model sees a view
+that names them. A branch's log only grows, so a file once written stays right. -/
 private def writeOutputs (rt : Runtime) (log : Log) : Result Unit := do
   let dir := rt.outputsDir
   Result.fromIO Error.storage do
@@ -447,7 +447,6 @@ private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (ap
     let content ← rt.agent.act rt.executor { dir := rt.workDir } call
     let workspace ← rt.workspaces.snapshot rt.workDir
     let event := Event.observation call.id content
-    writeOutputs rt (log.push event)
     follow rt before started (log.push event) (appended.push event) workspace
   | .record callId content =>
     -- Nothing ran: the workspace is as it was, and the state keeps its identifier.
@@ -478,6 +477,7 @@ def advance (rt : Runtime) (parent : Hash) (log : Log) (workspace : Hash)
   let image := parentState.image
   let workdir := parentState.workdir
   let started ← nowMs
+  writeOutputs rt log
   let stream ← rt.model.sample { messages := rt.agent.view log, tools := rt.agent.tools }
   let responses ← stream.nextN (childCount + 1)
   let response ← match responses[childCount]? with
@@ -522,7 +522,6 @@ partial def resume (rt : Runtime) (hash : Hash)
   -- Another branch's files may be there; this one's are written afresh.
   Result.fromIO Error.storage do
     if ← rt.outputsDir.pathExists then IO.FS.removeDirAll rt.outputsDir
-  writeOutputs rt log
   let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed taken : Nat) :
       Result (Hash × Halt) := do
     let (child, log, workspace, elapsed, halt) ← advance rt parent log workspace elapsed

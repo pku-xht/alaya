@@ -130,8 +130,8 @@ def view (config : Config) : Log -> Dialogue := MiniSwe.view config.base
 
 def tools (config : Config) : Array Chat.ToolDefinition := MiniSwe.tools config.base
 
-def agent (config : Config := {}) : Agent :=
-  { MiniSwe.agent config.base with
+def agent (config : Config := {}) (model : Models.Spec := default) : Agent :=
+  { MiniSwe.agent config.base model with
     config := config.toJson, initialLog := initialLog config, view := view config, tools := tools config }
 
 end Alaya.Agent.MiniVero
