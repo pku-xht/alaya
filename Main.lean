@@ -68,10 +68,12 @@ private def openWork (data : DataDir) : Result WorkDir := do
   pure { path }
 
 /-- Where a run's commands go: the image and workdir the trajectory recorded, pulled by its
-digest when it is missing. -/
-private def executorFor (run : Executor.Docker.RunOptions) (state : State) (config : Executor.Config) :
-    Result Executor := do
+digest when it is missing, with the agent's files from `outputs` mounted read-only. -/
+private def executorFor (run : Executor.Docker.RunOptions) (state : State) (config : Executor.Config)
+    (outputs : System.FilePath) : Result Executor := do
   let settings ← Executor.Docker.settingsOf run state.image state.workdir
+  let settings := { settings with
+    mounts := #[{ host := outputs, container := Agent.outputsDir, readOnly := true }] }
   settings.ensurePresent
   Executor.Docker.executor settings config
 
@@ -116,9 +118,10 @@ private def runtimeFor (data : DataDir) (work : WorkDir) (a : ResumeArgs) (start
     | some endpoint, "dgx" => pure (some endpoint.baseUrl)
     | some _, other => throw <| .input s!"--url and --port address a dgx server, not {other}"
   let model ← buildModel modelSpec a.provider data.cache baseUrl?
-  let executor ← executorFor a.run (← getState data.store start) spec.executorConfig
-  pure { store := data.store, workspaces := data.workspaces, workDir := work.path, executor, model
-         agent := spec
+  let outputsDir := data.scratch / "outputs"
+  let executor ← executorFor a.run (← getState data.store start) spec.executorConfig outputsDir
+  pure { store := data.store, workspaces := data.workspaces, workDir := work.path, outputsDir
+         executor, model, agent := spec
          budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
 
 /-- Empties the work directory. Both a checkout and an extraction from an image need it to start
@@ -232,7 +235,7 @@ private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
   if let some project := a.project? then
     Workspaces.refuseOverlap "snapshot" project #[a.data]
   withData a.data (write := true) (create := true) fun data => do
-    Executor.Docker.checkWorkdir a.workdir #[graderInput]
+    Executor.Docker.checkWorkdir a.workdir #[graderInput, Agent.outputsDir]
     let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
     let uname ← Executor.Docker.uname settings
     let log := spec.initialLog task uname

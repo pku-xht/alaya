@@ -119,18 +119,10 @@ def taskMessage (task : String) (mode : Mode) (uname : Uname) (pacing : Bool := 
     "Environment: " ++
       uname.system ++ " " ++ uname.release ++ " " ++ uname.version ++ " " ++ uname.machine]
 
-/-- MiniVero's own mechanics paragraph names the bash tool; with `read_output` offered, it
-says so too. -/
-def withRecovery (recover : Bool) (text : String) : String :=
-  if !recover then text else
-    text.replace "Use repository-relative paths."
-      "When a command's output was too long and only its beginning and end were shown, read_output shows any lines of the whole of it. Use repository-relative paths."
-
 def initialLog (config : Config) (task : String) (uname : Uname) : Log :=
   #[.message (.system systemMessage),
     .message (.user (MiniSwe.withAsk config.base.askUser
-      (withRecovery config.base.recoverOutput
-        (taskMessage task config.mode uname config.base.timeBudget))))]
+      (taskMessage task config.mode uname config.base.timeBudget)))]
 
 /-- MiniVero currently uses MiniSwe's linear model context. Experimental context
 management must be evaluated separately before changing the baseline. -/

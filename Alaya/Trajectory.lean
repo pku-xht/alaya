@@ -385,6 +385,9 @@ structure Sandbox where
   workspaces : Workspaces
   /-- Wiped and re-materialized from a snapshot at every checkout; holds nothing durable. -/
   workDir : System.FilePath
+  /-- Where the agent's files (`Agent.outputs`) are written, for the executor to mount at
+  `Agent.outputsDir`; derived from the log, and holding nothing durable. -/
+  outputsDir : System.FilePath
   executor : Executor
 
 /-- The live run: a sandbox, the model, the agent being driven, and this invocation's time
@@ -393,6 +396,16 @@ structure Runtime extends Sandbox where
   model : Model
   agent : Agent
   budgetMs? : Option Nat := none
+
+/-- Writes the agent's files for `log` that are not written yet. A branch's log only grows, so
+a file once written stays right. -/
+private def writeOutputs (rt : Runtime) (log : Log) : Result Unit := do
+  let dir := rt.outputsDir
+  Result.fromIO Error.storage do
+    IO.FS.createDirAll dir
+    for (name, text) in rt.agent.outputs log do
+      let path := dir / name
+      unless ← path.pathExists do IO.FS.writeFile path text
 
 private def nowMs : Result Nat := Result.fromIO Error.storage IO.monoMsNow
 
@@ -434,6 +447,7 @@ private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (ap
     let content ← rt.agent.act rt.executor { dir := rt.workDir } call
     let workspace ← rt.workspaces.snapshot rt.workDir
     let event := Event.observation call.id content
+    writeOutputs rt (log.push event)
     follow rt before started (log.push event) (appended.push event) workspace
   | .record callId content =>
     -- Nothing ran: the workspace is as it was, and the state keeps its identifier.
@@ -504,6 +518,11 @@ partial def resume (rt : Runtime) (hash : Hash)
   let before ← elapsedMs rt.store hash
   if !withinBudget rt before then return (hash, .outOfTime)
   checkoutInto rt.toSandbox start.workspace
+  let log ← logOf rt.store hash
+  -- Another branch's files may be there; this one's are written afresh.
+  Result.fromIO Error.storage do
+    if ← rt.outputsDir.pathExists then IO.FS.removeDirAll rt.outputsDir
+  writeOutputs rt log
   let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed taken : Nat) :
       Result (Hash × Halt) := do
     let (child, log, workspace, elapsed, halt) ← advance rt parent log workspace elapsed
@@ -514,7 +533,7 @@ partial def resume (rt : Runtime) (hash : Hash)
       else if turns?.any (taken + 1 ≥ ·) then pure (child, .outOfTurns)
       else go child log workspace elapsed (taken + 1)
     | halt => pure (child, halt)
-  go hash (← logOf rt.store hash) start.workspace before 0
+  go hash log start.workspace before 0
 
 /-! ## Evaluation -/
 

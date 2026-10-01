@@ -118,7 +118,7 @@ def suite : Suite := Testing.suite "ask_user" #[
 
   test "opening and repair prompts permit a lone ask with or without output recovery" do
     let incompatible := #["AT LEAST ONE bash tool call", "needs to use the 'bash' tool at least once",
-      "AT LEAST ONE tool call: bash, or read_output", "Every response needs at least one tool call: 'bash'",
+      "Every response needs at least one tool call: 'bash'",
       "exactly one bash tool call"]
     for recover in #[false, true] do
       for definition in Catalog.all do
@@ -160,7 +160,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         set "recover_output" true, set "step_limit" (11 : Nat), set "max_consecutive_format_errors" (2 : Nat)]
       let timeTools := if definition.name == "mini-vero" then #["time_budget"] else #[]
       assertEqual "enabled tools" (built.tools.map (·.name))
-        (#["bash", "submit", "read_output"] ++ timeTools ++ #["ask_user"])
+        (#["bash", "submit"] ++ timeTools ++ #["ask_user"])
       assertEqual "recordable flag" (built.config.getObjValAs? Bool "ask_user").toOption (some true)
       let restored ← assertOk <| Catalog.fromJson built.config
       assertEqual "complete config round-trip" restored.config.compress built.config.compress
@@ -283,7 +283,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (executor, calls) ← countingExecutor
         let continuations := (List.replicate answers.size (response #[submit])).toArray
         let (model, requests) ← scripted (#[response #[ask "q" arguments]] ++ continuations)
-        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
+        let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config) (model := testModel)
         let waitingHash ← resumed <| resume rt root (fun _ => pure ())
@@ -371,7 +371,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         IO.FS.createDirAll project
         let (executor, calls) ← countingExecutor
         let (model, requests) ← scripted #[response #[ask "q" arguments], response #[bash], response #[submit]]
-        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
+        let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config) (model := testModel)
         let before ← assertOk <| allStates store
@@ -441,7 +441,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let answered ← assertOk <| replyUnavailable store question
       let (executor, calls) ← countingExecutor
       let (model, requests) ← scripted #[]
-      let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built, budgetMs? := some 1000 }
+      let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built, budgetMs? := some 1000 }
       let before ← assertOk <| allStates store
       check ((← assertOk <| step rt answered).2 == .outOfTime) "step cannot sample after exhausted time"
       let (stopped, halt) ← assertOk <| resume rt answered (fun _ => pure ())
@@ -485,7 +485,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         IO.FS.createDirAll project
         let (executor, calls) ← countingExecutor
         let (model, requests) ← scripted #[response #[ask "q" arguments], response #[submit]]
-        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
+        let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config) (model := testModel)
         let stopped ← resumed <| resume rt root (fun _ => pure ())
@@ -575,7 +575,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (executor, calls) ← countingExecutor
         -- Exhausted after the question: any accidental second model call is a test failure.
         let (model, requests) ← scripted #[response #[ask]]
-        let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
+        let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config) (model := testModel)
         let stopped ← resumed <| resume rt root (fun _ => pure ())
@@ -639,7 +639,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let restored ← assertOk <| Catalog.fromJson recorded
       let (executor, calls) ← countingExecutor
       let (model, requests) ← scripted #[response #[submit]]
-      let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", executor, model, agent := restored, budgetMs? := some 1000 }
+      let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := restored, budgetMs? := some 1000 }
       let before ← assertOk <| allStates reopened
       let (stopped, halt) ← assertOk <| resume rt answered (fun _ => pure ())
       check (halt == .outOfTime) "the inherited time exhausts this invocation's budget"
@@ -665,15 +665,14 @@ def suite : Suite := Testing.suite "ask_user" #[
     expectDone (next config {} (answered ++ #[bad, bad])) "RepeatedFormatError"
     expectSample (next { config with maxConsecutiveFormatErrors := 0 } {} #[bad, bad, bad]),
 
-  test "asking and output recovery compose without running a command" do
+  test "asking and output recovery compose" do
     let config : Config := { askUser := true, recoverOutput := true }
     let arguments := args "Which part of the output should be inspected next?" #[] "open_ended"
     let output := "\n".intercalate ((List.range 3000).map fun i => s!"line {i + 1} xxxx") ++ "\n"
     let history : Log := #[.response (response #[bash]),
       .observation "b" (Output.toJson { output, exitCode? := some 0 })]
-    let readCall : Chat.ToolCall := { id := "r", name := "read_output", arguments := .mkObj [("call_id", "b"), ("offset", 1500), ("limit", 2)] }
     let (executor, calls) ← countingExecutor
-    let (model, _) ← scripted #[response #[ask "q" arguments], response #[readCall], response #[submit]]
+    let (model, _) ← scripted #[response #[ask "q" arguments], response #[submit]]
     let a := agent config
     let (rt, asked, halt) ← drive a executor model (initialLog config "task" testUname ++ history)
     match halt with
@@ -682,17 +681,13 @@ def suite : Suite := Testing.suite "ask_user" #[
     let replied ← assertOk <| reply rt.store asked "Inspect the middle lines.\nKeep the output unchanged."
     let (final, halt) ← assertOk <| resume rt replied (fun _ => pure ())
     match halt with
-    | .outcome outcome => assertEqual "submitted after reading" outcome.status "Submitted"
-    | _ => fail "expected submission after output recovery"
+    | .outcome outcome => assertEqual "submitted after the reply" outcome.status "Submitted"
+    | _ => fail "expected submission after the reply"
     let finalLog ← assertOk <| logOf rt.store final
-    let page := finalLog.findSome? fun
-      | .observation "r" json => (json.getObjValAs? String "text").toOption
-      | _ => none
-    assertEqual "recovered lines" page (some "line 1500 xxxx\nline 1501 xxxx")
     let dialogue := view config finalLog
     checkQuestionView dialogue "Inspect the middle lines.\nKeep the output unchanged." arguments
     check (dialogue.any fun
-      | .tool "b" (.str shown) => contains shown "read_output" && contains shown "id is b"
+      | .tool "b" (.str shown) => contains shown "[output truncated; full output: /alaya/outputs/3-b.txt]"
       | _ => false) "output truncation must retain its recovery hint"
     assertEqual "no executor calls" (← calls.get) 0
 ]

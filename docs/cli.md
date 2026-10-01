@@ -165,7 +165,8 @@ like the image, so every later command and every grader sees the workspace at th
 Without a `PROJECT`, `root` copies the image's own `--workdir` out as the initial workspace: task
 images that install their project in place, such as SWE-bench's at `/testbed`, work as they are,
 compiled extensions and `.git` included. A workdir is an absolute, clean path other than `/`, and
-not `/grader` or `/out`, which the grader mounts.
+not `/grader` or `/out`, which the grader mounts, nor in or around `/alaya/outputs`, where a
+run's commands read the files its agent derives from the log (`docs/miniswe.md` §9).
 
 ### `resume`
 

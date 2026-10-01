@@ -13,7 +13,7 @@ change behaviour are listed in §7.
 ```lean
 def agent (executor : Executor) (config : Config) : Agent := {
   identity := config.toJson                   -- the configuration, as the root records it
-  tools := tools config                       -- bash and submit; optional read_output and ask_user
+  tools := tools config                       -- bash and submit; optional ask_user
   view := view config
   next := next config
   act := act executor }
@@ -29,7 +29,7 @@ container the trajectory pinned — and the **configuration**, a JSON object rea
 | `step_limit` | 0 | model calls before the run ends with `LimitsExceeded`; 0 is no limit |
 | `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
 | `executor.timeout_seconds`, `executor.env` | 30, mini's overrides | how each command is run (`Executor.Config`) |
-| `recover_output` | false | offer `read_output` (§9) |
+| `recover_output` | false | name the file holding a cut output's whole (§9) |
 | `ask_user` | false | offer yes/no, single-choice, and open-ended questions |
 
 A field left out is its default; a misspelt one is an error. The task is not configuration: it
@@ -40,7 +40,7 @@ names the agent at `root` and overrides fields there (`--agent mini-swe --set ag
 The tools are not this agent's: `Alaya.Agent.Tools` defines each on its own — its schema for the
 model, how its arguments are read, and what answers a call — with no knowledge of which agent
 offers it. `bash` runs a command in the workspace through the executor and its observation is
-the `Output`; `submit` ends a run; `read_output` is answered from the log. MiniSwe composes them:
+the `Output`; `submit` ends a run. MiniSwe composes them:
 which are offered, how a malformed call is worded, what the view shows.
 
 ## 2. The opening log
@@ -59,10 +59,8 @@ submission sentinel, which name the `submit` tool. The opening log is frozen int
 command prints a sentinel line, which would require whoever runs the agent to read tool output;
 here the end of a run is a tool call, visible in the log's structure.
 
-With `recoverOutput` on, a third tool is offered. **`read_output`** takes `call_id`, the id of an
-earlier `bash` call, and `offset` and `limit`, a range of lines counting from 1, and shows those
-lines of that call's full output — the view shows a long output cut to its head and tail (§5),
-while the log holds all of it. See §9.
+With `recoverOutput` on, no tool is added: a long output, which the view cuts to its head and
+tail (§5), is in a file the agent reads with `bash`. See §9.
 
 ## 4. Reading a response: `parseActions`
 
@@ -133,8 +131,7 @@ flowchart LR
    observation does, since it means a turn ran.
 2. **After a response with actions.** The first action whose call no observation has answered
    yet is next. A `submit` there is `done Submitted`, with its message as the submission; a
-   `bash` there is `act` on that call; a `read_output` there is `record` with the page, computed
-   from the log by `Tools.ReadOutput.read` (§9). Calls after a `submit` in the same response never run.
+   `bash` there is `act` on that call. Calls after a `submit` in the same response never run.
 3. **When every call is answered**, `sample` — unless `stepLimit` is set and the log already
    holds that many responses, in which case `done LimitsExceeded`. The limit is checked before
    the model call, as mini does.
@@ -191,30 +188,22 @@ and is gone when a branch is resumed later.
 - Error texts are plain, not Python's exception messages.
 - The environment is a snapshot of the working directory, not a persistent machine.
 - No per-model cost accounting, so mini's `cost_limit` is not enforced.
-- With `recoverOutput` on: the `read_output` tool, two sentences, and a warning (§9).
+- With `recoverOutput` on: a cut output's warning names a file (§9).
 - With `ask_user` enabled (`--set agent.ask_user=true`): [yes/no, single-choice, and open-ended questions](ask-user.md), using the existing question/reply states.
 
-## 9. Reading a long output back: `read_output`
+## 9. Reading a long output back
 
-Off by default, and then nothing above changes. On (`recover_output` in the configuration
-file), the agent can see the part of a command's output the
-view cut:
+Off by default, and then nothing above changes. On (`--set agent.recover_output=true`), the
+warning on a cut output names a file holding the whole of it, as the DeepSeek harness does:
 
-- The **warning** on a cut output names the call: `Output too long. read_output shows any lines
-  of the whole of it; this call's id is call_…`. The id is also the tool message's
-  `tool_call_id`, but a model given only that has been seen to guess.
-- **`read_output {call_id, offset, limit}`** is answered by `next` from the log, as
-  `Directive.record`: nothing runs, no snapshot is taken, and the state records the page as an
-  ordinary observation with the parent's workspace. The output is the most recent observation
-  with that id whose content is a command's `Output`, so an id a provider reuses across turns
-  names the latest; a fork reads its ancestors' outputs and nothing else, since it reads its own
-  log.
-- The **page** is `{"text": "…", "lines": "2500-2502 of 5000"}`: whole lines while they fit in
-  `outputLimit` characters, or the first line alone, cut, and said so. A page is not an `Output`
-  — its field is `text`, not `output` — so the view shows it as recorded rather than cutting it
-  again. An unknown id, an offset past the end, or bad arguments give `{"error": "…"}`, an
-  observation like any other; malformed arguments are a format error, as for `bash`.
-- The two sentences of mini's texts that require a bash call in every response say a tool call
-  instead, since a response may be a `read_output` alone (`withRecovery`). That, and the tool,
-  are the whole difference: with the flag off, the prompts, tools and observations are mini's to
-  the byte, and the response cache keys do not move.
+```
+[output truncated; full output: /alaya/outputs/17-call_abc.txt]
+```
+
+and the agent reads it with `bash`. The files are derived from the log, like the view
+(`outputs`): each cut output of the branch, named by its position in the log, which never
+changes on a branch, and by its call id. The trajectory writes them into the command's scratch at
+each `resume` and after each command, and the container mounts that directory read-only at
+`/alaya/outputs`, outside the workdir. A fork or a new container sees its own branch's files;
+nothing is recorded, and no snapshot or grader sees them. The prompts and tools are mini's as
+they are, so only the warning differs.

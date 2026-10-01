@@ -15,14 +15,29 @@ open Alaya (Result Error Output Uname Executor)
 /-- Where the working directory is mounted inside the container, unless a root chooses another. -/
 def defaultWorkdir : String := "/workspace"
 
-/-- A workdir is an absolute, clean path other than the root, and not one of `reserved`. -/
+/-- A workdir is an absolute, clean path other than the root, and neither in nor around one of
+`reserved`, which are mounted beside it. -/
 def checkWorkdir (workdir : String) (reserved : Array String := #[]) : Result Unit := do
   let parts := (workdir.drop 1).toString.splitOn "/"
   if !workdir.startsWith "/" || workdir == "/" ||
       parts.any (fun part => part.isEmpty || part == "." || part == "..") then
     throw <| .input s!"--workdir must be an absolute, clean path other than /: {workdir}"
-  if let some taken := reserved.find? fun r => workdir == r || workdir.startsWith (r ++ "/") then
+  if let some taken := reserved.find? fun r =>
+      workdir == r || workdir.startsWith (r ++ "/") || r.startsWith (workdir ++ "/") then
     throw <| .input s!"--workdir cannot be {workdir}: {taken} is reserved"
+
+/-- A host directory bind-mounted into a container. -/
+structure Mount where
+  host : System.FilePath
+  container : String
+  readOnly : Bool := false
+  deriving Repr
+
+/-- `--volume` arguments for `mounts`. -/
+private def volumes (mounts : Array Mount) : IO (Array String) :=
+  mounts.foldlM (init := #[]) fun args m => do
+    let host ← IO.FS.realPath m.host
+    pure (args ++ #["--volume", s!"{host}:{m.container}{if m.readOnly then ":ro" else ""}"])
 
 /-- How the container is created. `image` is a runnable reference; once `pin`ned it is one that
 names exact bits, which is what a trajectory records. -/
@@ -38,6 +53,8 @@ structure Settings where
   workdir : String := defaultWorkdir
   /-- Extra `docker run` arguments, verbatim. -/
   extraRunArgs : Array String := #[]
+  /-- Directories mounted into the execution container besides the workdir. -/
+  mounts : Array Mount := #[]
   deriving Repr, Inhabited
 
 /-! ## Talking to the docker client -/
@@ -146,6 +163,7 @@ private def start (settings : Settings) (workDir : System.FilePath) : IO Contain
   let args := #["run", "--detach", "--rm", "--init", "--entrypoint", "/bin/sh"]
     ++ runArgs settings
     ++ #["--volume", s!"{host}:{settings.workdir}", "--workdir", settings.workdir]
+    ++ (← volumes settings.mounts)
     ++ settings.extraRunArgs
     ++ #[settings.image, "-c", "while :; do sleep 86400; done"]
   let started ← client args
@@ -289,12 +307,6 @@ private partial def waitUntil (child : IO.Process.Child cfg) (deadline : Option 
     IO.sleep 20
     waitUntil child deadline stop
 
-/-- A host directory bind-mounted into a `runOnce` container. -/
-structure Mount where
-  host : System.FilePath
-  container : String
-  readOnly : Bool := false
-
 /-- What a `runOnce` command printed, how it ended, and, when it did not end on its own, why. -/
 structure Captured where
   stdout : String := ""
@@ -311,9 +323,7 @@ def runOnce (settings : Settings) (mounts : Array Mount) (workdir command : Stri
     (timeoutSeconds : Nat) : IO Captured := do
   let name := s!"alaya-once-{← IO.monoNanosNow}"
   try
-    let volumes ← mounts.foldlM (init := #[]) fun args m => do
-      let host ← IO.FS.realPath m.host
-      pure (args ++ #["--volume", s!"{host}:{m.container}{if m.readOnly then ":ro" else ""}"])
+    let volumes ← volumes mounts
     let child ← IO.Process.spawn {
       cmd := "docker"
       args := #["run", "--rm", "--init", "--name", name, "--entrypoint", "/bin/sh"]

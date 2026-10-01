@@ -157,9 +157,8 @@ The unavailable object remains distinct from every ordinary answer string.
 `record` is how an agent answers a tool call itself: `next` computes the result, from the log
 or the session, and the loop records it as the call's observation, with nothing run and no
 snapshot taken, so the state keeps its parent's workspace. It is for tools that need no
-workspace — a page of an earlier command's output (`docs/miniswe.md` §9), the time left
-(`docs/minivero.md`), a value the agent keeps for itself. The view sees an ordinary observation
-and decides how, and whether, the model sees it.
+workspace — the time left (`docs/minivero.md`), a value the agent keeps for itself. The view
+sees an ordinary observation and decides how, and whether, the model sees it.
 
 ```lean
 structure Workspace where
@@ -185,7 +184,13 @@ structure Agent where
   view : View
   next : Session -> Log -> Directive
   act : Executor -> Workspace -> Chat.ToolCall -> Result Lean.Json
+  outputs : Log -> Array (String × String) := fun _ => #[]
 ```
+
+`outputs` gives the files the view names, by file name, with their contents: like the view, a
+function of the log. The trajectory writes them before each turn and after each act, and the
+container mounts them read-only at `/alaya/outputs`, so a command can read what the view only
+cut, such as a long output (`docs/miniswe.md` §9). Nothing records them.
 
 The tools themselves live in `Alaya.Agent.Tools`, each defined on its own — schema, argument
 reading, and what answers a call — with no knowledge of any agent; an agent composes them.

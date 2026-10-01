@@ -95,31 +95,28 @@ def goldenSuite : Suite := suite "mini-swe.golden" #[
 
 private def actionSummary : Action -> String × String
   | .bash id command => (id, command)
-  | .readOutput id _ => (id, "read_output")
   | .ask id question => (id, "ask_user:" ++ question.render)
   | .timeBudget id => (id, "time_budget")
   | .submit id message => (id, "submit:" ++ message)
 
 def parseSuite : Suite := suite "mini-swe.parse" #[
-  test "with recovery off the agent is mini to the byte; on, two sentences and a tool differ" do
+  test "recovery changes only a long output's warning" do
     let off : Config := {}
     let on : Config := { recoverOutput := true }
     assertEqual "tools off" ((tools off).map (·.name)) #["bash", "submit"]
-    assertEqual "tools on" ((tools on).map (·.name)) #["bash", "submit", "read_output"]
+    assertEqual "tools on" ((tools on).map (·.name)) #["bash", "submit"]
     let opening (config : Config) : String :=
       match (initialLog config "t" testUname)[1]? with
       | some (Event.message (Chat.Message.user text)) => text
       | _ => ""
     assertStringEq "opening off" (opening off)
       (instanceMessage "t" testUname.system testUname.release testUname.version testUname.machine)
-    let delta := (opening on).replace
-      "Your response MUST include AT LEAST ONE tool call: bash, or read_output to see more of an earlier command's output"
-      "Your response MUST include AT LEAST ONE bash tool call"
-    assertStringEq "opening on differs in one sentence" delta (opening off)
-    check (contains (formatErrorMessage "e" true (some "stop") { recoverOutput := true }) "'read_output'") "the repair text names it"
+    assertStringEq "opening on is unchanged" (opening on) (opening off)
+    assertStringEq "repair on is unchanged" (formatErrorMessage "e" true (some "stop") on)
+      (formatErrorMessage "e" true (some "stop"))
     assertStringEq "repair off is unchanged" (formatErrorMessage "e" true (some "stop") {})
       (formatErrorMessage "e" true (some "stop"))
-    -- On, a long output's warning names the call to read it back by; off, it is mini's.
+    -- On, a long output's warning names the file holding it; off, it is mini's.
     let long := Output.toJson { output := String.ofList (List.replicate 20000 'x'), exitCode? := some 0 }
     let warning (config : Config) : String :=
       match (view config #[.observation "call_7" long]).back? with
@@ -129,11 +126,11 @@ def parseSuite : Suite := suite "mini-swe.parse" #[
         | .error _ => ""
       | _ => ""
     assertStringEq "warning off" (warning off) "Output too long."
-    check (contains (warning on) "this call's id is call_7") s!"the warning should name the call: {warning on}"
-    -- Off, the tool is unknown, as any other unlisted tool is.
-    match parseActions (responseWith #[call "r" "read_output" "x"]) with
-    | .formatError message => check (contains message "Unknown tool 'read_output'") "unknown when off"
-    | .actions _ => fail "read_output should be unknown when recovery is off",
+    assertStringEq "warning on" (warning on) "[output truncated; full output: /alaya/outputs/0-call_7.txt]"
+    -- The tool is gone: unknown, as any other unlisted tool is.
+    match parseActions (responseWith #[call "r" "read_output" "x"]) on with
+    | .formatError message => check (contains message "Unknown tool 'read_output'") "unknown"
+    | .actions _ => fail "read_output should be unknown",
 
   test "every prompt piece is in mini.yaml, byte for byte, and is the file on disk" do
     -- The templates are block scalars indented four spaces; dedented, each piece is a substring.

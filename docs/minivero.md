@@ -85,7 +85,7 @@ step. MiniSwe offers neither the tool nor the section, and its configuration has
 
 MiniVero currently uses MiniSwe's linear history unchanged. Every earlier message remains in the model context, while the complete raw trajectory is also retained for reports, evaluation, and later analysis. This is the baseline used for experiments.
 
-MiniSwe truncates a single tool output of at least 10,000 characters to its beginning and end before placing it in the model context. With `recover_output` set, the agent can read the cut part back through `read_output` (`docs/miniswe.md` §9), and its mechanics paragraph says so; without, nothing differs. No multi-turn compaction or summary is applied before the baseline is evaluated.
+MiniSwe truncates a single tool output of at least 10,000 characters to its beginning and end before placing it in the model context. With `recover_output` set, the cut output names a read-only file holding the whole of it (`docs/miniswe.md` §9); without, nothing differs. No multi-turn compaction or summary is applied before the baseline is evaluated.
 
 ## Running
 

@@ -35,9 +35,9 @@ def act (executor : Executor) (workspace : Workspace) (command : String) : Resul
   pure output.toJson
 
 /-- How the model sees an `Output`: as JSON, with `output` cut to its first and last `limit / 2`
-characters when it is `limit` or longer — mini's `observation_template`. With `recovery?` the
-call's id, the warning says the rest can be read back by it. -/
-def observation (o : Output) (limit : Nat) (recovery? : Option String := none) : Lean.Json :=
+characters when it is `limit` or longer — mini's `observation_template`. With `file?`, where
+the whole output can be read, the warning names it instead, as the DeepSeek harness does. -/
+def observation (o : Output) (limit : Nat) (file? : Option String := none) : Lean.Json :=
   let length := o.output.length
   let fields : List (String × Lean.Json) :=
     if length < limit then [("output", o.output)]
@@ -46,9 +46,9 @@ def observation (o : Output) (limit : Nat) (recovery? : Option String := none) :
       [("output_head", String.ofList (o.output.toList.take half)),
        ("output_tail", String.ofList (o.output.toList.drop (length - half))),
        ("elided_chars", (length - limit : Nat)),
-       ("warning", match recovery? with
+       ("warning", match file? with
          | none => "Output too long."
-         | some id => s!"Output too long. read_output shows any lines of the whole of it; this call's id is {id}.")]
+         | some file => s!"[output truncated; full output: {file}]")]
   let fields := fields ++ [("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null)]
   let fields := match o.error? with
     | some error => fields ++ [("error", Lean.Json.str error)]
@@ -145,82 +145,5 @@ def answer (session : Session) : Lean.Json :=
   | none => .mkObj [("seconds_left", .null), ("note", "this run has no time limit")]
 
 end TimeBudget
-
-/-! ## read_output: lines of an earlier command's output, from the log -/
-
-namespace ReadOutput
-
-def definition : Chat.ToolDefinition := {
-  name := "read_output"
-  description := "Show lines of the full output of an earlier bash call, when it was too long " ++
-    "and only its beginning and end were shown. Name the call by its id."
-  parameters := .object #[
-    ("call_id", .string (description? := some "The id of the bash call")),
-    ("offset", .integer (description? := some "The first line to show, counting from 1")),
-    ("limit", .integer (description? := some "How many lines to show"))]
-}
-
-structure Request where
-  callId : String
-  offset : Nat
-  limit : Nat
-
-/-- Reads the arguments; the message says what is wrong with them. -/
-def parse (arguments : Lean.Json) : Except String Request := do
-  let callId ← (arguments.getObjVal? "call_id" >>= Lean.Json.getStr?).mapError
-    fun _ => "read_output needs 'call_id', the id of a bash call."
-  let offset ← (arguments.getObjVal? "offset" >>= Lean.Json.getNat?).mapError
-    fun _ => "read_output needs 'offset', a line number counting from 1."
-  let limit ← (arguments.getObjVal? "limit" >>= Lean.Json.getNat?).mapError
-    fun _ => "read_output needs 'limit', a number of lines."
-  if offset == 0 then throw "read_output needs 'offset', a line number counting from 1."
-  if limit == 0 then throw "read_output needs 'limit', a number of lines, at least 1."
-  pure { callId, offset, limit }
-
-/-- The full output the log recorded for the call `callId`: the most recent observation with
-that id whose content is a command's output, so an id a provider reuses across turns names the
-latest. -/
-def outputOf? (log : Log) (callId : String) : Option Output :=
-  log.reverse.findSome? fun
-    | .observation id content => if id == callId then Output.fromJson? content else none
-    | _ => none
-
-private def lines (text : String) : Array String :=
-  let all := (text.splitOn "\n").toArray
-  -- A trailing newline ends the last line rather than starting an empty one.
-  if text.endsWith "\n" then all.pop else all
-
-/-- The page: lines `offset` onward, at most `limit` of them and at most `maxChars` characters,
-as `text`, with `lines` saying which of how many they are. The field is not `output`, which
-would make the page look like a command's result to a view, and be cut down again. -/
-def page (output : Output) (request : Request) (maxChars : Nat) : Lean.Json :=
-  let all := lines output.output
-  let total := all.size
-  if request.offset > total then
-    .mkObj [("error", s!"the output has {total} lines; offset {request.offset} is past its end")]
-  else
-    let wanted := all.extract (request.offset - 1) (request.offset - 1 + request.limit)
-    -- Whole lines while they fit; the first line always, cut to the limit if it alone is over.
-    let (taken, _) := wanted.foldl (init := (#[], 0)) fun (taken, shown) line =>
-      if taken.isEmpty then (#[(line.take maxChars).toString], min line.length maxChars)
-      else if shown + 1 + line.length <= maxChars then (taken.push line, shown + 1 + line.length)
-      else (taken, maxChars)
-    let last := request.offset - 1 + taken.size
-    let cut := taken.size == 1 && wanted[0]!.length > maxChars
-    .mkObj [
-      ("text", "\n".intercalate taken.toList),
-      ("lines", s!"{request.offset}-{last} of {total}" ++ (if cut then s!", the line cut to {maxChars} characters" else ""))]
-
-/-- What a `read_output` call observes: the page, or why there is none. Answered from the log
-alone (`Directive.record`). -/
-def read (log : Log) (arguments : Lean.Json) (maxChars : Nat) : Lean.Json :=
-  match parse arguments with
-  | .error message => .mkObj [("error", message)]
-  | .ok request =>
-    match outputOf? log request.callId with
-    | some output => page output request maxChars
-    | none => .mkObj [("error", s!"no bash call with id {request.callId} in this run")]
-
-end ReadOutput
 
 end Alaya.Agent.Tools

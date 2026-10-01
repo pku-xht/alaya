@@ -45,9 +45,11 @@ private def workspace : TestM System.FilePath := do
 
 /-- A runtime driving the mini agent in the container. -/
 private def runtime (settings : Docker.Settings) (work : System.FilePath) (store : Trajectory.Store)
-    (model : Model) (agentConfig : Agent.MiniSwe.Config := miniConfig) : TestM Runtime := do
-  let executor ← assertOk (Docker.executor settings config)
-  pure { store, workspaces := ← workspaces, workDir := work, executor, model
+    (model : Model) (agentConfig : Agent.MiniSwe.Config := miniConfig)
+    (outputsDir : System.FilePath := work.withFileName "outputs") : TestM Runtime := do
+  let mounts := #[{ host := outputsDir, container := Agent.outputsDir, readOnly := true }]
+  let executor ← assertOk (Docker.executor { settings with mounts } config)
+  pure { store, workspaces := ← workspaces, workDir := work, outputsDir, executor, model
          agent := Agent.MiniSwe.agent agentConfig }
 
 def suite : Suite := Testing.suite "docker" #[
@@ -207,41 +209,38 @@ def suite : Suite := Testing.suite "docker" #[
       finally
         rt.executor.close,
 
-  test "read_output survives closing and recreating the execution container" <| withDocker
+  test "a cut output is readable, read-only, in a recreated container, and stays out of the workspace" <| withDocker
     fun settings => do
       let work ← workspace
       let project := (← scratch) / "proj"
       IO.FS.createDirAll project
       let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+      let recover := { miniConfig with recoverOutput := true }
       let model ← scripted #[toolResponse "awk 'BEGIN {for(i=0;i<6000;i++) printf \"a\"; printf \"MIDDLE\"; for(i=0;i<6000;i++) printf \"z\"}'"]
-      let first ← runtime settings work store model
+      let first ← runtime settings work store model recover ((← scratch) / "outputs-1")
       let saved ← try
         let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent) (model := testModel)
         stepped <| step first root
       finally first.executor.close
-      let log ← assertOk <| logOf store saved
-      let some produced := log.findSome? (fun
-          | .observation id content => if (Output.fromJson? content).isSome then some id else none
-          | _ => none)
-        | fail "expected the command's output"
+      -- A later command: a new container, a wiped workdir, and outputs written afresh from the log.
       IO.FS.removeDirAll work
       IO.FS.createDirAll work
-      let reopened ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
-      let readCall : Chat.ToolCall := {
-        id := "read", name := "read_output"
-        arguments := .mkObj [("call_id", produced), ("offset", 1), ("limit", 1)] }
-      let reading ← scripted #[{ toolCalls := #[readCall] }]
-      let second ← runtime settings work reopened reading { miniConfig with recoverOutput := true }
+      let reading ← scripted #[toolResponse
+        "grep -c MIDDLE /alaya/outputs/1-c1.txt; touch /alaya/outputs/x 2>/dev/null || echo read-only; ls -A"]
+      let second ← runtime settings work store reading recover ((← scratch) / "outputs-2")
       try
-        -- Start an actual replacement container before reading through the resumed driver.
-        assertEqual "new container starts" (← second.executor.bash work "true").exitCode? (some 0)
         let child ← stepped <| step second saved
-        let page? := (← assertOk <| logOf reopened child).reverse.findSome? fun
-          | .observation "read" content => (content.getObjVal? "text" >>= Lean.Json.getStr?).toOption
+        let shown? := (← assertOk <| logOf store child).reverse.findSome? fun
+          | .observation _ content => (Output.fromJson? content).map (·.output)
           | _ => none
-        -- One line of 12,006 characters, cut to a page: its middle, which the view elided, is there.
-        assertEqual "the page is the line, cut" (page?.map (·.length)) (some Agent.MiniSwe.outputLimit)
-        check (page?.any fun text => (text.splitOn "MIDDLE").length == 2) "the elided middle is readable"
+        -- The view elided the middle; the file has it, the mount refuses writes, and the
+        -- workdir holds nothing of it.
+        assertEqual "read back" shown? (some "1\nread-only\n")
+        let workspace := (← assertOk <| getState store child).workspace
+        let checkout := (← scratch) / "checkout"
+        IO.FS.createDirAll checkout
+        assertOk <| (← workspaces).materialize workspace checkout
+        assertEqual "snapshot" ((← checkout.readDir).map (·.fileName)) #[]
       finally second.executor.close,
 
   test "a grader has no network, reads its input at /grader and cannot write it, and keeps stderr apart" <| withDocker
