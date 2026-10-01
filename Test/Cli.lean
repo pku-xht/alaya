@@ -66,8 +66,8 @@ def taskSuite : Suite := suite "cli.task" #[
       #["give either --task TEXT or --task-file FILE, not both"]
     check ((← refused "empty" ["--task", ""])[0]!.startsWith "--task needs a value") "empty text"
     check ((← refused "missing" ["--task-file"])[0]!.startsWith "--task-file needs a value") "missing value"
-    assertEqual "- is stdin" (← parsed "stdin" ((Cli.text "task" "").parse ["--task-file", "-"]))
-      (some .stdin)
+    assertEqual "- is a file like any other" (← parsed "dash" ((Cli.text "task" "").parse ["--task-file", "-"]))
+      (some (.file "-"))
     let path := (← scratch) / "missing"
     configuration "missing file" (← task ["--task-file", path.toString]) (·.startsWith "cannot read the task file")
     IO.FS.writeBinFile path ⟨#[255, 254]⟩

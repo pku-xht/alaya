@@ -724,7 +724,7 @@ never takes the next token; a valued option takes the next token, or its value a
 (`--task=--literal`), and may be given once; after `--` everything is an argument, which is how
 an answer that begins with `-` is given. Every problem is reported at once. `alaya help`,
 `alaya help COMMAND` and `alaya COMMAND --help` print what a command accepts, and
-`alaya help --json` describes every command as data. `--task-file -` reads the task from stdin.
+`alaya help --json` describes every command as data.
 
 **Output.** A command prints text for a reader by default, and JSON with `--json`. Only the
 JSON is a stable interface; the text may change. One thing about the text is fixed: every state

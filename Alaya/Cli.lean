@@ -188,40 +188,32 @@ def arg (metavar : String) (v : Value α) (help : String) : Spec α :=
 inductive TextSource where
   | inline (text : String)
   | file (path : System.FilePath)
-  | stdin
   deriving Repr, BEq, Inhabited
 
-/-- Free text: `--NAME TEXT`, or `--NAME-file FILE`, where FILE `-` is stdin; one of the two. -/
+/-- Free text: `--NAME TEXT`, or `--NAME-file FILE`; one of the two. Stdin is the file
+`/dev/stdin`. -/
 def text (name help : String) : Spec (Option TextSource) :=
   let fileFlag := s!"{name}-file"
   ⟨#[{ name, shape := .valued "TEXT" false, help, group? := some name },
      { name := fileFlag, shape := .valued "FILE" false, group? := some name,
-       help := s!"read the {name} from FILE, as it is; - reads stdin" }], fun raw =>
+       help := s!"read the {name} from FILE, as it is" }], fun raw =>
     match (raw.valuesOf name).back?, (raw.valuesOf fileFlag).back? with
     | some _, some _ => .error #[s!"give either --{name} TEXT or --{fileFlag} FILE, not both"]
     | some t, none => .ok (some (.inline t))
-    | none, some "-" => .ok (some .stdin)
     | none, some p => .ok (some (.file p))
     | none, none => .ok none⟩
-
-private partial def readAll (stream : IO.FS.Stream) (acc : ByteArray := .empty) : IO ByteArray := do
-  let chunk ← stream.read 65536
-  if chunk.isEmpty then pure acc else readAll stream (acc ++ chunk)
 
 /-- The text, exactly: a file is read on the host, not trimmed, and must be UTF-8. `name` is
 the flag's, for messages. -/
 def TextSource.read (name : String) : TextSource → Result String
   | .inline t => pure t
-  | source => do
-    let (what, action) := match source with
-      | .file path => (s!"the {name} file {path}", IO.FS.readBinFile path)
-      | _ => (s!"the {name} from stdin", do readAll (← IO.getStdin))
-    let bytes ← match ← (Result.fromIO Error.configuration action).toBaseIO with
+  | .file path => do
+    let bytes ← match ← (Result.fromIO Error.configuration (IO.FS.readBinFile path)).toBaseIO with
       | .ok bytes => pure bytes
-      | .error _ => throw <| .configuration s!"cannot read {what}"
+      | .error _ => throw <| .configuration s!"cannot read the {name} file {path}"
     match String.fromUTF8? bytes with
     | some t => pure t
-    | none => throw <| .configuration s!"{what} is not valid UTF-8"
+    | none => throw <| .configuration s!"the {name} file {path} is not valid UTF-8"
 
 /-! ## Parsing -/
 
