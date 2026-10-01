@@ -72,8 +72,11 @@ gives it. -/
 def all : Array Spec := #[
   { name := "gpt-oss-120b", contextTokens? := some 131072 },
   { name := "gpt-5.6-luna" },
-  -- A thinking-mode DeepSeek model, which wants its earlier reasoning back.
-  { name := "deepseek-v4.1-flash", echoReasoning? := some 2 }]
+  -- A thinking-mode DeepSeek model: with tool calls, its API rejects a request whose earlier
+  -- assistant messages lack the reasoning they came with, so the two most recent carry theirs
+  -- and older ones an empty trace, which keeps requests small. 1M tokens of context, per
+  -- DeepSeek's documentation.
+  { name := "deepseek-v4.1-flash", echoReasoning? := some 2, contextTokens? := some 1048576 }]
 
 def names : String := ", ".intercalate (all.map (·.name)).toList
 
