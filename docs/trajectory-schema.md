@@ -637,7 +637,7 @@ An **event** is one of:
 {"type": "message", "message": {"role": "system"|"user", "content": "…"}}
 {"type": "message", "message": {"role": "assistant", "content": …, "reasoning": …, "tool_calls": [call…]}}
 {"type": "message", "message": {"role": "tool", "tool_call_id": "…", "content": <json>}}
-{"type": "response", "response": {"content", "tool_calls": [call…], "reasoning", "finish_reason", "usage": {"input", "output", "total"}}}
+{"type": "response", "response": {"content", "tool_calls": [call…], "reasoning", "finish_reason", "usage": {"input", "output", "total", "reasoning", "cached"}}}
 {"type": "observation", "call_id": "…", "content": <json>}
 ```
 

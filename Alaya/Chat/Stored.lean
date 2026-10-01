@@ -44,14 +44,16 @@ def toStored (usage : TokenUsage) : Lean.Json :=
   .mkObj [("input", orNull usage.input? (fun n => (n : Lean.Json))),
     ("output", orNull usage.output? (fun n => (n : Lean.Json))),
     ("total", orNull usage.total? (fun n => (n : Lean.Json))),
-    ("reasoning", orNull usage.reasoning? (fun n => (n : Lean.Json)))]
+    ("reasoning", orNull usage.reasoning? (fun n => (n : Lean.Json))),
+    ("cached", orNull usage.cached? (fun n => (n : Lean.Json)))]
 
 def ofStored (json : Lean.Json) : Except String TokenUsage := do
   pure {
     input? := ← nullable json "input" Lean.Json.getNat?
     output? := ← nullable json "output" Lean.Json.getNat?
     total? := ← nullable json "total" Lean.Json.getNat?
-    reasoning? := ← nullable json "reasoning" Lean.Json.getNat? }
+    reasoning? := ← nullable json "reasoning" Lean.Json.getNat?
+    cached? := ← nullable json "cached" Lean.Json.getNat? }
 
 end TokenUsage
 

@@ -170,6 +170,8 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
     ("image", state.image), ("workdir", state.workdir),
     ("agent", state.agent?.getD .null),
     ("elapsed", state.elapsedMs?.map (fun ms => Lean.Json.str (seconds ms)) |>.getD .null),
+    ("tokens", state.usage?.map (fun u => Lean.Json.str (tokens u)) |>.getD .null),
+    ("runTokens", let run := tokens (← runUsage store hash); if run.isEmpty then .null else .str run),
     ("outcome", match state.outcome? with
       | none => .null
       | some o => .mkObj [("status", o.status), ("submission", o.submission)]),
@@ -918,6 +920,8 @@ function select(hash) {
   if (state.image) rows.push(['image', state.image]);
   if (state.agent) rows.push(['agent', JSON.stringify(state.agent)]);
   if (state.elapsed) rows.push(['elapsed', state.elapsed]);
+  if (state.tokens) rows.push(['tokens', state.tokens]);
+  if (state.runTokens) rows.push(['run tokens', state.runTokens + ', from the root']);
   if (state.outcome) rows.push(['outcome', state.outcome.status]);
   if (state.question) rows.push(['question', state.question.displayText || state.question.text]);
   if (state.intervention) rows.push(['message', state.intervention.message]);

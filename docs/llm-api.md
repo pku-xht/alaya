@@ -313,8 +313,10 @@ several draws), and POSTs it with `curl` to `<baseUrl>/chat/completions` under a
 of 30 s and a total timeout of 10 minutes. HTTP failures become `Error.http status body
 retryAfterMs?`, with `Retry-After` parsed from the headers; curl failures become
 `Error.transport`. Its identity is the spec alone. A response's usage keeps, besides input and
-output tokens, the reasoning tokens a model reports spending (`completion_tokens_details`), so
-the cost of a reasoning level can be measured.
+output tokens, the input tokens the provider served from its prompt cache
+(`prompt_tokens_details.cached_tokens`, or DeepSeek's `prompt_cache_hit_tokens`) and the
+reasoning tokens a model reports spending (`completion_tokens_details.reasoning_tokens`), so the
+cache's reuse and the cost of a reasoning level can be measured.
 
 ```lean
 let spec ← Models.resolve "deepseek-v4.1-flash" #[]

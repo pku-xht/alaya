@@ -464,6 +464,8 @@ private def showRun (data : System.FilePath) (state : String) (view : Bool) (out
         ("kind", s.kind.toString), ("events", .arr (s.appended.map eventToJson))]
       let json := state.toJson |>.setObjVal! "state" hash.hex
         |>.setObjVal! "run_time_ms" (← elapsedMs data.store hash)
+        |>.setObjVal! "usage" (state.usage?.map (·.toStored) |>.getD .null)
+        |>.setObjVal! "run_usage" (← runUsage data.store hash).toStored
         |>.setObjVal! "history" (.arr history)
       let json := match view? with
         | some view =>

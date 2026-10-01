@@ -119,6 +119,39 @@ def suite : Suite := Testing.suite "preview" #[
     assertEqual "the log is theirs" ((← assertOk <| logOf store leaf).size) 3
     assertEqual "the root" (← assertOk <| rootOf store leaf) root,
 
+  test "usage keeps cached and reasoning tokens in either form, and a run's adds up from the root" do
+    let parse (usage : Lean.Json) : TestM Chat.TokenUsage := do
+      let raw := Lean.Json.mkObj [("choices", .arr #[.mkObj [("message", .mkObj [("content", "x")])]]),
+        ("usage", usage)]
+      let responses ← assertOk <| Chat.Response.fromJsons raw
+      pure (responses[0]!.usage?.getD {})
+    let openai ← parse (.mkObj [("prompt_tokens", (48211 : Nat)), ("completion_tokens", (1102 : Nat)),
+      ("prompt_tokens_details", .mkObj [("cached_tokens", (41900 : Nat))]),
+      ("completion_tokens_details", .mkObj [("reasoning_tokens", (800 : Nat))])])
+    assertEqual "cached" openai.cached? (some 41900)
+    assertEqual "reasoning" openai.reasoning? (some 800)
+    let deepseek ← parse (.mkObj [("prompt_tokens", (500 : Nat)), ("completion_tokens", (20 : Nat)),
+      ("prompt_cache_hit_tokens", (300 : Nat)), ("prompt_cache_miss_tokens", (200 : Nat))])
+    assertEqual "DeepSeek's cache hits" deepseek.cached? (some 300)
+    assertEqual "the text" (tokens openai) "in 48.2k, 41.9k cached; out 1.1k, 800 reasoning"
+    let store ← assertOk <| Store.create ((← scratch) / "states")
+    let turn (parent? : Option Hash) (usage : Chat.TokenUsage) : TestM Hash :=
+      assertOk <| putState store {
+        image := recordedImage, workdir := recordedWorkdir, parent? := parent?, workspace := workspace
+        kind := if parent?.isNone then .root else .turn
+        appended := #[.response { content? := some "x", usage? := some usage }]
+        agent? := if parent?.isNone then some testAgent else none
+        model? := if parent?.isNone then some testModel else none }
+    let root ← turn none {}
+    let first ← turn (some root) openai
+    let second ← turn (some first) deepseek
+    let run ← assertOk <| runUsage store second
+    assertEqual "input" run.input? (some 48711)
+    assertEqual "cached" run.cached? (some 42200)
+    assertEqual "reasoning, where only one reported it" run.reasoning? (some 800)
+    let tree ← assertOk <| treeLines store
+    check (tree.any fun l => (l.splitOn "in 500, 300 cached; out 20").length > 1) s!"tree shows a turn's tokens: {tree}",
+
   test "parents that form a cycle are an error, not an endless walk" do
     let store ← assertOk <| Store.create ((← scratch) / "states")
     -- Content-addressed states cannot form a cycle; files edited by hand can.

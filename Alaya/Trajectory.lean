@@ -784,6 +784,47 @@ private def outcomeSuffix (state : State) : String :=
   | some o => s!"  [{o.status}]"
   | none => ""
 
+/-! ## Tokens -/
+
+private def addCounts (a b : Option Nat) : Option Nat :=
+  match a, b with
+  | some a, some b => some (a + b)
+  | some n, none | none, some n => some n
+  | none, none => none
+
+/-- Two usages added; a count stays unknown only where neither reported it. -/
+def addUsage (a b : Chat.TokenUsage) : Chat.TokenUsage :=
+  { input? := addCounts a.input? b.input?, output? := addCounts a.output? b.output?
+    total? := addCounts a.total? b.total?, reasoning? := addCounts a.reasoning? b.reasoning?
+    cached? := addCounts a.cached? b.cached? }
+
+/-- What a state's responses cost, as the provider reported when it first produced them; `none`
+for a state with no response. -/
+def State.usage? (state : State) : Option Chat.TokenUsage :=
+  state.appended.foldl (init := none) fun acc event =>
+    match event with
+    | .response r => some (addUsage (acc.getD {}) (r.usage?.getD {}))
+    | _ => acc
+
+/-- What the run's responses cost from the root to `hash`. A response alaya's own cache replayed
+cost nothing again, but carries what it cost when it was first sampled. -/
+def runUsage (store : Store) (hash : Hash) : Result Chat.TokenUsage := do
+  pure ((← ancestors store hash).foldl (fun acc (_, state) => addUsage acc (state.usage?.getD {})) {})
+
+private def count (n : Nat) : String :=
+  if n < 1000 then toString n
+  else if n < 1000000 then s!"{n / 1000}.{(n % 1000) / 100}k"
+  else s!"{n / 1000000}.{(n % 1000000) / 100000}M"
+
+/-- `in 48.2k, 41.9k cached; out 1.1k, 0.8k reasoning`, with what was not reported left out. -/
+def tokens (usage : Chat.TokenUsage) : String :=
+  let side (name : String) (n? : Option Nat) (part? : Option Nat) (partName : String) : List String :=
+    match n? with
+    | some n => [s!"{name} {count n}" ++ (part?.map (s!", {count ·} {partName}") |>.getD "")]
+    | none => []
+  "; ".intercalate (side "in" usage.input? usage.cached? "cached" ++
+    side "out" usage.output? usage.reasoning? "reasoning")
+
 /-- Milliseconds as seconds with one decimal: `12.3 s`. -/
 def seconds (ms : Nat) : String := s!"{ms / 1000}.{(ms % 1000) / 100} s"
 
@@ -802,7 +843,9 @@ partial def treeLines (store : Store) : Result (Array String) := do
     if state.question?.isSome then
       let answered ← kids.anyM fun kid => do pure ((← getState store kid).kind == .reply)
       if !answered then waitingMark := "  [Waiting]"
-    let time := match state.elapsedMs? with | some ms => s!"  ({seconds ms})" | none => ""
+    let measures := (state.elapsedMs?.map seconds).toList ++
+      (state.usage?.map tokens |>.filter (!·.isEmpty)).toList
+    let time := if measures.isEmpty then "" else s!"  ({"; ".intercalate measures})"
     let line := s!"{indent}{short hash}  {label state}{outcomeSuffix state}{waitingMark}{time}"
     let mut lines := #[line]
     for kid in kids do
@@ -845,6 +888,9 @@ def showLines (store : Store) (hash : Hash) (view? : Option View := none) :
   if let some ms := state.elapsedMs? then lines := lines.push s!"elapsed  {seconds ms}"
   let total ← elapsedMs store hash
   if total > 0 then lines := lines.push s!"run time {seconds total}, from the root"
+  if let some usage := state.usage? then lines := lines.push s!"tokens   {tokens usage}"
+  let run := tokens (← runUsage store hash)
+  if !run.isEmpty then lines := lines.push s!"run tokens {run}, from the root"
   if let some e := state.evaluation? then
     lines := lines.push s!"grader   {e.command}"
     lines := lines.push s!"grader image {e.graderImage}"
