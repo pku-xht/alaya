@@ -726,6 +726,12 @@ an answer that begins with `-` is given. Every problem is reported at once. `ala
 `alaya help COMMAND` and `alaya COMMAND --help` print what a command accepts, and
 `alaya help --json` describes every command as data. `--task-file -` reads the task from stdin.
 
+**Output.** A command prints text for a reader by default, and JSON with `--json`. Only the
+JSON is a stable interface; the text may change. One thing about the text is fixed: every state
+a command creates — by `root`, `resume`, `commit`, `tell`, `reply`, `reply-unavailable` and
+`eval` — is printed on a line of its own that begins with its full 64-hex hash, so a script
+that only needs the new state can take it from there.
+
 **JSON.** With `--json`, a command prints one JSON object per line. A command that creates a
 state — `root`, `resume`, `commit`, `tell`, `reply`, `reply-unavailable` — prints that
 state as `{state, parent, kind, note, outcome, question, question_type, options}`, and `tree`
