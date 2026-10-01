@@ -56,9 +56,6 @@ private def scripted (responses : Array Chat.Response) : IO (Model × IO.Ref (Ar
         | some r => pure r
         | none => throw <| Error.protocol "scripted model exhausted" } }, requests)
 
-private def sampleWith (model : Model) (a : Agent) (dialogue : Dialogue) : Result Chat.Response := do
-  (← model.sample { messages := dialogue, tools := a.tools }).next
-
 private def expectDone (directive : Directive) (status : String) : TestM Unit := do
   match directive with
   | .done outcome => assertEqual "stop status" outcome.status status
@@ -69,10 +66,10 @@ private def expectSample (directive : Directive) : TestM Unit := do
   | .sample => pure ()
   | _ => fail "expected another model sample"
 
-private def resumed (result : Result Stopped) : TestM Hash := do
-  let stopped ← assertOk result
-  check (!stopped.outOfTime) "this continuation must stop at its question or outcome, not its time budget"
-  pure stopped.state
+private def resumed (result : Result (Hash × Halt)) : TestM Hash := do
+  let (state, halt) ← assertOk result
+  check (halt != .outOfTime) "this continuation must stop at its question or outcome, not its time budget"
+  pure state
 
 private def checkQuestionResult (dialogue : Dialogue) (answer : Lean.Json)
     (expectedArguments : Lean.Json := args) : TestM Unit := do
@@ -265,11 +262,10 @@ def suite : Suite := Testing.suite "ask_user" #[
       let (model, _) ← scripted #[bad]
       let config := { enabled with maxConsecutiveFormatErrors := 1 }
       let a := agent executor config
-      let (_, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-        (initialLog config "task" testUname)
-      match stop with
+      let (_, _, halt) ← drive a executor model (initialLog config "task" testUname)
+      match halt with
       | .outcome outcome => assertEqual "rejected turn outcome" outcome.status "RepeatedFormatError"
-      | .question _ _ => fail "an invalid question must not wait for an answer"
+      | _ => fail "an invalid question must not wait for an answer"
       assertEqual "executor calls" (← calls.get) 0,
 
   test "typed questions record candidate, none-of-above, yes/no, and open replies after reconstruction" do
@@ -319,7 +315,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "waiting workspace" questionState.workspace (← assertOk <| getState store root).workspace
         assertEqual "unanswered question count" (← assertOk <| waiting store).size 1
         assertEqual "unanswered question has no reply children" (← assertOk <| children store waitingHash).size 0
-        assertError "cannot step while waiting" (stepOnce rt "scripted" waitingHash) fun
+        assertError "cannot step while waiting" (step rt "scripted" waitingHash) fun
           | .input _ => true
           | _ => false
         assertEqual "only question sampled" (← requests.get).size 1
@@ -459,10 +455,10 @@ def suite : Suite := Testing.suite "ask_user" #[
       let (model, requests) ← scripted #[]
       let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built.build executor, budgetMs? := some 1000 }
       let before ← assertOk <| allStates store
-      assertEqual "step cannot sample after exhausted time" (← assertOk <| stepOnce rt "scripted" answered) none
-      let stopped ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
-      check stopped.outOfTime "unavailable retains the exhausted budget"
-      assertEqual "budget leaves reply resumable" stopped.state answered
+      check ((← assertOk <| step rt "scripted" answered).2 == .outOfTime) "step cannot sample after exhausted time"
+      let (stopped, halt) ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
+      check (halt == .outOfTime) "unavailable retains the exhausted budget"
+      assertEqual "budget leaves reply resumable" stopped answered
       assertEqual "budget writes no new state" (← assertOk <| allStates store) before
       let final ← resumed <| resume { rt with budgetMs? := none } "scripted" answered (fun _ => pure ())
       let terminal ← assertOk <| getState store final
@@ -563,14 +559,14 @@ def suite : Suite := Testing.suite "ask_user" #[
     let (executor, calls) ← countingExecutor
     let (model, requests) ← scripted #[response #[ask]]
     let a := agent executor config
-    let (log, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-      (initialLog config "task" testUname)
-    match stop with
-    | .question "q" _ => pure ()
+    let (rt, asked, halt) ← drive a executor model (initialLog config "task" testUname)
+    match halt with
+    | .question q => assertEqual "the asking call" q.callId "q"
     | _ => fail "the last allowed model turn may still ask its question"
-    let answered := log.push (.observation "q" (.str "2"))
-    let (_, stop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a) answered
-    match stop with
+    let replied ← assertOk <| reply rt.store asked "2"
+    let answered ← assertOk <| logOf rt.store replied
+    let (_, halt) ← assertOk <| resume rt "test" replied (fun _ => pure ())
+    match halt with
     | .outcome outcome => assertEqual "limit after reply" outcome.status "LimitsExceeded"
     | _ => fail "reply must not grant another model turn"
     assertEqual "sample count" (← requests.get).size 1
@@ -602,7 +598,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let rebuilt := { rt with agent := restored.build executor }
         let final ← if useResume then
             resumed <| resume rebuilt "scripted" answered (fun _ => pure ())
-          else stepped <| stepOnce rebuilt "scripted" answered
+          else stepped <| step rebuilt "scripted" answered
         let terminal ← assertOk <| getState store final
         assertEqual "limit outcome" (terminal.outcome?.map (·.status)) (some "LimitsExceeded")
         assertEqual "terminal parent" terminal.parent? (some answered)
@@ -657,10 +653,10 @@ def suite : Suite := Testing.suite "ask_user" #[
       let (model, requests) ← scripted #[response #[submit]]
       let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", executor, model, agent := restored.build executor, budgetMs? := some 1000 }
       let before ← assertOk <| allStates reopened
-      let stopped ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
-      check stopped.outOfTime "the inherited time exhausts this invocation's budget"
-      assertEqual "resume leaves the reply available for later continuation" stopped.state answered
-      assertEqual "step also refuses another sample" (← assertOk <| stepOnce rt "scripted" answered) none
+      let (stopped, halt) ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
+      check (halt == .outOfTime) "the inherited time exhausts this invocation's budget"
+      assertEqual "resume leaves the reply available for later continuation" stopped answered
+      check ((← assertOk <| step rt "scripted" answered).2 == .outOfTime) "step also refuses another sample"
       assertEqual "the budget writes no terminal or model state" (← assertOk <| allStates reopened) before
       assertEqual "no model request after the exhausted budget" (← requests.get).size 0
       assertEqual "no command after the exhausted budget" (← calls.get) 0
@@ -691,16 +687,16 @@ def suite : Suite := Testing.suite "ask_user" #[
     let (executor, calls) ← countingExecutor
     let (model, _) ← scripted #[response #[ask "q" arguments], response #[readCall], response #[submit]]
     let a := agent executor config
-    let (log, firstStop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-      (initialLog config "task" testUname ++ history)
-    match firstStop with
-    | .question "q" _ => pure ()
+    let (rt, asked, halt) ← drive a executor model (initialLog config "task" testUname ++ history)
+    match halt with
+    | .question q => assertEqual "the asking call" q.callId "q"
     | _ => fail "the recovery-enabled agent should ask normally"
-    let (finalLog, finalStop) ← assertOk <| Agent.run a { dir := ← scratch } (sampleWith model a)
-      (log.push (.observation "q" (.str "Inspect the middle lines.\nKeep the output unchanged.")))
-    match finalStop with
+    let replied ← assertOk <| reply rt.store asked "Inspect the middle lines.\nKeep the output unchanged."
+    let (final, halt) ← assertOk <| resume rt "test" replied (fun _ => pure ())
+    match halt with
     | .outcome outcome => assertEqual "submitted after reading" outcome.status "Submitted"
     | _ => fail "expected submission after output recovery"
+    let finalLog ← assertOk <| logOf rt.store final
     let page := finalLog.findSome? fun
       | .observation "r" json => (json.getObjValAs? String "text").toOption
       | _ => none

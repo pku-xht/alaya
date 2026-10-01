@@ -119,29 +119,4 @@ def calls (log : Log) : Array Chat.ToolCall :=
 
 end Log
 
-/-- How a reference run ended: with an outcome, or at a question a person has to answer. -/
-inductive Stop where
-  | outcome (outcome : Outcome)
-  | question (callId : String) (question : Question)
-  deriving Inhabited
-
-/-- The reference loop: follows the agent's directives until it stops, recording every event.
-A trajectory drives the same steps but persists each turn as a state, and times them; here the
-session is fixed. -/
-partial def run (agent : Agent) (workspace : Workspace) (sample : Dialogue -> Result Chat.Response)
-    (log : Log) (session : Session := {}) : Result (Log × Stop) := do
-  match agent.next session log with
-  | .done outcome => pure (log, .outcome outcome)
-  | .ask callId question =>
-    Result.fromExcept Error.input question.validate
-    pure (log, .question callId question)
-  | .sample =>
-    let response ← sample (agent.view log)
-    run agent workspace sample (log.push (.response response)) session
-  | .act call =>
-    let content ← agent.act workspace call
-    run agent workspace sample (log.push (.observation call.id content)) session
-  | .record callId content =>
-    run agent workspace sample (log.push (.observation callId content)) session
-
 end Alaya.Agent

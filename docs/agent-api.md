@@ -173,7 +173,7 @@ observation to record. The shape of the observation is the agent's to define, an
 what renders it. An agent that fails to execute a call returns an observation saying so rather
 than throwing, so that a run survives a failed command.
 
-## 4. The agent record and the reference loop
+## 4. The agent record and the loop
 
 ```lean
 structure Agent where
@@ -190,13 +190,16 @@ reading, and what answers a call — with no knowledge of any agent; an agent co
 `mini-vero`) reads a JSON configuration into an `Instance` — its opening log, tools, view and
 `build` — and the root records the configuration (`docs/cli.md` §5).
 
-`Agent.run agent workspace sample log` is the reference loop: follow `next` until it stops, sampling from
-`view log` and pushing every event. It returns the final log and a `Stop`: an `outcome`, or a
-`question` a person has to answer. A trajectory drives the same steps but persists each **turn**
-— one sample and the acts that follow it — as a state, and snapshots after every act. Tests run
-an agent through `Agent.run` with a scripted `sample` and no store at all.
+There is one loop that carries out directives, the trajectory's (`Trajectory.resume`,
+`docs/trajectory-schema.md` §2): follow `next` until it stops, sampling from `view log` and
+pushing every event, and persist each **turn** — one sample and the acts that follow it — as a
+state, with a snapshot of the workspace after every act. A turn ends in a `Halt`: `continue`, an
+`outcome`, or a `question` a person has to answer. `outOfTime` and `outOfTurns` are the
+continuation's own limits, checked between turns and never inside one, since a turn stopped
+between its tool calls would leave calls unanswered. Tests drive an agent through the same loop,
+with a scripted model and directory snapshots in place of restic.
 
-*The reference loop `Agent.run`, and how a trajectory drives the same steps.*
+*The loop, as `Trajectory.resume` carries out a turn.*
 
 ```mermaid
 flowchart TD
@@ -208,14 +211,14 @@ flowchart TD
   S3 --> NEXT
 
   NEXT -->|"act call"| A1["content := agent.act workspace call"]
-  A1 --> A2["log.push (observation call.id content)"]
+  A1 --> A2["log.push (observation call.id content); snapshot the workspace"]
   A2 --> NEXT
 
   NEXT -->|"record callId content"| O1["log.push (observation callId content)"]
   O1 --> NEXT
 
-  NEXT -->|"ask callId question"| SU["Stop.question: a person must answer"]
-  NEXT -->|"done outcome"| DO["Stop.outcome"]
+  NEXT -->|"ask callId question"| SU["Halt.question: a person must answer"]
+  NEXT -->|"done outcome"| DO["Halt.outcome"]
 
   classDef terminal fill:#eee,stroke-dasharray: 5 5
   class SU,DO terminal

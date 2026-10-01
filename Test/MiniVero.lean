@@ -223,10 +223,10 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
   test "each step records its time, and the tool counts it against the budget" do
     let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
       turn #[call "t" "time_budget"], turn #[call "s" "submit"]] (some 3600000)
-    let first ← stepped <| Trajectory.stepOnce rt "m" root
+    let first ← stepped <| step rt "m" root
     let slept := (← assertOk <| Trajectory.getState rt.store first).elapsedMs?.getD 0
     check (slept >= 200) s!"the step took the sleep, recorded {slept} ms"
-    let second ← stepped <| Trajectory.stepOnce rt "m" first
+    let second ← stepped <| step rt "m" first
     match (← assertOk <| Trajectory.getState rt.store second).appended.back? with
     | some (.observation "t" json) =>
       let left := (json.getObjVal? "seconds_left" >>= Lean.Json.getNat?).toOption.getD 0
@@ -237,17 +237,18 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
   test "a spent budget stops resume before a step, writes nothing, and a later resume continues" do
     let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
       turn #[call "s" "submit" (.mkObj [("message", "done")])]] (some 100)
-    let stopped ← assertOk <| Trajectory.resume rt "m" root (fun _ => pure ())
-    check stopped.outOfTime "the budget stopped it"
-    check ((← assertOk <| Trajectory.getState rt.store stopped.state).outcome?.isNone) "the run has not ended"
+    let (stopped, halt) ← assertOk <| Trajectory.resume rt "m" root (fun _ => pure ())
+    check (halt == .outOfTime) "the budget stopped it"
+    check ((← assertOk <| Trajectory.getState rt.store stopped).outcome?.isNone) "the run has not ended"
     let count := (← assertOk <| Trajectory.allStates rt.store).size
-    let again ← assertOk <| Trajectory.resume rt "m" stopped.state (fun _ => pure ())
-    check (again.outOfTime && again.state == stopped.state) "spent before a step: nothing more"
+    let (again, halt) ← assertOk <| Trajectory.resume rt "m" stopped (fun _ => pure ())
+    check (halt == .outOfTime && again == stopped) "spent before a step: nothing more"
     assertEqual "no state written" (← assertOk <| Trajectory.allStates rt.store).size count
-    assertEqual "step says so too" (← assertOk <| Trajectory.stepOnce rt "m" stopped.state) none
-    let final ← assertOk <| Trajectory.resume { rt with budgetMs? := none } "m" stopped.state (fun _ => pure ())
-    check (!final.outOfTime) "without a budget it runs on"
-    assertEqual "submitted" ((← assertOk <| Trajectory.getState rt.store final.state).outcome?.map (·.status)) (some "Submitted")
+    let (_, halt) ← assertOk <| step rt "m" stopped
+    check (halt == .outOfTime) "one step is refused too"
+    let (final, halt) ← assertOk <| Trajectory.resume { rt with budgetMs? := none } "m" stopped (fun _ => pure ())
+    check (halt != .outOfTime) "without a budget it runs on"
+    assertEqual "submitted" ((← assertOk <| Trajectory.getState rt.store final).outcome?.map (·.status)) (some "Submitted")
 ]
 
 end MiniVeroTests

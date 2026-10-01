@@ -163,10 +163,6 @@ private def stateLine (data : DataDir) (out : Cli.Out) (child : Hash) : Result U
 private def report (out : Cli.Out) (json : Lean.Json) (lines : Array String) : Result Unit :=
   if out.json then out.record json "" else emitLines lines
 
-/-- The exit status for the state a run stopped at. -/
-private def exitFor (data : DataDir) (hash : Hash) : Result UInt32 := do
-  pure (if (← getState data.store hash).question?.isSome then exitWaiting else 0)
-
 /-! ## Commands
 
 Each command declares what it takes (`Alaya.Cli`), and `main` runs the table. -/
@@ -220,22 +216,26 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
     let start ← resolve data.store a.state
     let rt ← runtimeFor data (← openWork data) a start
     try
-      let stopped ← resume rt a.model.spec start (stateLine data out)
+      let (stopped, halt) ← resume rt a.model.spec start (stateLine data out)
         (turns? := if a.turns == 0 then none else some a.turns)
-      if stopped.outOfTime then
-        let used ← elapsedMs data.store stopped.state
-        out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("time_budget_spent", true),
+      match halt with
+      | .outOfTime =>
+        let used ← elapsedMs data.store stopped
+        out.record (Lean.Json.mkObj [("state", stopped.hex), ("time_budget_spent", true),
             ("run_time_ms", used)])
-          s!"time budget spent: {stopped.state.hex} has run {seconds used}; resume it to continue"
-        return exitStopped
-      if stopped.outOfTurns then
-        out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("turns_spent", true),
+          s!"time budget spent: {stopped.hex} has run {seconds used}; resume it to continue"
+        pure exitStopped
+      | .outOfTurns =>
+        out.record (Lean.Json.mkObj [("state", stopped.hex), ("turns_spent", true),
             ("turns", a.turns)])
-          s!"{a.turns} turn(s) taken: resume {stopped.state.hex} to continue"
-        return exitStopped
-      if let some o := (← getState data.store stopped.state).outcome? then
+          s!"{a.turns} turn(s) taken: resume {stopped.hex} to continue"
+        pure exitStopped
+      | .question _ => pure exitWaiting
+      | .outcome o =>
         out.note s!"done: {o.status}"
-      exitFor data stopped.state
+        pure 0
+      -- A continuation only stops for one of the above.
+      | .continue => pure 0
     finally
       Result.fromIO Error.storage rt.executor.close
 

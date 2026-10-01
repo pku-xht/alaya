@@ -475,7 +475,10 @@ run already spent. -/
 private def sessionAt (rt : Runtime) (before started : Nat) : Result Session := do
   pure { elapsedMs := before + ((← nowMs) - started), budgetMs? := rt.budgetMs? }
 
-/-- Why a turn handed control back to the driver. -/
+/-- Why a turn handed control back, or a continuation stopped. A turn ends with one of the first
+three; the limits are the driver's, checked between turns and never inside one, since a turn
+stopped between its tool calls would leave calls unanswered. A limit is not recorded: a later
+`resume` continues from the state it stopped at. -/
 inductive Halt where
   /-- The turn went normally; the run goes on. -/
   | continue
@@ -483,7 +486,11 @@ inductive Halt where
   | outcome (outcome : Outcome)
   /-- The turn asked a person something; the run waits for `reply`. -/
   | question (question : Question)
-  deriving Inhabited
+  /-- The continuation's time budget was spent. -/
+  | outOfTime
+  /-- The continuation took the turns it was allowed. -/
+  | outOfTurns
+  deriving Inhabited, BEq
 
 /-- Follows the agent's directives after a sample until it wants to sample again or stops,
 recording each observation and snapshotting the workspace after each act. Returns the events
@@ -560,44 +567,27 @@ private def withinBudget (rt : Runtime) (elapsed : Nat) : Bool :=
   | some budget => elapsed < budget
   | none => true
 
-/-- Advances one model turn, or records the agent's stop after a reply without sampling.
-Returns `none` when the time budget is already spent, and then nothing is written. -/
-def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result (Option Hash) := do
-  let state ← getState rt.store hash
-  Result.fromExcept Error.input state.continuable
-  let before ← elapsedMs rt.store hash
-  if !withinBudget rt before then return none
-  checkoutInto rt.toSandbox state.workspace
-  let (child, _, _, _, _) ← advance rt note hash (← logOf rt.store hash) state.workspace before
-  pure (some child)
-
-/-- Where a continuation stopped: the state it reached, and whether it stopped there because
-the time budget was spent, not because the run ended or asked. -/
-structure Stopped where
-  state : Hash
-  outOfTime : Bool := false
-  /-- Stopped after the `turns?` this continuation was allowed, with the run still going. -/
-  outOfTurns : Bool := false
-
 /-- Grows a continuation from `hash` until the run ends, stops at a question, spends the time
-budget, or has taken `turns?` turns, and returns where it stopped. Stopping for a limit writes
-nothing more: the last state is where a later `resume` continues. -/
+budget, or has taken `turns?` turns, and returns the state it reached and why it stopped there.
+Stopping for a limit writes nothing more: that state is where a later `resume` continues. One
+turn is `turns? := some 1`. -/
 partial def resume (rt : Runtime) (note : String) (hash : Hash)
-    (onStep : Hash -> Result Unit) (turns? : Option Nat := none) : Result Stopped := do
+    (onStep : Hash -> Result Unit) (turns? : Option Nat := none) : Result (Hash × Halt) := do
   let start ← getState rt.store hash
   Result.fromExcept Error.input start.continuable
   let before ← elapsedMs rt.store hash
-  if !withinBudget rt before then return { state := hash, outOfTime := true }
+  if !withinBudget rt before then return (hash, .outOfTime)
   checkoutInto rt.toSandbox start.workspace
-  let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed taken : Nat) : Result Stopped := do
+  let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed taken : Nat) :
+      Result (Hash × Halt) := do
     let (child, log, workspace, elapsed, halt) ← advance rt note parent log workspace elapsed
     onStep child
     match halt with
     | .continue =>
-      if !withinBudget rt elapsed then pure { state := child, outOfTime := true }
-      else if turns?.any (taken + 1 ≥ ·) then pure { state := child, outOfTurns := true }
+      if !withinBudget rt elapsed then pure (child, .outOfTime)
+      else if turns?.any (taken + 1 ≥ ·) then pure (child, .outOfTurns)
       else go child log workspace elapsed (taken + 1)
-    | _ => pure { state := child }
+    | halt => pure (child, halt)
   go hash (← logOf rt.store hash) start.workspace before 0
 
 /-! ## Evaluation -/
