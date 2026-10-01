@@ -203,7 +203,8 @@ class QuestionApplication:
             raise ApiError(404, "This is not a question the page has listed.")
         value = self._inspect(self._run("show", state, json_output=True), state)
         history = value.get("history")
-        if value.get("kind") != "question" or not isinstance(history, list) or not all(
+        # A question is a turn that carries the question it waits on.
+        if not isinstance(value.get("question"), dict) or not isinstance(history, list) or not all(
             isinstance(step, dict) and isinstance(step.get("kind"), str)
             and isinstance(step.get("events"), list) for step in history
         ):

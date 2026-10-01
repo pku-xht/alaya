@@ -48,9 +48,8 @@ creates it, and every other command refuses a path that holds none. What it hold
 
 ## 3. Output
 
-A command prints text for a reader by default, and JSON with `--json`. Only the JSON is a stable
-interface; the text may change. One thing about the text is fixed: every state a command
-creates — by `root`, `resume`, `commit`, `tell`, `reply` and `eval` — is printed on a line of
+A command prints text for a reader by default, and JSON with `--json`. In the text, every state
+a command creates — by `root`, `resume`, `commit`, `tell`, `reply` and `eval` — is printed on a line of
 its own that begins with its full 64-hex hash, so a script that only needs the new state can
 take it from there.
 

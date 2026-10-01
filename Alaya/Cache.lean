@@ -1,4 +1,5 @@
 import Alaya.Model
+import Alaya.Chat.Stored
 import Std.Sync.Mutex
 
 namespace Alaya.Cache
@@ -7,80 +8,26 @@ structure Config where
   directory : System.FilePath
   readOnly : Bool := false
 
-private def usageToJson : Chat.TokenUsage -> Lean.Json
-  | { input?, output?, total? } => .mkObj [
-    ("input", input?.map Lean.Json.num |>.getD .null),
-    ("output", output?.map Lean.Json.num |>.getD .null),
-    ("total", total?.map Lean.Json.num |>.getD .null)
-  ]
-
-private def responseToJson (response : Chat.Response) : Lean.Json :=
-  .mkObj [
-    ("content", response.content?.map Lean.Json.str |>.getD .null),
-    ("tool_calls", .arr <| response.toolCalls.map fun call => .mkObj [
-      ("id", call.id),
-      ("name", call.name),
-      ("arguments", call.arguments),
-      ("invalid_arguments", call.invalidArguments?.map Lean.Json.str |>.getD .null)
-    ]),
-    ("usage", response.usage?.map usageToJson |>.getD .null),
-    ("finish_reason", response.finishReason?.map Lean.Json.str |>.getD .null),
-    ("reasoning_content", response.reasoning?.map Lean.Json.str |>.getD .null)
-  ]
-
 private def responsesToJson (key : String) (responses : Array Chat.Response) : Lean.Json :=
-  .mkObj [
-    ("version", 1),
-    ("key", key),
-    ("responses", .arr <| responses.map responseToJson)
-  ]
-
-private def liftJson (error : String) (result : Except String alpha) : Except String alpha :=
-  result.mapError fun _ => error
-
-private def usageFromJson? (json : Lean.Json) : Option Chat.TokenUsage :=
-  match json.getObjVal? "usage" with
-  | .ok usage =>
-    let input? := (usage.getObjVal? "input" >>= Lean.Json.getNat?).toOption
-    let output? := (usage.getObjVal? "output" >>= Lean.Json.getNat?).toOption
-    let total? := (usage.getObjVal? "total" >>= Lean.Json.getNat?).toOption
-    some { input?, output?, total? }
-  | .error _ => none
-
-private def responseFromJson (json : Lean.Json) : Except String Chat.Response := do
-  let content? := (json.getObjVal? "content" >>= Lean.Json.getStr?).toOption
-  let calls ← liftJson "cached response has invalid tool calls" <| json.getObjVal? "tool_calls" >>= Lean.Json.getArr?
-  let toolCalls ← calls.mapM fun call => do
-    let id ← liftJson "cached tool call has no id" <| call.getObjVal? "id" >>= Lean.Json.getStr?
-    let name ← liftJson "cached tool call has no name" <| call.getObjVal? "name" >>= Lean.Json.getStr?
-    let arguments ← liftJson "cached tool call has no arguments" <| call.getObjVal? "arguments"
-    let invalidArguments? := (call.getObjVal? "invalid_arguments" >>= Lean.Json.getStr?).toOption
-    pure { id, name, arguments, invalidArguments? }
-  let usage? := usageFromJson? json
-  let finishReason? := (json.getObjVal? "finish_reason" >>= Lean.Json.getStr?).toOption
-  let reasoning? := (json.getObjVal? "reasoning_content" >>= Lean.Json.getStr?).toOption
-  pure { content?, toolCalls, usage?, finishReason?, reasoning? }
+  .mkObj [("key", key), ("responses", .arr <| responses.map (·.toStored))]
 
 private def responsesFromJson (key : String) (json : Lean.Json) : Except String (Array Chat.Response) := do
-  let version ← liftJson "cached entry has no version" <| json.getObjVal? "version" >>= Lean.Json.getNat?
-  if version != 1 then throw "cached entry has an unsupported version"
-  let storedKey ← liftJson "cached entry has no key" <| json.getObjVal? "key" >>= Lean.Json.getStr?
+  let storedKey ← json.getObjVal? "key" >>= Lean.Json.getStr?
   if storedKey != key then throw "cached entry key does not match its filename"
-  let responses ← liftJson "cached entry has no responses" <| json.getObjVal? "responses" >>= Lean.Json.getArr?
-  responses.mapM responseFromJson
+  (← json.getObjVal? "responses" >>= Lean.Json.getArr?).mapM Chat.Response.ofStored
 
 private def fileName (key : String) : String :=
   s!"{hash key}.json"
 
 private def entryPath (config : Config) (key : String) : System.FilePath :=
-  config.directory / "v1" / fileName key
+  config.directory / fileName key
 
 private def load (config : Config) (key : String) : IO (Array Chat.Response) := do
   let path := entryPath config key
   if !(← path.pathExists) then return #[]
   try
     let contents ← IO.FS.readFile path
-    let json ← IO.ofExcept <| liftJson "cached entry is invalid JSON" <| Lean.Json.parse contents
+    let json ← IO.ofExcept <| (Lean.Json.parse contents).mapError fun _ => "cached entry is invalid JSON"
     IO.ofExcept <| responsesFromJson key json
   catch _ =>
     -- A corrupt entry is treated as a miss and replaced on the next successful sample.

@@ -60,23 +60,23 @@ flowchart LR
 
 ### Kinds of state
 
-Every state is one of seven kinds. The kind says what created the state and therefore what its
-`appended` and `workspace` hold. Four kinds come from the `alaya` commands a person runs (`commit`,
-`tell`, `reply`, `eval`); `root` comes from `root`; `turn` and `question` come from the agent,
-driven by `resume`.
+Every state is one of five kinds. The kind says what created the state and therefore what its
+`appended` and `workspace` hold. `intervention`, `reply` and `evaluation` come from the `alaya`
+commands a person runs (`commit` and `tell`, `reply`, `eval`); `root` comes from `root`; `turn`
+comes from the agent, driven by `resume`. A kind is never a second name for a field: a turn that
+asked a person something is a `turn` with `question?` set, and a message is an `intervention`
+with no changes.
 
 | Kind | Created by | `appended` | `workspace` |
 | --- | --- | --- | --- |
 | `root` | `alaya root` | the agent's opening prompts | the project as given |
-| `turn` | one model turn, or a stop after a reply | the response and observations; empty for a stop before sampling | the workspace after those calls ran, or the parent's when none ran |
-| `question` | a model turn whose call asked a person | the response, and the observations of the calls before the ask | the workspace after those calls ran |
+| `turn` | one model turn, or a stop after a reply | the response and observations — up to the ask, when a call asked a person; empty for a stop before sampling | the workspace after those calls ran, or the parent's when none ran |
 | `reply` | `alaya reply`, with an answer or `--unavailable` | one observation: the person's verbatim answer string, or the explicit unavailable object | the parent's |
-| `intervention` | `alaya commit` | one notice listing what changed | the directory the person edited |
-| `message` | `alaya tell` | one notice carrying the person's text | the parent's |
+| `intervention` | `alaya commit`, or `alaya tell` | one notice: what changed, or the person's message | the directory the person edited, or the parent's |
 | `evaluation` | `alaya eval` | nothing; the verdict is on the state itself | the checkout after the grader ran |
 
-Two kinds constrain what may follow them. A `question` waits: only `reply` may be its child until
-one exists. An `evaluation` is a leaf: it is a verdict on its parent, not a point a run can go on
+Two states constrain what may follow them. A turn with a `question?` waits: only `reply` may be
+its child until one exists. An `evaluation` is a leaf: it is a verdict on its parent, not a point a run can go on
 from.
 
 After a reply, the agent may already be done, for example when the question consumed its
@@ -85,7 +85,7 @@ the parent's workspace and the agent's outcome, without calling the model.
 
 Besides the three parts, a state carries what the run needs to continue and what a reader wants
 to know: the container `image` and `workdir`, set on the root and inherited; on the root, the `agent?` configuration the run is continued with (`docs/cli.md` §5); a `note?` of provenance (the model spec for a turn, the task for a root, the note for
-an intervention); the `outcome?` when the state ended the run; the `question?` a `question` is
+an intervention); the `outcome?` when the state ended the run; the `question?` a turn is
 waiting on; the `intervention?` record behind a notice; and the `evaluation?` verdict.
 
 *The run used in the examples of this page, as a tree. Dashed: an evaluation, a leaf.*
@@ -173,7 +173,7 @@ whose `appended` contains a model response — call the count `n` — and asks t
 - if its entry already holds draw `n`, it returns it without a provider call;
 - if not, it asks the provider for the missing draws, appends them to the entry, and returns them.
 
-Children a person makes — `reply`, `message`, `intervention` — and evaluations are not counted:
+Children a person makes — `reply`, `intervention` — and evaluations are not counted:
 they asked the model nothing, and counting them would skip a draw the cache holds.
 A terminal `turn` recorded after a reply without sampling is likewise not counted.
 
@@ -262,8 +262,8 @@ flowchart LR
 
 ### Sending a message: `tell`
 
-`alaya tell HASH TEXT` is the same notice without a workspace change: a `message` child whose
-`workspace` is the parent's and whose one appended event is the user message, with the header
+`alaya tell HASH TEXT` is the same notice without a workspace change: an `intervention` child
+with no changes, whose `workspace` is the parent's and whose one appended event is the user message, with the header
 "A person sent you a message while you were paused." and no path list.
 
 Both notices are `Event.message`, which every view passes through unchanged, so the model sees
@@ -288,7 +288,7 @@ flowchart LR
 
 An agent that offers a tool for asking a person returns the `ask callId question` directive when
 the model calls it (`docs/agent-api.md` §3). The trajectory then finishes the turn early and
-records it as a `question` state:
+records it as a `turn` that waits on a question:
 
 - `appended` holds the response and the observations of the calls *before* the ask; the calls
   after it never ran;
@@ -370,7 +370,7 @@ loop is: resume; on exit 3 read the question, decide, `reply`; resume from the r
 
 ```sh
 alaya resume "$hash" --model M --json
-# {"state":"c61754…","kind":"question","outcome":null,"question":"Should I keep the old API?","question_type":"open_ended","options":[]}
+# {"state":"c61754…","kind":"turn","outcome":null,"question":"Should I keep the old API?","question_type":"open_ended","options":[]}
 # exit status 3
 reply=$(alaya reply c61754 "Keep it; add the new one beside it.")
 alaya resume "$reply" --model M --json
@@ -497,7 +497,7 @@ holds none.
 | --- | --- |
 | `D/states/<64 hex>.json` | one file per state object, named by the SHA-256 of its bytes; the set of these files *is* the forest |
 | `D/restic/` | the [restic](https://restic.net) repository holding every workspace snapshot |
-| `D/cache/v1/<hash>.json` | model response cache entries (§7) |
+| `D/cache/<hash>.json` | model response cache entries (§7) |
 | `D/lock`, `D/lock.holder` | the lock a writing command holds, and the pid of the command holding it (`docs/cli.md` §4) |
 | `D/tmp/<id>/` | one command's scratch, removed when it ends: `work/`, the working directory, re-materialized at every checkout; `eval/`, a grader's checkout; `restic/`, where files read out of a snapshot land |
 
@@ -598,7 +598,7 @@ project with Mathlib — 7.2 GB in 121,433 files, an Apple M5 Pro's internal vol
 *What is on disk: the data directory, and what a state object refers to.*
 
 ```
-$ ls "$ALAYA_DATA"/cache/v1 | head -2
+$ ls "$ALAYA_DATA"/cache | head -2
 1180723829451067366.json
 5029385371209364131.json
 ```
@@ -657,18 +657,20 @@ alaya diff adbac1 4f2c8b        # the workspace changes between two states, one 
 
 ## 7. The model cache entry
 
-`D/cache/v1/<hash>.json`, where `hash` is Lean's generic hash of the cache key:
+`D/cache/<hash>.json`, where `hash` is Lean's generic hash of the cache key:
 
 ```json
 {
-  "version": 1,
   "key": "<compress {model: <identity>, structured_output: <mode>, request: <Request.toJson>}>",
   "responses": [
-    {"content": …, "tool_calls": [call…], "usage": {…}, "finish_reason": …, "reasoning_content": …},
+    {"content": …, "tool_calls": [call…], "reasoning": …, "finish_reason": …, "usage": {…}},
     …
   ]
 }
 ```
+
+A response is stored as a state's `response` event stores it (`Alaya.Chat.Stored`), so a
+response reads the same in the cache and in the tree.
 
 `responses[i]` is draw `i` of that request under that model identity. The stored key is checked
 against the file name on load, and a corrupt entry reads as empty and is replaced on the next
@@ -678,7 +680,7 @@ identity including options such as reasoning echo — changes the key, and a for
 one will not replay under another.
 
 ```
-$ ls "$ALAYA_DATA"/cache/v1 | head -2
+$ ls "$ALAYA_DATA"/cache | head -2
 1180723829451067366.json
 5029385371209364131.json
 ```

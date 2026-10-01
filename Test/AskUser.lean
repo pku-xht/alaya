@@ -297,7 +297,8 @@ def suite : Suite := Testing.suite "ask_user" #[
           project (← testImage) (some "task") (agent := built.config)
         let waitingHash ← resumed <| resume rt "scripted" root (fun _ => pure ())
         let questionState ← assertOk <| getState store waitingHash
-        assertEqual "waiting kind" questionState.kind Kind.question
+        assertEqual "waiting kind" questionState.kind Kind.turn
+        check questionState.question?.isSome "the turn waits on its question"
         let some question := questionState.question? | fail "missing recorded question"
         assertEqual "call id" question.callId "q"
         let expected ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
@@ -445,7 +446,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let question ← assertOk <| putState store {
         image := recordedImage
         workdir := recordedWorkdir
-        parent? := some root, workspace, kind := .question, elapsedMs? := some 1000
+        parent? := some root, workspace, kind := .turn, elapsedMs? := some 1000
         appended := #[.response (response #[ask])]
         question? := some { callId := "q", toQuestion := form } }
       let answered ← assertOk <| replyUnavailable store question
@@ -526,7 +527,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "one question and one continuation" (← requests.get).size 2,
 
   test "a stored question form must be complete and well-formed" do
-    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .question, appended := #[], question? := some { callId := "q", text := "Choose." }, agent? := some testAgent }
+    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .turn, appended := #[], question? := some { callId := "q", text := "Choose." }, agent? := some testAgent }
     let questionJson (kind : Lean.Json) (options : Lean.Json) : Lean.Json :=
       .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", kind), ("options", options)]
     let malformed : Array Lean.Json := #[
@@ -634,7 +635,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let question ← assertOk <| putState store {
         image := recordedImage
         workdir := recordedWorkdir
-        parent? := some first, workspace, kind := .question, elapsedMs? := some 300
+        parent? := some first, workspace, kind := .turn, elapsedMs? := some 300
         appended := #[.response (response #[ask])]
         question? := some { callId := "q", toQuestion := form } }
       let reopened ← assertOk <| Store.create (base / "states")

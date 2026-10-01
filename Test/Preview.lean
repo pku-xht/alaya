@@ -111,10 +111,10 @@ def suite : Suite := Testing.suite "preview" #[
     let root ← put none .root "task"
     let middle ← put (some root) .turn "middle"
     let _ ← put (some root) .turn "sibling"
-    let leaf ← put (some middle) .message "leaf"
+    let leaf ← put (some middle) .intervention "leaf"
     let branch ← assertOk <| ancestors store leaf
     assertEqual "states" (branch.map (·.1)) #[root, middle, leaf]
-    assertEqual "kinds" (branch.map (·.2.kind.toString)) #["root", "turn", "message"]
+    assertEqual "kinds" (branch.map (·.2.kind.toString)) #["root", "turn", "intervention"]
     assertEqual "the log is theirs" ((← assertOk <| logOf store leaf).size) 3
     assertEqual "the root" (← assertOk <| rootOf store leaf) root,
 

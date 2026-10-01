@@ -314,14 +314,14 @@ function summary(state) {
     const e = state.evaluation || {};
     return (e.verdict || '') + '  ' + (e.command || '');
   }
-  if (state.kind === 'intervention') return state.note || 'commit';
-  if (state.kind === 'message') return (state.intervention || {}).message || 'message';
+  if (state.kind === 'intervention') return isMessage(state)
+    ? (state.intervention || {}).message || 'message' : state.note || 'commit';
   if (state.kind === 'reply') {
     const e = (state.events || [])[0];
     return 'reply: ' + (e && typeof e.content === 'string' ? e.content : JSON.stringify(e && e.content));
   }
   const call = firstCall(state);
-  const asked = state.kind === 'question' ? ' ask: ' + ((state.question || {}).text || '') : '';
+  const asked = state.question ? ' ask: ' + (state.question.text || '') : '';
   return (call ? call.name + '  ' + flat(call.summary) : '(no tool call)') + asked;
 }
 
@@ -370,7 +370,14 @@ const GLYPHS = {
     '<circle cx=\"7\" cy=\"10.1\" r=\".7\" stroke=\"none\"/>'
 };
 
+/* A person's notice with no change to the workspace: a message, not a commit. */
+function isMessage(state) {
+  return state.kind === 'intervention' && !((state.intervention || {}).changed || []).length;
+}
+
 function glyphOf(state) {
+  if (state.kind === 'turn' && state.question) return 'question';
+  if (isMessage(state)) return 'message';
   if (state.kind !== 'evaluation') return state.kind;
   const status = state.evaluation && state.evaluation.status;
   return status === 'pass' || status === 'fail' ? status : 'error';
@@ -379,7 +386,7 @@ function glyphOf(state) {
 function icon(state) {
   const key = glyphOf(state);
   const holder = el('span', 'ic i-' + key);
-  holder.title = state.kind === 'evaluation' ? 'evaluation: ' + key : state.kind;
+  holder.title = state.kind === 'evaluation' ? 'evaluation: ' + key : key;
   holder.innerHTML = '<svg viewBox=\"0 0 14 14\" width=\"13\" height=\"13\" ' +
     'stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" ' +
     'stroke-linejoin=\"round\" fill=\"currentColor\">' + (GLYPHS[key] || GLYPHS.turn) +

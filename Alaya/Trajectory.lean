@@ -1,4 +1,5 @@
 import Alaya.Agent
+import Alaya.Chat.Stored
 import Alaya.Trajectory.Store
 import Alaya.Workspaces
 import Alaya.Cache
@@ -17,91 +18,16 @@ open Alaya.Agent (Agent Event Log Dialogue Outcome Directive View Session)
 
 /-! ## Event serialization -/
 
-private def toolCallToJson (call : Chat.ToolCall) : Lean.Json :=
-  .mkObj [
-    ("id", call.id), ("name", call.name), ("arguments", call.arguments),
-    ("invalid_arguments", call.invalidArguments?.map Lean.Json.str |>.getD .null)]
-
-private def toolCallFromJson (json : Lean.Json) : Except String Chat.ToolCall := do
-  let id ← json.getObjVal? "id" >>= Lean.Json.getStr?
-  let name ← json.getObjVal? "name" >>= Lean.Json.getStr?
-  let arguments ← json.getObjVal? "arguments"
-  let invalidArguments? := (json.getObjVal? "invalid_arguments" >>= Lean.Json.getStr?).toOption
-  pure { id, name, arguments, invalidArguments? }
-
-private def toolCallsFromJson (json : Lean.Json) : Except String (Array Chat.ToolCall) :=
-  match json.getObjVal? "tool_calls" with
-  | .ok (.arr calls) => calls.mapM toolCallFromJson
-  | _ => pure #[]
-
-def messageToJson : Chat.Message -> Lean.Json
-  | .system content => .mkObj [("role", "system"), ("content", content)]
-  | .user content => .mkObj [("role", "user"), ("content", content)]
-  | .assistant content? toolCalls reasoning? => .mkObj [
-      ("role", "assistant"),
-      ("content", content?.map Lean.Json.str |>.getD .null),
-      ("reasoning", reasoning?.map Lean.Json.str |>.getD .null),
-      ("tool_calls", .arr (toolCalls.map toolCallToJson))]
-  | .tool callId content => .mkObj [
-      ("role", "tool"), ("tool_call_id", callId), ("content", content)]
-
-def messageFromJson (json : Lean.Json) : Except String Chat.Message := do
-  match ← json.getObjVal? "role" >>= Lean.Json.getStr? with
-  | "system" => .system <$> (json.getObjVal? "content" >>= Lean.Json.getStr?)
-  | "user" => .user <$> (json.getObjVal? "content" >>= Lean.Json.getStr?)
-  | "assistant" =>
-    let content? := (json.getObjVal? "content" >>= Lean.Json.getStr?).toOption
-    let calls ← toolCallsFromJson json
-    let reasoning? := (json.getObjVal? "reasoning" >>= Lean.Json.getStr?).toOption
-    pure (.assistant content? calls reasoning?)
-  | "tool" =>
-    let callId ← json.getObjVal? "tool_call_id" >>= Lean.Json.getStr?
-    let content ← json.getObjVal? "content"
-    pure (.tool callId content)
-  | other => throw s!"unknown message role: {other}"
-
-private def usageToJson (u : Chat.TokenUsage) : Lean.Json :=
-  .mkObj [
-    ("input", u.input?.map (Lean.Json.num ·) |>.getD .null),
-    ("output", u.output?.map (Lean.Json.num ·) |>.getD .null),
-    ("total", u.total?.map (Lean.Json.num ·) |>.getD .null)]
-
-private def usageFromJson? (json : Lean.Json) : Option Chat.TokenUsage :=
-  match json.getObjVal? "usage" with
-  | .ok (.obj _) =>
-    let usage := (json.getObjVal? "usage").toOption.get!
-    some {
-      input? := (usage.getObjVal? "input" >>= Lean.Json.getNat?).toOption
-      output? := (usage.getObjVal? "output" >>= Lean.Json.getNat?).toOption
-      total? := (usage.getObjVal? "total" >>= Lean.Json.getNat?).toOption }
-  | _ => none
-
-/-- A response, as recorded. -/
-def responseToJson (r : Chat.Response) : Lean.Json :=
-  .mkObj [
-    ("content", r.content?.map Lean.Json.str |>.getD .null),
-    ("tool_calls", .arr (r.toolCalls.map toolCallToJson)),
-    ("reasoning", r.reasoning?.map Lean.Json.str |>.getD .null),
-    ("finish_reason", r.finishReason?.map Lean.Json.str |>.getD .null),
-    ("usage", r.usage?.map usageToJson |>.getD .null)]
-
-def responseFromJson (json : Lean.Json) : Except String Chat.Response := do
-  let content? := (json.getObjVal? "content" >>= Lean.Json.getStr?).toOption
-  let toolCalls ← toolCallsFromJson json
-  let reasoning? := (json.getObjVal? "reasoning" >>= Lean.Json.getStr?).toOption
-  let finishReason? := (json.getObjVal? "finish_reason" >>= Lean.Json.getStr?).toOption
-  pure { content?, toolCalls, reasoning?, finishReason?, usage? := usageFromJson? json }
-
 def eventToJson : Event -> Lean.Json
-  | .message m => .mkObj [("type", "message"), ("message", messageToJson m)]
-  | .response r => .mkObj [("type", "response"), ("response", responseToJson r)]
+  | .message m => .mkObj [("type", "message"), ("message", m.toStored)]
+  | .response r => .mkObj [("type", "response"), ("response", r.toStored)]
   | .observation callId content =>
     .mkObj [("type", "observation"), ("call_id", callId), ("content", content)]
 
 def eventFromJson (json : Lean.Json) : Except String Event := do
   match ← json.getObjVal? "type" >>= Lean.Json.getStr? with
-  | "message" => .message <$> (json.getObjVal? "message" >>= messageFromJson)
-  | "response" => .response <$> (json.getObjVal? "response" >>= responseFromJson)
+  | "message" => .message <$> (json.getObjVal? "message" >>= Chat.Message.ofStored)
+  | "response" => .response <$> (json.getObjVal? "response" >>= Chat.Response.ofStored)
   | "observation" =>
     let callId ← json.getObjVal? "call_id" >>= Lean.Json.getStr?
     let content ← json.getObjVal? "content"
@@ -113,18 +39,16 @@ def eventFromJson (json : Lean.Json) : Except String Event := do
 /-- What produced a state, for display and provenance. -/
 inductive Kind where
   | root
-  /-- One model turn, or a stop recorded after a reply without another model sample. -/
+  /-- One model turn, or a stop recorded after a reply without another model sample. A turn
+  whose agent asked a person something carries the `question?` it waits on, and only `reply`
+  grows it. -/
   | turn
-  /-- A person's workspace change, with a notice to the agent listing what changed. -/
+  /-- A person's notice to the agent: a change to the workspace, listing what changed (`commit`),
+  or a message alone, with no change (`tell`). -/
   | intervention
   /-- A grader's verdict on a state, with the checkout as the grader left it; always a leaf. -/
   | evaluation
-  /-- A person's message to the agent with no workspace change: see `tell`. -/
-  | message
-  /-- A turn that ended with the agent asking a person something. The run waits here, and only
-  `reply` grows it. -/
-  | question
-  /-- A person's answer to a `question`, recorded as the tool result of the asking call. -/
+  /-- A person's answer to a question, recorded as the tool result of the asking call. -/
   | reply
   deriving BEq, Repr, Inhabited
 
@@ -133,8 +57,6 @@ def Kind.toString : Kind -> String
   | .turn => "turn"
   | .intervention => "intervention"
   | .evaluation => "evaluation"
-  | .message => "message"
-  | .question => "question"
   | .reply => "reply"
 
 def Kind.ofString? : String -> Option Kind
@@ -142,8 +64,6 @@ def Kind.ofString? : String -> Option Kind
   | "turn" => some .turn
   | "intervention" => some .intervention
   | "evaluation" => some .evaluation
-  | "message" => some .message
-  | "question" => some .question
   | "reply" => some .reply
   | _ => none
 
@@ -547,7 +467,7 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
   let elapsed := (← nowMs) - started
   let child ← putState rt.store {
     parent? := some parent, workspace, appended, outcome?, question?
-    kind := if question?.isSome then .question else .turn
+    kind := .turn
     note? := some note, image, workdir, elapsedMs? := some elapsed }
   pure (child, log ++ appended, workspace, before + elapsed, halt)
 
@@ -734,7 +654,7 @@ def tell (store : Store) (hash : Hash) (message : String) : Result Hash := do
   buildable parent
   let intervention : Intervention := { message }
   putState store {
-    parent? := some hash, workspace := parent.workspace, kind := .message
+    parent? := some hash, workspace := parent.workspace, kind := .intervention
     appended := #[.message (.user (interventionNotice intervention))]
     intervention? := some intervention
     image := parent.image, workdir := parent.workdir }
@@ -821,15 +741,17 @@ private def label (state : State) : String :=
       | some family => s!"[{family}]  "
       | none => ""
     "root  " ++ family ++ flatten (state.note?.getD "")
-  | .turn | .question =>
+  | .turn =>
     let calls := state.calls
     let first := match calls[0]? with
       | some call => callSummary call
       | none => "turn  (no tool call)"
     let more := if calls.size > 1 then s!"  (+{calls.size - 1})" else ""
     first ++ more
-  | .intervention => "commit  " ++ (state.note?.getD "")
-  | .message => "tell  " ++ flatten (state.intervention?.map (·.message) |>.getD "")
+  | .intervention =>
+    match state.intervention? with
+    | some { changed := #[], message } => "tell  " ++ flatten message
+    | _ => "commit  " ++ (state.note?.getD "")
   | .reply =>
     let text := match state.appended[0]? with
       | some (Event.observation _ (Lean.Json.str s)) => s

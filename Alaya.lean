@@ -11,6 +11,7 @@ import Alaya.Workspaces.Restic
 import Alaya.Cli
 import Alaya.Provider
 import Alaya.Chat.Schema
+import Alaya.Chat.Stored
 import Alaya.Executor
 import Alaya.Executor.Docker
 import Alaya.Agent

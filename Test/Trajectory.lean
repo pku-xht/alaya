@@ -104,7 +104,8 @@ def suite : Suite := Testing.suite "trajectory" #[
     let root ← mkRoot rt (← emptyProject)
     let told ← assertOk <| tell rt.store root "Please re-run your checks."
     let state ← assertOk (getState rt.store told)
-    check (state.kind == .message) "a tell is a message state"
+    check (state.kind == .intervention && state.intervention?.map (·.changed.isEmpty) == some true)
+      "a tell is an intervention with no change"
     check (state.workspace == (← assertOk (getState rt.store root)).workspace) "a tell keeps the workspace"
     match (view {} (← assertOk (logOf rt.store told))).back? with
     | some (.user notice) =>
@@ -172,7 +173,7 @@ def suite : Suite := Testing.suite "trajectory" #[
     let root ← mkRoot rt (← emptyProject)
     let stopped := (← assertOk <| resume rt "test:model" root (fun _ => pure ())).1
     let state ← assertOk (getState rt.store stopped)
-    check (state.kind == .question) "the run stops at a question"
+    check (state.kind == .turn && state.question?.isSome) "the run stops at a question"
     assertEqual "question" state.question? (some { callId := "q1", text := "Exact wording or mine?" })
     check (← assertOk (rt.workspaces.readFile? state.workspace "before.txt")).isSome
       "the call before the question ran"
@@ -375,7 +376,7 @@ def suite : Suite := Testing.suite "trajectory" #[
     -- The scripted model is exhausted now, so any further sample would fail; a reply, tell, or
     -- commit child does not consume a draw and does not ask.
     let told ← assertOk <| tell rt.store root "note"
-    check ((← assertOk (getState rt.store told)).kind == .message) "a tell is recorded without a sample"
+    check ((← assertOk (getState rt.store told)).kind == .intervention) "a tell is recorded without a sample"
 ]
 
 end TrajectoryTests
