@@ -187,12 +187,12 @@ run's time is the sum along its path from the root: `show` prints both, `tree` e
 Tokens are kept the same way: each turn's response records what the provider reported — input,
 of which cached, output, of which reasoning — and `show` prints the turn's and the run's from the
 root, `tree` each turn's next to its time, `show --json` both as `usage` and `run_usage`, and the
-HTML report both. A response alaya's own cache replayed cost nothing again, but carries what it
+HTML report both, in cards at the top of each state. A response alaya's own cache replayed cost nothing again, but carries what it
 cost when it was first sampled, so a run's tokens are what its responses cost, and adding them up
-across the tree can count a response two branches share twice. The report's **view context**
-button also says how full the context a continuation would be sampled from is: its size, as
+across the tree can count a response two branches share twice. The report's **context** card
+says how full the context a continuation would be sampled from is: its size, as
 `Agent.contextTokens` estimates it, as a share of the root's model's `context_tokens`, or in
-tokens when that is not known.
+tokens when that is not known; clicking it shows that context.
 `--time-budget SECONDS` (default 0, no limit) is this invocation's alone and recorded nowhere.
 Before each step `resume` checks the run's time against the budget; once spent, it writes
 nothing, says so, and exits with status 4, and a later `resume` — with a larger budget, or

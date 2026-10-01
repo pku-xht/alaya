@@ -174,9 +174,11 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
     ("image", state.image), ("workdir", state.workdir),
     ("agent", state.agent?.getD .null),
     ("model", state.model?.getD .null),
-    ("elapsed", state.elapsedMs?.map (fun ms => Lean.Json.str (seconds ms)) |>.getD .null),
-    ("tokens", state.usage?.map (fun u => Lean.Json.str (tokens u)) |>.getD .null),
-    ("runTokens", let run := tokens (← runUsage store hash); if run.isEmpty then .null else .str run),
+    -- The page formats these itself: the turn's own time and tokens, and the run's from the root.
+    ("elapsedMs", state.elapsedMs?.map (fun ms => (ms : Lean.Json)) |>.getD .null),
+    ("runElapsedMs", (← elapsedMs store hash : Lean.Json)),
+    ("usage", state.usage?.map (·.toStored) |>.getD .null),
+    ("runUsage", (← runUsage store hash).toStored),
     ("outcome", match state.outcome? with
       | none => .null
       | some o => .mkObj [("status", o.status), ("submission", o.submission)]),
@@ -282,6 +284,22 @@ color:#999;text-align:center}
 .big{color:#888;font-style:italic;padding:6px 9px}
 .file.folded{padding:5px 9px;background:#f7f8fa;color:#777}
 .headbar{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+/* The selected state at a glance: its time, its tokens, and how full the context is. */
+.cards{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.card{display:grid;grid-template-columns:auto 1fr;column-gap:8px;align-items:baseline;
+min-width:150px;padding:7px 12px;border:1px solid #e3e6ea;border-radius:6px;background:#fbfcfd;
+text-align:left;font:inherit;color:inherit}
+.card .lbl{grid-column:1/3;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8a94a0}
+.card .val{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.card .note{font-size:11px;color:#666}
+.card .sub{grid-column:1/3;font-size:11px;color:#8a94a0;font-variant-numeric:tabular-nums}
+button.card{cursor:pointer}
+button.card:hover{border-color:#3a6ea5;background:#f3f7fc}
+.card .meter{grid-column:1/3;height:4px;background:#e8ebef;border-radius:2px;margin:3px 0 2px;overflow:hidden}
+.card .meter>div{height:100%;background:#3a6ea5}
+.card .meter>div.high{background:#c07a1a}.card .meter>div.full{background:#b02020}
+.msg>.head .chip{text-transform:none;letter-spacing:0;margin-left:8px}
+.field-key{color:#8a94a0;font-size:11px;margin:6px 0 2px}
 .headbar h1{margin:0}
 /* The model's context, in a modal over the page: what a continuation from the selected state
    is sampled from, in the form the provider receives. */
@@ -639,6 +657,74 @@ function renderDiff(rows) {
   return box;
 }
 
+/* --- the cards at the top ---------------------------------------------- */
+
+/** A count of tokens in a few characters: 980, 20.3k, 1.05M. */
+function compact(n) {
+  if (n >= 1e6) return +(n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return +(n / 1e3).toFixed(1) + 'k';
+  return String(n);
+}
+
+function duration(ms) {
+  const s = ms / 1000;
+  if (s < 60) return s.toFixed(1) + ' s';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + ' min ' + Math.round(s - 60 * m) + ' s';
+  return Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+}
+
+const cachedNote = u => u.input && u.cached ? Math.round(100 * u.cached / u.input) + '% cached' : '';
+const given = value => value !== null && value !== undefined;
+
+/** One card: a label, a value with a note beside it, and a line below. */
+function card(label, value, note, sub, tag = 'div') {
+  const box = el(tag, 'card');
+  box.append(el('span', 'lbl', label), el('span', 'val', value), el('span', 'note', note || ''));
+  if (sub) box.append(el('span', 'sub', sub));
+  return box;
+}
+
+/** The selected state's own time and tokens, the run's up to it, and how full the context a
+continuation from it would be sampled from is. */
+function renderCards(state) {
+  const box = el('div', 'cards');
+  const run = state.runUsage || {}, own = state.usage || {};
+  if (given(state.elapsedMs))
+    box.append(card('time', duration(state.elapsedMs), '', 'run ' + duration(state.runElapsedMs)));
+  else if (state.runElapsedMs)
+    box.append(card('run time', duration(state.runElapsedMs), ''));
+  if (run.input) {
+    const turn = given(own.input);
+    box.append(card('input tokens', compact(turn ? own.input : run.input), turn ? cachedNote(own) : 'run',
+      turn ? 'run ' + compact(run.input) + (cachedNote(run) ? ' · ' + cachedNote(run) : '') : cachedNote(run)));
+  }
+  if (run.output) {
+    const turn = given(own.output);
+    const reasoning = u => u.reasoning ? 'incl. ' + compact(u.reasoning) + ' reasoning' : '';
+    box.append(card('output tokens', compact(turn ? own.output : run.output), turn ? reasoning(own) : 'run',
+      turn ? 'run ' + compact(run.output) : reasoning(run)));
+  }
+  // An evaluation is a leaf nothing continues from, so it has no context to show.
+  if (state.kind !== 'evaluation') {
+    const size = state.contextSize, tokens = state.contextTokens;
+    const share = size ? Math.min(100, Math.round(100 * tokens / size)) : null;
+    const context = card('context', size ? share + '%' : compact(tokens), size ? '' : 'tokens',
+      (size ? compact(tokens) + ' of ' + compact(size) : 'context size unknown') + ' · view ›', 'button');
+    if (size) {
+      const meter = el('span', 'meter');
+      const fill = el('div', share >= 95 ? 'full' : share >= 80 ? 'high' : '');
+      fill.style.width = Math.max(share, 1) + '%';
+      meter.append(fill);
+      context.insertBefore(meter, context.lastChild);
+    }
+    context.title = 'The request a continuation from this state is sampled from, estimated as the agent does';
+    context.onclick = () => showContext(state.hash);
+    box.append(context);
+  }
+  return box;
+}
+
 function section(parent, title) {
   parent.append(el('h2', null, title));
   const box = el('div');
@@ -697,22 +783,36 @@ function renderCall(call) {
   return cmd;
 }
 
-/** An observation's content by its shape: a text as is, an object field by field, anything
-else as JSON. What the fields mean is the agent's business. */
-function renderContent(content) {
-  if (typeof content === 'string') return foldable(el('pre', null, content), content.split('\\n').length + ' lines');
-  if (content && typeof content === 'object' && !Array.isArray(content)) {
-    const box = el('div');
-    for (const [key, value] of Object.entries(content)) {
-      const field = el('div', 'field');
-      field.append(el('div', 'key', key));
-      if (typeof value === 'string') field.append(foldable(el('pre', null, value), value.split('\\n').length + ' lines'));
-      else field.append(el('pre', 'mono', JSON.stringify(value)));
-      box.append(field);
+const textBlock = text => foldable(el('pre', null, text), text.split('\\n').length + ' lines');
+
+/** An observation's content by its shape: a text as is; an object's short fields as chips on
+the card's `head`, an exit code as one that says how the command ended, and its long texts
+below, named when there is more than one; anything else as JSON. What the fields mean is the
+agent's business. */
+function renderContent(content, head) {
+  if (typeof content === 'string') return textBlock(content);
+  if (!content || typeof content !== 'object' || Array.isArray(content))
+    return el('pre', 'mono', JSON.stringify(content, null, 2));
+  const long = [];
+  for (const [key, value] of Object.entries(content)) {
+    if (key === 'exit_code') {
+      head.append(value === null ? el('span', 'chip bad', 'no exit status')
+        : el('span', 'chip ' + (value === 0 ? 'ok' : 'bad'), 'exit ' + value));
+    } else if (value === null || value === '') {
+      continue;
+    } else if (typeof value === 'string' && (value.length > 60 || value.includes('\\n'))) {
+      long.push([key, value]);
+    } else {
+      head.append(el('span', 'chip', key + ' ' + (typeof value === 'string' ? value : JSON.stringify(value))));
     }
-    return box;
   }
-  return el('pre', 'mono', JSON.stringify(content, null, 2));
+  const box = el('div');
+  for (const [key, value] of long) {
+    if (long.length > 1) box.append(el('div', 'field-key', key));
+    box.append(textBlock(value));
+  }
+  if (!long.length) box.append(el('div', 'muted', 'no output'));
+  return box;
 }
 
 /** One recorded event: a message placed verbatim, a model response, or a tool's observation. */
@@ -724,7 +824,7 @@ function renderEvent(event) {
     head.append(document.createTextNode(event.role));
     if (event.callId) head.append(el('span', 'id', 'tool_call_id ' + event.callId));
     if (event.reasoning) { body.append(el('div', 'muted', 'reasoning')); body.append(foldable(el('pre', 'muted', event.reasoning))); }
-    if (event.role === 'tool') body.append(renderContent(event.content));
+    if (event.role === 'tool') body.append(renderContent(event.content, head));
     else if (event.content) body.append(foldable(el('pre', null, event.content)));
     for (const call of event.calls || []) body.append(renderCall(call));
   } else if (event.type === 'response') {
@@ -735,8 +835,8 @@ function renderEvent(event) {
     for (const call of event.calls || []) body.append(renderCall(call));
   } else {
     head.append(document.createTextNode('observation'));
-    head.append(el('span', 'id', 'tool_call_id ' + event.callId));
-    body.append(renderContent(event.content));
+    head.append(el('span', 'id', event.callId));
+    body.append(renderContent(event.content, head));
   }
   card.append(head, body);
   return card;
@@ -913,28 +1013,13 @@ function select(hash) {
   detail.textContent = '';
   const headbar = el('div', 'headbar');
   headbar.append(el('h1', null, state.kind + '  ' + short(hash)));
-  // An evaluation is a leaf nothing continues from, so it has no context to show.
-  if (state.kind !== 'evaluation') {
-    // How full the context is, estimated as the agent does, of the root's model's context size.
-    const used = state.contextSize ? Math.round(100 * state.contextTokens / state.contextSize) + '% of context'
-      : '~' + state.contextTokens.toLocaleString('en-US') + ' tokens';
-    const context = el('button', 'tool', 'view context \u00b7 ' + used);
-    context.title = 'The request a continuation from this state is sampled from: about ' +
-      state.contextTokens.toLocaleString('en-US') + ' tokens' +
-      (state.contextSize ? ' of ' + state.contextSize.toLocaleString('en-US') : '');
-    context.onclick = () => showContext(hash);
-    headbar.append(context);
-  }
-  detail.append(headbar);
+  detail.append(headbar, renderCards(state));
   const meta = el('table', 'meta');
   const rows = [['hash', hash], ['parent', state.parent || '(root)'], ['workspace', state.workspace]];
   if (state.note) rows.push(['note', state.note]);
   if (state.image) rows.push(['image', state.image]);
   if (state.agent) rows.push(['agent', JSON.stringify(state.agent)]);
   if (state.model) rows.push(['model', JSON.stringify(state.model)]);
-  if (state.elapsed) rows.push(['elapsed', state.elapsed]);
-  if (state.tokens) rows.push(['tokens', state.tokens]);
-  if (state.runTokens) rows.push(['run tokens', state.runTokens + ', from the root']);
   if (state.outcome) rows.push(['outcome', state.outcome.status]);
   if (state.question) rows.push(['question', state.question.displayText || state.question.text]);
   if (state.intervention) rows.push(['message', state.intervention.message]);
