@@ -38,8 +38,8 @@ export ALAYA_DATA=$PWD/runs    # the data directory; `root` creates it
 
 # Run the agent until it submits, then grade where it ended.
 root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton \
-  --agent mini-swe --model gpt-oss-120b --image alaya-bija)
-alaya resume "$root" --provider dgx    # one line per new state; `alaya config` lists models, providers
+  --agent mini-swe --model gpt-6-luna --set model.params.reasoning_effort=high --image alaya-bija)
+alaya resume "$root" --provider apiyi    # one line per new state; `alaya config` lists models, providers
 alaya eval END --input example/bija --grader /grader/grade.py --timeout 1800
 
 # Find the turn where it went wrong, and see what the model was sent there.
@@ -50,13 +50,20 @@ alaya show TURN --view
 # the new branch.
 alaya checkout TURN fix    # its files, to edit by hand in fix/
 fixed=$(alaya commit TURN fix --note "corrected by hand")
-alaya resume "$fixed" --provider dgx
+alaya resume "$fixed" --provider apiyi
 alaya eval END2 --input example/bija --grader /grader/grade.py --timeout 1800
 ```
 
 `END`, `TURN` and `END2` stand for state hashes, or any unambiguous prefix of one: `resume`
 prints each state it adds, and `tree` the whole forest. The first branch is untouched, so the two
 verdicts compare the same run with and without the correction.
+
+`alaya html report.html` writes the whole forest as one page: each state with its time, tokens
+and how full the context is, its events, and its workspace changes. Below is
+[such a page](example/bija/report.html) for a gpt-6-luna run on Bija, branched by a message
+(`alaya tell`) after a turn, at the first turn of the new branch.
+
+![The HTML report of a gpt-6-luna run on Bija](example/bija/report.png)
 
 ## Documentation
 
