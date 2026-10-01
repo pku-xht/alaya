@@ -155,8 +155,9 @@ def suite : Suite := Testing.suite "ask_user" #[
 
   test "settings enable asking in both agents, round-trip, and reject wrong types" do
     for definition in Catalog.all do
-      let built ← assertOk <| Catalog.resolve definition.name #[(["ask_user"], true),
-        (["recover_output"], true), (["step_limit"], 11), (["max_consecutive_format_errors"], 2)]
+      let set (path : String) (value : Lean.Json) : Settings.Setting := { target := .agent, path := [path], value }
+      let built ← assertOk <| Catalog.resolve definition.name #[set "ask_user" true,
+        set "recover_output" true, set "step_limit" (11 : Nat), set "max_consecutive_format_errors" (2 : Nat)]
       let timeTools := if definition.name == "mini-vero" then #["time_budget"] else #[]
       assertEqual "enabled tools" (built.tools.map (·.name))
         (#["bash", "submit", "read_output"] ++ timeTools ++ #["ask_user"])
@@ -273,7 +274,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       for (questionType, arguments, answers) in cases do
         let base := (← scratch) / s!"{definition.name}-{questionType}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Catalog.resolve definition.name #[(["ask_user"], true)]
+        let built ← assertOk <| Catalog.resolve definition.name #[{ target := .agent, path := ["ask_user"], value := true }]
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
@@ -284,8 +285,8 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (model, requests) ← scripted (#[response #[ask "q" arguments]] ++ continuations)
         let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-          project (← testImage) (some "task") (agent := built.config)
-        let waitingHash ← resumed <| resume rt "scripted" root (fun _ => pure ())
+          project (← testImage) (some "task") (agent := built.config) (model := testModel)
+        let waitingHash ← resumed <| resume rt root (fun _ => pure ())
         let questionState ← assertOk <| getState store waitingHash
         assertEqual "waiting kind" questionState.kind Kind.turn
         check questionState.question?.isSome "the turn waits on its question"
@@ -304,7 +305,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "waiting workspace" questionState.workspace (← assertOk <| getState store root).workspace
         assertEqual "unanswered question count" (← assertOk <| waiting store).size 1
         assertEqual "unanswered question has no reply children" (← assertOk <| children store waitingHash).size 0
-        assertError "cannot step while waiting" (step rt "scripted" waitingHash) fun
+        assertError "cannot step while waiting" (step rt waitingHash) fun
           | .input _ => true
           | _ => false
         assertEqual "only question sampled" (← requests.get).size 1
@@ -335,7 +336,7 @@ def suite : Suite := Testing.suite "ask_user" #[
           let restored ← assertOk <| Catalog.fromJson recorded
           checkQuestionView (restored.view (← assertOk <| logOf store answered)) answer arguments
           let rebuilt : Runtime := { rt with agent := restored }
-          let final ← resumed <| resume rebuilt "scripted" answered (fun _ => pure ())
+          let final ← resumed <| resume rebuilt answered (fun _ => pure ())
           let finalState ← assertOk <| getState store final
           assertEqual "resumed submission" (finalState.outcome?.map (·.status)) (some "Submitted")
           assertEqual "final workspace" finalState.workspace questionState.workspace
@@ -372,13 +373,13 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (model, requests) ← scripted #[response #[ask "q" arguments], response #[bash], response #[submit]]
         let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-          project (← testImage) (some "task") (agent := built.config)
+          project (← testImage) (some "task") (agent := built.config) (model := testModel)
         let before ← assertOk <| allStates store
         assertError "only a question accepts an unavailable reply" (replyUnavailable store root) fun
           | .input _ => true
           | _ => false
         assertEqual "rejected reply writes no state" (← assertOk <| allStates store) before
-        let question ← resumed <| resume rt "scripted" root (fun _ => pure ())
+        let question ← resumed <| resume rt root (fun _ => pure ())
         let questionState ← assertOk <| getState store question
         let answered ← assertOk <| replyUnavailable store question
         let reopened ← assertOk <| Store.create (base / "states")
@@ -398,7 +399,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let ordinary ← assertOk <| reply reopened question ordinaryAnswer
         check (ordinary != answered) "unavailable must differ from no, none_of_above, and literal JSON open text"
         checkQuestionView (built.view (← assertOk <| logOf reopened ordinary)) ordinaryAnswer arguments
-        let final ← resumed <| resume { rt with store := reopened } "scripted" answered (fun _ => pure ())
+        let final ← resumed <| resume { rt with store := reopened } answered (fun _ => pure ())
         assertEqual "continuation submitted" ((← assertOk <| getState reopened final).outcome?.map (·.status)) (some "Submitted")
         assertEqual "continuation ran a command" (← calls.get) 1
         let allRequests ← requests.get
@@ -428,7 +429,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let project := base / "project"
       IO.FS.createDirAll project
       let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-        project (← testImage) (some "task") (agent := built.config)
+        project (← testImage) (some "task") (agent := built.config) (model := testModel)
       let workspace := (← assertOk <| getState store root).workspace
       let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
       let question ← assertOk <| putState store {
@@ -442,12 +443,12 @@ def suite : Suite := Testing.suite "ask_user" #[
       let (model, requests) ← scripted #[]
       let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built, budgetMs? := some 1000 }
       let before ← assertOk <| allStates store
-      check ((← assertOk <| step rt "scripted" answered).2 == .outOfTime) "step cannot sample after exhausted time"
-      let (stopped, halt) ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
+      check ((← assertOk <| step rt answered).2 == .outOfTime) "step cannot sample after exhausted time"
+      let (stopped, halt) ← assertOk <| resume rt answered (fun _ => pure ())
       check (halt == .outOfTime) "unavailable retains the exhausted budget"
       assertEqual "budget leaves reply resumable" stopped answered
       assertEqual "budget writes no new state" (← assertOk <| allStates store) before
-      let final ← resumed <| resume { rt with budgetMs? := none } "scripted" answered (fun _ => pure ())
+      let final ← resumed <| resume { rt with budgetMs? := none } answered (fun _ => pure ())
       let terminal ← assertOk <| getState store final
       assertEqual "unavailable does not reset step limit" (terminal.outcome?.map (·.status)) (some "LimitsExceeded")
       assertEqual "terminal belongs to reply" terminal.parent? (some answered)
@@ -486,8 +487,8 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (model, requests) ← scripted #[response #[ask "q" arguments], response #[submit]]
         let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-          project (← testImage) (some "task") (agent := built.config)
-        let stopped ← resumed <| resume rt "scripted" root (fun _ => pure ())
+          project (← testImage) (some "task") (agent := built.config) (model := testModel)
+        let stopped ← resumed <| resume rt root (fun _ => pure ())
         let reopened ← assertOk <| Store.create (base / "states")
         let before ← assertOk <| allStates reopened
         let original := (← assertOk <| getState reopened stopped).toJson.compress
@@ -509,13 +510,13 @@ def suite : Suite := Testing.suite "ask_user" #[
         | [.observation "q" (.str raw)] => assertEqual "corrected answer remains verbatim" raw valid
         | _ => fail "a corrected answer must retain its question call id"
         check (← assertOk <| waiting reopened).isEmpty "a valid submitted answer closes waiting"
-        let final ← resumed <| resume { rt with store := reopened } "scripted" answered (fun _ => pure ())
+        let final ← resumed <| resume { rt with store := reopened } answered (fun _ => pure ())
         assertEqual "continuation after correction" ((← assertOk <| getState reopened final).outcome?.map (·.status))
           (some "Submitted")
         assertEqual "one question and one continuation" (← requests.get).size 2,
 
   test "a stored question form must be complete and well-formed" do
-    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .turn, appended := #[], question? := some { callId := "q", text := "Choose." }, agent? := some testAgent }
+    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .turn, appended := #[], question? := some { callId := "q", text := "Choose." }, agent? := some testAgent, model? := some testModel }
     let questionJson (kind : Lean.Json) (options : Lean.Json) : Lean.Json :=
       .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", kind), ("options", options)]
     let malformed : Array Lean.Json := #[
@@ -552,7 +553,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     | _ => fail "the last allowed model turn may still ask its question"
     let replied ← assertOk <| reply rt.store asked "2"
     let answered ← assertOk <| logOf rt.store replied
-    let (_, halt) ← assertOk <| resume rt "test" replied (fun _ => pure ())
+    let (_, halt) ← assertOk <| resume rt replied (fun _ => pure ())
     match halt with
     | .outcome outcome => assertEqual "limit after reply" outcome.status "LimitsExceeded"
     | _ => fail "reply must not grant another model turn"
@@ -576,16 +577,16 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (model, requests) ← scripted #[response #[ask]]
         let rt : Runtime := { store, workspaces, workDir := base / "work", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-          project (← testImage) (some "task") (agent := built.config)
-        let stopped ← resumed <| resume rt "scripted" root (fun _ => pure ())
+          project (← testImage) (some "task") (agent := built.config) (model := testModel)
+        let stopped ← resumed <| resume rt root (fun _ => pure ())
         check (← assertOk <| getState store stopped).question?.isSome "the allowed model turn asks"
         let answered ← assertOk <| reply store stopped "2"
         let recorded ← assertOk <| agentOf store answered
         let restored ← assertOk <| Catalog.fromJson recorded
         let rebuilt := { rt with agent := restored }
         let final ← if useResume then
-            resumed <| resume rebuilt "scripted" answered (fun _ => pure ())
-          else stepped <| step rebuilt "scripted" answered
+            resumed <| resume rebuilt answered (fun _ => pure ())
+          else stepped <| step rebuilt answered
         let terminal ← assertOk <| getState store final
         assertEqual "limit outcome" (terminal.outcome?.map (·.status)) (some "LimitsExceeded")
         assertEqual "terminal parent" terminal.parent? (some answered)
@@ -593,7 +594,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "terminal workspace" terminal.workspace (← assertOk <| getState store answered).workspace
         assertEqual "one request in all" (← requests.get).size 1
         assertEqual "no execution" (← calls.get) 0
-        assertError "terminal state cannot resume" (resume rebuilt "scripted" final (fun _ => pure ())) fun
+        assertError "terminal state cannot resume" (resume rebuilt final (fun _ => pure ())) fun
           | .input _ => true
           | _ => false
         assertEqual "refusing terminal resume does not sample" (← requests.get).size 1,
@@ -608,7 +609,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let project := base / "project"
       IO.FS.createDirAll project
       let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
-        project (← testImage) (some "task") (agent := built.config)
+        project (← testImage) (some "task") (agent := built.config) (model := testModel)
       let workspace := (← assertOk <| getState store root).workspace
       -- Reconstruct an already-recorded run with two timed model steps. Fixed durations
       -- exercise persistence and accumulation without sleeps or timing-sensitive assertions.
@@ -640,14 +641,14 @@ def suite : Suite := Testing.suite "ask_user" #[
       let (model, requests) ← scripted #[response #[submit]]
       let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", executor, model, agent := restored, budgetMs? := some 1000 }
       let before ← assertOk <| allStates reopened
-      let (stopped, halt) ← assertOk <| resume rt "scripted" answered (fun _ => pure ())
+      let (stopped, halt) ← assertOk <| resume rt answered (fun _ => pure ())
       check (halt == .outOfTime) "the inherited time exhausts this invocation's budget"
       assertEqual "resume leaves the reply available for later continuation" stopped answered
-      check ((← assertOk <| step rt "scripted" answered).2 == .outOfTime) "step also refuses another sample"
+      check ((← assertOk <| step rt answered).2 == .outOfTime) "step also refuses another sample"
       assertEqual "the budget writes no terminal or model state" (← assertOk <| allStates reopened) before
       assertEqual "no model request after the exhausted budget" (← requests.get).size 0
       assertEqual "no command after the exhausted budget" (← calls.get) 0
-      let final ← resumed <| resume { rt with budgetMs? := none } "scripted" answered (fun _ => pure ())
+      let final ← resumed <| resume { rt with budgetMs? := none } answered (fun _ => pure ())
       assertEqual "the same reply remains resumable with more budget"
         ((← assertOk <| getState reopened final).outcome?.map (·.status)) (some "Submitted")
       assertEqual "only the later allowed continuation samples" (← requests.get).size 1
@@ -679,7 +680,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     | .question q => assertEqual "the asking call" q.callId "q"
     | _ => fail "the recovery-enabled agent should ask normally"
     let replied ← assertOk <| reply rt.store asked "Inspect the middle lines.\nKeep the output unchanged."
-    let (final, halt) ← assertOk <| resume rt "test" replied (fun _ => pure ())
+    let (final, halt) ← assertOk <| resume rt replied (fun _ => pure ())
     match halt with
     | .outcome outcome => assertEqual "submitted after reading" outcome.status "Submitted"
     | _ => fail "expected submission after output recovery"

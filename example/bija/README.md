@@ -57,9 +57,9 @@ docker build -t alaya-bija example/bija
 
 export ALAYA_DATA=$PWD/bija-runs   # created by root; every command below uses it
 root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton --agent mini-swe \
-  --image alaya-bija)
+  --model gpt-oss-120b --image alaya-bija)
 
-alaya resume "$root" --model dgx:gpt-oss-120b
+alaya resume "$root" --provider dgx
 
 alaya eval <final-hash> --input example/bija --grader /grader/grade.py --timeout 1800
 # <hash>  fail N/464  (… ms)

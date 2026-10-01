@@ -156,6 +156,9 @@ structure TokenUsage where
   input? : Option Nat := none
   output? : Option Nat := none
   total? : Option Nat := none
+  /-- Of the output, the tokens a reasoning model spent thinking, when it reports them: what a
+  reasoning level costs. -/
+  reasoning? : Option Nat := none
   deriving Repr, Inhabited
 
 /-- A parsed OpenAI-compatible assistant response: the fields the library reads. Anything else a
@@ -194,7 +197,9 @@ private def usageFromJson? (raw : Lean.Json) : Option TokenUsage :=
     let output? := (usage.getObjVal? "completion_tokens" >>= Lean.Json.getNat?).toOption.orElse fun _ =>
       (usage.getObjVal? "output_tokens" >>= Lean.Json.getNat?).toOption
     let total? := (usage.getObjVal? "total_tokens" >>= Lean.Json.getNat?).toOption
-    some { input?, output?, total? }
+    let reasoning? := (usage.getObjVal? "completion_tokens_details" >>= (·.getObjVal? "reasoning_tokens")
+      >>= Lean.Json.getNat?).toOption
+    some { input?, output?, total?, reasoning? }
   | .error _ => none
 
 private def fencedJson (content : String) : Except String String :=

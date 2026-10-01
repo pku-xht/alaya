@@ -181,7 +181,7 @@ private def runtime (responses : Array Chat.Response) (budgetMs? : Option Nat) :
                                    agent := MiniVero.agent config, budgetMs? }
   let uname : Uname := { system := "Linux", release := "", version := "", machine := "x86_64" }
   let root ← assertOk <| Trajectory.createRoot store workspaces (MiniVero.initialLog config "t" uname)
-    project (← testImage) (some "t") (agent := config.toJson)
+    project (← testImage) (some "t") (agent := config.toJson) (model := testModel)
   pure (rt, root)
 
 def timeSuite : Suite := Testing.suite "mini-vero.time" #[
@@ -223,10 +223,10 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
   test "each step records its time, and the tool counts it against the budget" do
     let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
       turn #[call "t" "time_budget"], turn #[call "s" "submit"]] (some 3600000)
-    let first ← stepped <| step rt "m" root
+    let first ← stepped <| step rt root
     let slept := (← assertOk <| Trajectory.getState rt.store first).elapsedMs?.getD 0
     check (slept >= 200) s!"the step took the sleep, recorded {slept} ms"
-    let second ← stepped <| step rt "m" first
+    let second ← stepped <| step rt first
     match (← assertOk <| Trajectory.getState rt.store second).appended.back? with
     | some (.observation "t" json) =>
       let left := (json.getObjVal? "seconds_left" >>= Lean.Json.getNat?).toOption.getD 0
@@ -237,16 +237,16 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
   test "a spent budget stops resume before a step, writes nothing, and a later resume continues" do
     let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
       turn #[call "s" "submit" (.mkObj [("message", "done")])]] (some 100)
-    let (stopped, halt) ← assertOk <| Trajectory.resume rt "m" root (fun _ => pure ())
+    let (stopped, halt) ← assertOk <| Trajectory.resume rt root (fun _ => pure ())
     check (halt == .outOfTime) "the budget stopped it"
     check ((← assertOk <| Trajectory.getState rt.store stopped).outcome?.isNone) "the run has not ended"
     let count := (← assertOk <| Trajectory.allStates rt.store).size
-    let (again, halt) ← assertOk <| Trajectory.resume rt "m" stopped (fun _ => pure ())
+    let (again, halt) ← assertOk <| Trajectory.resume rt stopped (fun _ => pure ())
     check (halt == .outOfTime && again == stopped) "spent before a step: nothing more"
     assertEqual "no state written" (← assertOk <| Trajectory.allStates rt.store).size count
-    let (_, halt) ← assertOk <| step rt "m" stopped
+    let (_, halt) ← assertOk <| step rt stopped
     check (halt == .outOfTime) "one step is refused too"
-    let (final, halt) ← assertOk <| Trajectory.resume { rt with budgetMs? := none } "m" stopped (fun _ => pure ())
+    let (final, halt) ← assertOk <| Trajectory.resume { rt with budgetMs? := none } stopped (fun _ => pure ())
     check (halt != .outOfTime) "without a budget it runs on"
     assertEqual "submitted" ((← assertOk <| Trajectory.getState rt.store final).outcome?.map (·.status)) (some "Submitted")
 ]

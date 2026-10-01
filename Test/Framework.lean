@@ -56,6 +56,9 @@ def recordedWorkdir : String := "/workspace"
 /-- The agent a root records when the test does not care which: MiniSwe with its defaults. -/
 def testAgent : Lean.Json := .mkObj [("name", "mini-swe")]
 
+/-- The model a root records when the test does not care which. -/
+def testModel : Lean.Json := .mkObj [("name", "gpt-oss-120b")]
+
 def fail (message : String) : TestM alpha := do
   throw <| IO.userError s!"{(← read).name}: {message}"
 

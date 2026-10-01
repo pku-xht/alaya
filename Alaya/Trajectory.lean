@@ -138,7 +138,7 @@ structure State where
   appended : Log
   /-- The run outcome, when this state ended the run. -/
   outcome? : Option Outcome := none
-  /-- Provenance: the model spec that produced this turn, an intervention note, the root task. -/
+  /-- Provenance for a reader of the tree: the task on a root, a person's note on a commit. -/
   note? : Option String := none
   /-- The verdict, on an `evaluation` state. -/
   evaluation? : Option Evaluation := none
@@ -151,6 +151,9 @@ structure State where
   /-- On a root: the agent that runs this trajectory, as its complete configuration — its `name`
   and every field — so that every later command builds the same agent. -/
   agent? : Option Lean.Json := none
+  /-- On a root: the model this trajectory samples from, as its complete spec (`Models.Spec`), so
+  that every later command builds the same model, whichever provider serves it. -/
+  model? : Option Lean.Json := none
   /-- On a model step (`turn`, `question`): its wall-clock time, from before the model call to
   after its last act and snapshot. A run's time is the sum along its path from the root. -/
   elapsedMs? : Option Nat := none
@@ -237,6 +240,7 @@ def toJson (state : State) : Lean.Json :=
     ("image", state.image),
     ("workdir", state.workdir),
     ("agent", state.agent?.getD .null),
+    ("model", state.model?.getD .null),
     ("elapsed_ms", state.elapsedMs?.map (fun ms => (ms : Lean.Json)) |>.getD .null),
     ("evaluation", state.evaluation?.map evaluationToJson |>.getD .null),
     ("intervention", state.intervention?.map (fun i => .mkObj [
@@ -261,6 +265,10 @@ def fromJson (json : Lean.Json) : Except String State := do
     | j@(.obj _) => pure j
     | _ => throw "the agent configuration is not an object"
   if parent?.isNone && agent?.isNone then throw "a root records its agent configuration"
+  let model? ← nullable json "model" fun
+    | j@(.obj _) => pure j
+    | _ => throw "the model spec is not an object"
+  if parent?.isNone && model?.isNone then throw "a root records its model"
   let elapsedMs? ← nullable json "elapsed_ms" Lean.Json.getNat?
   let evaluation? ← nullable json "evaluation" evaluationFromJson
   let intervention? ← nullable json "intervention" fun i => do
@@ -268,7 +276,7 @@ def fromJson (json : Lean.Json) : Except String State := do
     let changed ← (← i.getObjVal? "changed" >>= Lean.Json.getArr?).mapM Lean.Json.getStr?
     pure ({ message, changed } : Intervention)
   let question? ← nullable json "question" Question.fromJson
-  pure { parent?, workspace, kind, appended, outcome?, note?, image, workdir, agent?, elapsedMs?
+  pure { parent?, workspace, kind, appended, outcome?, note?, image, workdir, agent?, model?, elapsedMs?
          evaluation?, intervention?, question? }
 
 end State
@@ -359,9 +367,9 @@ def removeSubtree (store : Store) (workspaces : Workspaces) (hash : Hash) : Resu
 /-! ## Model construction -/
 
 /-- The model stack behind a `provider:name` spec: provider, retry, batch, persistent cache. -/
-def buildModel (spec : String) (temperature : Float) (cacheDir : System.FilePath)
-    (options : Provider.Options := {}) : Result Model := do
-  let base ← Provider.fromSpec spec temperature options
+def buildModel (spec : Models.Spec) (provider : Provider.Provider) (cacheDir : System.FilePath)
+    (baseUrl? : Option String := none) : Result Model := do
+  let base ← Provider.serve provider spec baseUrl?
   -- Transport failures are retried: a duplicate request costs less than an aborted run, whose
   -- container — and everything the agent kept outside the workspace — is lost on resume.
   let model ← base.retry { retryUnknownDelivery := true }
@@ -436,7 +444,7 @@ private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (ap
 materialized into `rt.workDir`, and `before` of whose run has been spent), records it as a new
 child state with its time, and returns the child, its log, its workspace, the run's time so
 far, and why the turn stopped, if it did. A reply may instead stop before sampling. -/
-def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspace : Hash)
+def advance (rt : Runtime) (parent : Hash) (log : Log) (workspace : Hash)
     (before : Nat) : Result (Hash × Log × Hash × Nat × Halt) := do
   let parentState ← getState rt.store parent
   -- `follow` stopped at the question before it could check what happens after the answer.
@@ -445,7 +453,7 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
     if let .done outcome := rt.agent.next { elapsedMs := before, budgetMs? := rt.budgetMs? } log then
       let child ← putState rt.store {
         parent? := some parent, workspace, appended := #[], outcome? := some outcome
-        kind := .turn, note? := some note, image := parentState.image
+        kind := .turn, image := parentState.image
         workdir := parentState.workdir }
       return (child, log, workspace, before, .outcome outcome)
   -- Draw index = the number of children that came from sampling.
@@ -468,7 +476,7 @@ def advance (rt : Runtime) (note : String) (parent : Hash) (log : Log) (workspac
   let child ← putState rt.store {
     parent? := some parent, workspace, appended, outcome?, question?
     kind := .turn
-    note? := some note, image, workdir, elapsedMs? := some elapsed }
+    image, workdir, elapsedMs? := some elapsed }
   pure (child, log ++ appended, workspace, before + elapsed, halt)
 
 /-- Materializes `workspace` into `rt.workDir`, replacing whatever is there. A container bind
@@ -489,7 +497,7 @@ private def withinBudget (rt : Runtime) (elapsed : Nat) : Bool :=
 budget, or has taken `turns?` turns, and returns the state it reached and why it stopped there.
 Stopping for a limit writes nothing more: that state is where a later `resume` continues. One
 turn is `turns? := some 1`. -/
-partial def resume (rt : Runtime) (note : String) (hash : Hash)
+partial def resume (rt : Runtime) (hash : Hash)
     (onStep : Hash -> Result Unit) (turns? : Option Nat := none) : Result (Hash × Halt) := do
   let start ← getState rt.store hash
   Result.fromExcept Error.input start.continuable
@@ -498,7 +506,7 @@ partial def resume (rt : Runtime) (note : String) (hash : Hash)
   checkoutInto rt.toSandbox start.workspace
   let rec go (parent : Hash) (log : Log) (workspace : Hash) (elapsed taken : Nat) :
       Result (Hash × Halt) := do
-    let (child, log, workspace, elapsed, halt) ← advance rt note parent log workspace elapsed
+    let (child, log, workspace, elapsed, halt) ← advance rt parent log workspace elapsed
     onStep child
     match halt with
     | .continue =>
@@ -591,11 +599,11 @@ def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePat
 /-- Creates a root state from the initial project directory: the agent's opening log — its
 prompts — and a snapshot of `project`. -/
 def createRoot (store : Store) (workspaces : Workspaces) (log : Log) (project : System.FilePath)
-    (image : String) (note? : Option String := none) (agent : Lean.Json)
+    (image : String) (note? : Option String := none) (agent model : Lean.Json)
     (workdir : String := Executor.Docker.defaultWorkdir) : Result Hash := do
   let workspace ← workspaces.snapshot project
   putState store { parent? := none, workspace, kind := .root, appended := log, note?, image, workdir
-                   agent? := some agent }
+                   agent? := some agent, model? := some model }
 
 /-- The root of the tree `hash` is in. -/
 def rootOf (store : Store) (hash : Hash) : Result Hash := do
@@ -609,6 +617,13 @@ def agentOf (store : Store) (hash : Hash) : Result Lean.Json := do
   let some agent := (← getState store root).agent?
     | throw <| .storage s!"the root {root.hex} records no agent"
   pure agent
+
+/-- The model spec the run of `hash` was created with, from its root. -/
+def modelOf (store : Store) (hash : Hash) : Result Lean.Json := do
+  let root ← rootOf store hash
+  let some model := (← getState store root).model?
+    | throw <| .storage s!"the root {root.hex} records no model"
+  pure model
 
 /-- A state a person may build on: anything but an evaluation, which is a leaf, or a state
 waiting for an answer, which `reply` alone grows. An ended run is fine: fixing something after a
@@ -737,10 +752,11 @@ private def observationText : Lean.Json -> String
 private def label (state : State) : String :=
   match state.kind with
   | .root =>
-    let agent := match state.agent?.bind fun a => (a.getObjVal? "name" >>= Lean.Json.getStr?).toOption with
-      | some name => s!"[{name}]  "
-      | none => ""
-    "root  " ++ agent ++ flatten (state.note?.getD "")
+    let nameOf (json? : Option Lean.Json) := json?.bind fun j => (j.getObjVal? "name" >>= Lean.Json.getStr?).toOption
+    let run := match nameOf state.agent?, nameOf state.model? with
+      | some agent, some model => s!"[{agent}, {model}]  "
+      | _, _ => ""
+    "root  " ++ run ++ flatten (state.note?.getD "")
   | .turn =>
     let calls := state.calls
     let first := match calls[0]? with
@@ -825,6 +841,7 @@ def showLines (store : Store) (hash : Hash) (view? : Option View := none) :
   lines := lines.push s!"image    {state.image}"
   lines := lines.push s!"workdir  {state.workdir}"
   if let some agent := state.agent? then lines := lines.push s!"agent    {agent.compress}"
+  if let some model := state.model? then lines := lines.push s!"model    {model.compress}"
   if let some ms := state.elapsedMs? then lines := lines.push s!"elapsed  {seconds ms}"
   let total ← elapsedMs store hash
   if total > 0 then lines := lines.push s!"run time {seconds total}, from the root"

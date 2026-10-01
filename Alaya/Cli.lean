@@ -8,12 +8,12 @@ Declaring a flag and reading it are one act, so the parser knows everything a co
 it refuses what it does not know, never lets a switch take the next token, and writes the help.
 
 Specs compose applicatively. A module that owns some settings owns their flags too
-(`Executor.Docker.RunOptions.cli`, `Provider.Choice.cli`), and a command lists the groups it
+(`Executor.Docker.RunOptions.cli`, `Provider.endpointCli`), and a command lists the groups it
 takes:
 
 ```
 ContinueArgs.mk <$> dataDir <*> arg "HASH" .string "the state to continue from"
-  <*> Provider.Choice.cli <*> Docker.RunOptions.cli <*> flagD "time-budget" .nat 0 "…"
+  <*> flag "provider" providerName "…" <*> Docker.RunOptions.cli <*> flagD "time-budget" .nat 0 "…"
 ```
 
 A command line is `COMMAND` followed by positionals and flags in any order. A valued flag takes
@@ -416,7 +416,7 @@ private def Item.token (item : Item) : String :=
   | .valued metavar repeatable => s!"--{item.name} {metavar}" ++ (if repeatable then " …" else "")
   | .argument _ => item.name
 
-/-- `alaya resume HASH --model P:M [OPTIONS]`: the arguments and what is required, with
+/-- `alaya resume HASH --provider NAME [OPTIONS]`: the arguments and what is required, with
 alternatives grouped; help lists the options. -/
 def Command.usage (app : App) (c : Command) : String := Id.run do
   let items := c.full.items

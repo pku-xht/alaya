@@ -102,8 +102,8 @@ def directoryWorkspaces (root : System.FilePath) : Workspaces where
         IO.FS.removeDirAll entry.path
 
 /-- One turn from `hash`: a continuation allowed one turn, as `alaya resume --turns 1` is. -/
-def step (rt : Trajectory.Runtime) (note : String) (hash : Hash) : Result (Hash × Trajectory.Halt) :=
-  Trajectory.resume rt note hash (fun _ => pure ()) (turns? := some 1)
+def step (rt : Trajectory.Runtime) (hash : Hash) : Result (Hash × Trajectory.Halt) :=
+  Trajectory.resume rt hash (fun _ => pure ()) (turns? := some 1)
 
 /-- The state a step reached, when no time budget stopped it: the tests that step give none. -/
 def stepped (result : Result (Hash × Trajectory.Halt)) : TestM Hash := do
@@ -128,9 +128,9 @@ def drive (agent : Agent.Agent) (executor : Executor) (model : Model) (log : Age
   let store ← assertOk <| Trajectory.Store.create (base / "states")
   let workspaces ← workspaces
   let root ← assertOk <| Trajectory.createRoot store workspaces log (base / "project") recordedImage
-    (agent := testAgent)
+    (agent := testAgent) (model := testModel)
   let rt : Trajectory.Runtime := { store, workspaces, workDir := work, executor, model, agent }
-  let (state, halt) ← assertOk <| Trajectory.resume rt "test" root (fun _ => pure ())
+  let (state, halt) ← assertOk <| Trajectory.resume rt root (fun _ => pure ())
   pure (rt, state, halt)
 
 end Testing

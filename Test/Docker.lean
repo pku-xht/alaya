@@ -152,8 +152,8 @@ def suite : Suite := Testing.suite "docker" #[
       try
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
-          settings.image (some "t") (agent := testAgent)
-        let child ← stepped <| step rt "test:model" root
+          settings.image (some "t") (agent := testAgent) (model := testModel)
+        let child ← stepped <| step rt root
         let state ← assertOk (getState store child)
         assertEqual "image inherited" state.image settings.image
         -- The container wrote it, the host snapshotted it.
@@ -194,8 +194,8 @@ def suite : Suite := Testing.suite "docker" #[
       try
         let uname ← assertOk (Docker.uname settings)
         let root ← assertOk <| createRoot store (← workspaces) (Agent.MiniSwe.initialLog miniConfig "t" uname) project
-          settings.image (some "t") (agent := testAgent)
-        let child ← stepped <| step rt "test:model" root
+          settings.image (some "t") (agent := testAgent) (model := testModel)
+        let child ← stepped <| step rt root
         -- The image's own file shows the grader is in the container, not on the host.
         let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") child
           "test -f /etc/alpine-release && echo 1..1 && echo \"ok 1 - $(cat made.txt)\"" settings.user?
@@ -216,8 +216,8 @@ def suite : Suite := Testing.suite "docker" #[
       let model ← scripted #[toolResponse "awk 'BEGIN {for(i=0;i<6000;i++) printf \"a\"; printf \"MIDDLE\"; for(i=0;i<6000;i++) printf \"z\"}'"]
       let first ← runtime settings work store model
       let saved ← try
-        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
-        stepped <| step first "produce" root
+        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent) (model := testModel)
+        stepped <| step first root
       finally first.executor.close
       let log ← assertOk <| logOf store saved
       let some produced := log.findSome? (fun
@@ -235,7 +235,7 @@ def suite : Suite := Testing.suite "docker" #[
       try
         -- Start an actual replacement container before reading through the resumed driver.
         assertEqual "new container starts" (← second.executor.bash work "true").exitCode? (some 0)
-        let child ← stepped <| step second "read" saved
+        let child ← stepped <| step second saved
         let page? := (← assertOk <| logOf reopened child).reverse.findSome? fun
           | .observation "read" content => (content.getObjVal? "text" >>= Lean.Json.getStr?).toOption
           | _ => none
@@ -251,7 +251,7 @@ def suite : Suite := Testing.suite "docker" #[
       let input := (← scratch) / "input"
       writeSpec input #[("data.txt", "trusted")]
       let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
-      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
+      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent) (model := testModel)
       -- Without network the routing table has its header line and nothing else.
       let grader := "echo noise >&2; test \"$(wc -l < /proc/net/route)\" = 1 && " ++
         "test \"$(pwd)\" = /workspace && test \"$(cat /grader/data.txt)\" = trusted && " ++
@@ -273,7 +273,7 @@ def suite : Suite := Testing.suite "docker" #[
       let project := (← scratch) / "proj"
       IO.FS.createDirAll project
       let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
-      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
+      let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent) (model := testModel)
       -- Complete TAP before the timeout does not make it a pass.
       let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root
         "printf '1..1\\nok 1\\n'; sleep 30" settings.user? (timeoutSeconds := 1)
@@ -292,7 +292,7 @@ def suite : Suite := Testing.suite "docker" #[
       IO.FS.createDirAll project
       let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
       -- The trajectory's own image does not exist, so only the grader image can run it.
-      let root ← assertOk <| createRoot store (← workspaces) #[] project recordedImage (agent := testAgent)
+      let root ← assertOk <| createRoot store (← workspaces) #[] project recordedImage (agent := testAgent) (model := testModel)
       let node ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root
         "test -f /etc/alpine-release && printf '1..1\\nok 1\\n'" settings.user?
         (graderImage? := some testImageReference)
@@ -320,9 +320,9 @@ def suite : Suite := Testing.suite "docker" #[
       let model ← scripted #[toolResponse "pwd > where.txt"]
       let rt ← runtime settings work store model
       try
-        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent)
+        let root ← assertOk <| createRoot store (← workspaces) #[] project settings.image (agent := testAgent) (model := testModel)
           (workdir := "/testbed")
-        let child ← stepped <| step rt "test:model" root
+        let child ← stepped <| step rt root
         let state ← assertOk (getState store child)
         assertEqual "workdir inherited" state.workdir "/testbed"
         assertEqual "the command ran there"

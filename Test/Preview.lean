@@ -107,7 +107,8 @@ def suite : Suite := Testing.suite "preview" #[
       assertOk <| putState store {
         image := recordedImage, workdir := recordedWorkdir, parent? := parent?
         workspace := workspace, kind := kind, appended := #[.message (.user text)]
-        agent? := if parent?.isNone then some testAgent else none }
+        agent? := if parent?.isNone then some testAgent else none
+        model? := if parent?.isNone then some testModel else none }
     let root ← put none .root "task"
     let middle ← put (some root) .turn "middle"
     let _ ← put (some root) .turn "sibling"

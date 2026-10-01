@@ -99,6 +99,7 @@ def test_mode(args, mode):
 
     root = state_hash(alaya("root", source, "--task-file", directory / "MINIVERO_TASK.md",
                              "--agent", "mini-vero", "--set", f"agent.mode={mode}",
+                             "--model", "gpt-oss-120b",
                              "--image", args.agent_image,
                              "--workdir", "/testbed").stdout)
     root_state = read_state(root)
@@ -127,7 +128,7 @@ def test_mode(args, mode):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        model = ["--model", "dgx:scripted", "--url", f"http://127.0.0.1:{server.server_port}/v1",
+        model = ["--provider", "dgx", "--url", f"http://127.0.0.1:{server.server_port}/v1",
                  "--json"]
         partial = alaya("resume", root, *model, "--time-budget", "1", codes=(4,))
         rows = [json.loads(line) for line in partial.stdout.splitlines() if line.strip()]
