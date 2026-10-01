@@ -879,16 +879,13 @@ function renderContent(content, head) {
   return box;
 }
 
-/** A response's reasoning: the summary of encrypted reasoning as it is, since it is short; the
-reasoning itself folded, since it is long. */
+/** A response's reasoning, folded until opened: the reasoning itself, or, for encrypted
+reasoning, its summary. */
 function renderReasoning(body, event) {
   if (!event.reasoning) return;
-  if (event.reasoningItems) {
-    body.append(el('div', 'muted', 'reasoning summary'), foldable(el('pre', 'muted', event.reasoning)));
-    return;
-  }
+  const label = event.reasoningItems ? 'reasoning summary' : 'reasoning';
   const box = el('details', 'reasoning');
-  box.append(el('summary', null, 'reasoning (' + event.reasoning.split('\\n').length + ' lines)'),
+  box.append(el('summary', null, label + ' (' + event.reasoning.split('\\n').length + ' lines)'),
     el('pre', 'muted', event.reasoning));
   body.append(box);
 }
