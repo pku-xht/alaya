@@ -170,7 +170,7 @@ alaya reply --data /path/to/run -- QUESTION '2'
 # Or, when none of the listed candidates is correct:
 alaya reply --data /path/to/run -- QUESTION 'none_of_above'
 # Alternatively, when the person cannot answer (all supported question types):
-alaya reply-unavailable QUESTION --data /path/to/run
+alaya reply --data /path/to/run --unavailable -- QUESTION
 alaya resume REPLY --model PROVIDER:MODEL --data /path/to/run --json
 ```
 
@@ -193,7 +193,7 @@ same workspace. Receiving an answer does not change the task's rules or imply
 that the answer is correct. `none_of_above` means none of the listed candidates is correct;
 it is not a substitute for an unavailable answer.
 
-`reply-unavailable` creates the same kind of reply child, but its observation is
+`reply --unavailable` creates the same kind of reply child, but its observation is
 the JSON object `{"status":"unavailable"}`. The next model request receives that
 object under the original `ask_user` call ID. Ordinary answers remain JSON strings
 with their exact text, so even an open answer containing the literal text

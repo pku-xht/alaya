@@ -69,7 +69,7 @@ driven by `resume`.
 | `root` | `alaya root` | the agent's opening prompts | the project as given |
 | `turn` | one model turn, or a stop after a reply | the response and observations; empty for a stop before sampling | the workspace after those calls ran, or the parent's when none ran |
 | `question` | a model turn whose call asked a person | the response, and the observations of the calls before the ask | the workspace after those calls ran |
-| `reply` | `alaya reply` or `reply-unavailable` | one observation: the person's verbatim answer string, or the explicit unavailable object | the parent's |
+| `reply` | `alaya reply`, with an answer or `--unavailable` | one observation: the person's verbatim answer string, or the explicit unavailable object | the parent's |
 | `intervention` | `alaya commit` | one notice listing what changed | the directory the person edited |
 | `message` | `alaya tell` | one notice carrying the person's text | the parent's |
 | `evaluation` | `alaya eval` | nothing; the verdict is on the state itself | the checkout after the grader ran |
@@ -332,7 +332,7 @@ flowchart TD
 Answering the same question twice makes two `reply` siblings, which is a fork on the answer.
 `alaya waiting` lists every question no child has answered.
 
-`alaya reply-unavailable HASH` records `{"status":"unavailable"}` as the observation
+`alaya reply HASH --unavailable` records `{"status":"unavailable"}` as the observation
 of the asking call for any currently supported question type. Normal answers remain JSON strings;
 unavailable is neither `no`, `none_of_above`, nor empty text. The reply keeps the question's
 workspace and follows the same continuation and budget rules. See
@@ -695,8 +695,7 @@ alaya resume HASH --model P:M [--turns N] [--time-budget S]   grow one continuat
 alaya eval   HASH --grader CMD [--input DIR] [--grader-image IMAGE] [--timeout S]   grade a state (§4)
 alaya commit HASH DIR [--note NOTE]              record a hand-edited workspace as a child, telling the agent
 alaya tell   HASH TEXT                           send the agent a message, as a child
-alaya reply  HASH TEXT                           answer the question a state is waiting on
-alaya reply-unavailable HASH                     record that the person cannot answer
+alaya reply  HASH (TEXT | --unavailable)         answer the question a state is waiting on, or say the person cannot
 alaya waiting                                    list every unanswered question
 alaya ls HASH [PATH]                             list a directory of a state's workspace snapshot
 alaya cat HASH PATH                              print a file from a state's workspace snapshot, or preview it
@@ -728,12 +727,11 @@ an answer that begins with `-` is given. Every problem is reported at once. `ala
 
 **Output.** A command prints text for a reader by default, and JSON with `--json`. Only the
 JSON is a stable interface; the text may change. One thing about the text is fixed: every state
-a command creates — by `root`, `resume`, `commit`, `tell`, `reply`, `reply-unavailable` and
-`eval` — is printed on a line of its own that begins with its full 64-hex hash, so a script
+a command creates — by `root`, `resume`, `commit`, `tell`, `reply` and `eval` — is printed on a line of its own that begins with its full 64-hex hash, so a script
 that only needs the new state can take it from there.
 
 **JSON.** With `--json`, a command prints one JSON object per line. A command that creates a
-state — `root`, `resume`, `commit`, `tell`, `reply`, `reply-unavailable` — prints that
+state — `root`, `resume`, `commit`, `tell`, `reply` — prints that
 state as `{state, parent, kind, note, outcome, question, question_type, options}`, and `tree`
 prints every state that way; `resume` stopped at a limit prints `{state, turns_spent, turns}` or
 `{state, time_budget_spent, run_time_ms}`. `show` prints the state object (§6) with its `state`

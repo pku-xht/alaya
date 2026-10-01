@@ -53,9 +53,10 @@ class QuestionApplication:
         self.events_revision = 0
         self.events_message: bytes | None = None
 
-    def _run(self, verb: str, *args: str, json_output: bool = False) -> str:
+    def _run(self, verb: str, *args: str, json_output: bool = False,
+             flags: Sequence[str] = ()) -> str:
         # Answers and snapshot paths such as "--data" are positional text, after "--".
-        flags = ["--data", self.data] + (["--json"] if json_output else [])
+        flags = ["--data", self.data, *flags] + (["--json"] if json_output else [])
         argv = [*self.command, verb, *flags, "--", *args]
         try:
             result = subprocess.run(
@@ -243,7 +244,7 @@ class QuestionApplication:
             if not any(question["state"] == state for question in waiting):
                 self._publish("questions", {"questions": waiting})
                 raise ApiError(409, "This question is no longer waiting. The list updates automatically.")
-            reply = (self._run("reply-unavailable", state) if answer is None
+            reply = (self._run("reply", state, flags=["--unavailable"]) if answer is None
                      else self._run("reply", state, answer)).strip()
             if not STATE_HASH.fullmatch(reply):
                 self.events_refresh.set()

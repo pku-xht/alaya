@@ -293,15 +293,24 @@ private def tellRun (data : System.FilePath) (state text : String) (out : Cli.Ou
     stateLine data out (← tell data.store (← resolve data.store state) text)
     pure 0
 
-private def replyRun (data : System.FilePath) (state text : String) (out : Cli.Out) : Result UInt32 := do
-  withData data fun data => do
-    stateLine data out (← reply data.store (← resolve data.store state) text)
-    pure 0
+/-- A person's reply: the answer's text, or `none` when they cannot answer. -/
+private def replyAnswer : Cli.Spec (Option String) :=
+  (Prod.mk
+    <$> Cli.arg? "TEXT" .string "the answer, verbatim; put it after -- if it may begin with -"
+    <*> Cli.switch "unavailable" "record that the person cannot answer, instead of an answer").refine
+    fun
+    | (some text, false) => .ok (some text)
+    | (none, true) => .ok none
+    | (some _, true) => .error "give the answer or --unavailable, not both"
+    | (none, false) => .error "give the answer as TEXT, or --unavailable"
 
-private def replyUnavailableRun (data : System.FilePath) (state : String) (out : Cli.Out) :
-    Result UInt32 := do
+private def replyRun (data : System.FilePath) (state : String) (answer? : Option String)
+    (out : Cli.Out) : Result UInt32 := do
   withData data fun data => do
-    stateLine data out (← replyUnavailable data.store (← resolve data.store state))
+    let waiting ← resolve data.store state
+    stateLine data out (← match answer? with
+      | some text => reply data.store waiting text
+      | none => replyUnavailable data.store waiting)
     pure 0
 
 private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 := do
@@ -462,13 +471,9 @@ private def commands : Array Cli.Command := #[
     examples := #["alaya tell 4f2c8b 'keep the old API'"]
     spec := tellRun <$> dataDir <*> hashArg <*> Cli.arg "TEXT" .string "the message" },
   { name := "reply"
-    summary := "Answer the question a state is waiting on."
-    examples := #["alaya reply c61754 -- 'yes, keep it'"]
-    spec := replyRun <$> dataDir <*> hashArg "the waiting state"
-      <*> Cli.arg "TEXT" .string "the answer, verbatim; put it after -- if it may begin with -" },
-  { name := "reply-unavailable"
-    summary := "Record that the person cannot answer the question a state is waiting on."
-    spec := replyUnavailableRun <$> dataDir <*> hashArg "the waiting state" },
+    summary := "Answer the question a state is waiting on, or record that the person cannot."
+    examples := #["alaya reply c61754 -- 'yes, keep it'", "alaya reply c61754 --unavailable"]
+    spec := replyRun <$> dataDir <*> hashArg "the waiting state" <*> replyAnswer },
   { name := "waiting"
     summary := "List every unanswered question."
     examples := #["alaya waiting --json"]

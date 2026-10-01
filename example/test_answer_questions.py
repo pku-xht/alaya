@@ -70,9 +70,9 @@ elif args[0] in ("show", "ls", "cat"):
     if override.exists():
         value = json.loads(override.read_text(encoding="utf-8"))
     print(json.dumps(value))
-elif args[0] in ("reply", "reply-unavailable"):
+elif args[0] == "reply":
     assert delimiter < len(args), "reply requires a positional delimiter"
-    if args[0] == "reply":
+    if "--unavailable" not in flags:
         state, answer = args[delimiter + 1:]
         value = {"state": state, "answer": answer}
     else:

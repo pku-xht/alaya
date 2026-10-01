@@ -142,6 +142,14 @@ def flag? (name : String) (v : Value α) (help : String) (env? : Option String :
         | none => .ok none
       | none => .ok none⟩
 
+/-- `s` with a check on its whole value, for what the declarations alone cannot say, such as two
+items that exclude each other. -/
+def Spec.refine (s : Spec α) (f : α → Except String β) : Spec β :=
+  ⟨s.items, fun raw => do
+    match f (← s.decode raw) with
+    | .ok b => pure b
+    | .error e => throw #[e]⟩
+
 /-- Marks every item of `s` required and fails with `message` when it yields nothing. -/
 def Spec.required (s : Spec (Option α)) (message : String) : Spec α :=
   ⟨s.items.map ({ · with required := true }), fun raw => do

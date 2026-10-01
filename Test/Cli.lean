@@ -225,6 +225,18 @@ def specSuite : Suite := suite "cli.spec" #[
     for answer in ["", "--data", "-m", "--", "--json", "  answer\n--data other\n原文  "] do
       assertEqual s!"answer {answer}" (← parsed "reply" (reply.parse ["--", "q", answer])) ("q", answer),
 
+  test "a refined spec checks the whole value, after every item has parsed" do
+    let answer := (Prod.mk <$> Cli.arg? "TEXT" .string "" <*> Cli.switch "unavailable" "").refine
+      fun
+      | (some text, false) => .ok (some text)
+      | (none, true) => .ok none
+      | _ => .error "give the answer or --unavailable"
+    assertEqual "text" (← parsed "text" (answer.parse ["yes"])) (some "yes")
+    assertEqual "unavailable" (← parsed "unavailable" (answer.parse ["--unavailable"])) none
+    assertEqual "both" (← problemsOf "both" (answer.parse ["yes", "--unavailable"]))
+      #["give the answer or --unavailable"]
+    assertEqual "neither" (← problemsOf "neither" (answer.parse [])) #["give the answer or --unavailable"],
+
   test "every problem is reported at once" do
     let spec := Prod.mk <$> Cli.flag "count" .nat "how many" <*> Cli.flag "model" (.string "P:M") "the model"
     assertEqual "both" (← problemsOf "both" (spec.parse ["--count", "x"]))
