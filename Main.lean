@@ -30,7 +30,7 @@ an empty forest. The command's scratch directory is removed when it ends, howeve
 private def withData (path : System.FilePath) (f : DataDir → Result α) (create := false) :
     Result α := do
   if !create && !(← Result.fromIO Error.storage (path / "states").isDir) then
-    throw <| .configuration s!"no data directory at {path}: `alaya root --data {path}` creates one"
+    throw <| .input s!"no data directory at {path}: `alaya root --data {path}` creates one"
   let store ← Store.create (path / "states")
   let id := s!"{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"
   let scratch := path / "tmp" / id
@@ -127,10 +127,6 @@ private def rootProject (data : DataDir) (settings : Executor.Docker.Settings)
 
 /-- Exit status when a run stopped at a question rather than an outcome. -/
 private def exitWaiting : UInt32 := 3
-
-/-- Exit status of `eval` when no verdict was recorded: the state, the grader image, or the
-input could not be had. A verdict exits 0 for pass, 1 for fail, 2 for error. -/
-private def exitNoVerdict : UInt32 := 5
 
 /-- Exit status when a run stopped at a limit of this invocation, its time budget or its turns:
 it has not ended, and a later `resume` continues it. -/
@@ -260,9 +256,10 @@ private def EvalArgs.cli : Cli.Spec EvalArgs :=
     <*> Cli.flag? "container-user" (.string "UID:GID")
       "the user the grader runs as; by default the host user on Linux, the image's own on macOS"
 
+/-- Exits with the verdict: 0 pass, 1 fail, 2 error. A failure before a verdict is recorded
+exits with its class's status, as for any command, all of them above the verdict's. -/
 private def evalRun (a : EvalArgs) (out : Cli.Out) : Result UInt32 := do
-  -- The exit status is the verdict's; an error before one is recorded has its own.
-  try withData a.data fun data => do
+  withData a.data fun data => do
     let target ← resolve data.store a.state
     let targetState ← getState data.store target
     let settings ← Executor.Docker.settingsOf { user? := a.user? } targetState.image targetState.workdir
@@ -275,9 +272,6 @@ private def evalRun (a : EvalArgs) (out : Cli.Out) : Result UInt32 := do
       s!"{node.hex}  {e.verdict}  ({e.elapsedMs} ms)"
     if e.status == .error then out.note s!"error: {e.reason}"
     pure (match e.status with | .pass => 0 | .fail => 1 | .error => 2)
-  catch error =>
-    out.fail error
-    pure exitNoVerdict
 
 /-! ### A person in the tree -/
 
@@ -419,11 +413,11 @@ private def htmlRun (data : System.FilePath) (file : System.FilePath) (hide : Ar
       paths ++ (value.splitOn ",").toArray.filter (!·.isEmpty)
     -- The page has one view and one tool list, so the forest's roots must agree on the agent.
     let roots ← (← allStates data.store).filterM fun h => do pure (← getState data.store h).parent?.isNone
-    let some first := roots[0]? | throw <| .configuration "nothing to report: the data directory holds no states"
+    let some first := roots[0]? | throw <| .input "nothing to report: the data directory holds no states"
     let spec ← recordedAgent data.store first
     for root in roots do
       if (← recordedAgent data.store root).config.compress != spec.config.compress then
-        throw <| .configuration <|
+        throw <| .input <|
           s!"the roots of {data.path} were created with different agents; a report renders one " ++
           "agent's runs, so give each its own data directory"
     let page ← Html.report data.store data.workspaces s!"alaya {data.path}" spec.view spec.tools hidden
@@ -458,9 +452,7 @@ private def commands : Array Cli.Command := #[
     examples := #[
       "alaya eval e5a1c3 --input ./hidden --grader 'cp -R /grader/tests . && pytest -q -p tap --tap-stream'",
       "alaya eval e5a1c3 --grader-image my-grader:1 --input ./benchmark --grader 'grade-project /grader'"]
-    spec := evalRun <$> EvalArgs.cli
-    -- Exit 1 is a failing verdict, so a command line that does not parse records none.
-    usageExit? := some exitNoVerdict },
+    spec := evalRun <$> EvalArgs.cli },
   { name := "commit"
     summary := "Record a hand-edited workspace as a child; the agent is told what changed."
     examples := #["alaya commit 4f2c8b ./fix --note 'fixed the fixture'"]
@@ -518,8 +510,9 @@ private def app : Cli.App where
   commands := commands
 
 /-- Exit 0 on success, 3 when a run stopped at a question (`exitWaiting`), 4 when it stopped at
-a limit of the invocation, its time budget or its turns (`exitStopped`), 1 on an error or a command line that does
-not parse. `eval` exits with its verdict: 0 pass, 1 fail, 2 error, and 5 when it recorded none
-(`exitNoVerdict`), a command line that does not parse included. -/
+a limit of the invocation, its time budget or its turns (`exitStopped`); `eval` exits with its
+verdict, 0 pass, 1 fail, 2 error. A failure exits with its class's status, above all of these
+(`Cli.exitFor`): 64 a command line that does not parse, 65 input, 69 environment, 74 storage,
+75 transient, 76 model. -/
 def main (argv : List String) : IO UInt32 :=
   app.run argv

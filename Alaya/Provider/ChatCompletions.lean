@@ -137,7 +137,7 @@ private def complete (config : Config) (temperature : Lean.Json) (request : Chat
 def model (config : Config) : Result Model := do
   let temperature ← match Lean.JsonNumber.fromFloat? config.temperature with
     | .inr number => pure <| Lean.Json.num number
-    | .inl _ => throw <| .configuration "temperature must be finite"
+    | .inl _ => throw <| .input "temperature must be finite"
   pure {
     identity :=
       let fields : List (String × Lean.Json) := [
@@ -164,7 +164,7 @@ def model (config : Config) : Result Model := do
 
 The key is read from `keyVar`, treating empty values as unset. `defaultKey?` supplies a
 fallback for servers that need no real credential; without one, a missing key is a
-configuration error. When `baseUrlVar?` is given and set, it overrides `baseUrl`. -/
+environment error. When `baseUrlVar?` is given and set, it overrides `baseUrl`. -/
 def modelFromEnv (provider keyVar baseUrl name : String) (temperature : Float)
     (defaultKey? : Option String := none)
     (baseUrlVar? : Option String := none)
@@ -172,11 +172,11 @@ def modelFromEnv (provider keyVar baseUrl name : String) (temperature : Float)
     (structuredOutput := Chat.StructuredOutput.native)
     (echoReasoning := false) : Result Model := do
   let env (envVar : String) : Result (Option String) :=
-    Result.fromIO Error.configuration do pure ((← IO.getEnv envVar).filter (!·.isEmpty))
+    Result.fromIO Error.environment do pure ((← IO.getEnv envVar).filter (!·.isEmpty))
   let apiKey ← match (← env keyVar), defaultKey? with
     | some key, _ => pure key
     | none, some fallback => pure fallback
-    | none, none => throw <| .configuration s!"{keyVar} is not set"
+    | none, none => throw <| .environment s!"{keyVar} is not set"
   let baseUrl ← match baseUrlVar? with
     | some envVar => pure ((← env envVar).getD baseUrl)
     | none => pure baseUrl

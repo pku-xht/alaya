@@ -10,8 +10,8 @@ open Testing Alaya Alaya.Trajectory
 
 private def workspace : Hash := Hash.ofBytes "test snapshot".toUTF8
 
-private def configError : Error -> Bool
-  | .configuration _ => true
+private def inputError : Error -> Bool
+  | .input _ => true
   | _ => false
 
 /-- These metadata deliberately include an apparent descendant under a link. A reader must
@@ -64,11 +64,11 @@ def suite : Suite := Testing.suite "preview" #[
     let listings ← IO.mkRef #[]
     let workspaces := fakeWorkspaces reads listings
     for path in #["../outside", "a/../b", "/etc/passwd", "a//b", "./a", "a\\b", "C:/x", "a:x", "x\x00y"] do
-      assertError "unsafe file path" (workspaces.preview workspace path) configError
-      assertError "unsafe directory path" (workspaces.list workspace path) configError
+      assertError "unsafe file path" (workspaces.preview workspace path) inputError
+      assertError "unsafe directory path" (workspaces.list workspace path) inputError
     assertEqual "invalid paths rejected before listing" (← listings.get) #[]
-    assertError "symlink ancestor" (workspaces.preview workspace "link/secret") configError
-    assertError "symlink directory" (workspaces.list workspace "link") configError
+    assertError "symlink ancestor" (workspaces.preview workspace "link/secret") inputError
+    assertError "symlink directory" (workspaces.list workspace "link") inputError
     assertEqual "no file reads" (← reads.get) #[]
     assertEqual "never list through a link" (← listings.get) #["", ""],
 
@@ -96,9 +96,9 @@ def suite : Suite := Testing.suite "preview" #[
     assertEqual "nested listing" ((← assertOk <| workspaces.list old "nested").map (·.path))
       #["nested/proof.lean"]
     assertEqual "hidden file" (← text old ".hidden/config") (some "hidden")
-    assertError "later file absent" (workspaces.preview old "after.txt") configError
+    assertError "later file absent" (workspaces.preview old "after.txt") inputError
     assertEqual "link is not read" (← assertOk <| workspaces.preview old "file-link").kind "symlink"
-    assertError "outside link not traversed" (workspaces.preview old "link/secret") configError
+    assertError "outside link not traversed" (workspaces.preview old "link/secret") inputError
     assertEqual "live working copy was not overwritten" (← IO.FS.readFile (source / "code.lean")) "new code",
 
   test "a branch is the states from the root to a state, with nothing from siblings" do

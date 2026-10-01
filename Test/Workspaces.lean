@@ -177,7 +177,7 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     assertEqual "nested" (describe (← assertOk <| workspaces.list id "src"))
       #[("src/lib", "directory", none), ("src/main.lean", "file", some 13)]
     assertError "a file is not a directory" (workspaces.list id "README.md") fun
-      | .configuration m => (m.splitOn "not a directory").length > 1
+      | .input m => (m.splitOn "not a directory").length > 1
       | _ => false,
 
   onEach "read gives a file's bytes; a directory, a link, or an absent path is an error" fun workspaces => do
@@ -192,7 +192,7 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     for (path, message) in [("src", "not a regular file"), ("link", "not a regular file"),
         ("missing.txt", "no such path"), ("src/missing.txt", "no such path")] do
       assertError path (workspaces.read id path) fun
-        | .configuration m => (m.splitOn message).length > 1
+        | .input m => (m.splitOn message).length > 1
         | _ => false,
 
   onEach "a path through a symbolic link is refused, even to a directory in the snapshot" fun workspaces => do
@@ -202,10 +202,10 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     let id ← assertOk <| workspaces.snapshot source
     for path in ["alias/main.lean", "alias/lib/util.lean"] do
       assertError path (workspaces.read id path) fun
-        | .configuration m => (m.splitOn "crosses a non-directory").length > 1
+        | .input m => (m.splitOn "crosses a non-directory").length > 1
         | _ => false
     assertError "listing" (workspaces.list id "alias") fun
-      | .configuration m => (m.splitOn "not a directory").length > 1
+      | .input m => (m.splitOn "not a directory").length > 1
       | _ => false,
 
   onEach "a path that is not clean and relative is refused" fun workspaces => do
@@ -215,7 +215,7 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     for path in ["../README.md", "/README.md", "src/../README.md", "./README.md", "src//main.lean",
         "src/", "src\\main.lean"] do
       assertError path (workspaces.read id path) fun
-        | .configuration m => (m.splitOn "not a clean relative path").length > 1
+        | .input m => (m.splitOn "not a clean relative path").length > 1
         | _ => false,
 
   onEach "retainOnly keeps the listed snapshots usable" fun workspaces => do
@@ -262,7 +262,7 @@ def resticSuite : Suite := Testing.suite "workspaces.restic" #[
     let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t") (agent := testAgent)
     let id := (← assertOk <| getState store root).workspace
     let refused (label : String) (action : Result Unit) : TestM Unit :=
-      assertError label action fun | .configuration _ => true | _ => false
+      assertError label action fun | .input _ => true | _ => false
     -- `restore --delete` into any of these would delete the states or the repository.
     for target in [data, (← scratch), data / "states", data / "restic", data / "restic" / "inside"] do
       refused s!"checkout into {target}" (workspaces.materialize id target)

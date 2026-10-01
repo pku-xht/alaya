@@ -25,6 +25,8 @@ MAX_BODY_BYTES = 1024 * 1024
 CLI_TIMEOUT_SECONDS = 30
 EVENT_POLL_SECONDS = 1
 EVENT_HEARTBEAT_SECONDS = 5
+# Alaya's exit status for a request that names something wrong (`docs/trajectory-schema.md` §8).
+INPUT_ERROR = 65
 
 
 class ApiError(Exception):
@@ -75,7 +77,9 @@ class QuestionApplication:
             raise ApiError(502, f"Could not run Alaya: {error}") from error
         if result.returncode:
             detail = (result.stderr or result.stdout).strip()[:2000]
-            status = 400 if verb != "waiting" and result.returncode == 1 else 502
+            # Alaya exits 65 when the request names something wrong, such as an invalid answer
+            # or a path not in the snapshot: the page's request was bad. Anything else is Alaya's.
+            status = 400 if verb != "waiting" and result.returncode == INPUT_ERROR else 502
             raise ApiError(status, detail or f"Alaya exited with code {result.returncode}.")
         return result.stdout
 

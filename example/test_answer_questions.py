@@ -60,7 +60,7 @@ elif args[0] in ("show", "ls", "cat"):
         path = positional[1]
         if ".." in path.split("/") or path.startswith("/"):
             print("invalid snapshot path", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(65)
         value["path"] = path
         if args[0] == "ls":
             value["entries"] = [{"name": "Main.lean", "path": "Main.lean", "kind": "file", "size": 4}]
@@ -84,18 +84,18 @@ elif args[0] == "reply":
     question = next(q for q in questions if q["state"] == state)
     if answer is not None and question["question_type"] == "yes_no" and answer not in ("yes", "no"):
         print("yes/no answers must be yes or no", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(65)
     if answer is not None and question["question_type"] == "single_choice":
         choices = {str(index) for index in range(1, len(question["options"]) + 1)}
         if answer not in choices | {"none_of_above"}:
             print("single-choice answers must select one option or none_of_above", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(65)
     # Match JavaScript String.trim(), including NBSP and ideographic space but
     # excluding Python-only whitespace such as NEL and record separators.
     js_whitespace = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
     if answer is not None and question["question_type"] == "open_ended" and not answer.strip(js_whitespace):
         print("open-ended answers must not be blank", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(65)
     time.sleep(0.05)
     questions_file.write_text(json.dumps([q for q in questions if q["state"] != state]), encoding="utf-8")
     print("d" * 64)

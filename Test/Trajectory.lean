@@ -143,7 +143,7 @@ def suite : Suite := Testing.suite "trajectory" #[
     let root ← mkRoot rt (← emptyProject)
     let unchanged ← emptyProject
     assertError "no change" (commit rt.store rt.workspaces root unchanged (some "nothing")) fun
-      | .configuration m => (m.splitOn "use `tell`").length > 1
+      | .input m => (m.splitOn "use `tell`").length > 1
       | _ => false
     let edited := (← scratch) / "edited"
     assertOk <| Result.fromIO Error.storage do
@@ -285,10 +285,10 @@ def suite : Suite := Testing.suite "trajectory" #[
       "a grader's files must never reach a state the agent continues from"
     -- Nothing may continue from the evaluation.
     assertError "step" (stepOnce rt "test:model" node) fun
-      | .configuration m => (m.splitOn "cannot continue from an evaluation").length > 1
+      | .input m => (m.splitOn "cannot continue from an evaluation").length > 1
       | _ => false
     assertError "commit" (commit rt.store rt.workspaces node (← emptyProject) none) fun
-      | .configuration m => (m.splitOn "cannot build on an evaluation").length > 1
+      | .input m => (m.splitOn "cannot build on an evaluation").length > 1
       | _ => false,
 
   test "a failing check is a failing verdict, and re-evaluating adds a new evaluation" do

@@ -391,8 +391,8 @@ def resolve (store : Store) (pfx : String) : Result Hash := do
   let hits := states.filter (·.hex.startsWith pfx)
   match hits.toList with
   | [hash] => pure hash
-  | [] => throw <| .configuration s!"no state matches {pfx}"
-  | _ => throw <| .configuration s!"ambiguous state prefix {pfx} ({hits.size} matches)"
+  | [] => throw <| .input s!"no state matches {pfx}"
+  | _ => throw <| .input s!"ambiguous state prefix {pfx} ({hits.size} matches)"
 
 /-- Reconstructs the full log at `hash` by concatenating appended events root→node. -/
 partial def logOf (store : Store) (hash : Hash) : Result Log := do
@@ -494,7 +494,7 @@ private partial def follow (rt : Runtime) (before started : Nat) (log : Log) (ap
   | .sample => pure (appended, workspace, none, .continue)
   | .done outcome => pure (appended, workspace, none, .outcome outcome)
   | .ask callId toQuestion =>
-    Result.fromExcept Error.configuration toQuestion.validate
+    Result.fromExcept Error.input toQuestion.validate
     let question : Question := { callId, toQuestion }
     pure (appended, workspace, some question, .question question)
   | .act call =>
@@ -564,7 +564,7 @@ private def withinBudget (rt : Runtime) (elapsed : Nat) : Bool :=
 Returns `none` when the time budget is already spent, and then nothing is written. -/
 def stepOnce (rt : Runtime) (note : String) (hash : Hash) : Result (Option Hash) := do
   let state ← getState rt.store hash
-  Result.fromExcept Error.configuration state.continuable
+  Result.fromExcept Error.input state.continuable
   let before ← elapsedMs rt.store hash
   if !withinBudget rt before then return none
   checkoutInto rt.toSandbox state.workspace
@@ -585,7 +585,7 @@ nothing more: the last state is where a later `resume` continues. -/
 partial def resume (rt : Runtime) (note : String) (hash : Hash)
     (onStep : Hash -> Result Unit) (turns? : Option Nat := none) : Result Stopped := do
   let start ← getState rt.store hash
-  Result.fromExcept Error.configuration start.continuable
+  Result.fromExcept Error.input start.continuable
   let before ← elapsedMs rt.store hash
   if !withinBudget rt before then return { state := hash, outOfTime := true }
   checkoutInto rt.toSandbox start.workspace
@@ -636,13 +636,13 @@ def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePat
     (graderImage? : Option String := none) (timeoutSeconds : Nat := 900) : Result Hash := do
   let state ← getState store hash
   if state.kind == .evaluation then
-    throw <| .configuration "cannot evaluate an evaluation: it is already a leaf"
+    throw <| .input "cannot evaluate an evaluation: it is already a leaf"
   let graderImage ← match graderImage? with
     | some reference => pure (← Executor.Docker.Settings.pin { image := reference }).image
     | none => pure state.image
   let inputId? ← input?.mapM fun dir => do
     if !(← Result.fromIO Error.storage dir.isDir) then
-      throw <| .configuration s!"--input must be a directory: {dir}"
+      throw <| .input s!"--input must be a directory: {dir}"
     workspaces.snapshot dir
   Result.fromIO Error.storage (IO.FS.createDirAll scratch)
   let scratch ← Result.fromIO Error.storage (IO.FS.realPath scratch)
@@ -707,9 +707,9 @@ waiting for an answer, which `reply` alone grows. An ended run is fine: fixing s
 submission and continuing is what interventions are for. -/
 private def buildable (state : State) : Result Unit := do
   if state.kind == .evaluation then
-    throw <| .configuration "cannot build on an evaluation: it is a verdict, not a point in the run"
+    throw <| .input "cannot build on an evaluation: it is a verdict, not a point in the run"
   if let some q := state.question? then
-    throw <| .configuration
+    throw <| .input
       s!"this state is waiting for an answer to: {q.text}\nanswer it with `alaya reply HASH TEXT`"
 
 /-- The workspace changes from `before` to `after`, one line each. -/
@@ -732,7 +732,7 @@ def commit (store : Store) (workspaces : Workspaces) (hash : Hash) (dir : System
   let workspace ← workspaces.snapshot dir
   let changed ← changedLines workspaces parent.workspace workspace
   if changed.isEmpty then
-    throw <| .configuration s!"{dir} has no change from {hash.hex}: to send a message alone, use `tell`"
+    throw <| .input s!"{dir} has no change from {hash.hex}: to send a message alone, use `tell`"
   let intervention : Intervention := { message := "", changed }
   putState store {
     parent? := some hash, workspace, kind := .intervention, note?
@@ -757,8 +757,8 @@ def reply (store : Store) (hash : Hash) (text : String) : Result Hash := do
   let parent ← getState store hash
   let question ← match parent.question? with
     | some q => pure q
-    | none => throw <| .configuration "this state is not waiting for an answer"
-  Result.fromExcept Error.configuration (question.toQuestion.validateReply text)
+    | none => throw <| .input "this state is not waiting for an answer"
+  Result.fromExcept Error.input (question.toQuestion.validateReply text)
   putState store {
     parent? := some hash, workspace := parent.workspace, kind := .reply
     appended := #[.observation question.callId (.str text)]
@@ -771,7 +771,7 @@ def replyUnavailable (store : Store) (hash : Hash) : Result Hash := do
   let parent ← getState store hash
   let question ← match parent.question? with
     | some q => pure q
-    | none => throw <| .configuration "this state is not waiting for an answer"
+    | none => throw <| .input "this state is not waiting for an answer"
   putState store {
     parent? := some hash, workspace := parent.workspace, kind := .reply
     appended := #[.observation question.callId (.mkObj [("status", "unavailable")])]

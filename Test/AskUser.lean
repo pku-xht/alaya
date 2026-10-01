@@ -109,7 +109,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         (minimal.config.getObjValAs? Bool "ask_user").toOption (some false)
       let defaultPath : System.FilePath := "agents" / s!"{family.name}-default.json"
       let defaultText ← IO.FS.readFile defaultPath
-      let defaultJson ← assertOk <| Result.fromExcept Error.configuration (Lean.Json.parse defaultText)
+      let defaultJson ← assertOk <| Result.fromExcept Error.input (Lean.Json.parse defaultText)
       assertEqual "default JSON explicitly contains ask_user false"
         (defaultJson.getObjValAs? Bool "ask_user").toOption (some false)
       let request (spec : Families.Instance) : Lean.Json :=
@@ -182,7 +182,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       for bad in #[Lean.Json.null, .str "true", .num 1, .arr #[], .mkObj []] do
         assertError "ask_user type" (Families.instanceOf
           (.mkObj [("family", family.name), ("ask_user", bad)])) fun
-            | .configuration message => contains message "ask_user" && contains message "true or false"
+            | .input message => contains message "ask_user" && contains message "true or false"
             | _ => false,
 
   test "single choice adds a platform answer while retaining model candidates verbatim" do
@@ -320,7 +320,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "unanswered question count" (← assertOk <| waiting store).size 1
         assertEqual "unanswered question has no reply children" (← assertOk <| children store waitingHash).size 0
         assertError "cannot step while waiting" (stepOnce rt "scripted" waitingHash) fun
-          | .configuration _ => true
+          | .input _ => true
           | _ => false
         assertEqual "only question sampled" (← requests.get).size 1
         -- Changing the source file cannot disable the capability on a recorded run.
@@ -392,7 +392,7 @@ def suite : Suite := Testing.suite "ask_user" #[
           project (← testImage) (some "task") (agent := built.config)
         let before ← assertOk <| allStates store
         assertError "only a question accepts an unavailable reply" (replyUnavailable store root) fun
-          | .configuration _ => true
+          | .input _ => true
           | _ => false
         assertEqual "rejected reply writes no state" (← assertOk <| allStates store) before
         let question ← resumed <| resume rt "scripted" root (fun _ => pure ())
@@ -510,7 +510,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let original := (← assertOk <| getState reopened stopped).toJson.compress
         for answer in invalid do
           assertError s!"invalid {questionType} answer {repr answer}" (reply reopened stopped answer) fun
-            | .configuration _ => true
+            | .input _ => true
             | _ => false
           assertEqual "no new stored state" (← assertOk <| allStates reopened) before
           assertEqual "no reply child" (← assertOk <| children reopened stopped).size 0
@@ -611,7 +611,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "one request in all" (← requests.get).size 1
         assertEqual "no execution" (← calls.get) 0
         assertError "terminal state cannot resume" (resume rebuilt "scripted" final (fun _ => pure ())) fun
-          | .configuration _ => true
+          | .input _ => true
           | _ => false
         assertEqual "refusing terminal resume does not sample" (← requests.get).size 1,
 

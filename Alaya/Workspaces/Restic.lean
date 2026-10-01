@@ -155,7 +155,7 @@ private def literalPattern (path : String) : String :=
 `restic ls` nonrecursive, even at the root; dependencies are not restored merely to browse. -/
 def listEntries (settings : Settings) (id : Hash) (path : String) : Result (Array Entry) := do
   if !safeSnapshotPath path then
-    throw <| .configuration "snapshot path must be a clean relative path"
+    throw <| .input "snapshot path must be a clean relative path"
   let finished ← succeed "ls" (← run settings #["ls", id.hex, "--json", "/" ++ path])
   let pathPrefix := if path.isEmpty then "/" else "/" ++ path ++ "/"
   let mut entries := #[]
@@ -215,9 +215,9 @@ def retainOnly (settings : Settings) (keep : Array Hash) : Result Unit := do
     rest := rest.extract 200 rest.size
   let _ ← succeed "prune" (← run settings #["prune", "--quiet"])
 
-/-- The restic version as `(major, minor)`, or a configuration error when it cannot be run. -/
+/-- The restic version as `(major, minor)`, or an environment error when it cannot be run. -/
 def version (settings : Settings) : Result (Nat × Nat) := do
-  let missing : Error := .configuration <|
+  let missing : Error := .environment <|
     s!"cannot run `{settings.program}`: install restic 0.17 or later (https://restic.net)"
   -- A program that does not exist shows as a failed exit on some platforms, not as an exception.
   let out ← match ← (Result.fromIO Error.storage
@@ -225,7 +225,7 @@ def version (settings : Settings) : Result (Nat × Nat) := do
     | .ok out => if out.exitCode == 0 then pure out else throw missing
     | .error _ => throw missing
   -- "restic 0.17.3 compiled with go1.23 on darwin/arm64"
-  let unrecognized : Error := .configuration s!"unrecognized restic version: {out.stdout.trimAscii}"
+  let unrecognized : Error := .environment s!"unrecognized restic version: {out.stdout.trimAscii}"
   match (out.stdout.splitOn " ")[1]?.map (·.splitOn ".") with
   | some (major :: minor :: _) =>
     match major.toNat?, minor.toNat? with
@@ -245,7 +245,7 @@ def «open» (repository scratch : System.FilePath) (keep : Array System.FilePat
   let settings : Settings := { repository, scratch, kept := #[repository, scratch] ++ keep, program }
   let (major, minor) ← version settings
   if major == 0 && minor < 17 then
-    throw <| .configuration s!"restic {major}.{minor} is too old: 0.17 or later is needed"
+    throw <| .environment s!"restic {major}.{minor} is too old: 0.17 or later is needed"
   init settings
   pure {
     snapshot := snapshot settings

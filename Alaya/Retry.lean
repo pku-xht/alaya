@@ -37,8 +37,7 @@ private def rateLimited : Error -> Bool
 
 /-- Whether retrying is safe and likely useful; see `docs/llm-api.md` §3 for the policy. -/
 private def retryable (config : Config) : Error -> Bool
-  | .http status _ _ => status == 408 || status == 409 || status == 425 || status == 429 ||
-      (500 <= status && status < 600)
+  | .http status _ _ => Error.retryableStatus status
   | .transport _ => config.retryUnknownDelivery
   | .structuredOutput _ => config.retryStructuredOutput
   | .protocol _ => config.retryMalformedResponse
@@ -80,7 +79,7 @@ retryable failure draws on `maxAttempts`, each counted separately, so a burst of
 exhaust the patience reserved for genuine transient errors, and vice versa. -/
 def run (config : Config) (action : Result alpha) : Result alpha := do
   if config.maxAttempts == 0 then
-    throw <| .configuration "retry maxAttempts must be at least one"
+    throw <| .input "retry maxAttempts must be at least one"
   let rec go (general rate : Nat) : (fuel : Nat) -> Result alpha
     -- Unreachable: fuel is the sum of both class budgets, so one class exhausts its budget
     -- (throwing below) before fuel can run out.

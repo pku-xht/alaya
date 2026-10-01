@@ -96,7 +96,7 @@ on the way is never followed, even when its target is inside the snapshot. The e
 snapshot's root. -/
 def entryAt (workspaces : Workspaces) (id : Hash) (path : String) : Result Entry := do
   if !safeSnapshotPath path then
-    throw <| .configuration s!"not a clean relative path in a snapshot: {path}"
+    throw <| .input s!"not a clean relative path in a snapshot: {path}"
   if path.isEmpty then return { name := "", path := "", kind := .directory }
   let mut directory := ""
   let parts := (path.splitOn "/").toArray
@@ -106,9 +106,9 @@ def entryAt (workspaces : Workspaces) (id : Hash) (path : String) : Result Entry
     let expected := if directory.isEmpty then name else directory ++ "/" ++ name
     let entries ← workspaces.listEntries id directory
     let some entry := entries.find? fun entry => entry.name == name && entry.path == expected
-      | throw <| .configuration s!"no such path in the snapshot: {path}"
+      | throw <| .input s!"no such path in the snapshot: {path}"
     if index + 1 < parts.size && entry.kind != .directory then
-      throw <| .configuration s!"the snapshot path crosses a non-directory: {expected}"
+      throw <| .input s!"the snapshot path crosses a non-directory: {expected}"
     found := entry
     directory := expected
   pure found
@@ -117,14 +117,14 @@ def entryAt (workspaces : Workspaces) (id : Hash) (path : String) : Result Entry
 def list (workspaces : Workspaces) (id : Hash) (path : String := "") : Result (Array Entry) := do
   let entry ← workspaces.entryAt id path
   if entry.kind != .directory then
-    throw <| .configuration s!"not a directory in the snapshot: {path}"
+    throw <| .input s!"not a directory in the snapshot: {path}"
   pure ((← workspaces.listEntries id path).qsort (·.name < ·.name))
 
 /-- The bytes of the regular file at `path` in snapshot `id`. A link is not followed. -/
 def read (workspaces : Workspaces) (id : Hash) (path : String) : Result ByteArray := do
   let entry ← workspaces.entryAt id path
   if entry.kind != .file then
-    throw <| .configuration s!"not a regular file in the snapshot ({entry.kind.toString}): {path}"
+    throw <| .input s!"not a regular file in the snapshot ({entry.kind.toString}): {path}"
   let some bytes ← workspaces.readFile? id path
     | throw <| .storage s!"the snapshot file could not be read: {path}"
   pure bytes
@@ -186,7 +186,7 @@ def refuseOverlap (verb : String) (directory : System.FilePath) (kept : Array Sy
   for path in kept do
     let path ← Result.fromIO Error.storage (resolved path)
     if overlap target path then
-      throw <| .configuration <|
+      throw <| .input <|
         s!"cannot {verb} {target}: it overlaps {path}, where alaya keeps this run. " ++
         "Use a directory outside the data directory, or a data directory (--data) outside it"
 

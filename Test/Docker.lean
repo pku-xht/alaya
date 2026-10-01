@@ -176,11 +176,11 @@ def suite : Suite := Testing.suite "docker" #[
       check (← assertOk ((← workspaces).readFile? snapshot "world")).isSome
         "expected /etc/apk/world in the snapshot",
 
-  test "a path that is not in the image is a configuration error" <| withDocker
+  test "a path that is not in the image is an input error" <| withDocker
     fun settings => do
       let work ← workspace
       assertError "copyOut" (Docker.copyOut settings "/no/such/path" work) fun
-        | .configuration m => (m.splitOn "/no/such/path").length > 1
+        | .input m => (m.splitOn "/no/such/path").length > 1
         | _ => false,
 
   test "a grader runs in the trajectory's image and sees what a turn wrote" <| withDocker
@@ -302,7 +302,7 @@ def suite : Suite := Testing.suite "docker" #[
       -- A grader image that cannot be had is no verdict at all.
       assertError "missing" (evaluate store (← workspaces) ((← scratch) / "eval") root "true"
           settings.user? (graderImage? := some "alaya.invalid/nope:1")) fun
-        | .configuration m => (m.splitOn "alaya.invalid/nope").length > 1
+        | .environment m => (m.splitOn "alaya.invalid/nope").length > 1
         | _ => false
       -- Without one, the trajectory's missing image is an error verdict with docker's message.
       let broken ← assertOk <| evaluate store (← workspaces) ((← scratch) / "eval") root "true" settings.user?
@@ -343,18 +343,18 @@ def suite : Suite := Testing.suite "docker" #[
         assertOk <| Docker.checkWorkdir good #["/grader", "/out"]
       for bad in ["workspace", "/", "/a/../b", "/a//b", "/a/", "/a/./b", "/grader", "/out/x"] do
         assertError bad (Docker.checkWorkdir bad #["/grader", "/out"]) fun
-          | .configuration _ => true
+          | .input _ => true
           | _ => false,
 
   test "a missing recorded image is pulled by its digest, and a local build's ID cannot be" <| withDocker
     fun _ => do
       let missing : Docker.Settings := { image := "alaya.invalid/nope@sha256:0" }
       assertError "digest" missing.ensurePresent fun
-        | .configuration m => (m.splitOn "docker pull alaya.invalid/nope@sha256:0").length > 1
+        | .environment m => (m.splitOn "docker pull alaya.invalid/nope@sha256:0").length > 1
         | _ => false
       let local_ : Docker.Settings := { image := "sha256:" ++ "0".pushn '0' 63 }
       assertError "local" local_.ensurePresent fun
-        | .configuration m => (m.splitOn "cannot be pulled").length > 1
+        | .environment m => (m.splitOn "cannot be pulled").length > 1
         | _ => false
 ]
 

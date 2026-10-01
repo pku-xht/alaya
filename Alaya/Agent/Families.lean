@@ -66,20 +66,20 @@ def family? (name : String) : Option Family := all.find? (·.name == name)
 def instanceOf (json : Lean.Json) : Result Instance := do
   let name ← match json.getObjVal? "family" with
     | .ok (.str name) => pure name
-    | _ => throw <| .configuration s!"an agent configuration needs a \"family\": one of {names}"
+    | _ => throw <| .input s!"an agent configuration needs a \"family\": one of {names}"
   let some family := family? name
-    | throw <| .configuration s!"unknown agent family: {name} (use {names})"
+    | throw <| .input s!"unknown agent family: {name} (use {names})"
   match family.make json with
   | .ok built => pure built
-  | .error message => throw <| .configuration s!"{name} configuration: {message}"
+  | .error message => throw <| .input s!"{name} configuration: {message}"
 
 /-- The agent a configuration file names. -/
 def fromFile (path : System.FilePath) : Result Instance := do
-  let text ← match ← (Result.fromIO Error.configuration (IO.FS.readFile path)).toBaseIO with
+  let text ← match ← (Result.fromIO Error.input (IO.FS.readFile path)).toBaseIO with
     | .ok text => pure text
-    | .error _ => throw <| .configuration s!"cannot read the agent configuration {path}"
+    | .error _ => throw <| .input s!"cannot read the agent configuration {path}"
   match Lean.Json.parse text with
   | .ok json => instanceOf json
-  | .error message => throw <| .configuration s!"{path} is not JSON: {message}"
+  | .error message => throw <| .input s!"{path} is not JSON: {message}"
 
 end Alaya.Agent.Families

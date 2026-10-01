@@ -470,9 +470,10 @@ flowchart LR
 ```
 
 Every `eval` runs the grader and adds a new evaluation of the state, even with a grader command
-used before; each evaluation records one run. `eval` exits 0 for pass, 1 for fail, 2 for error,
-and 5 when it recorded no verdict at all — an unknown state, a grader image or input that could
-not be had, a command line that does not parse.
+used before; each evaluation records one run. `eval` exits 0 for pass, 1 for fail, 2 for error.
+When it records no verdict at all — an unknown state, a grader image or input that could not be
+had, a command line that does not parse — it exits with the failure's status (§8), which is
+above all three.
 
 ```sh
 # A hidden test suite, copied over the checkout; pytest-tap prints the TAP.
@@ -739,11 +740,7 @@ hash, the run's `run_time_ms`, its `history` — one `{state, kind, events}` per
 root, whose events concatenate to the log — and, with `--view`, the `view`; `ls` prints
 `{state, workspace, path, entries}` and `cat` a preview, `{state, workspace, path, kind, content,
 size}`; `diff` prints `{a, b, changes}`, `checkout` `{state, workspace, directory}`, `html`
-`{file, bytes}` and `rm` `{removed}`. A failure is one JSON object on stderr: `{"error": "usage", "problems": [...],
-"usage": ...}` for a command line that does not parse, and `{"error": KIND, "message": ...}`
-for a command that failed, where KIND is `configuration`, `transport`, `http` (with `status`
-and `retry_after_ms`), `provider`, `protocol`, `structured_output`, `cache`, `storage` or
-`cancelled`.
+`{file, bytes}` and `rm` `{removed}`. A failure is one JSON object on stderr, below.
 
 `ls` and `cat` read a state's snapshot directly, without restoring its workspace, which is how
 a report an evaluation left in its workspace is read. A path is clean and relative to the
@@ -795,9 +792,27 @@ A container runs with **no network** unless `--network` names one (`--network br
 Docker's default network): an agent with network access can go looking for its own reference
 solution, so an image should carry what a task legitimately needs.
 
-Exit status: 0 when a run ended, 3 when it stopped at a question, 4 when it stopped at its turns
-or its time budget, 1 on an error or a command line that does not parse; `eval` exits with
-its verdict (§4), and 5 for a command line that does not parse, as for any other missing verdict. Commands may run
+**Exit status.** An outcome is 0 to 4, and a failure is one of six classes above them, each with
+one status, the same for every command:
+
+| Status | Meaning | What to do |
+| --- | --- | --- |
+| 0 | done: the command succeeded, a run ended, a verdict passed | — |
+| 1, 2 | `eval`: the verdict is fail, or error (§4) | — |
+| 3 | `resume`: the run waits for an answer | `reply`, then resume from the reply |
+| 4 | `resume`: `--turns` or `--time-budget` stopped it | resume from the last state |
+| 64 | `usage`: the command line does not parse | fix the command line |
+| 65 | `input`: it names something not there, in the wrong condition, or malformed | fix the request |
+| 69 | `environment`: the machine lacks docker, an image, restic or an API key | fix the machine |
+| 74 | `storage`: the data directory could not be read or written | look at the data directory |
+| 75 | `transient`: the provider was unreachable, throttled or failing, after alaya's own retries | try again later |
+| 76 | `model`: the provider refused the request or answered it wrongly | fix the model's settings |
+
+A failure prints `error: MESSAGE` on stderr, or with `--json` one object: `{"error": CLASS,
+"message": ...}`, where CLASS is the class's name above, with `status` and `retry_after_ms` for
+an HTTP failure, and `problems` and `usage` for `usage`. A failed `resume` leaves the states it
+wrote: to continue after one, resume from the last state it printed, since resuming the state
+it started from again begins a new branch beside the first. Commands may run
 concurrently on one data directory, each in its own scratch, except that two appending to the
 same model cache entry at once can lose a draw.
 

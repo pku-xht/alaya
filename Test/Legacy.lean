@@ -244,10 +244,10 @@ private def batchConcurrencyTests : IO Unit := do
   let observedPeak ← peak.get
   if observedPeak > 2 then
     throw <| IO.userError s!"batch maxInFlight exceeded its bound: peak {observedPeak}"
-  -- Zero in-flight requests can never serve anything and is a configuration error.
+  -- Zero in-flight requests can never serve anything and is an input error.
   match ← (base.batch (.concurrent (some 0))).toBaseIO with
-  | .error (.configuration _) => pure ()
-  | _ => throw <| IO.userError "batch maxInFlight 0 should be a configuration error"
+  | .error (.input _) => pure ()
+  | _ => throw <| IO.userError "batch maxInFlight 0 should be an input error"
 
 private def typedErrorTest : IO Unit := do
   let error ← (Result.fromExcept Error.protocol (Lean.Json.parse "not json")).toBaseIO

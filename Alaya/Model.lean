@@ -73,7 +73,7 @@ def retry (inner : Model) (config : Retry.Config) : Result Model :=
 /-- Selects native, concurrent, or sequential sampling on top of retried single requests. -/
 def batch (inner : Model) (mode : BatchSampling) : Result Model := do
   let semaphore? : Option Std.Semaphore ← match mode with
-    | .concurrent (some 0) => throw <| .configuration "batch maxInFlight must be at least one"
+    | .concurrent (some 0) => throw <| .input "batch maxInFlight must be at least one"
     | .concurrent (some permits) => some <$> Std.Semaphore.new permits
     | _ => pure none
   pure {

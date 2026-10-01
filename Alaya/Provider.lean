@@ -45,7 +45,7 @@ def splitSpec (spec : String) : String × String :=
 def fromSpec (spec : String) (temperature : Float) (options : Options := {}) : Result Model :=
   let (provider, name) := splitSpec spec
   if name.isEmpty then
-    throw <| .configuration s!"'{spec}' is not a PROVIDER:NAME spec (e.g. dgx:gpt-oss-120b)"
+    throw <| .input s!"'{spec}' is not a PROVIDER:NAME spec (e.g. dgx:gpt-oss-120b)"
   else match provider with
     | "yunwu" => Yunwu.model name temperature (echoReasoning := options.echoReasoning)
     | "closeai" => CloseAI.model name temperature (echoReasoning := options.echoReasoning)
@@ -53,7 +53,7 @@ def fromSpec (spec : String) (temperature : Float) (options : Options := {}) : R
     | "apiyi" => Apiyi.model name temperature (echoReasoning := options.echoReasoning)
     | "dgx" => Dgx.model name temperature options.dgxEndpoint? (echoReasoning := options.echoReasoning)
     | other =>
-      throw <| .configuration s!"unknown provider: {other} (use {"|".intercalate names.toList})"
+      throw <| .input s!"unknown provider: {other} (use {"|".intercalate names.toList})"
 
 /-- The model a continuation samples from, as the command line names it. -/
 structure Choice where

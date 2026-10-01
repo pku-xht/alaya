@@ -216,12 +216,12 @@ the flag's, for messages. -/
 def TextSource.read (name : String) : TextSource → Result String
   | .inline t => pure t
   | .file path => do
-    let bytes ← match ← (Result.fromIO Error.configuration (IO.FS.readBinFile path)).toBaseIO with
+    let bytes ← match ← (Result.fromIO Error.input (IO.FS.readBinFile path)).toBaseIO with
       | .ok bytes => pure bytes
-      | .error _ => throw <| .configuration s!"cannot read the {name} file {path}"
+      | .error _ => throw <| .input s!"cannot read the {name} file {path}"
     match String.fromUTF8? bytes with
     | some t => pure t
-    | none => throw <| .configuration s!"the {name} file {path} is not valid UTF-8"
+    | none => throw <| .input s!"the {name} file {path} is not valid UTF-8"
 
 /-! ## Parsing -/
 
@@ -337,23 +337,34 @@ def Spec.check (s : Spec α) : Array String := Id.run do
 
 /-! ## Commands -/
 
-private def errorKind : Error → String
-  | .configuration _ => "configuration"
-  | .transport _ => "transport"
-  | .http .. => "http"
-  | .provider _ => "provider"
-  | .protocol _ => "protocol"
-  | .structuredOutput _ => "structured_output"
-  | .cache _ => "cache"
-  | .storage _ => "storage"
-  | .cancelled => "cancelled"
+/-! ## Failure
 
-private def errorJson (error : Error) : Lean.Json :=
+Every failure is one of a few classes, each with one exit status, the same for every command,
+and each above every status a command uses for an outcome (0 to 4). The numbers are
+`sysexits.h`'s. -/
+
+/-- The exit status of a command line that does not parse. -/
+def exitUsage : UInt32 := 64
+
+/-- The exit status of a command that is declared wrongly: the program's mistake. -/
+def exitInternal : UInt32 := 70
+
+/-- The exit status of a failure of class `c`. -/
+def exitFor : Error.Class → UInt32
+  | .input => 65
+  | .environment => 69
+  | .storage => 74
+  | .transient => 75
+  | .model => 76
+
+/-- A failure as one JSON object: its class, which says what to do and matches the exit status,
+a message for a person, and an HTTP failure's status and retry delay. -/
+def errorJson (error : Error) : Lean.Json :=
   let extra : List (String × Lean.Json) := match error with
     | .http status _ retry? => [("status", status),
         ("retry_after_ms", retry?.map (fun n => (n : Lean.Json)) |>.getD .null)]
     | _ => []
-  .mkObj ([("error", .str (errorKind error)), ("message", .str error.describe)] ++ extra)
+  .mkObj ([("error", .str error.class.toString), ("message", .str error.describe)] ++ extra)
 
 /-- Where a command writes: each record has a JSON form, for `--json`, and a readable one. -/
 structure Out where
@@ -381,9 +392,6 @@ structure Command where
   summary : String
   examples : Array String := #[]
   spec : Spec (Out → Result UInt32)
-  /-- The exit status of a command line that does not parse, when the app's would mean
-  something else for this command. -/
-  usageExit? : Option UInt32 := none
 
 structure App where
   name : String
@@ -391,10 +399,6 @@ structure App where
   commands : Array Command
   /-- Printed at the end of the overview. -/
   epilog : String := ""
-  /-- The exit status of a command line that does not parse. -/
-  usageExit : UInt32 := 1
-  /-- The exit status of a command that failed. -/
-  errorExit : Error → UInt32 := fun _ => 1
 
 /-- Every command takes these. -/
 private def builtins : Spec (Bool × Bool) :=
@@ -510,13 +514,13 @@ def App.run (app : App) (argv : List String) : IO UInt32 := do
       for p in problems do stderr.putStrLn s!"error: {p}"
       stderr.putStrLn s!"usage: {usage}"
       stderr.putStrLn hint
-    pure app.usageExit
+    pure exitUsage
   -- A declaration mistake is the program's, and says so before anything runs.
   for c in app.commands do
     let problems := c.full.check
     if !problems.isEmpty then
       stderr.putStrLn s!"internal error: `{c.name}` is declared wrongly: {"; ".intercalate problems.toList}"
-      return 70
+      return exitInternal
   let names := app.commands.map (·.name)
   let find (name : String) := app.commands.find? (·.name == name)
   match argv with
@@ -543,13 +547,12 @@ def App.run (app : App) (argv : List String) : IO UInt32 := do
     let env := fun var => values.lookup var
     match c.parse rest env with
     | .error problems =>
-      let code ← usageError problems (c.usage app) s!"run `{app.name} help {c.name}` for every option"
-      pure (c.usageExit?.getD code)
+      usageError problems (c.usage app) s!"run `{app.name} help {c.name}` for every option"
     | .ok (action, json) =>
       match ← (action { json }).toBaseIO with
       | .ok code => pure code
       | .error error =>
         let _ ← ((Out.mk json).fail error).toBaseIO
-        pure (app.errorExit error)
+        pure (exitFor error.class)
 
 end Alaya.Cli
