@@ -9,10 +9,10 @@ how it fails.
 ## 1. Commands
 
 ```
-alaya root --task TEXT PROJECT --agent NAME [--set agent.PATH=VALUE …] --image IMAGE [--workdir PATH]   create a root
-alaya root --task TEXT --agent NAME --image IMAGE --workdir PATH   …from the image's own PATH
-alaya config [--agent NAME] [--set agent.PATH=VALUE …]   the agents and their defaults, or what root would record
-alaya resume HASH --model P:M [--turns N] [--time-budget S]   grow one continuation until it ends, asks, or reaches a limit
+alaya root --task TEXT PROJECT --agent NAME --model NAME [--set PATH=VALUE …] --image IMAGE [--workdir PATH]   create a root
+alaya root --task TEXT --agent NAME --model NAME --image IMAGE --workdir PATH   …from the image's own PATH
+alaya config [--agent NAME] [--model NAME] [--set PATH=VALUE …]   the agents, models and providers, or what root would record
+alaya resume HASH --provider NAME [--turns N] [--time-budget S]   grow one continuation until it ends, asks, or reaches a limit
 alaya eval   HASH --grader CMD [--input DIR] [--grader-image IMAGE] [--timeout S]   grade a state
 alaya commit HASH DIR [--note NOTE]              record a hand-edited workspace as a child, telling the agent
 alaya tell   HASH TEXT                           send the agent a message, as a child
@@ -126,21 +126,33 @@ opening log and the root's note, so the first request carries all of it without 
 task specification too long for a command's output preview reaches the model whole, its middle
 included.
 
-**The agent.** `--agent NAME` names an agent — `mini-swe` (`docs/miniswe.md`) or `mini-vero`
-(`docs/minivero.md`) — whose defaults are in code. `--set agent.PATH=VALUE`, repeatable and
-applied in order, overrides one field: PATH continues into the configuration
-(`agent.mode`, `agent.step_limit`, `agent.executor.timeout_seconds`), and VALUE is read as
-JSON when it parses and as a string otherwise. Each `--set` replaces exactly one key, with no
-deep merging; an unknown field, or a value of the wrong type, is an input error naming it.
-There are no configuration files: an experiment's arms are named in the script that runs it.
+**The agent and the model.** Both are configured the same way, with defaults in code and
+overrides on the command line; there are no configuration files, and an experiment's arms are
+named in the script that runs it.
 
-`alaya config` lists every agent with its complete defaults, and
-`alaya config --agent NAME --set …` prints exactly the configuration `root` would record,
-creating nothing — so a variant can be checked before a run is spent on it. With `--json`, each
-is one `{agent}` object. The complete configuration — the agent's `name` and every field — is
-recorded in the root (`docs/trajectory-schema.md` §6, `agent`), shown by `show` and, by name, by
-`tree`, and every later command — `resume`, `html`, `show --view` — builds the agent from it, so
-a run is continued by the agent that started it; none of them takes `--agent` or `--set`.
+- `--agent NAME` names an agent — `mini-swe` (`docs/miniswe.md`) or `mini-vero`
+  (`docs/minivero.md`). `--model NAME` names a model by its ID as its creator publishes it, with
+  no provider prefix — `gpt-oss-120b`, `gpt-6-luna`, `deepseek-v4.1-flash` — whose defaults are a row of the
+  model table: its context and output sizes when known, default `params`, and whether its earlier
+  reasoning is sent back (`echo_reasoning`, on for thinking-mode DeepSeek models).
+- `--set PATH=VALUE`, repeatable and applied in order, overrides one field. PATH starts with
+  `agent.` or `model.` and continues into that object (`agent.mode`,
+  `agent.executor.timeout_seconds`, `model.params.reasoning_effort`, `model.context_tokens`), and
+  VALUE is read as JSON when it parses and as a string otherwise. Each `--set` replaces exactly
+  one key, with no deep merging; an unknown field, or a value of the wrong type, is an input
+  error naming it. `model.params` holds request fields — `temperature`, `reasoning_effort`, … —
+  sent as they are, and nothing else: a field left out takes the provider's default, and one
+  alaya sets itself (`model`, `messages`, `tools`, `tool_choice`, `response_format`, `n`,
+  `stream`) is refused.
+
+`alaya config` lists every agent and model with its complete defaults, and every provider with
+the names it serves models under; `alaya config --agent NAME --model NAME --set …` prints exactly
+the configuration `root` would record, creating nothing — so a variant can be checked before a
+run is spent on it. With `--json`, each is one `{agent}`, `{model}` or `{provider}` object, or
+`{agent, model}` for what root would record. Both are recorded complete in the root
+(`docs/trajectory-schema.md` §6, `agent` and `model`), shown by `show` and, by name, by `tree`,
+and every later command builds them from there, so a run is continued by the agent and the model
+that started it; none of them takes `--agent`, `--model` or `--set`.
 
 **The image.** `root` requires `--image`. The image is resolved to a digest and recorded, and
 every later command runs in it: `resume` takes no `--image`. A recorded image that is missing is
@@ -157,14 +169,26 @@ not `/grader` or `/out`, which the grader mounts.
 
 ### `resume`
 
-`resume` takes the model — `--model PROVIDER:NAME`, `--temperature`, `--echo-reasoning`, and the
-DGX flags `--url`/`--port` (`docs/llm-api.md`) — and `--container-user` and `--network` for the
-run's commands. A container runs with **no network** unless `--network` names one
+`resume` takes who serves the run's model, `--provider NAME` — and for `dgx`, `--url`/`--port`
+— and `--container-user` and `--network` for the run's commands. The provider is this
+invocation's alone and recorded nowhere: a run may be continued through any provider that serves
+its model. Each serves a model under its own name or under a name of its own for it (`alaya
+config` lists them), and declares what it can do for the model; before any request, `resume`
+refuses a provider that cannot meet what the root recorded — one that rejects the earlier
+reasoning the model is sent, or needs it when it is not sent, or takes a shorter context or
+output than the model's (`docs/llm-api.md`). The model cache keys on the model alone, so a
+response is reused whichever provider sent it. A container runs with **no network** unless `--network` names one
 (`--network bridge` is Docker's default network): an agent with network access can go looking
 for its own reference solution, so an image should carry what a task legitimately needs.
 
 **Limits.** Every model step records its wall-clock time on its state (`elapsed_ms`), and a
 run's time is the sum along its path from the root: `show` prints both, `tree` each step's.
+Tokens are kept the same way: each turn's response records what the provider reported — input,
+of which cached, output, of which reasoning — and `show` prints the turn's and the run's from the
+root, `tree` each turn's next to its time, `show --json` both as `usage` and `run_usage`, and the
+HTML report both. A response alaya's own cache replayed cost nothing again, but carries what it
+cost when it was first sampled, so a run's tokens are what its responses cost, and adding them up
+across the tree can count a response two branches share twice.
 `--time-budget SECONDS` (default 0, no limit) is this invocation's alone and recorded nowhere.
 Before each step `resume` checks the run's time against the budget; once spent, it writes
 nothing, says so, and exits with status 4, and a later `resume` — with a larger budget, or

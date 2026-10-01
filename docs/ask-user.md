@@ -155,8 +155,8 @@ spent, Alaya stops without another model call.
 
 ```bash
 alaya root --task-file /path/to/source/MINIVERO_TASK.md /path/to/source \
-  --agent mini-vero --set agent.mode=codeproof --set agent.ask_user=true --data /path/to/run
-alaya resume ROOT --model PROVIDER:MODEL --data /path/to/run --json
+  --agent mini-vero --set agent.mode=codeproof --set agent.ask_user=true --model MODEL --data /path/to/run
+alaya resume ROOT --provider PROVIDER --data /path/to/run --json
 # A question stops resume with exit code 3. Use its state hash below.
 alaya waiting --data /path/to/run
 # For a single-choice question, choose one model-provided candidate:
@@ -165,7 +165,7 @@ alaya reply --data /path/to/run -- QUESTION '2'
 alaya reply --data /path/to/run -- QUESTION 'none_of_above'
 # Alternatively, when the person cannot answer (all supported question types):
 alaya reply --data /path/to/run --unavailable -- QUESTION
-alaya resume REPLY --model PROVIDER:MODEL --data /path/to/run --json
+alaya resume REPLY --provider PROVIDER --data /path/to/run --json
 ```
 
 Place reply text after `--` so an open-ended answer such as `--data` or `-m` is

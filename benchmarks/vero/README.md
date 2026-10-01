@@ -82,8 +82,8 @@ Both modes use MiniVero's defaults — `env: []`, `recover_output: false`, and
 MODE=codeproof    # or proof
 ROOT=$(.lake/build/bin/alaya root "$RUN/source" \
   --task-file "$RUN/MINIVERO_TASK.md" --agent mini-vero --set agent.mode=$MODE \
-  --image "$AGENT" --data "$RUN/audit")
-.lake/build/bin/alaya resume "$ROOT" --model PROVIDER:MODEL --container-user "$(id -u):$(id -g)" \
+  --model MODEL --image "$AGENT" --data "$RUN/audit")
+.lake/build/bin/alaya resume "$ROOT" --provider PROVIDER --container-user "$(id -u):$(id -g)" \
   --time-budget 60 --data "$RUN/audit" --json > "$RUN/first.jsonl"
 ```
 
@@ -92,7 +92,7 @@ failed or finished run. The last JSON row contains the state to resume:
 
 ```sh
 STATE=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().splitlines()[-1])["state"])' "$RUN/first.jsonl")
-.lake/build/bin/alaya resume "$STATE" --model PROVIDER:MODEL \
+.lake/build/bin/alaya resume "$STATE" --provider PROVIDER \
   --time-budget 600 --data "$RUN/audit" --json > "$RUN/continued.jsonl"
 STATE=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().splitlines()[-1])["state"])' "$RUN/continued.jsonl")
 ```

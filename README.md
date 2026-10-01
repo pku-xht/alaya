@@ -38,8 +38,8 @@ export ALAYA_DATA=$PWD/runs    # the data directory; `root` creates it
 
 # Run the agent until it submits, then grade where it ended.
 root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton \
-  --agent mini-swe --image alaya-bija)
-alaya resume "$root" --model PROVIDER:MODEL    # one line per new state; providers: docs/llm-api.md
+  --agent mini-swe --model gpt-oss-120b --image alaya-bija)
+alaya resume "$root" --provider dgx    # one line per new state; `alaya config` lists models, providers
 alaya eval END --input example/bija --grader /grader/grade.py --timeout 1800
 
 # Find the turn where it went wrong, and see what the model was sent there.
@@ -50,7 +50,7 @@ alaya show TURN --view
 # the new branch.
 alaya checkout TURN fix    # its files, to edit by hand in fix/
 fixed=$(alaya commit TURN fix --note "corrected by hand")
-alaya resume "$fixed" --model PROVIDER:MODEL
+alaya resume "$fixed" --provider dgx
 alaya eval END2 --input example/bija --grader /grader/grade.py --timeout 1800
 ```
 

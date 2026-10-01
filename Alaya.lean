@@ -9,6 +9,8 @@ import Alaya.Hash
 import Alaya.Workspaces
 import Alaya.Workspaces.Restic
 import Alaya.Cli
+import Alaya.Settings
+import Alaya.Models
 import Alaya.Provider
 import Alaya.Chat.Schema
 import Alaya.Chat.Stored

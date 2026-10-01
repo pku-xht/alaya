@@ -156,6 +156,11 @@ structure TokenUsage where
   input? : Option Nat := none
   output? : Option Nat := none
   total? : Option Nat := none
+  /-- Of the output, the tokens a reasoning model spent thinking, when it reports them: what a
+  reasoning level costs. -/
+  reasoning? : Option Nat := none
+  /-- Of the input, the tokens the provider served from its prompt cache, when it reports them. -/
+  cached? : Option Nat := none
   deriving Repr, Inhabited
 
 /-- A parsed OpenAI-compatible assistant response: the fields the library reads. Anything else a
@@ -194,7 +199,13 @@ private def usageFromJson? (raw : Lean.Json) : Option TokenUsage :=
     let output? := (usage.getObjVal? "completion_tokens" >>= Lean.Json.getNat?).toOption.orElse fun _ =>
       (usage.getObjVal? "output_tokens" >>= Lean.Json.getNat?).toOption
     let total? := (usage.getObjVal? "total_tokens" >>= Lean.Json.getNat?).toOption
-    some { input?, output?, total? }
+    let reasoning? := (usage.getObjVal? "completion_tokens_details" >>= (·.getObjVal? "reasoning_tokens")
+      >>= Lean.Json.getNat?).toOption
+    -- OpenAI's form, and DeepSeek's own.
+    let cached? := (usage.getObjVal? "prompt_tokens_details" >>= (·.getObjVal? "cached_tokens")
+      >>= Lean.Json.getNat?).toOption.orElse fun _ =>
+        (usage.getObjVal? "prompt_cache_hit_tokens" >>= Lean.Json.getNat?).toOption
+    some { input?, output?, total?, reasoning?, cached? }
   | .error _ => none
 
 private def fencedJson (content : String) : Except String String :=

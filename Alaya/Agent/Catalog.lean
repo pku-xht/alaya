@@ -1,5 +1,6 @@
 import Alaya.Agent.MiniSwe
 import Alaya.Agent.MiniVero
+import Alaya.Settings
 
 /-!
 The agents the command line can run, by name, and how a run's agent is configured.
@@ -47,26 +48,13 @@ def fromJson (json : Lean.Json) : Result Agent := do
   | .ok agent => pure agent
   | .error message => throw <| .input s!"{name}: {message}"
 
-/-- `json` with the value at `path` replaced by `value`, creating the objects on the way. -/
-private def setAt (json : Lean.Json) (path : List String) (value : Lean.Json) : Except String Lean.Json :=
-  match path with
-  | [] => pure value
-  | key :: rest => do
-    let .obj _ := json | throw s!"{key} is inside something that is not an object"
-    let inner := (json.getObjVal? key).toOption.getD (.mkObj [])
-    pure (json.setObjVal! key (← setAt inner rest value))
-
-/-- The agent `name` with each `(path, value)` set in turn over its complete defaults. Every key
-is checked as a configuration file's would be: an unknown one, or a value of the wrong type, is
-an error naming it. -/
-def resolve (name : String) (settings : Array (List String × Lean.Json)) : Result Agent := do
+/-- The agent `name` with the agent's settings applied over its complete defaults. Every key is
+checked as a configuration's would be: an unknown one, or a value of the wrong type, is an error
+naming it. -/
+def resolve (name : String) (settings : Array Settings.Setting) : Result Agent := do
   let defaults ← fromJson (.mkObj [("name", name)])
-  let mut config := defaults.config
-  for (path, value) in settings do
-    if path == ["name"] then throw <| .input "the agent's name is --agent NAME, not a --set"
-    match setAt config path value with
-    | .ok updated => config := updated
-    | .error message => throw <| .input s!"--set agent.{".".intercalate path}: {message}"
-  fromJson config
+  match Settings.apply .agent defaults.config settings with
+  | .ok config => fromJson config
+  | .error message => throw <| .input message
 
 end Alaya.Agent.Catalog

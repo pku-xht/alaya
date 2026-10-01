@@ -50,7 +50,7 @@ assert packages and all(p.is_symlink() and str(p.readlink()).startswith("/opt/ve
 alaya = ROOT / ".lake/build/bin/alaya"
 data = output / "audit"
 root = state_hash(run(alaya, "root", source, "--task-file", output / "MINIVERO_TASK.md",
-                      "--agent", "mini-vero", "--set", "agent.mode=proof", "--image",
+                      "--agent", "mini-vero", "--set", "agent.mode=proof", "--model", "gpt-oss-120b", "--image",
                       args.agent_image, "--data", data).stdout)
 state = json.loads((data / "states" / f"{root}.json").read_text())
 stats = json.loads(run("restic", "--repo", data / "restic", "--insecure-no-password",

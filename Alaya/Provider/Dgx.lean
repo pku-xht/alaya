@@ -1,4 +1,4 @@
-import Alaya.Provider.ChatCompletions
+import Lean.Data.Json
 
 namespace Alaya.Provider.Dgx
 
@@ -39,18 +39,5 @@ def Endpoint.ofUrl (url : String) : Except String Endpoint := do
     | some port => pure { scheme, host, port, path }
     | none => throw s!"'{port}' is not a port number"
   | _ => throw s!"cannot read '{url}' as [scheme://]host[:port][/path]"
-
-/-- An OpenAI-compatible model served by a DGX Spark. `endpoint?` pins the address; left `none`,
-the default is used, overridable with `DGX_BASE_URL`. -/
-def model (name : String) (temperature : Float)
-    (endpoint? : Option Endpoint := none)
-    (canonicalModelName? : Option String := none)
-    (structuredOutput := Chat.StructuredOutput.native) (echoReasoning := false) : Result Model :=
-  ChatCompletions.modelFromEnv "DGX" "DGX_API_KEY"
-    ((endpoint?.getD {}).baseUrl) name temperature
-    (defaultKey? := some "EMPTY")
-    (baseUrlVar? := if endpoint?.isSome then none else some "DGX_BASE_URL")
-    (canonicalModelName? := canonicalModelName?) (structuredOutput := structuredOutput)
-    (echoReasoning := echoReasoning)
 
 end Alaya.Provider.Dgx

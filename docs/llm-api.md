@@ -200,7 +200,7 @@ with retries, batching, or a cache added around it (§3).
 
 ```lean
 structure Model where
-  identity : Lean.Json                -- what makes a response reproducible: model name, temperature, options
+  identity : Lean.Json                -- what is answering: the model's recorded spec
   structuredOutput : Chat.StructuredOutput := .native
   sample : Chat.Request -> Result Model.Stream
 
@@ -220,15 +220,17 @@ model may have a cheaper way: a provider can be asked for n completions in one r
 concurrent batcher (§4) sends n requests at the same time. Such a model puts that way into the
 stream's private field, and `nextN` uses it when present.
 
-**Identity.** `identity` is a JSON value that says what is answering: the model name, the
-temperature, and any other setting of the answering side that the request itself does not carry.
+**Identity.** `identity` is a JSON value that says what is answering: for a provider's model,
+its spec (`Models.Spec`) — the model's name, its `params`, and whether its earlier reasoning is
+sent back — and never the provider, so the same model's answers are the same draws whoever
+served them.
 
 **The cache key.** `Model.cacheKey request` names a draw sequence as a string, so that the cache
 (§4) can store and find the draws of a request. It is the identity and the request together,
 serialized as one JSON object with sorted keys and no whitespace:
 
 ```json
-{"model":{"model":"gpt-5.6-luna","temperature":0},
+{"model":{"context_tokens":null,"echo_reasoning":false,"name":"gpt-5.6-luna","output_tokens":null,"params":{"temperature":0}},
  "request":{"messages":[{"content":"You can run bash.","role":"system"},{"content":"List the files.","role":"user"}],
             "response_format":{"type":"text"},"tool_choice":"auto","tools":[...]},
  "structured_output":"native"}
@@ -261,7 +263,7 @@ flowchart BT
     Caller(["caller"])
 
     Providers -- "POST baseUrl/chat/completions" --> Transport
-    Transport -- "adds model, temperature, n>1; parses Chat.Response" --> Retry
+    Transport -- "adds the provider's model name, params, n>1; parses Chat.Response" --> Retry
     Retry -- "retries 408/409/425/429/5xx; bigger 429 budget, honors Retry-After" --> Batch
     Batch -- "native / concurrent (semaphore) / sequential n draws" --> Cache
     Cache -- "replays cache/hash(key).json; extends entry on miss" --> Caller
@@ -275,46 +277,68 @@ flowchart BT
     Caller -- "model.sample request" --> Stream["Stream { next, nextN }"]
 ```
 
-### Provider transport
+### Models and providers
 
-`Provider.fromSpec "PROVIDER:NAME"` builds the innermost model for one of five providers; the
-name may contain colons, so only the first splits.
+A model is named independently of who serves it, by its ID as its creator publishes it
+(`gpt-oss-120b`, `deepseek-v4.1-flash`), and its defaults are a row of the model table,
+`Alaya.Models`: a `Spec` of `params` — request fields sent as they are, such as `temperature`
+or `reasoning_effort` — whether its earlier reasoning is sent back, and the context
+and output sizes when known. A root records the complete spec (`docs/cli.md` §5).
 
-| Provider | Default endpoint | Key variable | Endpoint override |
-| --- | --- | --- | --- |
-| `yunwu` | `https://yunwu.ai/v1` | `YUNWU_API_KEY` | `YUNWU_BASE_URL` |
-| `closeai` | `https://api.openai-proxy.org/v1` | `CLOSEAI_API_KEY` | — |
-| `xmcp` | `https://llm.xmcp.ltd` | `XMCP_API_KEY` | — |
-| `apiyi` | `https://api.apiyi.com/v1` | `APIYI_API_KEY` | `APIYI_BASE_URL` |
-| `dgx` | `http://10.42.0.1:8000/v1` | `DGX_API_KEY`, default `EMPTY` | `DGX_BASE_URL`, or `--url`/`--port` |
+A provider is who serves it, chosen per invocation (`resume --provider NAME`). Providers are
+data, in `Alaya.Provider`:
 
-A missing key is an environment error, except for `dgx`, where `EMPTY` is the vLLM convention for
-a server that needs no credential. `--url` accepts anything from a bare host to a full URL and
-fills in `http`, port `8000`, and `/v1`; `--port` wins over a port inside `--url`; passing either
-turns off the `DGX_BASE_URL` fallback.
+| Provider | Default endpoint | Key variable | Endpoint override | Serves |
+| --- | --- | --- | --- | --- |
+| `yunwu` | `https://yunwu.ai/v1` | `YUNWU_API_KEY` | `YUNWU_BASE_URL` | any model, under its own name |
+| `closeai` | `https://api.openai-proxy.org/v1` | `CLOSEAI_API_KEY` | — | any model, under its own name |
+| `xmcp` | `https://llm.xmcp.ltd` | `XMCP_API_KEY` | — | any model; `deepseek-v4.1-flash` as `ds/deepseek-v4-flash`, `gpt-5.6-luna` as `closeai/gpt-5.6-luna` |
+| `apiyi` | `https://api.apiyi.com/v1` | `APIYI_API_KEY` | `APIYI_BASE_URL` | any model, under its own name |
+| `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `FIREWORKS_BASE_URL` | only `deepseek-v4.1-flash`, as `accounts/fireworks/models/deepseek-v4p1-flash` |
+| `dgx` | `http://10.42.0.1:8000/v1` | `DGX_API_KEY`, default `EMPTY` | `DGX_BASE_URL`, or `--url`/`--port` | any model, under its own name |
 
-All five are `Provider.ChatCompletions`, the one transport. It serializes the request with
-`Request.toJson`, adds `model` and `temperature` (and `n` for several draws), and POSTs it with
-`curl` to `<baseUrl>/chat/completions` under a connect timeout of 30 s and a total timeout of 10
-minutes. HTTP failures become `Error.http status body retryAfterMs?`, with `Retry-After` parsed
-from the headers; curl failures become `Error.transport`. Its identity is the model name and the
-temperature, plus the reasoning-echo settings when they are on.
+How a provider serves one model is a **route**: the provider's name for it, and what it declares
+it can do — whether it requires, accepts or rejects earlier reasoning sent back, and the largest
+context and response it takes. `Provider.serve provider spec` finds the route and checks the
+spec's requirements against it before any request is sent: a provider that cannot meet them is
+refused (`input`, exit 65), so changing providers either sends the model the same requests or
+fails loudly. The agent may behave differently with different models, but never with different
+providers. A missing key is an environment error, except for `dgx`, where `EMPTY` is the vLLM
+convention for a server that needs no credential. `--url` accepts anything from a bare host to a
+full URL and fills in `http`, port `8000`, and `/v1`; `--port` wins over a port inside `--url`.
+
+All of them are `Provider.ChatCompletions`, the one transport. It serializes the request with
+`Request.toJson`, adds the route's model name, the spec's `params` and nothing else (and `n` for
+several draws), and POSTs it with `curl` to `<baseUrl>/chat/completions` under a connect timeout
+of 30 s and a total timeout of 10 minutes. HTTP failures become `Error.http status body
+retryAfterMs?`, with `Retry-After` parsed from the headers; curl failures become
+`Error.transport`. Its identity is the spec alone. A response's usage keeps, besides input and
+output tokens, the input tokens the provider served from its prompt cache
+(`prompt_tokens_details.cached_tokens`, or DeepSeek's `prompt_cache_hit_tokens`) and the
+reasoning tokens a model reports spending (`completion_tokens_details.reasoning_tokens`), so the
+cache's reuse and the cost of a reasoning level can be measured.
 
 ```lean
-let model ← Provider.fromSpec "xmcp:ds/deepseek-v4-flash" (temperature := 0.0)
+let spec ← Models.resolve "deepseek-v4.1-flash" #[]
+let some apiyi := Provider.named? "apiyi" | …
+let model ← Provider.serve apiyi spec
 ```
 
 **Reasoning echo.** A thinking-mode model such as DeepSeek returns, with each assistant message,
-a `reasoning_content`: the trace it thought through before answering. On the next request it
-demands that field back on *every* assistant message in the history, and rejects the request if
-one lacks it. Two things get in the way. Turns written by another model have no trace at all. And
-a trace runs to tens of kilobytes, so sending every trace back made a twenty-turn request exceed
-half a megabyte and time out.
+a `reasoning_content`: the trace it thought through before answering. The view keeps it, so the
+transport sends each recorded trace back with its message, as it was received. With tool calls,
+DeepSeek's API also rejects a request in which an earlier assistant message lacks the field, and
+a gateway that re-encodes the conversation for another vendor may need it on every reasoned turn
+to reconstruct it. So with `echo_reasoning` on in the model's spec — as `deepseek-v4.1-flash` has
+it — the transport gives every assistant message the field: its own recorded trace, or `""`
+where none was recorded, such as another model's turn or a person's, which the provider accepts
+as present. Off, no field is added; other models reject the unknown field.
 
-With `--echo-reasoning` the transport fills the field in when it serializes the request: the two
-most recent assistant messages get their recorded trace, and every older assistant message gets
-`""` — an empty trace, which the provider accepts as present. The recorded dialogue is untouched;
-only the request differs. Off by default, because other providers reject the unknown field.
+A recorded trace is never changed or dropped, so a message serializes the same on every later
+request and the provider can keep reusing the prefix it has cached. The cost is the earlier
+traces in input tokens. This is how the DeepSeek harness handles it too (its
+`dsh-llm-deepseek` adapter). Shortening the context, if requests grow too large, must keep the
+prefix stable in the same way: dropping old reasoning in large blocks, not a sliding window.
 
 ### Retry
 

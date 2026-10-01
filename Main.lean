@@ -79,12 +79,17 @@ private def executorFor (run : Executor.Docker.RunOptions) (state : State) (conf
 private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Agent := do
   Agent.Catalog.fromJson (← agentOf store hash)
 
-/-- What `resume` takes: what this invocation samples from, and its limits. The image, the
-workdir and the agent are the root's. -/
+/-- `--provider NAME`: who serves the run's model, for this invocation. -/
+private def providerName : Cli.Value Provider.Provider :=
+  .enum "NAME" (Provider.all.map fun p => (p.name, p)).toList
+
+/-- What `resume` takes: who serves the model, and this invocation's limits. The agent, the
+model, the image and the workdir are the root's. -/
 private structure ResumeArgs where
   data : System.FilePath
   state : String
-  model : Provider.Choice
+  provider : Provider.Provider
+  endpoint? : Option Provider.Dgx.Endpoint
   run : Executor.Docker.RunOptions
   /-- Seconds of run time, not recorded; 0 is no limit. -/
   budget : Nat
@@ -95,7 +100,8 @@ private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
   ResumeArgs.mk
     <$> dataDir
     <*> Cli.arg "HASH" .string "the state to continue from; any unambiguous prefix"
-    <*> Provider.Choice.cli
+    <*> Cli.flag "provider" providerName s!"who serves the run's model: {Provider.names}"
+    <*> Provider.endpointCli
     <*> Executor.Docker.RunOptions.cli
     <*> Cli.flagD "time-budget" (.nat "S") 0
       "seconds of run time, summed from the root, after which no turn starts; 0 is no limit"
@@ -104,7 +110,12 @@ private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
 private def runtimeFor (data : DataDir) (work : WorkDir) (a : ResumeArgs) (start : Hash) :
     Result Runtime := do
   let spec ← recordedAgent data.store start
-  let model ← buildModel a.model.spec a.model.temperature data.cache a.model.options
+  let modelSpec ← Models.fromJson (← modelOf data.store start)
+  let baseUrl? ← match a.endpoint?, a.provider.name with
+    | none, _ => pure none
+    | some endpoint, "dgx" => pure (some endpoint.baseUrl)
+    | some _, other => throw <| .input s!"--url and --port address a dgx server, not {other}"
+  let model ← buildModel modelSpec a.provider data.cache baseUrl?
   let executor ← executorFor a.run (← getState data.store start) spec.executorConfig
   pure { store := data.store, workspaces := data.workspaces, workDir := work.path, executor, model
          agent := spec
@@ -176,21 +187,16 @@ private def hashArg (help : String := "the state; any unambiguous prefix") : Cli
 private def agentName : Cli.Value String :=
   .enum "NAME" (Agent.Catalog.all.map fun d => (d.name, d.name)).toList
 
-/-- `--set agent.PATH=VALUE`: one field of the agent's configuration, over its defaults. The
-value is read as JSON when it parses, and as a string otherwise. -/
-private def setting : Cli.Value (List String × Lean.Json) := ⟨"agent.PATH=VALUE", fun text =>
-  match text.splitOn "=" with
-  | path :: value :: rest =>
-    let value := "=".intercalate (value :: rest)
-    match path.splitOn "." with
-    | "agent" :: keys@(_ :: _) =>
-      if keys.any (·.isEmpty) then .error s!"has an empty key in '{path}'"
-      else .ok (keys, (Lean.Json.parse value).toOption.getD (.str value))
-    | _ => .error s!"sets a field of the agent, agent.FIELD, not '{path}'"
-  | _ => .error s!"expects agent.PATH=VALUE, got '{text}'"⟩
+/-- `--model NAME`: a model the table has. -/
+private def modelName : Cli.Value String :=
+  .enum "NAME" (Models.all.map fun m => (m.name, m.name)).toList
 
-private def agentSettings : Cli.Spec (Array (List String × Lean.Json)) :=
-  Cli.repeated "set" setting "a field of the agent's configuration, over its defaults, e.g. agent.mode=codeproof"
+/-- `--set agent.PATH=VALUE` or `--set model.PATH=VALUE`: one field over the defaults. -/
+private def setting : Cli.Value Settings.Setting := ⟨"agent|model.PATH=VALUE", Settings.parse⟩
+
+private def overrides : Cli.Spec (Array Settings.Setting) :=
+  Cli.repeated "set" setting
+    "a field over the agent's or the model's defaults, e.g. agent.mode=codeproof, model.params.reasoning_effort=high"
 
 /-- What `root` takes. -/
 private structure RootArgs where
@@ -200,7 +206,8 @@ private structure RootArgs where
   image : String
   workdir : String
   agent : String
-  settings : Array (List String × Lean.Json)
+  model : String
+  settings : Array Settings.Setting
 
 private def RootArgs.cli : Cli.Spec RootArgs :=
   RootArgs.mk
@@ -213,11 +220,13 @@ private def RootArgs.cli : Cli.Spec RootArgs :=
     <*> Cli.flagD "workdir" (.string "PATH") Executor.Docker.defaultWorkdir
       "where the workspace is mounted in the image"
     <*> Cli.flag "agent" agentName s!"the agent: {Agent.Catalog.names}"
-    <*> agentSettings
+    <*> Cli.flag "model" modelName s!"the model: {Models.names}"
+    <*> overrides
 
 private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
   -- A configuration that is wrong is said so before anything is created.
   let spec ← Agent.Catalog.resolve a.agent a.settings
+  let model ← Models.resolve a.model a.settings
   let task ← a.task.read "task"
   -- Before the data directory is created: inside the project it would become part of it.
   if let some project := a.project? then
@@ -229,7 +238,7 @@ private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
     let log := spec.initialLog task uname
     let project ← rootProject data settings (a.project?.map (·.toString))
     let hash ← createRoot data.store data.workspaces log project settings.image (some task) spec.config
-      a.workdir
+      model.toJson a.workdir
     stateLine data out hash
     pure 0
 
@@ -238,7 +247,7 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
     let start ← resolve data.store a.state
     let rt ← runtimeFor data (← openWork data) a start
     try
-      let (stopped, halt) ← resume rt a.model.spec start (stateLine data out)
+      let (stopped, halt) ← resume rt start (stateLine data out)
         (turns? := if a.turns == 0 then none else some a.turns)
       match halt with
       | .outOfTime =>
@@ -263,18 +272,42 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
 
 /-! ### Configuration -/
 
-/-- The agents and their defaults, or the configuration `root` would record for these flags. -/
-private def configRun (agent? : Option String) (settings : Array (List String × Lean.Json))
+private def providerJson (provider : Provider.Provider) : Lean.Json :=
+  .mkObj [("name", provider.name), ("base_url", provider.baseUrl),
+    ("base_url_var", provider.baseUrlVar?.map Lean.Json.str |>.getD .null),
+    ("key_var", provider.keyVar), ("any_model", provider.anyModel),
+    ("routes", .arr (provider.routes.toArray.map fun (model, route) =>
+      .mkObj [("model", model), ("name", route.name)]))]
+
+private def providerText (provider : Provider.Provider) : String :=
+  let serves := if !provider.anyModel then "only these models:"
+    else if provider.routes.isEmpty then "any model, under its own name"
+    else "any model under its own name, and these under others:"
+  let routes := provider.routes.map fun (model, route) => s!"\n  {model} as {route.name}"
+  s!"provider {provider.name}: {provider.baseUrl}, key {provider.keyVar}; serves {serves}" ++ String.join routes
+
+/-- The agents, models and providers with their defaults, or the configuration `root` would
+record for these flags. -/
+private def configRun (agent? model? : Option String) (settings : Array Settings.Setting)
     (out : Cli.Out) : Result UInt32 := do
-  match agent? with
-  | none =>
-    if !settings.isEmpty then throw <| .input "--set needs --agent NAME, the agent it changes"
+  for setting in settings do
+    if setting.target == .agent && agent?.isNone then
+      throw <| .input "--set agent.… needs --agent NAME, the agent it changes"
+    if setting.target == .model && model?.isNone then
+      throw <| .input "--set model.… needs --model NAME, the model it changes"
+  if agent?.isNone && model?.isNone then
     for definition in Agent.Catalog.all do
       let agent ← Agent.Catalog.resolve definition.name #[]
-      out.record (.mkObj [("agent", agent.config)]) agent.config.pretty
-  | some name =>
-    let agent ← Agent.Catalog.resolve name settings
-    out.record (.mkObj [("agent", agent.config)]) agent.config.pretty
+      out.record (.mkObj [("agent", agent.config)]) s!"agent {agent.config.pretty}"
+    for spec in Models.all do
+      out.record (.mkObj [("model", spec.toJson)]) s!"model {spec.toJson.pretty}"
+    for provider in Provider.all do
+      out.record (.mkObj [("provider", providerJson provider)]) (providerText provider)
+    return 0
+  let mut fields : List (String × Lean.Json) := []
+  if let some name := agent? then fields := fields ++ [("agent", (← Agent.Catalog.resolve name settings).config)]
+  if let some name := model? then fields := fields ++ [("model", (← Models.resolve name settings).toJson)]
+  out.record (.mkObj fields) (Lean.Json.mkObj fields).pretty
   pure 0
 
 /-! ### Grading -/
@@ -431,6 +464,8 @@ private def showRun (data : System.FilePath) (state : String) (view : Bool) (out
         ("kind", s.kind.toString), ("events", .arr (s.appended.map eventToJson))]
       let json := state.toJson |>.setObjVal! "state" hash.hex
         |>.setObjVal! "run_time_ms" (← elapsedMs data.store hash)
+        |>.setObjVal! "usage" (state.usage?.map (·.toStored) |>.getD .null)
+        |>.setObjVal! "run_usage" (← runUsage data.store hash).toStored
         |>.setObjVal! "history" (.arr history)
       let json := match view? with
         | some view =>
@@ -484,18 +519,21 @@ private def commands : Array Cli.Command := #[
     summary := "Create a root: the agent's opening prompts for a task, and a snapshot of the project."
     examples := #[
       "alaya root --task 'Add a hello.py that prints hello' ./project " ++
-        "--agent mini-swe --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
-      "alaya root --task-file TASK.md --agent mini-vero --set agent.mode=codeproof --image my-task:1 --workdir /testbed"]
+        "--agent mini-swe --model gpt-oss-120b --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
+      "alaya root --task-file TASK.md --agent mini-vero --model deepseek-v4.1-flash --set agent.mode=codeproof " ++
+        "--set model.params.reasoning_effort=high --image my-task:1 --workdir /testbed"]
     spec := rootRun <$> RootArgs.cli },
   { name := "config"
-    summary := "The agents with their defaults, or the configuration root would record; creates nothing."
-    examples := #["alaya config", "alaya config --agent mini-vero --set agent.mode=codeproof"]
+    summary := "The agents, models and providers, or the configuration root would record; creates nothing."
+    examples := #["alaya config",
+      "alaya config --agent mini-vero --model deepseek-v4.1-flash --set agent.mode=codeproof --set model.params.reasoning_effort=high"]
     spec := configRun <$> Cli.flag? "agent" agentName s!"the agent: {Agent.Catalog.names}"
-      <*> agentSettings },
+      <*> Cli.flag? "model" modelName s!"the model: {Models.names}"
+      <*> overrides },
   { name := "resume"
     summary := "Grow one continuation until the run ends, asks a question, or reaches a limit."
-    examples := #["alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash --time-budget 3600 --json",
-      "alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash --turns 1"]
+    examples := #["alaya resume 4f2c8b --provider apiyi --time-budget 3600 --json",
+      "alaya resume 4f2c8b --provider dgx --url spark.local:9000 --turns 1"]
     spec := resumeRun <$> ResumeArgs.cli },
   { name := "eval"
     summary := "Grade a state: run a grader over a fresh copy and record its TAP verdict as a leaf."

@@ -106,8 +106,8 @@ def suite : Suite := Testing.suite "read_output" #[
     let rt : Runtime := { store, workspaces, workDir := work, executor, model
                           agent := agent config }
     let root ← assertOk <| createRoot store workspaces (initialLog config "t" testUname ++ recorded) project
-      (← testImage) (agent := testAgent)
-    let child ← stepped <| step rt "test" root
+      (← testImage) (agent := testAgent) (model := testModel)
+    let child ← stepped <| step rt root
     let state ← assertOk <| getState store child
     assertEqual "same workspace" state.workspace (← assertOk <| getState store root).workspace
     match state.appended.back? with

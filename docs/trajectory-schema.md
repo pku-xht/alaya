@@ -22,7 +22,7 @@ a restic repository and named by its snapshot ID (§5).
 ```sh
 export ALAYA_DATA=$PWD/runs   # the data directory every command below uses (§5)
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
-root=$(alaya root --task "make the test suite pass" ./project --agent mini-swe --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
+root=$(alaya root --task "make the test suite pass" ./project --agent mini-swe --model gpt-oss-120b --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
 
 alaya show adbac1          # the state: kind, parent, workspace snapshot, note, image, then its log
@@ -84,8 +84,8 @@ last allowed model turn. The driver then records a terminal `turn` with empty `a
 the parent's workspace and the agent's outcome, without calling the model.
 
 Besides the three parts, a state carries what the run needs to continue and what a reader wants
-to know: the container `image` and `workdir`, set on the root and inherited; on the root, the `agent?` configuration the run is continued with (`docs/cli.md` §5); a `note?` of provenance (the model spec for a turn, the task for a root, the note for
-an intervention); the `outcome?` when the state ended the run; the `question?` a turn is
+to know: the container `image` and `workdir`, set on the root and inherited; on the root, the `agent?` configuration and the `model?` spec the run is continued with
+(`docs/cli.md` §5); a `note?` of provenance (the task for a root, the note for an intervention); the `outcome?` when the state ended the run; the `question?` a turn is
 waiting on; the `intervention?` record behind a notice; and the `evaluation?` verdict.
 
 *The run used in the examples of this page, as a tree. Dashed: an evaluation, a leaf.*
@@ -152,8 +152,8 @@ flowchart TD
 ```
 
 ```sh
-alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash --turns 1   # exactly one turn
-alaya resume 4f2c8b --model xmcp:ds/deepseek-v4-flash             # turns until the run ends or asks
+alaya resume 4f2c8b --provider xmcp --turns 1   # exactly one turn
+alaya resume 4f2c8b --provider xmcp             # turns until the run ends or asks
 ```
 
 `resume` prints one line per new state and ends with `done: Submitted`, with the question it
@@ -199,9 +199,9 @@ flowchart LR
 ```
 
 ```sh
-alaya resume 2c7f0a --model M --turns 1   # 2c7f0a has one turn child, e5a1c3 (draw 0),
+alaya resume 2c7f0a --provider P --turns 1   # 2c7f0a has one turn child, e5a1c3 (draw 0),
                                           # so this is draw 1: a new sample, a fork
-alaya resume 2c7f0a --model M --turns 1   # draw 2
+alaya resume 2c7f0a --provider P --turns 1   # draw 2
 alaya tree                                # 2c7f0a now has three turn children, siblings
 ```
 
@@ -249,7 +249,7 @@ alaya commit 4f2c8b ./fix --note "fixed the fixture"
 # 9d0e11a2b7c4
 alaya tell 9d0e11 "I fixed the identifier lookup in src/app.py; re-run the suite."
 # 3f81c0d2a9e4
-alaya resume 3f81c0 --model M   # the agent continues, having read both notices
+alaya resume 3f81c0 --provider P   # the agent continues, having read both notices
 ```
 
 ```mermaid
@@ -273,7 +273,7 @@ continuation from the parent still receives the draw its turn children imply.
 ```sh
 alaya tell 2c7f0a "The failing test is the one to trust; do not edit tests/."
 # 3a9b7e2c1d40                                  a message child of 2c7f0a
-alaya resume 3a9b7e --model M
+alaya resume 3a9b7e --provider P
 ```
 
 ```mermaid
@@ -341,7 +341,7 @@ workspace and follows the same continuation and budget rules. See
 for branch history and snapshot browsing.
 
 ```sh
-$ alaya resume 4f2c8b --model M
+$ alaya resume 4f2c8b --provider P
 c61754d16c7a  ask  "Should I keep the old API?"  [Waiting]
 $ echo $?
 3
@@ -349,7 +349,7 @@ $ alaya waiting
 c61754d16c7a  "Should I keep the old API?"
 $ alaya reply c61754 "Keep it; add the new one beside it."
 8f2e6b0d4a17
-$ alaya resume 8f2e6b --model M
+$ alaya resume 8f2e6b --provider P
 ```
 
 ```mermaid
@@ -369,11 +369,11 @@ and `waiting --json` lists the open ones (exit statuses and JSON in `docs/cli.md
 loop is: resume; on exit 3 read the question, decide, `reply`; resume from the reply's hash.
 
 ```sh
-alaya resume "$hash" --model M --json
+alaya resume "$hash" --provider P --json
 # {"state":"c61754…","kind":"turn","outcome":null,"question":"Should I keep the old API?","question_type":"open_ended","options":[]}
 # exit status 3
 reply=$(alaya reply c61754 "Keep it; add the new one beside it.")
-alaya resume "$reply" --model M --json
+alaya resume "$reply" --provider P --json
 ```
 
 ## 4. Evaluation
@@ -624,8 +624,9 @@ with a field missing or of another type: nothing is read with a default.
 | `note` | string or null | provenance |
 | `image` | string | the pinned container image, set on the root and inherited |
 | `workdir` | string | where the workspace is mounted in the image, set on the root and inherited |
-| `elapsed_ms` | integer or null | on a model step (`turn`, `question`), its wall-clock time: from before the model call to after its last act and snapshot; a run's time is the sum from the root |
+| `elapsed_ms` | integer or null | on a model step (a `turn`), its wall-clock time: from before the model call to after its last act and snapshot; a run's time is the sum from the root |
 | `agent` | object or null | on a root, the agent's complete configuration (`docs/cli.md` §5), which every root records; null elsewhere |
+| `model` | object or null | on a root, the model's complete spec (`docs/cli.md` §5): `{name, params, echo_reasoning, context_tokens, output_tokens}`, which every root records; null elsewhere |
 | `evaluation` | object or null | `{command, graderImage, input, status, checks, reason, returncode, elapsedMs, output}` on an evaluation (§4) |
 | `intervention` | object or null | `{message, changed: ["M path", "+ path", "- path", …]}` on a state that carried a notice |
 | `question` | object or null | `{call_id, text, question_type, options}` on a waiting state |
@@ -636,7 +637,7 @@ An **event** is one of:
 {"type": "message", "message": {"role": "system"|"user", "content": "…"}}
 {"type": "message", "message": {"role": "assistant", "content": …, "reasoning": …, "tool_calls": [call…]}}
 {"type": "message", "message": {"role": "tool", "tool_call_id": "…", "content": <json>}}
-{"type": "response", "response": {"content", "tool_calls": [call…], "reasoning", "finish_reason", "usage": {"input", "output", "total"}}}
+{"type": "response", "response": {"content", "tool_calls": [call…], "reasoning", "finish_reason", "usage": {"input", "output", "total", "reasoning", "cached"}}}
 {"type": "observation", "call_id": "…", "content": <json>}
 ```
 
