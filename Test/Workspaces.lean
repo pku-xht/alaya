@@ -19,7 +19,7 @@ private structure Backend where
   «open» : TestM Workspaces
 
 private def backends : Array Backend := #[
-  { name := "restic", «open» := do assertOk <| Workspaces.Restic.open ((← scratch) / "restic") },
+  { name := "restic", «open» := do assertOk <| Workspaces.Restic.open ((← scratch) / "restic") ((← scratch) / "restic-scratch") },
   { name := "copies", «open» := Testing.workspaces }]
 
 private def run (args : Array String) : TestM Unit := do
@@ -238,10 +238,10 @@ def pathSuite : Suite := Testing.suite "workspaces.paths" #[
   test "a path that does not exist yet resolves against the directories that do" do
     let base ← IO.FS.realPath (← scratch)
     assertEqual "absolute" (← Workspaces.resolved ((← scratch) / "new" / "deeper")) (base / "new" / "deeper")
-    -- A bare name, as the default data directory `.alaya` is, is relative to where we are.
+    -- A bare name, such as a data directory given as `--data runs`, is relative to where we are.
     assertEqual "bare name" (← Workspaces.resolved "no-such-directory-here")
       ((← IO.FS.realPath (← IO.currentDir)) / "no-such-directory-here")
-    check (Workspaces.overlap (base / "p") (base / "p" / ".alaya")) "a directory overlaps what it holds"
+    check (Workspaces.overlap (base / "p") (base / "p" / "runs")) "a directory overlaps what it holds"
     check (!Workspaces.overlap (base / "p") (base / "p2")) "a shared name prefix is not an overlap",
 
   test "safeRelativePath accepts only clean relative paths" do
@@ -256,7 +256,7 @@ def resticSuite : Suite := Testing.suite "workspaces.restic" #[
   test "the run's own storage is refused as a checkout target and as a snapshot source" do
     let data := (← scratch) / "data"
     let store ← assertOk <| Trajectory.Store.create (data / "states")
-    let workspaces ← assertOk <| Workspaces.Restic.open (data / "restic") (keep := #[store.dir])
+    let workspaces ← assertOk <| Workspaces.Restic.open (data / "restic") (data / "restic-scratch") (keep := #[store.dir])
     let project ← source
     writeSpec project baseSpec
     let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t") (agent := testAgent)
@@ -279,7 +279,7 @@ def resticSuite : Suite := Testing.suite "workspaces.restic" #[
 def trajectorySuite : Suite := Testing.suite "workspaces.trajectory" #[
   test "a root, a commit, its diff, an evaluation and a removal, over restic" do
     let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
-    let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic")
+    let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic") ((← scratch) / "restic-scratch")
     let project ← source
     writeSpec project baseSpec
     let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t") (agent := testAgent)

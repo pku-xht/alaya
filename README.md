@@ -26,11 +26,13 @@ Nothing an agent or a grader asks for runs on the host: every trajectory is crea
 `--image`, its commands run in that image, and its graders in that image or one of their own,
 so a running docker daemon is required, for the tests too. `restic` is a single binary, and `chmod` is on any Unix host.
 
-A first run needs an image, a project directory, a task, and a model (`docs/llm-api.md` lists
-the providers). `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` — Debian, Python 3.12, and `uv` —
-is a good default image; `alaya` records it by digest:
+A first run needs a data directory, an image, a project directory, a task, and a model
+(`docs/llm-api.md` lists the providers). Every command names the data directory with `--data DIR`
+or reads `ALAYA_DATA`; `root` creates it. `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` —
+Debian, Python 3.12, and `uv` — is a good default image; `alaya` records it by digest:
 
 ```sh
+export ALAYA_DATA=$PWD/runs
 root=$(alaya root --task "Add a hello.py that prints hello" ./project \
   --agent agents/mini-swe-default.json --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
 alaya resume "$root" --model PROVIDER:MODEL

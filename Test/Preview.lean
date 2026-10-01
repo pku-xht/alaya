@@ -73,7 +73,7 @@ def suite : Suite := Testing.suite "preview" #[
     assertEqual "never list through a link" (← listings.get) #["", ""],
 
   test "previews and listings read the snapshot, never the live directory" do
-    let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic")
+    let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic") ((← scratch) / "restic-scratch")
     let source := (← scratch) / "source"
     writeSpec source #[ ("code.lean", "old code"), ("nested/proof.lean", "old proof"),
       (".hidden/config", "hidden"), ("literal[1]*?.txt", "literal filename") ]

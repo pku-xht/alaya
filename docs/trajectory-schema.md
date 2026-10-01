@@ -19,6 +19,7 @@ workspace is recorded as a **snapshot**: the content of the directory the agent 
 a restic repository and named by its snapshot ID (§5).
 
 ```sh
+export ALAYA_DATA=$PWD/runs   # the data directory every command below uses (§5)
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
 root=$(alaya root --task "make the test suite pass" ./project --agent agents/mini-swe-default.json --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
@@ -206,7 +207,8 @@ alaya tree                                # 2c7f0a now has three turn children, 
 Replay needs no command of its own. If the second `resume` had been interrupted after the model
 answered but before the child was written, running it again asks for draw 1 again and receives
 the recorded response without a provider call. Likewise `alaya rm HASH` followed by a `resume`
-from its parent reproduces the deleted branch draw for draw, as long as `.alaya/cache` is kept.
+from its parent reproduces the deleted branch draw for draw, as long as the data directory's
+`cache/` is kept.
 
 ## 3. People in the tree
 
@@ -487,16 +489,20 @@ alaya ls 7b19d4 .report           # the reports the grader left in the checkout
 
 ## 5. On disk
 
-The data directory (`--data D`, default `.alaya`) holds everything one set of runs needs:
+The data directory, `D`, holds everything one set of runs needs. Every command names it with
+`--data D`, or reads `ALAYA_DATA`; there is no default, so a command run from the wrong place
+cannot quietly begin a new one. `root` creates it, and every other command refuses a path that
+holds none.
 
 | Path | Contents |
 | --- | --- |
 | `D/states/<64 hex>.json` | one file per state object, named by the SHA-256 of its bytes; the set of these files *is* the forest |
 | `D/restic/` | the [restic](https://restic.net) repository holding every workspace snapshot |
-| `D/restic-scratch/` | where files read out of a snapshot land; emptied after each use |
 | `D/cache/v1/<hash>.json` | model response cache entries (§7) |
-| `D/work/` | the working directory; re-materialized at every checkout, holds nothing durable |
-| `D/eval/` | a grader's checkout and output directory; emptied before every evaluation |
+| `D/tmp/<id>/` | one command's scratch, removed when it ends: `work/`, the working directory, re-materialized at every checkout; `eval/`, a grader's checkout; `restic/`, where files read out of a snapshot land |
+
+Everything but `tmp/` lasts. Each command has a scratch directory of its own, so commands on one
+data directory do not share a working directory.
 
 A state is written once, as a finished temporary file renamed into place, and never changes: its
 name is the hash of its bytes, which is also what its children's `parent` holds. `rm` deletes
@@ -561,15 +567,15 @@ links, extended attributes. The identifier is the restic snapshot ID.
 | `snapshot` | `restic backup . --no-scan --host alaya`, run inside the directory so paths are relative to it; a snapshot that could not read every file is a failure |
 | `materialize` | `restic restore ID --target DIR --delete --overwrite always`: in place, comparing content, not times, after the directory is made writable |
 | `diff` | `restic diff A B --json` without `--metadata`, folded so that a directory stands for its subtree; for a type change whose new side is a file, one `restic ls` of the old side tells whether a directory was replaced |
-| `readFiles` | one `restic restore ID --include …` of just those paths into `D/restic-scratch`, read back from there |
+| `readFiles` | one `restic restore ID --include …` of just those paths into the command's scratch, read back from there |
 | `listEntries` | `restic ls ID --json /PATH`, immediate directory metadata only |
 | `retainOnly` | `restic forget` of the rest, then `restic prune` |
 
 A snapshot or a checkout of a directory that overlaps the run's own storage — the repository,
 `D/states`, `D/cache` — is refused before anything is touched: the one would capture the
-storage, and the other deletes what the snapshot does not hold, which is the storage. So
-`alaya checkout STATE .` beside `.alaya`, and `alaya root --task T .` with the default data
-directory, are errors that say to move one of the two.
+storage, and the other deletes what the snapshot does not hold, which is the storage. So a
+checkout into the data directory, or a root of a project that contains it, is an error that says
+to move one of the two.
 
 Every operation is one `restic` process with `--no-cache --insecure-no-password`: the repository
 sits beside the states, which are not encrypted either. It is restic's own format, so `restic
@@ -592,7 +598,7 @@ project with Mathlib — 7.2 GB in 121,433 files, an Apple M5 Pro's internal vol
 *What is on disk: the data directory, and what a state object refers to.*
 
 ```
-$ ls .alaya/cache/v1 | head -2
+$ ls "$ALAYA_DATA"/cache/v1 | head -2
 1180723829451067366.json
 5029385371209364131.json
 ```
@@ -672,7 +678,7 @@ identity including options such as reasoning echo — changes the key, and a for
 one will not replay under another.
 
 ```
-$ ls .alaya/cache/v1 | head -2
+$ ls "$ALAYA_DATA"/cache/v1 | head -2
 1180723829451067366.json
 5029385371209364131.json
 ```
@@ -698,7 +704,7 @@ alaya checkout HASH DIR                          materialize a state's workspace
 alaya tree                                       show the whole forest
 alaya show HASH [--view]                         metadata, the log, and optionally the view
 alaya diff A B                                   workspace changes between two states
-alaya html [FILE] [--hide DIR]                   write the forest as one self-contained page
+alaya html FILE [--hide DIR]                     write the forest as one self-contained page
 alaya rm HASH                                    delete a subtree and the snapshots only it used
 alaya help [COMMAND]                             what a command takes; `help --json` for all of them
 ```
@@ -710,7 +716,7 @@ anything is created, not an empty task. Either way the task is saved in the open
 root's note, so the first request carries all of it without a tool read: a task specification
 too long for a command's output preview reaches the model whole, its middle included.
 
-Every command takes `--data D`, `--json` and `--help`.
+Every command takes `--data D` (or `ALAYA_DATA`, §5), `--json` and `--help`.
 
 **The command line.** Every command declares what it takes (`Alaya.Cli`), and the command comes
 first. A command refuses an option it does not take, naming the nearest one it does; a switch
@@ -787,8 +793,9 @@ solution, so an image should carry what a task legitimately needs.
 
 Exit status: 0 when a run ended, 3 when it stopped at a question, 4 when it stopped at its turns
 or its time budget, 1 on an error or a command line that does not parse; `eval` exits with
-its verdict (§4), and 5 for a command line that does not parse, as for any other missing verdict. Concurrent runs
-need separate data directories: the work directory and the cache are not shared safely.
+its verdict (§4), and 5 for a command line that does not parse, as for any other missing verdict. Commands may run
+concurrently on one data directory, each in its own scratch, except that two appending to the
+same model cache entry at once can lose a draw.
 
 ## 9. Invariants
 

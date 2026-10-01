@@ -370,7 +370,7 @@ Concurrent streams in one process serialize extensions of the same entry; a cach
 not be written by two processes.
 
 ```lean
-let model ← Cache.persistent model { directory := ".alaya/cache" }
+let model ← Cache.persistent model { directory := "runs/cache" }
 ```
 
 *A cache lookup by draw index: replay on a hit, a provider call for the missing draws on a miss.*

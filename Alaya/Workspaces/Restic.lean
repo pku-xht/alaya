@@ -233,15 +233,15 @@ def version (settings : Settings) : Result (Nat × Nat) := do
     | _, _ => throw unrecognized
   | _ => throw unrecognized
 
-/-- The snapshots kept in `repository`, which is created if it does not exist. `keep` names the
-rest of the run's storage, which like the repository no snapshot or checkout may overlap. -/
-def «open» (repository : System.FilePath) (keep : Array System.FilePath := #[])
+/-- The snapshots kept in `repository`, which is created if it does not exist. Files read out of a
+snapshot land in `scratch`, which the caller owns and removes. `keep` names the rest of the run's
+storage, which like the repository no snapshot or checkout may overlap. -/
+def «open» (repository scratch : System.FilePath) (keep : Array System.FilePath := #[])
     (program : String := "restic") : Result Workspaces := do
   -- Absolute, because `backup` runs from inside the directory it snapshots.
   let repository ← Result.fromIO Error.storage do
     IO.FS.createDirAll repository
     IO.FS.realPath repository
-  let scratch := repository.withFileName "restic-scratch"
   let settings : Settings := { repository, scratch, kept := #[repository, scratch] ++ keep, program }
   let (major, minor) ← version settings
   if major == 0 && minor < 17 then

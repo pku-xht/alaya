@@ -1,6 +1,5 @@
 # cache and other artifacts produced by Lean's Lake build tool
 .lake/
-.alaya/
 
 # Python helper caches
 __pycache__/

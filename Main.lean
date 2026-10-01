@@ -12,31 +12,51 @@ private def emit (s : String) : Result Unit := Result.fromIO Error.storage (IO.p
 private def emitLines (lines : Array String) : Result Unit :=
   lines.forM emit
 
-/-- The data directory (`--data`, default `.alaya`); its layout is in `docs/trajectory-schema.md` §5. -/
+/-- The data directory (`--data`, or `ALAYA_DATA`); its layout is in `docs/trajectory-schema.md`
+§5. A command opens it with `withData`, which gives the command a scratch directory of its own. -/
 private structure DataDir where
   path : System.FilePath
   store : Store
   workspaces : Workspaces
+  /-- This command's scratch, `tmp/<id>`: its work directory, a grader's checkout, restic's
+  restores. Nothing in it lasts past the command, and no other command shares it. -/
+  scratch : System.FilePath
 
 private def DataDir.cache (data : DataDir) : System.FilePath := data.path / "cache"
 
-private def openDataAt (path : System.FilePath) : Result DataDir := do
+/-- Opens the data directory at `path` for one command and runs `f` on it. Only `root` creates
+one (`create`): any other command needs one that exists, so a wrong path is an error rather than
+an empty forest. The command's scratch directory is removed when it ends, however it ends. -/
+private def withData (path : System.FilePath) (f : DataDir → Result α) (create := false) :
+    Result α := do
+  if !create && !(← Result.fromIO Error.storage (path / "states").isDir) then
+    throw <| .configuration s!"no data directory at {path}: `alaya root --data {path}` creates one"
   let store ← Store.create (path / "states")
-  -- The states and the model cache are as much the run as the repository is.
-  let workspaces ← Workspaces.Restic.open (path / "restic") (keep := #[store.dir, path / "cache"])
-  pure { path, store, workspaces }
+  let id := s!"{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"
+  let scratch := path / "tmp" / id
+  Result.fromIO Error.storage (IO.FS.createDirAll scratch)
+  try
+    -- The states and the model cache are as much the run as the repository is.
+    let workspaces ← Workspaces.Restic.open (path / "restic") (scratch / "restic")
+      (keep := #[store.dir, path / "cache"])
+    f { path, store, workspaces, scratch }
+  finally
+    Workspaces.makeWritable scratch
+    Result.fromIO Error.storage (IO.FS.removeDirAll scratch)
 
-/-- `--data`, which every command takes. -/
+/-- `--data`, which every command takes, or `ALAYA_DATA`: there is no default, so a command run
+from the wrong directory cannot quietly start a new data directory. -/
 private def dataDir : Cli.Spec System.FilePath :=
-  Cli.flagD "data" (.path "DIR") ".alaya" "the data directory"
+  (Cli.flag? "data" (.path "DIR") "the data directory" (env? := some "ALAYA_DATA")).required
+    "no data directory: give --data DIR, or set ALAYA_DATA"
 
-/-- The work directory, always `DATA/work`: not configurable, so no path a user names can be
-destroyed by a checkout, and the store and the cache are out of its reach by construction. -/
+/-- The work directory, in the command's scratch: not configurable, so no path a user names can
+be destroyed by a checkout, and the store and the cache are out of its reach by construction. -/
 private structure WorkDir where
   path : System.FilePath
 
 private def openWork (data : DataDir) : Result WorkDir := do
-  let path := data.path / "work"
+  let path := data.scratch / "work"
   Result.fromIO Error.storage (IO.FS.createDirAll path)
   pure { path }
 
@@ -180,41 +200,41 @@ private def rootRun (a : RootArgs) (out : Cli.Out) : Result UInt32 := do
   -- Before the data directory is created: inside the project it would become part of it.
   if let some project := a.project? then
     Workspaces.refuseOverlap "snapshot" project #[a.data]
-  let data ← openDataAt a.data
-  Executor.Docker.checkWorkdir a.workdir #[graderInput]
-  let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
-  let uname ← Executor.Docker.uname settings
-  let spec ← Agent.Families.fromFile a.agent
-  let log := spec.initialLog task uname
-  let project ← rootProject data settings (a.project?.map (·.toString))
-  let hash ← createRoot data.store data.workspaces log project settings.image (some task) spec.config
-    a.workdir
-  stateLine data out hash
-  pure 0
+  withData a.data (create := true) fun data => do
+    Executor.Docker.checkWorkdir a.workdir #[graderInput]
+    let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
+    let uname ← Executor.Docker.uname settings
+    let spec ← Agent.Families.fromFile a.agent
+    let log := spec.initialLog task uname
+    let project ← rootProject data settings (a.project?.map (·.toString))
+    let hash ← createRoot data.store data.workspaces log project settings.image (some task) spec.config
+      a.workdir
+    stateLine data out hash
+    pure 0
 
 private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt a.data
-  let start ← resolve data.store a.state
-  let rt ← runtimeFor data (← openWork data) a start
-  try
-    let stopped ← resume rt a.model.spec start (stateLine data out)
-      (turns? := if a.turns == 0 then none else some a.turns)
-    if stopped.outOfTime then
-      let used ← elapsedMs data.store stopped.state
-      out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("time_budget_spent", true),
-          ("run_time_ms", used)])
-        s!"time budget spent: {stopped.state.hex} has run {seconds used}; resume it to continue"
-      return exitStopped
-    if stopped.outOfTurns then
-      out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("turns_spent", true),
-          ("turns", a.turns)])
-        s!"{a.turns} turn(s) taken: resume {stopped.state.hex} to continue"
-      return exitStopped
-    if let some o := (← getState data.store stopped.state).outcome? then
-      out.note s!"done: {o.status}"
-    exitFor data stopped.state
-  finally
-    Result.fromIO Error.storage rt.executor.close
+  withData a.data fun data => do
+    let start ← resolve data.store a.state
+    let rt ← runtimeFor data (← openWork data) a start
+    try
+      let stopped ← resume rt a.model.spec start (stateLine data out)
+        (turns? := if a.turns == 0 then none else some a.turns)
+      if stopped.outOfTime then
+        let used ← elapsedMs data.store stopped.state
+        out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("time_budget_spent", true),
+            ("run_time_ms", used)])
+          s!"time budget spent: {stopped.state.hex} has run {seconds used}; resume it to continue"
+        return exitStopped
+      if stopped.outOfTurns then
+        out.record (Lean.Json.mkObj [("state", stopped.state.hex), ("turns_spent", true),
+            ("turns", a.turns)])
+          s!"{a.turns} turn(s) taken: resume {stopped.state.hex} to continue"
+        return exitStopped
+      if let some o := (← getState data.store stopped.state).outcome? then
+        out.note s!"done: {o.status}"
+      exitFor data stopped.state
+    finally
+      Result.fromIO Error.storage rt.executor.close
 
 /-! ### Grading -/
 
@@ -242,12 +262,11 @@ private def EvalArgs.cli : Cli.Spec EvalArgs :=
 
 private def evalRun (a : EvalArgs) (out : Cli.Out) : Result UInt32 := do
   -- The exit status is the verdict's; an error before one is recorded has its own.
-  try
-    let data ← openDataAt a.data
+  try withData a.data fun data => do
     let target ← resolve data.store a.state
     let targetState ← getState data.store target
     let settings ← Executor.Docker.settingsOf { user? := a.user? } targetState.image targetState.workdir
-    let node ← evaluate data.store data.workspaces (data.path / "eval") target a.grader
+    let node ← evaluate data.store data.workspaces (data.scratch / "eval") target a.grader
       settings.user? a.input? a.graderImage? a.timeout
     let some e := (← getState data.store node).evaluation?
       | throw <| .storage "the evaluation was not recorded"
@@ -264,152 +283,151 @@ private def evalRun (a : EvalArgs) (out : Cli.Out) : Result UInt32 := do
 
 private def commitRun (data : System.FilePath) (state : String) (dir : System.FilePath)
     (note? : Option String) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  let hash ← commit data.store data.workspaces (← resolve data.store state) dir note?
-  stateLine data out hash
-  pure 0
+  withData data fun data => do
+    let hash ← commit data.store data.workspaces (← resolve data.store state) dir note?
+    stateLine data out hash
+    pure 0
 
 private def tellRun (data : System.FilePath) (state text : String) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  stateLine data out (← tell data.store (← resolve data.store state) text)
-  pure 0
+  withData data fun data => do
+    stateLine data out (← tell data.store (← resolve data.store state) text)
+    pure 0
 
 private def replyRun (data : System.FilePath) (state text : String) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  stateLine data out (← reply data.store (← resolve data.store state) text)
-  pure 0
+  withData data fun data => do
+    stateLine data out (← reply data.store (← resolve data.store state) text)
+    pure 0
 
 private def replyUnavailableRun (data : System.FilePath) (state : String) (out : Cli.Out) :
     Result UInt32 := do
-  let data ← openDataAt data
-  stateLine data out (← replyUnavailable data.store (← resolve data.store state))
-  pure 0
+  withData data fun data => do
+    stateLine data out (← replyUnavailable data.store (← resolve data.store state))
+    pure 0
 
 private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  for (hash, q) in ← waiting data.store do
-    out.record (Lean.Json.mkObj [
-        ("state", hash.hex), ("question", q.text),
-        ("question_type", q.questionType.toString),
-        ("options", .arr (q.options.map Lean.Json.str))])
-      s!"{hash.hex}  {q.toQuestion.render.quote}"
-  pure 0
+  withData data fun data => do
+    for (hash, q) in ← waiting data.store do
+      out.record (Lean.Json.mkObj [
+          ("state", hash.hex), ("question", q.text),
+          ("question_type", q.questionType.toString),
+          ("options", .arr (q.options.map Lean.Json.str))])
+        s!"{hash.hex}  {q.toQuestion.render.quote}"
+    pure 0
 
 /-! ### Reading a run -/
 
 private def lsRun (data : System.FilePath) (state : String) (path? : Option String) (out : Cli.Out) :
     Result UInt32 := do
-  let data ← openDataAt data
-  let hash ← resolve data.store state
-  let workspace := (← getState data.store hash).workspace
-  let path := path?.getD ""
-  let entries ← data.workspaces.list workspace path
-  let lines := entries.map fun e =>
-    let size := e.size.map toString |>.getD "-"
-    let suffix := if e.kind == .directory then "/" else if e.kind == .symlink then "@" else ""
-    s!"{"".pushn ' ' (10 - min 10 size.length)}{size}  {e.path}{suffix}"
-  report out (Lean.Json.mkObj [("state", hash.hex), ("workspace", workspace.hex), ("path", path),
-      ("entries", .arr (entries.map fun e => .mkObj [("name", e.name), ("path", e.path),
-        ("kind", e.kind.toString), ("size", e.size.map (fun n => (n : Lean.Json)) |>.getD .null)]))])
-    lines
-  pure 0
+  withData data fun data => do
+    let hash ← resolve data.store state
+    let workspace := (← getState data.store hash).workspace
+    let path := path?.getD ""
+    let entries ← data.workspaces.list workspace path
+    let lines := entries.map fun e =>
+      let size := e.size.map toString |>.getD "-"
+      let suffix := if e.kind == .directory then "/" else if e.kind == .symlink then "@" else ""
+      s!"{"".pushn ' ' (10 - min 10 size.length)}{size}  {e.path}{suffix}"
+    report out (Lean.Json.mkObj [("state", hash.hex), ("workspace", workspace.hex), ("path", path),
+        ("entries", .arr (entries.map fun e => .mkObj [("name", e.name), ("path", e.path),
+          ("kind", e.kind.toString), ("size", e.size.map (fun n => (n : Lean.Json)) |>.getD .null)]))])
+      lines
+    pure 0
 
 /-- The file's bytes, exactly; with `--json`, a preview of any entry: UTF-8 text up to 1 MiB,
 and otherwise what it is. -/
 private def catRun (data : System.FilePath) (state path : String) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  let hash ← resolve data.store state
-  let workspace := (← getState data.store hash).workspace
-  if out.json then
-    let preview ← data.workspaces.preview workspace path
-    out.record (Lean.Json.mkObj [("state", hash.hex), ("workspace", workspace.hex), ("path", path),
-      ("kind", preview.kind), ("content", preview.content?.map Lean.Json.str |>.getD .null),
-      ("size", preview.size?.map (fun n => (n : Lean.Json)) |>.getD .null)]) ""
-  else
-    let bytes ← data.workspaces.read workspace path
-    Result.fromIO Error.storage do
-      let stdout ← IO.getStdout
-      stdout.write bytes
-      stdout.flush
-  pure 0
+  withData data fun data => do
+    let hash ← resolve data.store state
+    let workspace := (← getState data.store hash).workspace
+    if out.json then
+      let preview ← data.workspaces.preview workspace path
+      out.record (Lean.Json.mkObj [("state", hash.hex), ("workspace", workspace.hex), ("path", path),
+        ("kind", preview.kind), ("content", preview.content?.map Lean.Json.str |>.getD .null),
+        ("size", preview.size?.map (fun n => (n : Lean.Json)) |>.getD .null)]) ""
+    else
+      let bytes ← data.workspaces.read workspace path
+      Result.fromIO Error.storage do
+        let stdout ← IO.getStdout
+        stdout.write bytes
+        stdout.flush
+    pure 0
 
 private def checkoutRun (data : System.FilePath) (state : String) (dir : System.FilePath)
     (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  let hash ← resolve data.store state
-  let state ← getState data.store hash
-  data.workspaces.materialize state.workspace dir
-  out.record (Lean.Json.mkObj [("state", hash.hex), ("workspace", state.workspace.hex),
-      ("directory", dir.toString)])
-    s!"checked out {state.workspace.hex} into {dir}"
-  pure 0
+  withData data fun data => do
+    let hash ← resolve data.store state
+    let state ← getState data.store hash
+    data.workspaces.materialize state.workspace dir
+    out.record (Lean.Json.mkObj [("state", hash.hex), ("workspace", state.workspace.hex),
+        ("directory", dir.toString)])
+      s!"checked out {state.workspace.hex} into {dir}"
+    pure 0
 
 private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  if out.json then
-    for hash in ← allStates data.store do
-      out.record (stateJson hash (← getState data.store hash)) ""
-  else emitLines (← treeLines data.store)
-  pure 0
+  withData data fun data => do
+    if out.json then
+      for hash in ← allStates data.store do
+        out.record (stateJson hash (← getState data.store hash)) ""
+    else emitLines (← treeLines data.store)
+    pure 0
 
 private def showRun (data : System.FilePath) (state : String) (view : Bool) (out : Cli.Out) :
     Result UInt32 := do
-  let data ← openDataAt data
-  let hash ← resolve data.store state
-  let view? ← if view then some <$> (·.view) <$> recordedAgent data.store hash else pure none
-  if out.json then
-    let branch ← branchOf data.store hash
-    let some (_, state) := branch.back? | throw <| .storage s!"no state {hash.hex}"
-    let history := branch.map fun (h, s) => Lean.Json.mkObj [("state", h.hex),
-      ("kind", s.kind.toString), ("events", .arr (s.appended.map eventToJson))]
-    let json := state.toJson |>.setObjVal! "state" hash.hex
-      |>.setObjVal! "run_time_ms" (← elapsedMs data.store hash)
-      |>.setObjVal! "history" (.arr history)
-    let json := match view? with
-      | some view =>
-        let log := branch.foldl (fun log (_, s) => log ++ s.appended) #[]
-        json.setObjVal! "view" (.arr ((view log).map Chat.Message.toJson))
-      | none => json
-    out.record json ""
-  else emitLines (← showLines data.store hash view?)
-  pure 0
+  withData data fun data => do
+    let hash ← resolve data.store state
+    let view? ← if view then some <$> (·.view) <$> recordedAgent data.store hash else pure none
+    if out.json then
+      let branch ← branchOf data.store hash
+      let some (_, state) := branch.back? | throw <| .storage s!"no state {hash.hex}"
+      let history := branch.map fun (h, s) => Lean.Json.mkObj [("state", h.hex),
+        ("kind", s.kind.toString), ("events", .arr (s.appended.map eventToJson))]
+      let json := state.toJson |>.setObjVal! "state" hash.hex
+        |>.setObjVal! "run_time_ms" (← elapsedMs data.store hash)
+        |>.setObjVal! "history" (.arr history)
+      let json := match view? with
+        | some view =>
+          let log := branch.foldl (fun log (_, s) => log ++ s.appended) #[]
+          json.setObjVal! "view" (.arr ((view log).map Chat.Message.toJson))
+        | none => json
+      out.record json ""
+    else emitLines (← showLines data.store hash view?)
+    pure 0
 
 private def diffRun (data : System.FilePath) (a b : String) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  let a ← resolve data.store a
-  let b ← resolve data.store b
-  let lines ← diffLines data.store data.workspaces a b
-  report out (Lean.Json.mkObj [("a", a.hex), ("b", b.hex), ("changes", .arr (lines.map Lean.Json.str))])
-    lines
-  pure 0
+  withData data fun data => do
+    let a ← resolve data.store a
+    let b ← resolve data.store b
+    let lines ← diffLines data.store data.workspaces a b
+    report out (Lean.Json.mkObj [("a", a.hex), ("b", b.hex), ("changes", .arr (lines.map Lean.Json.str))])
+      lines
+    pure 0
 
-private def htmlRun (data : System.FilePath) (file? : Option System.FilePath) (hide : Array String)
+private def htmlRun (data : System.FilePath) (file : System.FilePath) (hide : Array String)
     (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  let file := file?.getD (data.path / "report.html")
-  -- Each --hide may list several: --hide .venv --hide __pycache__,.pytest_cache
-  let hidden := hide.foldl (init := #[]) fun paths value =>
-    paths ++ (value.splitOn ",").toArray.filter (!·.isEmpty)
-  -- The page has one view and one tool list, so the forest's roots must agree on the agent.
-  let roots ← (← allStates data.store).filterM fun h => do pure (← getState data.store h).parent?.isNone
-  let some first := roots[0]? | throw <| .configuration "nothing to report: the data directory holds no states"
-  let spec ← recordedAgent data.store first
-  for root in roots do
-    if (← recordedAgent data.store root).config.compress != spec.config.compress then
-      throw <| .configuration <|
-        s!"the roots of {data.path} were created with different agents; a report renders one " ++
-        "agent's runs, so give each its own data directory"
-  let page ← Html.report data.store data.workspaces s!"alaya {data.path}" spec.view spec.tools hidden
-  Result.fromIO Error.storage (IO.FS.writeFile file page)
-  out.record (Lean.Json.mkObj [("file", file.toString), ("bytes", page.length)])
-    s!"wrote {file} ({page.length} bytes)"
-  pure 0
+  withData data fun data => do
+    -- Each --hide may list several: --hide .venv --hide __pycache__,.pytest_cache
+    let hidden := hide.foldl (init := #[]) fun paths value =>
+      paths ++ (value.splitOn ",").toArray.filter (!·.isEmpty)
+    -- The page has one view and one tool list, so the forest's roots must agree on the agent.
+    let roots ← (← allStates data.store).filterM fun h => do pure (← getState data.store h).parent?.isNone
+    let some first := roots[0]? | throw <| .configuration "nothing to report: the data directory holds no states"
+    let spec ← recordedAgent data.store first
+    for root in roots do
+      if (← recordedAgent data.store root).config.compress != spec.config.compress then
+        throw <| .configuration <|
+          s!"the roots of {data.path} were created with different agents; a report renders one " ++
+          "agent's runs, so give each its own data directory"
+    let page ← Html.report data.store data.workspaces s!"alaya {data.path}" spec.view spec.tools hidden
+    Result.fromIO Error.storage (IO.FS.writeFile file page)
+    out.record (Lean.Json.mkObj [("file", file.toString), ("bytes", page.length)])
+      s!"wrote {file} ({page.length} bytes)"
+    pure 0
 
 private def rmRun (data : System.FilePath) (state : String) (out : Cli.Out) : Result UInt32 := do
-  let data ← openDataAt data
-  let n ← removeSubtree data.store data.workspaces (← resolve data.store state)
-  out.record (Lean.Json.mkObj [("removed", n)]) s!"removed {n} state(s)"
-  pure 0
+  withData data fun data => do
+    let n ← removeSubtree data.store data.workspaces (← resolve data.store state)
+    out.record (Lean.Json.mkObj [("removed", n)]) s!"removed {n} state(s)"
+    pure 0
 
 /-! ### The table -/
 
@@ -481,9 +499,9 @@ private def commands : Array Cli.Command := #[
       <*> Cli.arg "B" .string "the later state" },
   { name := "html"
     summary := "Write the forest as one self-contained page."
-    examples := #["alaya html --hide .venv --hide __pycache__,.pytest_cache"]
+    examples := #["alaya html report.html --hide .venv --hide __pycache__,.pytest_cache"]
     spec := htmlRun <$> dataDir
-      <*> Cli.arg? "FILE" .path "where to write the page; by default DATA/report.html"
+      <*> Cli.arg "FILE" .path "where to write the page"
       <*> Cli.repeated "hide" (.string "DIRS") "directories to leave out of the page, comma-separated" },
   { name := "rm"
     summary := "Delete a subtree and the snapshots only it used."

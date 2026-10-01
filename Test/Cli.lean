@@ -231,9 +231,9 @@ def specSuite : Suite := suite "cli.spec" #[
       #["--count expects a whole number, got 'x'", "--model P:M is required: the model"],
 
   test "an environment variable fills an absent flag, and a flag wins over it" do
-    let data := Cli.flagD "data" (.path "DIR") ".alaya" "the data directory" (env? := some "ALAYA_DATA")
+    let data := Cli.flagD "data" (.path "DIR") "runs" "the data directory" (env? := some "ALAYA_DATA")
     let env := fun var => if var == "ALAYA_DATA" then some "/runs" else none
-    assertEqual "default" (← parsed "default" (data.parse [])) ".alaya"
+    assertEqual "default" (← parsed "default" (data.parse [])) "runs"
     assertEqual "env" (← parsed "env" (data.parse [] env)) "/runs"
     assertEqual "flag" (← parsed "flag" (data.parse ["--data", "d"] env)) "d",
 
