@@ -7,10 +7,10 @@ line that drives it — every command, its options, output and exit status — i
 
 The trajectory is the same for every agent. Wherever an agent's prompts, tools, or view matter —
 creating a root, taking a turn, rendering what the model was sent — the command line names the
-agent with `--agent` when the root is created — a JSON configuration file, such as
-`agents/mini-swe-default.json` (`docs/miniswe.md`, which the examples below use) or
-`agents/mini-vero-default.json` (`docs/minivero.md`) (`docs/cli.md` §5) — and the root records it, so no later
-command asks again. Everything else — evaluating, intervening, replying,
+agent with `--agent NAME` when the root is created — `mini-swe` (`docs/miniswe.md`, which the
+examples below use) or `mini-vero` (`docs/minivero.md`), with any field overridden by `--set`
+(`docs/cli.md` §5) — and the root records its complete configuration, so no later command asks
+again. Everything else — evaluating, intervening, replying,
 inspecting — is agent-independent and takes no such flag.
 
 ## 1. States
@@ -22,7 +22,7 @@ a restic repository and named by its snapshot ID (§5).
 ```sh
 export ALAYA_DATA=$PWD/runs   # the data directory every command below uses (§5)
 # A root: the agent's opening prompts for the task, and a snapshot of ./project.
-root=$(alaya root --task "make the test suite pass" ./project --agent agents/mini-swe-default.json --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
+root=$(alaya root --task "make the test suite pass" ./project --agent mini-swe --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
 
 alaya show adbac1          # the state: kind, parent, workspace snapshot, note, image, then its log

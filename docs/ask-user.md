@@ -1,16 +1,10 @@
 # Questions: `ask_user`
 
-MiniSwe and MiniVero can ask a question and wait for an answer. Set
-`"ask_user": true` in the agent's JSON configuration to offer the tool. It is off by default.
-The root records the setting explicitly as `true` or `false`, so later commands
-rebuild the same agent. As with other configuration fields, omitting it on input
-uses the default.
+MiniSwe and MiniVero can ask a question and wait for an answer. `--set agent.ask_user=true` at
+`root` offers the tool; it is off by default. The root records the setting explicitly as `true`
+or `false`, so later commands rebuild the same agent.
 
-For example, save this as `mini-vero-questions.json`:
-
-```json
-{"family": "mini-vero", "mode": "codeproof", "ask_user": true}
-```
+For example, `--agent mini-vero --set agent.mode=codeproof --set agent.ask_user=true`.
 
 ## Question forms
 
@@ -161,7 +155,7 @@ spent, Alaya stops without another model call.
 
 ```bash
 alaya root --task-file /path/to/source/MINIVERO_TASK.md /path/to/source \
-  --agent mini-vero-questions.json --data /path/to/run
+  --agent mini-vero --set agent.mode=codeproof --set agent.ask_user=true --data /path/to/run
 alaya resume ROOT --model PROVIDER:MODEL --data /path/to/run --json
 # A question stops resume with exit code 3. Use its state hash below.
 alaya waiting --data /path/to/run

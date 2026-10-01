@@ -148,8 +148,8 @@ structure State where
   /-- Where the workspace is mounted in the image, and where commands run, inherited from the
   root. -/
   workdir : String
-  /-- On a root: the agent that runs this trajectory, as its complete configuration — `family`
-  and the family's fields — so that every later command builds the same agent. -/
+  /-- On a root: the agent that runs this trajectory, as its complete configuration — its `name`
+  and every field — so that every later command builds the same agent. -/
   agent? : Option Lean.Json := none
   /-- On a model step (`turn`, `question`): its wall-clock time, from before the model call to
   after its last act and snapshot. A run's time is the sum along its path from the root. -/
@@ -737,10 +737,10 @@ private def observationText : Lean.Json -> String
 private def label (state : State) : String :=
   match state.kind with
   | .root =>
-    let family := match state.agent?.bind fun a => (a.getObjVal? "family" >>= Lean.Json.getStr?).toOption with
-      | some family => s!"[{family}]  "
+    let agent := match state.agent?.bind fun a => (a.getObjVal? "name" >>= Lean.Json.getStr?).toOption with
+      | some name => s!"[{name}]  "
       | none => ""
-    "root  " ++ family ++ flatten (state.note?.getD "")
+    "root  " ++ agent ++ flatten (state.note?.getD "")
   | .turn =>
     let calls := state.calls
     let first := match calls[0]? with

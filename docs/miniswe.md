@@ -19,13 +19,13 @@ def agent (executor : Executor) (config : Config) : Agent := {
   act := act executor }
 ```
 
-Two things are fixed when the agent is built. The **executor** is where its commands run — the
-host, or a container the trajectory pinned — and the **configuration**, a JSON object read by
-`Config.fromJson` (`agents/mini-swe-default.json` is its defaults, and the fields are):
+Two things are fixed when the agent is built. The **executor** is where its commands run — a
+container the trajectory pinned — and the **configuration**, a JSON object read by
+`Config.fromJson`, whose defaults `alaya config --agent mini-swe` prints:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `family` | `mini-swe` | which agent this configures |
+| `name` | `mini-swe` | which agent this configures |
 | `step_limit` | 0 | model calls before the run ends with `LimitsExceeded`; 0 is no limit |
 | `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
 | `executor.timeout_seconds`, `executor.env` | 30, mini's overrides | how each command is run (`Executor.Config`) |
@@ -34,8 +34,8 @@ host, or a container the trajectory pinned — and the **configuration**, a JSON
 
 A field left out is its default; a misspelt one is an error. The task is not configuration: it
 is what `root --task` gives, and `initialLog config task uname` places it. The command line
-names a configuration file at `root` (`--agent agents/mini-swe-default.json`;
-`docs/cli.md` §5) and the root records it.
+names the agent at `root` and overrides fields there (`--agent mini-swe --set agent.step_limit=50`;
+`docs/cli.md` §5), and the root records the complete configuration.
 
 The tools are not this agent's: `Alaya.Agent.Tools` defines each on its own — its schema for the
 model, how its arguments are read, and what answers a call — with no knowledge of which agent
@@ -192,7 +192,7 @@ and is gone when a branch is resumed later.
 - The environment is a snapshot of the working directory, not a persistent machine.
 - No per-model cost accounting, so mini's `cost_limit` is not enforced.
 - With `recoverOutput` on: the `read_output` tool, two sentences, and a warning (§9).
-- With `ask_user` enabled in the JSON configuration: [yes/no, single-choice, and open-ended questions](ask-user.md), using the existing question/reply states.
+- With `ask_user` enabled (`--set agent.ask_user=true`): [yes/no, single-choice, and open-ended questions](ask-user.md), using the existing question/reply states.
 
 ## 9. Reading a long output back: `read_output`
 

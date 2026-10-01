@@ -97,10 +97,9 @@ def test_mode(args, mode):
     def read_state(hash_):
         return json.loads((data / "states" / f"{hash_}.json").read_text())
 
-    config = ROOT / ("agents/mini-vero-default.json" if mode == "proof" else
-                     "benchmarks/vero/mini-vero-codeproof.json")
     root = state_hash(alaya("root", source, "--task-file", directory / "MINIVERO_TASK.md",
-                             "--agent", config, "--image", args.agent_image,
+                             "--agent", "mini-vero", "--set", f"agent.mode={mode}",
+                             "--image", args.agent_image,
                              "--workdir", "/testbed").stdout)
     root_state = read_state(root)
     assert root_state["workdir"] == "/testbed"

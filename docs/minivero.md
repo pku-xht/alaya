@@ -1,6 +1,6 @@
 # MiniVero
 
-`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Its configuration is MiniSwe's with two more fields, `time_budget` (below) and `mode`: `proof` or `codeproof`, Vero's evaluation mode for the run (`agents/mini-vero-default.json`; a codeproof run is a copy of it with `"mode": "codeproof"`). The root records it, and every later command builds the agent from the record.
+`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Its configuration is MiniSwe's with two more fields, `time_budget` (below) and `mode`: `proof` or `codeproof`, Vero's evaluation mode for the run (`alaya config --agent mini-vero` prints the defaults; a codeproof run is `--agent mini-vero --set agent.mode=codeproof`). The root records it, and every later command builds the agent from the record.
 
 ## How it is built
 
@@ -106,6 +106,6 @@ agent's task file. Vero remains the source of the benchmark definitions, the
 trusted reconstruction, and the grading rules.
 
 The task contract is outside `source/` and enters the root through `--task-file`.
-The proof baseline is `agents/mini-vero-default.json`; only codeproof needs a
-separate configuration. Both use an empty executor environment list, with output
+The proof baseline is `--agent mini-vero`, MiniVero's defaults; codeproof is
+`--set agent.mode=codeproof` on top. Both use an empty executor environment list, with output
 recovery and questions disabled by default.

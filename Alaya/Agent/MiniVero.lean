@@ -34,11 +34,11 @@ structure Config where
   mode : Mode := .proof
   deriving Inhabited
 
-/-- The configuration as JSON: MiniSwe's fields with `family` `mini-vero`, `mode`, and
+/-- The configuration as JSON: MiniSwe's fields with `name` `mini-vero`, `mode`, and
 `time_budget` — whether the agent is offered the tool and asked to pace itself by it. -/
 def Config.toJson (config : Config) : Lean.Json :=
   match config.base.toJson with
-  | .obj fields => .obj (((fields.insert "family" "mini-vero").insert "mode" (toString config.mode))
+  | .obj fields => .obj (((fields.insert "name" "mini-vero").insert "mode" (toString config.mode))
       |>.insert "time_budget" (config.base.timeBudget : Lean.Json))
   | other => other
 
@@ -55,9 +55,10 @@ def Config.fromJson (json : Lean.Json) : Except String Config := do
     | .error _ => pure defaults.timeBudget
     | .ok (.bool b) => pure b
     | .ok other => throw s!"'time_budget' must be true or false, not {other.compress}"
-  -- The rest is MiniSwe's, read without the fields that are this family's.
+  -- The rest is MiniSwe's, read without the fields that are this agent's own.
   let base ← match json with
-    | .obj fields => MiniSwe.Config.fromJson (.obj ((fields.erase "mode").erase "time_budget")) defaults
+    | .obj fields =>
+      MiniSwe.Config.fromJson (.obj ((fields.erase "mode").erase "time_budget")) defaults #["mode", "time_budget"]
     | other => MiniSwe.Config.fromJson other defaults
   pure { base := { base with timeBudget }, mode }
 

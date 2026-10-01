@@ -75,15 +75,13 @@ preserves these symlinks without including the dependency trees.
 
 ## Root and run
 
-Proof uses `agents/mini-vero-default.json`; codeproof uses
-`benchmarks/vero/mini-vero-codeproof.json`. Both baseline configurations use
-`env: []`, `recover_output: false`, and `ask_user: false`.
+Both modes use MiniVero's defaults — `env: []`, `recover_output: false`, and
+`ask_user: false` — and set only the mode (`alaya config --agent mini-vero` prints the rest).
 
 ```sh
-CONFIG=benchmarks/vero/mini-vero-codeproof.json
-# For MODE=proof: CONFIG=agents/mini-vero-default.json
+MODE=codeproof    # or proof
 ROOT=$(.lake/build/bin/alaya root "$RUN/source" \
-  --task-file "$RUN/MINIVERO_TASK.md" --agent "$CONFIG" \
+  --task-file "$RUN/MINIVERO_TASK.md" --agent mini-vero --set agent.mode=$MODE \
   --image "$AGENT" --data "$RUN/audit")
 .lake/build/bin/alaya resume "$ROOT" --model PROVIDER:MODEL --container-user "$(id -u):$(id -g)" \
   --time-budget 60 --data "$RUN/audit" --json > "$RUN/first.jsonl"
