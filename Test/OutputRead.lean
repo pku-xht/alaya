@@ -106,7 +106,7 @@ def suite : Suite := Testing.suite "read_output" #[
     let rt : Runtime := { store, workspaces, workDir := work, executor, model
                           agent := agent executor config }
     let root ← assertOk <| createRoot store workspaces (initialLog config "t" testUname ++ recorded) project
-      (← testImage)
+      (← testImage) (agent := testAgent)
     let child ← stepped <| stepOnce rt "test" root
     let state ← assertOk <| getState store child
     assertEqual "same workspace" state.workspace (← assertOk <| getState store root).workspace

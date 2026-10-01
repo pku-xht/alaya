@@ -259,7 +259,7 @@ def resticSuite : Suite := Testing.suite "workspaces.restic" #[
     let workspaces ← assertOk <| Workspaces.Restic.open (data / "restic") (keep := #[store.dir])
     let project ← source
     writeSpec project baseSpec
-    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t")
+    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t") (agent := testAgent)
     let id := (← assertOk <| getState store root).workspace
     let refused (label : String) (action : Result Unit) : TestM Unit :=
       assertError label action fun | .configuration _ => true | _ => false
@@ -282,7 +282,7 @@ def trajectorySuite : Suite := Testing.suite "workspaces.trajectory" #[
     let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic")
     let project ← source
     writeSpec project baseSpec
-    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t")
+    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t") (agent := testAgent)
     IO.FS.writeFile (project / "README.md") "readme, by hand"
     writeSpec project #[("tests/extra.txt", "extra")]
     let child ← assertOk <| commit store workspaces root project (some "by hand")

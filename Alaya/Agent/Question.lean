@@ -58,17 +58,16 @@ def toJson (question : Question) : Lean.Json :=
   .mkObj [("text", question.text), ("question_type", question.questionType.toString),
     ("options", .arr (question.options.map Lean.Json.str))]
 
-/-- Only an old record lacking both form fields defaults to open-ended. Explicit malformed
-metadata is rejected instead of silently disabling answer validation. -/
+/-- A stored question: its text, form, and options, all required. Malformed metadata is
+rejected rather than silently disabling answer validation. -/
 def fromJson (json : Lean.Json) : Except String Question := do
   let text ← json.getObjVal? "text" >>= Lean.Json.getStr?
   let question ← match json.getObjVal? "question_type", json.getObjVal? "options" with
-    | .error _, .error _ => pure ({ text } : Question)
     | .ok kind, .ok choices => do
       let questionType ← kind.getStr? >>= QuestionType.fromString
       let options ← choices.getArr? >>= (·.mapM Lean.Json.getStr?)
       pure { text, questionType, options }
-    | _, _ => throw "A structured question requires both question_type and options."
+    | _, _ => throw "A question requires both question_type and options."
   question.validate
   pure question
 

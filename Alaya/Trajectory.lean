@@ -254,6 +254,14 @@ def continuable (state : State) : Except String Unit := do
   if let some q := state.question? then
     throw s!"this state is waiting for an answer to: {q.text}\nanswer it with `alaya reply HASH TEXT`"
 
+/-- A field `toJson` always writes, `null` for none. A missing field, or one of another type, is
+an error: nothing is read with a default. -/
+private def nullable (json : Lean.Json) (name : String) (read : Lean.Json → Except String α) :
+    Except String (Option α) := do
+  match ← json.getObjVal? name with
+  | .null => pure none
+  | value => some <$> read value
+
 def checkToJson (c : Grader.Check) : Lean.Json :=
   .mkObj [("ok", c.ok), ("name", c.name), ("directive", c.directive)]
 
@@ -270,7 +278,7 @@ def evaluationToJson (e : Evaluation) : Lean.Json :=
 private def evaluationFromJson (json : Lean.Json) : Except String Evaluation := do
   let command ← json.getObjVal? "command" >>= Lean.Json.getStr?
   let graderImage ← json.getObjVal? "graderImage" >>= Lean.Json.getStr?
-  let input? := (json.getObjVal? "input" >>= Lean.Json.getStr?).toOption.map (⟨·⟩)
+  let input? ← nullable json "input" fun j => (⟨·⟩) <$> j.getStr?
   let some status := Grader.Status.ofString? (← json.getObjVal? "status" >>= Lean.Json.getStr?)
     | throw "unknown evaluation status"
   let checks ← (← json.getObjVal? "checks" >>= Lean.Json.getArr?).mapM fun c => do
@@ -278,7 +286,7 @@ private def evaluationFromJson (json : Lean.Json) : Except String Evaluation := 
             name := ← c.getObjVal? "name" >>= Lean.Json.getStr?
             directive := ← c.getObjVal? "directive" >>= Lean.Json.getStr? } : Grader.Check)
   let reason ← json.getObjVal? "reason" >>= Lean.Json.getStr?
-  let returncode? := (json.getObjVal? "returncode" >>= Lean.Json.getInt?).toOption
+  let returncode? ← nullable json "returncode" Lean.Json.getInt?
   let elapsedMs ← json.getObjVal? "elapsedMs" >>= Lean.Json.getNat?
   let output ← json.getObjVal? "output"
   let stdout ← output.getObjVal? "stdout" >>= Lean.Json.getStr?
@@ -319,38 +327,27 @@ def fromJson (json : Lean.Json) : Except String State := do
   let version ← json.getObjVal? "v" >>= Lean.Json.getNat?
   if version != schemaVersion then
     throw s!"state object has schema version {version}; this build reads version {schemaVersion}"
-  let parent? := (json.getObjVal? "parent" >>= Lean.Json.getStr?).toOption.map (⟨·⟩)
+  let parent? ← nullable json "parent" fun j => (⟨·⟩) <$> j.getStr?
   let workspace : Hash := ⟨← json.getObjVal? "workspace" >>= Lean.Json.getStr?⟩
   let kind ← match Kind.ofString? (← json.getObjVal? "kind" >>= Lean.Json.getStr?) with
     | some kind => pure kind
     | none => throw "unknown state kind"
   let appended ← (← json.getObjVal? "appended" >>= Lean.Json.getArr?).mapM eventFromJson
-  let outcome? ← match json.getObjVal? "outcome" with
-    | .ok .null => pure none
-    | .ok o => some <$> outcomeFromJson o
-    | .error _ => pure none
-  let note? := (json.getObjVal? "note" >>= Lean.Json.getStr?).toOption
+  let outcome? ← nullable json "outcome" outcomeFromJson
+  let note? ← nullable json "note" Lean.Json.getStr?
   let image ← json.getObjVal? "image" >>= Lean.Json.getStr?
   let workdir ← json.getObjVal? "workdir" >>= Lean.Json.getStr?
-  let agent? := match json.getObjVal? "agent" with
-    | .ok (.obj _) => (json.getObjVal? "agent").toOption
-    | _ => none
-  let elapsedMs? := (json.getObjVal? "elapsed_ms" >>= Lean.Json.getNat?).toOption
-  let evaluation? ← match json.getObjVal? "evaluation" with
-    | .ok .null => pure none
-    | .ok e => some <$> evaluationFromJson e
-    | .error _ => pure none
-  let intervention? ← match json.getObjVal? "intervention" with
-    | .ok (.obj _) =>
-      let i := (json.getObjVal? "intervention").toOption.get!
-      let message ← i.getObjVal? "message" >>= Lean.Json.getStr?
-      let changed ← (← i.getObjVal? "changed" >>= Lean.Json.getArr?).mapM Lean.Json.getStr?
-      pure (some ({ message, changed } : Intervention))
-    | _ => pure none
-  let question? ← match json.getObjVal? "question" with
-    | .ok .null => pure none
-    | .error _ => pure none
-    | .ok q => some <$> Question.fromJson q
+  let agent? ← nullable json "agent" fun
+    | j@(.obj _) => pure j
+    | _ => throw "the agent configuration is not an object"
+  if parent?.isNone && agent?.isNone then throw "a root records its agent configuration"
+  let elapsedMs? ← nullable json "elapsed_ms" Lean.Json.getNat?
+  let evaluation? ← nullable json "evaluation" evaluationFromJson
+  let intervention? ← nullable json "intervention" fun i => do
+    let message ← i.getObjVal? "message" >>= Lean.Json.getStr?
+    let changed ← (← i.getObjVal? "changed" >>= Lean.Json.getArr?).mapM Lean.Json.getStr?
+    pure ({ message, changed } : Intervention)
+  let question? ← nullable json "question" Question.fromJson
   pure { parent?, workspace, kind, appended, outcome?, note?, image, workdir, agent?, elapsedMs?
          evaluation?, intervention?, question? }
 
@@ -686,11 +683,11 @@ def evaluate (store : Store) (workspaces : Workspaces) (scratch : System.FilePat
 /-- Creates a root state from the initial project directory: the agent's opening log — its
 prompts — and a snapshot of `project`. -/
 def createRoot (store : Store) (workspaces : Workspaces) (log : Log) (project : System.FilePath)
-    (image : String) (note? : Option String := none) (agent : Lean.Json := .null)
+    (image : String) (note? : Option String := none) (agent : Lean.Json)
     (workdir : String := Executor.Docker.defaultWorkdir) : Result Hash := do
   let workspace ← workspaces.snapshot project
   putState store { parent? := none, workspace, kind := .root, appended := log, note?, image, workdir
-                   agent? := if agent.isNull then none else some agent }
+                   agent? := some agent }
 
 /-- The root of the tree `hash` is in. -/
 partial def rootOf (store : Store) (hash : Hash) : Result Hash := do
@@ -699,8 +696,11 @@ partial def rootOf (store : Store) (hash : Hash) : Result Hash := do
   | none => pure hash
 
 /-- The agent configuration the run of `hash` was created with, from its root. -/
-def agentOf (store : Store) (hash : Hash) : Result (Option Lean.Json) := do
-  pure (← getState store (← rootOf store hash)).agent?
+def agentOf (store : Store) (hash : Hash) : Result Lean.Json := do
+  let root ← rootOf store hash
+  let some agent := (← getState store root).agent?
+    | throw <| .storage s!"the root {root.hex} records no agent"
+  pure agent
 
 /-- A state a person may build on: anything but an evaluation, which is a leaf, or a state
 waiting for an answer, which `reply` alone grows. An ended run is fine: fixing something after a

@@ -154,8 +154,8 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let root ← assertOk <| Trajectory.createRoot store workspaces #[] project (← testImage) (some "t")
       (agent := built.config)
     let child ← assertOk <| Trajectory.tell store root "hello"
-    assertEqual "root" ((← assertOk <| Trajectory.agentOf store root).map compressed) (some (compressed built.config))
-    assertEqual "child" ((← assertOk <| Trajectory.agentOf store child).map compressed) (some (compressed built.config))
+    assertEqual "root" (compressed (← assertOk <| Trajectory.agentOf store root)) (compressed built.config)
+    assertEqual "child" (compressed (← assertOk <| Trajectory.agentOf store child)) (compressed built.config)
     check (← assertOk <| Trajectory.getState store child).agent?.isNone "a child carries no record itself"
     let lines ← assertOk <| Trajectory.showLines store root
     check (lines.any fun l => l.startsWith "agent    " && (l.splitOn "\"step_limit\":7").length > 1) "show prints it"

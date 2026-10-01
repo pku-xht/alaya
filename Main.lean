@@ -20,16 +20,7 @@ private structure DataDir where
 
 private def DataDir.cache (data : DataDir) : System.FilePath := data.path / "cache"
 
-/-- A data directory with a `store/` is from before states became files under `states/` and
-workspaces moved to restic; its states name snapshots nothing can read any more. -/
-private def refuseLegacy (path : System.FilePath) : Result Unit := do
-  if ← Result.fromIO Error.storage (path / "store").isDir then
-    throw <| .configuration <|
-      s!"{path} has the layout of an earlier alaya (`store/`), which this one does not read: " ++
-      "convert it with a build from before the change, or start a new data directory"
-
 private def openDataAt (path : System.FilePath) : Result DataDir := do
-  refuseLegacy path
   let store ← Store.create (path / "states")
   -- The states and the model cache are as much the run as the repository is.
   let workspaces ← Workspaces.Restic.open (path / "restic") (keep := #[store.dir, path / "cache"])
@@ -59,9 +50,7 @@ private def executorFor (run : Executor.Docker.RunOptions) (state : State) (conf
 
 /-- The agent of an existing run: what its root recorded. -/
 private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Families.Instance := do
-  let some recorded ← agentOf store hash
-    | throw <| .configuration "this run's root records no agent: it is from an earlier alaya"
-  Agent.Families.instanceOf recorded
+  Agent.Families.instanceOf (← agentOf store hash)
 
 /-- What `resume` takes: what this invocation samples from, and its limits. The image, the
 workdir and the agent are the root's. -/

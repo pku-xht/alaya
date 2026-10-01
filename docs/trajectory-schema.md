@@ -527,8 +527,7 @@ structure Workspaces where
 | `listEntries` | `ls`, and `cat`'s check of a path, using metadata before reading a file |
 | `retainOnly` | `rm`, with the snapshots the surviving states name |
 
-`listEntries` defaults to an unsupported-operation error for older/custom stores.
-Restic implements it without restoring the workspace. An entry records name,
+Restic implements `listEntries` without restoring the workspace. An entry records name,
 relative path, kind (directory/file/symlink/other), and optional byte size; the
 empty path names the root. `ls` and `cat` verify ancestor directories and never
 follow symbolic links.
@@ -605,6 +604,8 @@ an entry is only ever appended to.
 
 A state object is compact JSON. Field order is canonical (sorted keys), so equal states have
 equal hashes.
+Every field is always written, `null` where it does not apply, and a reader refuses an object
+with a field missing or of another type: nothing is read with a default.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -618,7 +619,7 @@ equal hashes.
 | `image` | string | the pinned container image, set on the root and inherited |
 | `workdir` | string | where the workspace is mounted in the image, set on the root and inherited |
 | `elapsed_ms` | integer or null | on a model step (`turn`, `question`), its wall-clock time: from before the model call to after its last act and snapshot; a run's time is the sum from the root |
-| `agent` | object or null | on a root, the agent's complete configuration (§8) |
+| `agent` | object or null | on a root, the agent's complete configuration (§8), which every root records; null elsewhere |
 | `evaluation` | object or null | `{command, graderImage, input, status, checks, reason, returncode, elapsedMs, output}` on an evaluation (§4) |
 | `intervention` | object or null | `{message, changed: ["M path", "+ path", "- path", …]}` on a state that carried a notice |
 | `question` | object or null | `{call_id, text, question_type, options}` on a waiting state |
