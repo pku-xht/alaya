@@ -874,17 +874,25 @@ partial def treeLines (store : Store) : Result (Array String) := do
     lines := lines ++ (← render root 0)
   pure lines
 
+/-- A response's reasoning as `show` gives it: the text, and of encrypted items only their size. -/
+private def reasoningLines (r : Chat.Response) : Array String :=
+  let text := match r.reasoning? with | some text => #["[reasoning] " ++ text] | none => #[]
+  let size := r.reasoningItems.foldl (fun n item => n + item.compress.length) 0
+  if r.reasoningItems.isEmpty then text
+  else text.push s!"[reasoning items] {r.reasoningItems.size}, {size} characters, encrypted"
+
 /-- One event as lines: who, then what. -/
 private def eventLines : Event -> Array String
   | .message m =>
     match m with
     | .system c => #["[system]", c]
     | .user c => #["[user]", c]
-    | .assistant c? calls _ =>
+    | .assistant c? calls _ _ =>
       #["[assistant]", c?.getD ""] ++ calls.map fun call => "[call] " ++ callSummary call
     | .tool id content => #[s!"[tool {id}]", observationText content]
   | .response r =>
-    #["[response]", r.content?.getD ""] ++ r.toolCalls.map fun call => "[call] " ++ callSummary call
+    #["[response]"] ++ reasoningLines r ++ #[r.content?.getD ""] ++
+      r.toolCalls.map fun call => "[call] " ++ callSummary call
   | .observation id content => #[s!"[observation {id}]", observationText content]
 
 /-- Renders a state for `show`: metadata, then the full reconstructed log — what happened — and,

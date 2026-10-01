@@ -96,7 +96,7 @@ private def eventJson : Event -> Lean.Json
     match m with
     | .system c => .mkObj [("type", "message"), ("role", "system"), ("content", c)]
     | .user c => .mkObj [("type", "message"), ("role", "user"), ("content", c)]
-    | .assistant c? calls reasoning? => .mkObj [
+    | .assistant c? calls reasoning? _ => .mkObj [
         ("type", "message"), ("role", "assistant"),
         ("content", c?.map Lean.Json.str |>.getD .null),
         ("reasoning", reasoning?.map Lean.Json.str |>.getD .null),
@@ -107,6 +107,9 @@ private def eventJson : Event -> Lean.Json
       ("type", "response"),
       ("content", r.content?.map Lean.Json.str |>.getD .null),
       ("reasoning", r.reasoning?.map Lean.Json.str |>.getD .null),
+      -- Encrypted reasoning is unreadable; the page says only how much there is.
+      ("reasoningItems", (r.reasoningItems.size : Lean.Json)),
+      ("reasoningItemChars", ((r.reasoningItems.foldl (fun n item => n + item.compress.length) 0 : Nat) : Lean.Json)),
       ("finishReason", r.finishReason?.map Lean.Json.str |>.getD .null),
       ("calls", .arr (r.toolCalls.map callJson))]
   | .observation id content => .mkObj [
@@ -710,7 +713,7 @@ function renderCards(state) {
     if (m.context_tokens) about.push(compact(m.context_tokens) + ' context');
     if (m.output_tokens) about.push(compact(m.output_tokens) + ' output');
     for (const [k, v] of Object.entries(m.params || {})) about.push(k + ' ' + JSON.stringify(v));
-    if (m.echo_reasoning) about.push('echoes reasoning');
+    if (m.echo_reasoning && m.echo_reasoning !== 'none') about.push('echoes reasoning ' + m.echo_reasoning);
     box.append(namedCard(card('model', m.name || '?', '', about.join(' · '))));
   }
   // Time and tokens are a turn's: a state that sampled nothing spent neither, and the run's
@@ -897,6 +900,8 @@ function renderEvent(event) {
     head.append(document.createTextNode('response'));
     if (event.finishReason) head.append(el('span', 'id', 'finish_reason ' + event.finishReason));
     if (event.reasoning) { body.append(el('div', 'muted', 'reasoning')); body.append(foldable(el('pre', 'muted', event.reasoning))); }
+    if (event.reasoningItems) body.append(el('div', 'muted', event.reasoningItems + ' encrypted reasoning item' +
+      (event.reasoningItems === 1 ? '' : 's') + ', ' + compact(event.reasoningItemChars) + ' characters, sent back with every later request'));
     if (event.content) body.append(foldable(el('pre', null, event.content)));
     for (const call of event.calls || []) body.append(renderCall(call));
   } else {

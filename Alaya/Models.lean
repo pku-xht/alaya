@@ -14,6 +14,23 @@ namespace Alaya.Models
 
 open Alaya (Result Error)
 
+/-- What of a model's earlier reasoning each request sends back. -/
+inductive Echo where
+  /-- Nothing: each turn's reasoning is the model's alone. -/
+  | none
+  /-- The reasoning as text, as DeepSeek's thinking mode requires: every earlier assistant
+  message gets a `reasoning_content`, its recorded trace as received, or the empty string. -/
+  | text
+  /-- The Responses API's reasoning items, opaque and encrypted, as they were received: how an
+  OpenAI reasoning model keeps its chain of thought across tool calls. -/
+  | items
+  deriving BEq, Repr, Inhabited
+
+def Echo.all : List Echo := [.none, .text, .items]
+
+instance : ToString Echo where
+  toString | .none => "none" | .text => "text" | .items => "items"
+
 /-- Which model, independent of who serves it: what a root records. -/
 structure Spec where
   /-- The model's ID as its creator publishes it, with no provider prefix. -/
@@ -21,9 +38,8 @@ structure Spec where
   /-- Request fields that change the model's behaviour (`temperature`, `reasoning_effort`, …),
   merged into every request as they are. A field left out takes the provider's default. -/
   params : Lean.Json := .mkObj []
-  /-- Give every earlier assistant message a `reasoning_content`, as DeepSeek's thinking mode
-  requires: its recorded trace as it was received, or the empty string where none was recorded. -/
-  echoReasoning : Bool := false
+  /-- What of its earlier reasoning the model is sent back. -/
+  echoReasoning : Echo := .none
   /-- The model's context window, in tokens; not sent to the API. -/
   contextTokens? : Option Nat := none
   /-- The longest response the model returns, in tokens; not sent to the API. -/
@@ -39,7 +55,7 @@ private def orNull (value? : Option Nat) : Lean.Json := value?.map (fun n => (n 
 /-- The complete spec, every field written. -/
 def Spec.toJson (spec : Spec) : Lean.Json :=
   .mkObj [("name", spec.name), ("params", spec.params),
-    ("echo_reasoning", spec.echoReasoning), ("context_tokens", orNull spec.contextTokens?),
+    ("echo_reasoning", toString spec.echoReasoning), ("context_tokens", orNull spec.contextTokens?),
     ("output_tokens", orNull spec.outputTokens?)]
 
 private def natOrNull (object : Agent.ConfigJson.Object) (key : String) (default : Option Nat) :
@@ -63,7 +79,12 @@ def Spec.fromJson (json : Lean.Json) (defaults : Spec) : Except String Spec := d
     if (params.getObjVal? key).isOk then throw s!"params cannot set '{key}': alaya sets it itself"
   pure {
     name := defaults.name, params
-    echoReasoning := ← object.bool "echo_reasoning" defaults.echoReasoning
+    echoReasoning := ← match ← object.field? "echo_reasoning" with
+      | none => pure defaults.echoReasoning
+      | some (.str name) => match Echo.all.find? (toString · == name) with
+        | some echo => pure echo
+        | none => throw s!"'echo_reasoning' must be none, text or items, not {name}"
+      | some other => throw s!"'echo_reasoning' must be none, text or items, not {other.compress}"
     contextTokens? := ← natOrNull object "context_tokens" defaults.contextTokens?
     outputTokens? := ← natOrNull object "output_tokens" defaults.outputTokens? }
 
@@ -73,12 +94,14 @@ def all : Array Spec := #[
   { name := "gpt-oss-120b", contextTokens? := some 131072 },
   { name := "gpt-5.6-luna" },
   -- OpenAI's light GPT-6, released 2026-09-22: 1,050,000 tokens of context, of which up to
-  -- 128,000 may be output.
-  { name := "gpt-6-luna", contextTokens? := some 1050000, outputTokens? := some 128000 },
+  -- 128,000 may be output. An OpenAI reasoning model, so it keeps its reasoning across tool
+  -- calls only through the Responses API, which returns it as encrypted items to send back.
+  { name := "gpt-6-luna", echoReasoning := .items, contextTokens? := some 1050000,
+    outputTokens? := some 128000 },
   -- A thinking-mode DeepSeek model: with tool calls, its API rejects a request whose earlier
   -- assistant messages lack their reasoning, and a gateway may need it on every reasoned turn
   -- to reconstruct the conversation. 1,000,000 tokens of context, per DeepSeek's documentation.
-  { name := "deepseek-v4.1-flash", echoReasoning := true, contextTokens? := some 1000000 }]
+  { name := "deepseek-v4.1-flash", echoReasoning := .text, contextTokens? := some 1000000 }]
 
 def names : String := ", ".intercalate (all.map (·.name)).toList
 

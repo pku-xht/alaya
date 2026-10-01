@@ -323,7 +323,7 @@ def view (config : Config) (log : Log) : Dialogue :=
     | .message m => m
     | .response r =>
       match parseActions r config with
-      | .actions _ => .assistant r.content? r.toolCalls r.reasoning?
+      | .actions _ => r.message
       | .formatError message => .user message
     | .observation id content =>
       let path := outputPath index id

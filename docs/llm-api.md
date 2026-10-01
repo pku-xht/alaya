@@ -230,11 +230,16 @@ served them.
 serialized as one JSON object with sorted keys and no whitespace:
 
 ```json
-{"model":{"context_tokens":null,"echo_reasoning":false,"name":"gpt-5.6-luna","output_tokens":null,"params":{"temperature":0}},
+{"model":{"context_tokens":null,"echo_reasoning":"none","name":"gpt-5.6-luna","output_tokens":null,"params":{"temperature":0}},
  "request":{"messages":[{"content":"You can run bash.","role":"system"},{"content":"List the files.","role":"user"}],
             "response_format":{"type":"text"},"tool_choice":"auto","tools":[...]},
  "structured_output":"native"}
 ```
+
+The request is its Chat Completions form, which has no field for the Responses API's reasoning
+items. So when earlier assistant messages carry some, the key adds a `reasoning_items` field of
+`[position, items]` pairs: two requests that differ only in them are different requests, and a
+request with none keys exactly as it would without the field.
 
 
 ## 3. Layers
@@ -247,7 +252,7 @@ configured separately. A typical stack is provider → retry → batch → cache
 
 ```mermaid
 flowchart BT
-    subgraph Providers["Providers (OpenAI chat-completions protocol)"]
+    subgraph Providers["Providers (Chat Completions, or the Responses API per route)"]
         direction LR
         yunwu["yunwu"]
         closeai["closeai"]
@@ -256,13 +261,13 @@ flowchart BT
         dgx["dgx"]
     end
 
-    Transport["ChatCompletions.model"]
+    Transport["ChatCompletions.model / Responses.model"]
     Retry["Model.retry"]
     Batch["Model.batch"]
     Cache["Cache.persistent"]
     Caller(["caller"])
 
-    Providers -- "POST baseUrl/chat/completions" --> Transport
+    Providers -- "POST baseUrl/chat/completions or baseUrl/responses" --> Transport
     Transport -- "adds the provider's model name, params, n>1; parses Chat.Response" --> Retry
     Retry -- "retries 408/409/425/429/5xx; bigger 429 budget, honors Retry-After" --> Batch
     Batch -- "native / concurrent (semaphore) / sequential n draws" --> Cache
@@ -293,13 +298,14 @@ data, in `Alaya.Provider`:
 | `yunwu` | `https://yunwu.ai/v1` | `YUNWU_API_KEY` | `YUNWU_BASE_URL` | any model, under its own name |
 | `closeai` | `https://api.openai-proxy.org/v1` | `CLOSEAI_API_KEY` | — | any model, under its own name |
 | `xmcp` | `https://llm.xmcp.ltd` | `XMCP_API_KEY` | — | any model; `deepseek-v4.1-flash` as `ds/deepseek-v4-flash`, `gpt-5.6-luna` as `closeai/gpt-5.6-luna` |
-| `apiyi` | `https://api.apiyi.com/v1` | `APIYI_API_KEY` | `APIYI_BASE_URL` | any model, under its own name |
+| `apiyi` | `https://api.apiyi.com/v1` | `APIYI_API_KEY` | `APIYI_BASE_URL` | any model, under its own name; `gpt-6-luna` through the Responses API |
 | `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `FIREWORKS_BASE_URL` | only `deepseek-v4.1-flash`, as `accounts/fireworks/models/deepseek-v4p1-flash` |
 | `dgx` | `http://10.42.0.1:8000/v1` | `DGX_API_KEY`, default `EMPTY` | `DGX_BASE_URL`, or `--url`/`--port` | any model, under its own name |
 
-How a provider serves one model is a **route**: the provider's name for it, and what it declares
-it can do — whether it requires, accepts or rejects earlier reasoning sent back, and the largest
-context and response it takes. `Provider.serve provider spec` finds the route and checks the
+How a provider serves one model is a **route**: the provider's name for it, the API it speaks
+(Chat Completions unless it says the Responses API), and what it declares it can do — whether it
+requires, accepts or rejects earlier reasoning sent back as text, and the largest context and
+response it takes. `Provider.serve provider spec` finds the route and checks the
 spec's requirements against it before any request is sent: a provider that cannot meet them is
 refused (`input`, exit 65), so changing providers either sends the model the same requests or
 fails loudly. The agent may behave differently with different models, but never with different
@@ -307,7 +313,8 @@ providers. A missing key is an environment error, except for `dgx`, where `EMPTY
 convention for a server that needs no credential. `--url` accepts anything from a bare host to a
 full URL and fills in `http`, port `8000`, and `/v1`; `--port` wins over a port inside `--url`.
 
-All of them are `Provider.ChatCompletions`, the one transport. It serializes the request with
+A route speaks one of two transports, which share their HTTP layer (`Provider.Http`).
+`Provider.ChatCompletions` serializes the request with
 `Request.toJson`, adds the route's model name, the spec's `params` and nothing else (and `n` for
 several draws), and POSTs it with `curl` to `<baseUrl>/chat/completions` under a connect timeout
 of 30 s and a total timeout of 10 minutes. HTTP failures become `Error.http status body
@@ -317,6 +324,19 @@ output tokens, the input tokens the provider served from its prompt cache
 (`prompt_tokens_details.cached_tokens`, or DeepSeek's `prompt_cache_hit_tokens`) and the
 reasoning tokens a model reports spending (`completion_tokens_details.reasoning_tokens`), so the
 cache's reuse and the cost of a reasoning level can be measured.
+
+`Provider.Responses` speaks OpenAI's Responses API, `POST <baseUrl>/responses`, from the same
+`Chat.Request` to the same `Chat.Response`. The system prompt and user turns become input
+messages, tool results `function_call_output` items, and an assistant turn its reasoning items,
+its text, and its `function_call` items, in the order the model produced them. Tools are sent in
+the flat function format, not strict, as with Chat Completions; structured output is
+`text.format`. A spec's `params` keep their Chat Completions names, and the transport renames the
+two the Responses API names otherwise, `reasoning_effort` to `reasoning.effort` and
+`max_tokens` to `max_output_tokens`, so a spec means the same through either API. Requests are
+stateless, `store: false`: the provider keeps nothing, and the log holds the whole conversation.
+`status` and `incomplete_details` are read as Chat Completions' finish reasons — `tool_calls`,
+`stop`, `length` — which agents read, and usage from `input_tokens`, its `cached_tokens`,
+`output_tokens` and its `reasoning_tokens`. The API has no `n`, so draws are separate requests.
 
 ```lean
 let spec ← Models.resolve "deepseek-v4.1-flash" #[]
@@ -329,13 +349,27 @@ a `reasoning_content`: the trace it thought through before answering. The view k
 transport sends each recorded trace back with its message, as it was received. With tool calls,
 DeepSeek's API also rejects a request in which an earlier assistant message lacks the field, and
 a gateway that re-encodes the conversation for another vendor may need it on every reasoned turn
-to reconstruct it. So with `echo_reasoning` on in the model's spec — as `deepseek-v4.1-flash` has
+to reconstruct it. So with `echo_reasoning` `text` in the model's spec — as `deepseek-v4.1-flash` has
 it — the transport gives every assistant message the field: its own recorded trace, or `""`
 where none was recorded, such as another model's turn or a person's, which the provider accepts
-as present. Off, no field is added; other models reject the unknown field.
+as present. Otherwise no field is added; other models reject the unknown field.
 
-A recorded trace is never changed or dropped, so a message serializes the same on every later
-request and the provider can keep reusing the prefix it has cached. The cost is the earlier
+An OpenAI reasoning model such as `gpt-6-luna` keeps its reasoning otherwise: the Responses API
+returns it as **reasoning items**, encrypted, which must be sent back for the model to continue
+its chain of thought across tool calls; Chat Completions has no field for them, so through it
+every turn reasons afresh. With `echo_reasoning` `items`, as `gpt-6-luna` has it, the transport
+asks for them (`include: ["reasoning.encrypted_content"]`, with `reasoning.summary` `auto` for a
+readable summary), the response records them as received, and every later request sends each
+turn's items back before its text and calls. `show` and the HTML report give the summary, and of
+the encrypted items only their size.
+
+`echo_reasoning` is thus `none`, `text` or `items`, and a route must honour it: `text` needs Chat
+Completions, `items` the Responses API, and a route that cannot is refused before any request.
+A run that records items can therefore be continued only through a provider that serves the
+model through the Responses API.
+
+Recorded reasoning, as text or as items, is never changed or dropped, so a message serializes
+the same on every later request and the provider can keep reusing the prefix it has cached. The cost is the earlier
 traces in input tokens. This is how the DeepSeek harness handles it too (its
 `dsh-llm-deepseek` adapter). Shortening the context, if requests grow too large, must keep the
 prefix stable in the same way: dropping old reasoning in large blocks, not a sliding window.

@@ -67,7 +67,7 @@ private def askingAgent : Agent.Agent := {
   tools := #[Alaya.Agent.Tools.Bash.definition, askTool]
   view := fun log => log.map fun
     | .message m => m
-    | .response r => .assistant r.content? r.toolCalls r.reasoning?
+    | .response r => r.message
     | .observation id content => .tool id content
   next := fun _ log =>
     match log.pending[0]? with
