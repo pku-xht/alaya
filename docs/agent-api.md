@@ -188,7 +188,7 @@ The tools themselves live in `Alaya.Agent.Tools`, each defined on its own — sc
 reading, and what answers a call — with no knowledge of any agent; an agent composes them.
 `Alaya.Agent.Families` is how the command line gets an agent: a *family* (`mini-swe`,
 `mini-vero`) reads a JSON configuration into an `Instance` — its opening log, tools, view and
-`build` — and the root records the configuration (`docs/trajectory-schema.md` §8).
+`build` — and the root records the configuration (`docs/cli.md` §5).
 
 `Agent.run agent workspace sample log` is the reference loop: follow `next` until it stops, sampling from
 `view log` and pushing every event. It returns the final log and a `Stop`: an `outcome`, or a

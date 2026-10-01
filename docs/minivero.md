@@ -61,7 +61,7 @@ This setting is inherited from MiniSwe and recorded in the root configuration.
 
 A Vero run may be given a time budget and checkpointed: `alaya resume STATE --time-budget
 SECONDS` stops before a step once the run has taken that long, and a later `resume` continues
-it from its last state (`docs/trajectory-schema.md` §8). With `time_budget` on — the default —
+it from its last state (`docs/cli.md` §5). With `time_budget` on — the default —
 MiniVero is offered the **`time_budget`** tool and asked to pace itself by it:
 
 - **The tool** takes no arguments and records `{"seconds_left": N}`: the budget less the run's

@@ -1,7 +1,7 @@
 import Alaya
 
-/-! `alaya` — the command-line driver for the mini-SWE-agent port over a trajectory tree. See
-`docs/trajectory-schema.md` for the commands. -/
+/-! `alaya` — the command line over a trajectory tree. See
+`docs/cli.md` for the commands. -/
 
 open Alaya
 open Alaya.Agent (Outcome)

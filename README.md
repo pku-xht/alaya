@@ -6,7 +6,8 @@ restic repository beside them: every model turn, every tool result, and every wo
 is kept exactly as it happened, so a run can be replayed, branched at any point, evaluated
 against hidden tests, and interrupted by a person.
 
-The library is organised in four layers, each documented on its own page.
+The library is organised in four layers, each documented on its own page, with a command line
+over them.
 
 ```sh
 lake build              # the alaya executable, in .lake/build/bin/
@@ -57,12 +58,24 @@ person, or stop, an `act` that runs a tool call in a workspace, and the tools it
 parent, the events it appends, and a snapshot of the workspace, so a run can be replayed,
 forked, evaluated against hidden tests, and continued after a person intervenes. The page
 specifies the state object, the store layout, the workspace snapshots kept in a restic
-repository, the model cache entry, and every `alaya` command.
+repository, and the model cache entry.
+
+[`docs/cli.md`](docs/cli.md) — the `alaya` command line, for scripts, UIs and agents: every
+command, how a command line is read, the data directory, text and JSON output, and one exit
+status per class of failure.
 
 [`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agent.MiniSwe` is the port of
 mini-SWE-agent as one agent: the original's prompts, cut from its `mini.yaml`, its `bash` tool, and protocol for reading a
 response and answering a malformed one, realized through the agent API with Lean-native
 rendering, and commands run in a container.
+
+[`docs/minivero.md`](docs/minivero.md) — MiniVero, the agent for Vero's Lean implementation and
+proof tasks: MiniSwe with its own prompts, a `proof` or `codeproof` mode, and a `time_budget`
+tool to pace a run by, graded by the Vero benchmark in `benchmarks/vero/`.
+
+[`docs/ask-user.md`](docs/ask-user.md) — `ask_user`, the tool with which MiniSwe and MiniVero
+ask a person a question and wait: yes/no, single-choice and open-ended forms, answering with
+`alaya reply`, and a local page that serves the waiting questions.
 
 ## Example
 

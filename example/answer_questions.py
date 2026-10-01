@@ -25,7 +25,7 @@ MAX_BODY_BYTES = 1024 * 1024
 CLI_TIMEOUT_SECONDS = 30
 EVENT_POLL_SECONDS = 1
 EVENT_HEARTBEAT_SECONDS = 5
-# Alaya's exit status for a request that names something wrong (`docs/trajectory-schema.md` §8).
+# Alaya's exit status for a request that names something wrong (`docs/cli.md` §4).
 INPUT_ERROR = 65
 
 

@@ -406,7 +406,7 @@ The same identity, the same request, and the same index always yield the same re
 Every operation runs in `Result α := EIO Error α`. The constructors decide what is retryable, and
 each belongs to one `Error.Class` — what a caller does about it — which is how a front end
 reports it: the `alaya` command line exits with one status per class
-(`docs/trajectory-schema.md` §8).
+(`docs/cli.md` §4).
 
 | Constructor | Meaning | Class |
 | --- | --- | --- |
