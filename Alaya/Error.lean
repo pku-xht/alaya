@@ -15,6 +15,9 @@ inductive Error where
   | transport (message : String)
   /-- A provider returned an HTTP response; the status and body support retry and diagnostics. -/
   | http (status : Nat) (body : String) (retryAfterMs? : Option Nat := none)
+  /-- The provider refused the request because it does not fit in the model's context: what a
+run ends with, rather than fails with (`Trajectory.advance`). The provider's own words. -/
+  | contextExceeded (message : String)
   /-- A provider-specific failure not represented by transport, HTTP, or protocol failures. -/
   | provider (message : String)
   /-- A response or local wire representation did not satisfy the expected chat protocol. -/
@@ -34,6 +37,7 @@ def Error.describe : Error -> String
   | .busy m => m
   | .transport m => s!"transport: {m}"
   | .http status body _ => s!"http {status}: {body}"
+  | .contextExceeded m => s!"context exceeded: {m}"
   | .provider m => s!"provider: {m}"
   | .protocol m => s!"protocol: {m}"
   | .structuredOutput m => s!"structured output: {m}"
@@ -73,7 +77,7 @@ def Error.class : Error -> Error.Class
   | .environment _ => .environment
   | .busy _ | .transport _ => .transient
   | .http status _ _ => if Error.retryableStatus status then .transient else .model
-  | .provider _ | .protocol _ | .structuredOutput _ => .model
+  | .contextExceeded _ | .provider _ | .protocol _ | .structuredOutput _ => .model
   | .cache _ | .storage _ => .storage
 
 abbrev Result (α : Type) := EIO Error α

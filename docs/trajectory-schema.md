@@ -159,6 +159,13 @@ alaya resume 4f2c8b --provider xmcp             # turns until the run ends or as
 `resume` prints one line per new state and ends with `done: Submitted`, with the question it
 stopped at, or, when `--turns N` or `--time-budget S` stopped it first, with how to continue.
 
+**A request too long for the model.** When the provider refuses the request of step 2 because it
+does not fit in the model's context, the turn ends the run instead of failing it: its child is a
+turn with nothing appended, the parent's workspace, the outcome `ContextExceeded`, and a note
+with the provider's words. Nothing was sampled, so it takes no draw: resuming the parent again
+draws its next response as before. This is the provider's own check; an agent may stop sooner
+on an estimate (`docs/miniswe.md` §10).
+
 ### Which draw
 
 A model request does not have one answer; it has a sequence of draws, and the model cache (§7)
