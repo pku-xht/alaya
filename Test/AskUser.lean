@@ -8,7 +8,7 @@ All model responses are scripted; an executor that counts calls detects unwanted
 
 namespace AskUserTests
 
-open Testing Alaya Alaya.Agent Alaya.Trajectory
+open Testing Alaya Alaya.Agent Alaya.Trajectory Alaya.Driver
 open Alaya.Agent.MiniSwe
 
 private def contains (text part : String) : Bool := (text.splitOn part).length > 1
@@ -34,11 +34,16 @@ private def submit : Chat.ToolCall :=
 private def response (calls : Array Chat.ToolCall) : Chat.Response :=
   { toolCalls := calls, finishReason? := some "tool_calls" }
 
-private def enabled : Config := { askUser := true }
+private def enabled : Config := { tools := ({} : Config).tools.push Tools.AskUser.tool }
+
+/-- The `tools` a configuration of agent `name` names to offer asking, besides its defaults. -/
+private def askingTools (name : String) : Lean.Json :=
+  .arr ((#["bash", "submit"] ++ (if name == "mini-vero" then #["time_budget"] else #[]) ++
+    #["ask_user"]).map Lean.Json.str)
 
 private def countingExecutor : IO (Executor × IO.Ref Nat) := do
   let calls ← IO.mkRef 0
-  pure ({ exec := fun _ _ _ => do
+  pure ({ exec := fun _ _ _ _ => do
             calls.modify (· + 1)
             pure { output := "unexpected execution", exitCode? := some 0 }
           uname := pure testUname }, calls)
@@ -56,17 +61,17 @@ private def scripted (responses : Array Chat.Response) : IO (Model × IO.Ref (Ar
         | some r => pure r
         | none => throw <| Error.protocol "scripted model exhausted" } }, requests)
 
-private def expectDone (directive : Directive) (status : String) : TestM Unit := do
-  match directive with
-  | .done outcome => assertEqual "stop status" outcome.status status
+private def expectDone (next : Effect ⊕ Outcome) (status : String) : TestM Unit := do
+  match next with
+  | .inr outcome => assertEqual "stop status" outcome.status status
   | _ => fail s!"expected {status}"
 
-private def expectSample (directive : Directive) : TestM Unit := do
-  match directive with
-  | .sample => pure ()
+private def expectSample (next : Effect ⊕ Outcome) : TestM Unit := do
+  match next with
+  | .inl (.sample ..) => pure ()
   | _ => fail "expected another model sample"
 
-private def resumed (result : Result (Hash × Halt)) : TestM Hash := do
+private def resumed (result : Result (Hash × Stop)) : TestM Hash := do
   let (state, halt) ← assertOk result
   check (halt != .outOfTime) "this continuation must stop at its question or outcome, not its time budget"
   pure state
@@ -89,27 +94,28 @@ private def checkQuestionResult (dialogue : Dialogue) (answer : Lean.Json)
   let decoded ← assertOk <| Result.fromExcept Error.protocol (Lean.Json.parse shown)
   assertEqual "answer in the model view" decoded.compress answer.compress
 
-private def checkQuestionView (dialogue : Dialogue) (answer : String)
-    (expectedArguments : Lean.Json := args) : TestM Unit :=
-  checkQuestionResult dialogue (.str answer) expectedArguments
+/-- What a valid answer `text` to a question of `questionType` is recorded as, and so what the
+model is shown: a candidate's number as a number, and anything else as the text. -/
+private def recordedAnswer (questionType answer : String) : Lean.Json :=
+  if questionType == "single_choice" && answer != "none_of_above" then (answer.trimAscii.toString.toNat! : Lean.Json)
+  else .str answer
 
 def suite : Suite := Testing.suite "ask_user" #[
   test "both agents keep their default prompts and tools when asking is disabled" do
     for definition in Catalog.all do
       let minimal ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name)])
-      let off ← assertOk <| Catalog.fromJson
-        (.mkObj [("name", definition.name), ("ask_user", false)])
       let timeTools := if definition.name == "mini-vero" then #["time_budget"] else #[]
-      assertEqual "default tools" (minimal.tools.map (·.name)) (#["bash", "submit"] ++ timeTools)
+      let off ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name),
+        ("tools", .arr ((#["bash", "submit"] ++ timeTools).map Lean.Json.str))])
+      assertEqual "default tools" (toolNames minimal (minimal.initialLog "task" testUname)) (#["bash", "submit"] ++ timeTools)
       assertEqual "explicit off config" off.config.compress minimal.config.compress
-      assertEqual "default serializes ask_user false"
-        (minimal.config.getObjValAs? Bool "ask_user").toOption (some false)
-      let request (spec : Agent) : Lean.Json :=
-        ({ messages := spec.view (spec.initialLog "task" testUname), tools := spec.tools } : Chat.Request).toJson
+      check (!contains ((minimal.config.getObjVal? "tools").toOption.getD .null).compress "ask_user")
+        "the default configuration names no ask_user"
+      let request (spec : Agent) : Lean.Json := (requestOf spec (spec.initialLog "task" testUname)).toJson
       assertEqual "explicit off opening" (request off).compress (request minimal).compress
       check (!contains (request minimal).compress "ask_user") "the default opening must not offer questions"
       let bad := response #[ask]
-      match (minimal.view #[.response bad])[0]? with
+      match (requestOf minimal #[.sampled default .turn bad]).messages[0]? with
       | some (Chat.Message.user text) => check (contains text "Unknown tool 'ask_user'") "disabled is unknown"
       | _ => fail "disabled ask should be a format error"
     match parseActions (response #[ask]) with
@@ -123,19 +129,23 @@ def suite : Suite := Testing.suite "ask_user" #[
     for recover in #[false, true] do
       for definition in Catalog.all do
         let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name),
-          ("ask_user", true), ("recover_output", recover)])
+          ("tools", askingTools definition.name), ("recover_output", recover)])
         let opening := (built.initialLog "task" testUname).foldl (init := "") fun text event =>
           match event with
-          | .message (.user message) => text ++ message
+          | .told (.user message) => text ++ message
           | _ => text
         check (contains opening "Call ask_user alone") "the opening must permit a question on its own"
         for phrase in incompatible do
           check (!contains opening phrase) s!"the opening still conflicts with a lone question: {phrase}"
       for timeBudget in #[false, true] do
-        let config : Config := { recoverOutput := recover, timeBudget }
+        let base := ({} : Config).tools
+        let config : Config := {
+          recoverOutput := recover
+          tools := if timeBudget then base.push Tools.TimeBudget.tool else base }
+        let asking : Config := { config with tools := config.tools.push Tools.AskUser.tool }
         for reason in #["stop", "length", "tool_calls"] do
           let malformed : Chat.Response := { content? := some "unfinished", finishReason? := some reason }
-          match parseActions malformed { config with askUser := true } with
+          match parseActions malformed asking with
           | .formatError message =>
             check (contains message "ask_user") "every repair path must retain the offered question tool"
             for phrase in incompatible do
@@ -144,42 +154,43 @@ def suite : Suite := Testing.suite "ask_user" #[
               check (contains message s!"finish_reason={reason}") "the truncation reason must be preserved"
               check (contains message "exactly one tool call") "the truncation hint must allow a lone question"
           | _ => fail "an unfinished response needs a repair"
-          let old := if reason == "stop" then
-              withExtraTools config (sentinelToSubmit (formatErrorTemplate.replace "{{error}}" "error"))
-            else withExtraTools config (formatErrorCut.replace "{{ finish_reason }}" reason)
-          assertEqual "asking off retains the original repair"
-            (formatErrorMessage "error" false (some reason) config) old
-        match parseActions (response #[ask]) { config with askUser := true } with
+          -- Asking only adds to the repair: what the tools without it say comes first, unchanged.
+          check ((formatErrorMessage "error" false (some reason) asking).startsWith
+              (formatErrorMessage "error" false (some reason) config))
+            "asking appends to the repair, and changes nothing before it"
+        match parseActions (response #[ask]) asking with
         | .actions actions => check (actions.size == 1) "a lone ask is valid with recovery and time-budget tools"
         | _ => fail "other optional tools must not prevent a lone ask",
 
   test "settings enable asking in both agents, round-trip, and reject wrong types" do
     for definition in Catalog.all do
       let set (path : String) (value : Lean.Json) : Settings.Setting := { target := .agent, path := [path], value }
-      let built ← assertOk <| Catalog.resolve definition.name #[set "ask_user" true,
+      let built ← assertOk <| Catalog.resolve definition.name #[set "tools" (askingTools definition.name),
         set "recover_output" true, set "step_limit" (11 : Nat), set "max_consecutive_format_errors" (2 : Nat)]
       let timeTools := if definition.name == "mini-vero" then #["time_budget"] else #[]
-      assertEqual "enabled tools" (built.tools.map (·.name))
+      assertEqual "enabled tools" (toolNames built (built.initialLog "task" testUname))
         (#["bash", "submit"] ++ timeTools ++ #["ask_user"])
-      assertEqual "recordable flag" (built.config.getObjValAs? Bool "ask_user").toOption (some true)
+      assertEqual "recorded tools" ((built.config.getObjVal? "tools").toOption.map (·.compress))
+        (some (askingTools definition.name).compress)
       let restored ← assertOk <| Catalog.fromJson built.config
       assertEqual "complete config round-trip" restored.config.compress built.config.compress
       check ((built.initialLog "task" testUname).any fun
-        | .message (.user text) => contains text "ask_user"
+        | .told (.user text) => contains text "ask_user"
         | _ => false) "the enabled agent must tell the model it can ask"
-      for bad in #[Lean.Json.null, .str "true", .num 1, .arr #[], .mkObj []] do
-        assertError "ask_user type" (Catalog.fromJson
-          (.mkObj [("name", definition.name), ("ask_user", bad)])) fun
-            | .input message => contains message "ask_user" && contains message "true or false"
+      for bad in #[Lean.Json.null, .str "ask_user", .num 1, .arr #[], .mkObj [],
+          .arr #[.str "bash", .str "submit", .str "ask_users"], .arr #[.str "bash", .str "ask_user"],
+          .arr #[.str "bash", .str "submit", .str "bash"]] do
+        assertError "tools" (Catalog.fromJson
+          (.mkObj [("name", definition.name), ("tools", bad)])) fun
+            | .input message => contains message "tool"
             | _ => false,
 
   test "single choice adds a platform answer while retaining model candidates verbatim" do
     let question := "  Which rule applies?\nContext: α < β.  "
     let candidates := #[" Keep α ", "Change β\nwith evidence"]
     let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question (args question candidates))
-    assertEqual "single-choice type" form.questionType QuestionType.singleChoice
+    assertEqual "a choice of the original candidates" form.form (.singleChoice candidates)
     assertEqual "original question" form.text question
-    assertEqual "original choices" form.options candidates
     let rendered := form.render
     check (rendered.startsWith question) "the question and context must retain their original wording"
     check (contains rendered "\n1.  Keep α \n2. Change β\nwith evidence")
@@ -191,29 +202,27 @@ def suite : Suite := Testing.suite "ask_user" #[
     check (!contains rendered "OTHER") "single choice must not append a custom-answer input"
     match parseActions (response #[ask "q" (args question candidates)]) enabled with
     | .actions actions =>
-      match actions[0]? with
-      | some (MiniSwe.Action.ask "q" parsed) =>
-        assertEqual "waiting type" parsed.questionType form.questionType
-        assertEqual "waiting choices" parsed.options candidates
+      match actions[0]?.map (fun (action : Action) => action.next { response := 0, index := 0 } #[]) with
+      | some (.inl (Effect.ask _ parsed)) =>
+        assertEqual "waiting form" parsed.form form.form
         assertEqual "waiting text" parsed.text question
-      | _ => fail "expected the question directive's action"
+      | _ => fail "expected the question effect's action"
     | _ => fail "valid choices should parse"
-    for (questionType, expectedType) in #[("yes_no", QuestionType.yesNo),
-        ("open_ended", QuestionType.openEnded)] do
+    for (questionType, expectedForm) in #[("yes_no", Question.Form.yesNo),
+        ("open_ended", Question.Form.openEnded)] do
       let arguments := args question #[] questionType
       let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
-      assertEqual "question type" form.questionType expectedType
+      assertEqual "question form" form.form expectedForm
       assertEqual "original question" form.text question
-      assertEqual "no model-defined choices" form.options #[]
+      assertEqual "no model-defined choices" form.form.options #[]
       check (!contains form.render "OTHER") s!"{questionType} must not invent a custom-answer choice"
       check (!contains form.render "none_of_above") s!"{questionType} must not offer the reserved single-choice answer"
       match parseActions (response #[ask "q" arguments]) enabled with
       | .actions actions =>
-        match actions[0]? with
-        | some (MiniSwe.Action.ask "q" parsed) =>
-          assertEqual "waiting type" parsed.questionType expectedType
+        match actions[0]?.map (fun (action : Action) => action.next { response := 0, index := 0 } #[]) with
+        | some (.inl (Effect.ask _ parsed)) =>
+          assertEqual "waiting form" parsed.form expectedForm
           assertEqual "waiting text" parsed.text question
-          assertEqual "waiting options" parsed.options #[]
         | _ => fail s!"expected the {questionType} question action"
       | _ => fail s!"valid {questionType} question should parse",
 
@@ -235,6 +244,8 @@ def suite : Suite := Testing.suite "ask_user" #[
       (args).setObjVal! "options" (.arr #[.str "a", .num 2]),
       args "q" #[], args "q" #["a"], args "q" #["a", " \t"],
       args "q" #["a", "a"], args "q" #["a", " a "],
+      -- Every choice has this answer already; the model may not offer it as a candidate.
+      args "q" #["a", "None of the above"], args "q" #["a", " none_of_above "],
       args "q" #["yes", "no"] "yes_no",
       args "q" #["one"] "yes_no",
       args "q" #["a", "b"] "open_ended",
@@ -266,7 +277,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       ("single_choice", args "Which change should be included?\nSelect one answer."
         #["Keep α", "Check β\nwith evidence",
           "Document γ with a detailed explanation of the public API, compatibility constraints, boundary cases, and expected output."],
-        #["1", "2", "3", "none_of_above", " \t\r2 \n"]),
+        #["1", "2", "3", "none_of_above"]),
       ("open_ended", args "How should we handle the boundary case?" #[] "open_ended",
         #["  Keep the public API.\nPreserve the literal \"[]\" in the response.\n理由：边界条件不同。\n",
           "[]", String.ofList [Char.ofNat 0x200B]])]
@@ -274,7 +285,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       for (questionType, arguments, answers) in cases do
         let base := (← scratch) / s!"{definition.name}-{questionType}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Catalog.resolve definition.name #[{ target := .agent, path := ["ask_user"], value := true }]
+        let built ← assertOk <| Catalog.resolve definition.name #[{ target := .agent, path := ["tools"], value := askingTools definition.name }]
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
@@ -286,17 +297,17 @@ def suite : Suite := Testing.suite "ask_user" #[
         let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config) (model := testModel)
-        let waitingHash ← resumed <| resume rt root (fun _ => pure ())
+        let waitingHash ← resumed <| resume rt root
         let questionState ← assertOk <| getState store waitingHash
-        assertEqual "waiting kind" questionState.kind Kind.turn
+        assertEqual "waiting kind" questionState.kind.toString "step"
         check questionState.question?.isSome "the turn waits on its question"
-        let some question := questionState.question? | fail "missing recorded question"
-        assertEqual "call id" question.callId "q"
+        let some asked := questionState.asked? | fail "missing recorded question"
+        let question := asked.question
+        assertEqual "call id" ((← assertOk <| logOf store waitingHash).index.callId? asked.call) (some "q")
         let expected ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
         assertEqual "recorded question wording" question.text expected.text
-        assertEqual "recorded question type" question.questionType expected.questionType
-        assertEqual "recorded question options" question.options expected.options
-        check (!contains question.toQuestion.render "OTHER") "the waiting record must not add a custom option"
+        assertEqual "recorded question form" question.form expected.form
+        check (!contains question.render "OTHER") "the waiting record must not add a custom option"
         -- The log's call summary is truncated, so `show` must render the complete question
         -- separately, including long choices and the requested answer format.
         let shown ← assertOk <| showLines store waitingHash
@@ -313,39 +324,44 @@ def suite : Suite := Testing.suite "ask_user" #[
         let reopened ← assertOk <| Store.create (base / "states")
         let some persistedQuestion := (← assertOk <| getState reopened waitingHash).question?
           | fail "the persisted question disappeared"
-        assertEqual "reopened type" persistedQuestion.questionType expected.questionType
-        assertEqual "reopened choices" persistedQuestion.options expected.options
+        assertEqual "reopened form" persistedQuestion.form expected.form
         let mut replyHashes : Array Hash := #[]
         for answer in answers do
-          let answered ← assertOk <| reply reopened waitingHash answer
+          let answered ← assertOk <| replyText reopened waitingHash answer
           check (!replyHashes.contains answered) "different answers must create distinct reply branches"
           replyHashes := replyHashes.push answered
           let state ← assertOk <| getState store answered
-          assertEqual "reply kind" state.kind Kind.reply
+          assertEqual "reply kind" state.kind.toString "reply"
           assertEqual "reply parent" state.parent? (some waitingHash)
           assertEqual "reply workspace" state.workspace questionState.workspace
           check state.question?.isNone "an answer, including none_of_above, must not still be a waiting question"
-          check state.agent?.isNone "the reply must inherit configuration rather than duplicate it"
+          check state.root?.isNone "the reply must inherit configuration rather than duplicate it"
           match state.appended.toList with
-          | [.observation "q" (.str raw)] => assertEqual "raw answer" raw answer
-          | _ => fail "a reply must append exactly the original answer as the asking call's observation"
+          | [.recorded _ content] =>
+            assertEqual "recorded answer" content.compress (recordedAnswer questionType answer).compress
+          | _ => fail "a reply must append exactly the answer as the asking call's result"
           check (← assertOk <| waiting store).isEmpty
             "an explicit answer, including none_of_above, must differ from not answering"
           let recorded ← assertOk <| agentOf store answered
           assertEqual "recorded root config" recorded.compress built.config.compress
           let restored ← assertOk <| Catalog.fromJson recorded
-          checkQuestionView (restored.view (← assertOk <| logOf store answered)) answer arguments
+          checkQuestionResult (requestOf restored (← assertOk <| logOf store answered)).messages
+            (recordedAnswer questionType answer) arguments
           let rebuilt : Runtime := { rt with agent := restored }
-          let final ← resumed <| resume rebuilt answered (fun _ => pure ())
+          let final ← resumed <| resume rebuilt answered
           let finalState ← assertOk <| getState store final
           assertEqual "resumed submission" (finalState.outcome?.map (·.status)) (some "Submitted")
           assertEqual "final workspace" finalState.workspace questionState.workspace
           let some request := (← requests.get).back? | fail "missing continuation request"
-          checkQuestionView request.messages answer arguments
+          checkQuestionResult request.messages (recordedAnswer questionType answer) arguments
+        -- A choice is its number however it was typed: the same reply, and so the same state.
+        if questionType == "single_choice" then
+          assertEqual "a choice typed with spaces" (← assertOk <| replyText reopened waitingHash " \t\r2 \n")
+            (replyHashes[1]?.getD default)
         assertEqual "distinct reply branches" (← assertOk <| children store waitingHash).size answers.size
         assertEqual "one question and one continuation per answer" (← requests.get).size (answers.size + 1)
         assertEqual "no command ran for asking or replying" (← calls.get) 0
-        let report ← assertOk <| Html.dataJson store workspaces built.view built.tools
+        let report ← assertOk <| Html.dataJson store workspaces (fun _ => pure built)
         let states ← assertOk <| Result.fromExcept Error.storage (report.getObjVal? "states" >>= Lean.Json.getArr?)
         let some reportQuestion := states.find? fun json =>
             (json.getObjValAs? String "hash").toOption == some waitingHash.hex
@@ -364,7 +380,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       for (questionType, arguments, ordinaryAnswer) in cases do
         let base := (← scratch) / s!"{definition.name}-{questionType}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name), ("ask_user", true)])
+        let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name), ("tools", askingTools definition.name)])
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
@@ -375,31 +391,31 @@ def suite : Suite := Testing.suite "ask_user" #[
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config) (model := testModel)
         let before ← assertOk <| allStates store
-        assertError "only a question accepts an unavailable reply" (replyUnavailable store root) fun
+        assertError "only a question accepts an unavailable reply" (reply store root .unavailable) fun
           | .input _ => true
           | _ => false
         assertEqual "rejected reply writes no state" (← assertOk <| allStates store) before
-        let question ← resumed <| resume rt root (fun _ => pure ())
+        let question ← resumed <| resume rt root
         let questionState ← assertOk <| getState store question
-        let answered ← assertOk <| replyUnavailable store question
+        let answered ← assertOk <| reply store question .unavailable
         let reopened ← assertOk <| Store.create (base / "states")
         let state ← assertOk <| getState reopened answered
-        assertEqual "reply kind" state.kind Kind.reply
+        assertEqual "reply kind" state.kind.toString "reply"
         assertEqual "reply parent" state.parent? (some question)
         assertEqual "reply workspace" state.workspace questionState.workspace
-        assertEqual "reply image" state.image questionState.image
         assertEqual "reply adds no runtime" state.elapsedMs? none
         assertEqual "reply inherits accumulated time" (← assertOk <| elapsedMs reopened answered)
           (← assertOk <| elapsedMs reopened question)
         check state.question?.isNone "unavailable is an explicit response, not an unanswered question"
         match state.appended.toList with
-        | [.observation "q" content] => assertEqual "structured unavailable status" content.compress unavailable.compress
+        | [.recorded _ content] => assertEqual "structured unavailable status" content.compress unavailable.compress
         | _ => fail "unavailable must answer the original call exactly once"
         check (← assertOk <| waiting reopened).isEmpty "unavailable clears the waiting question"
-        let ordinary ← assertOk <| reply reopened question ordinaryAnswer
+        let ordinary ← assertOk <| replyText reopened question ordinaryAnswer
         check (ordinary != answered) "unavailable must differ from no, none_of_above, and literal JSON open text"
-        checkQuestionView (built.view (← assertOk <| logOf reopened ordinary)) ordinaryAnswer arguments
-        let final ← resumed <| resume { rt with store := reopened } answered (fun _ => pure ())
+        checkQuestionResult (requestOf built (← assertOk <| logOf reopened ordinary)).messages
+          (recordedAnswer questionType ordinaryAnswer) arguments
+        let final ← resumed <| resume { rt with store := reopened } answered
         assertEqual "continuation submitted" ((← assertOk <| getState reopened final).outcome?.map (·.status)) (some "Submitted")
         assertEqual "continuation ran a command" (← calls.get) 1
         let allRequests ← requests.get
@@ -408,7 +424,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         checkQuestionResult nextRequest.messages unavailable arguments
         let lines ← assertOk <| treeLines reopened
         check (lines.any (contains · ("reply  " ++ unavailable.compress))) "tree retains the structured status"
-        let report ← assertOk <| Html.dataJson reopened workspaces built.view built.tools
+        let report ← assertOk <| Html.dataJson reopened workspaces (fun _ => pure built)
         let states ← assertOk <| Result.fromExcept Error.storage (report.getObjVal? "states" >>= Lean.Json.getArr?)
         let some reportReply := states.find? fun json =>
             (json.getObjValAs? String "hash").toOption == some answered.hex
@@ -423,32 +439,33 @@ def suite : Suite := Testing.suite "ask_user" #[
       let base := (← scratch) / definition.name
       IO.FS.createDirAll base
       let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name),
-        ("ask_user", true), ("step_limit", 1)])
+        ("tools", askingTools definition.name), ("step_limit", 1)])
       let store ← assertOk <| Store.create (base / "states")
       let workspaces ← Testing.workspaces
       let project := base / "project"
       IO.FS.createDirAll project
       let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
         project (← testImage) (some "task") (agent := built.config) (model := testModel)
-      let workspace := (← assertOk <| getState store root).workspace
+      let rootState ← assertOk <| getState store root
+      let workspace := rootState.workspace
       let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
       let question ← assertOk <| putState store {
-        image := recordedImage
-        workdir := recordedWorkdir
-        parent? := some root, workspace, kind := .turn, elapsedMs? := some 1000
-        appended := #[.response (response #[ask])]
-        question? := some { callId := "q", toQuestion := form } }
-      let answered ← assertOk <| replyUnavailable store question
+        parent? := some root, workspace
+        appended := #[.sampled default .turn (response #[ask])]
+        -- After the root's opening and workspace, the response is at log position 3.
+        kind := .step (some 1000) (some (.inr { call := { response := 3, index := 0 }, question := form })) }
+      let answered ← assertOk <| reply store question .unavailable
       let (executor, calls) ← countingExecutor
       let (model, requests) ← scripted #[]
-      let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built, budgetMs? := some 1000 }
+      let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built }
+      let spent : Limits := { budgetMs? := some 1000 }
       let before ← assertOk <| allStates store
-      check ((← assertOk <| step rt answered).2 == .outOfTime) "step cannot sample after exhausted time"
-      let (stopped, halt) ← assertOk <| resume rt answered (fun _ => pure ())
+      check ((← assertOk <| step rt answered spent.budgetMs?).2 == .outOfTime) "step cannot sample after exhausted time"
+      let (stopped, halt) ← assertOk <| resume rt answered spent
       check (halt == .outOfTime) "unavailable retains the exhausted budget"
       assertEqual "budget leaves reply resumable" stopped answered
       assertEqual "budget writes no new state" (← assertOk <| allStates store) before
-      let final ← resumed <| resume { rt with budgetMs? := none } answered (fun _ => pure ())
+      let final ← resumed <| resume rt answered
       let terminal ← assertOk <| getState store final
       assertEqual "unavailable does not reset step limit" (terminal.outcome?.map (·.status)) (some "LimitsExceeded")
       assertEqual "terminal belongs to reply" terminal.parent? (some answered)
@@ -478,7 +495,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       for (questionType, arguments, invalid, valid) in cases do
         let base := (← scratch) / s!"{definition.name}-{questionType}"
         IO.FS.createDirAll base
-        let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name), ("ask_user", true)])
+        let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name), ("tools", askingTools definition.name)])
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
@@ -488,12 +505,12 @@ def suite : Suite := Testing.suite "ask_user" #[
         let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config) (model := testModel)
-        let stopped ← resumed <| resume rt root (fun _ => pure ())
+        let stopped ← resumed <| resume rt root
         let reopened ← assertOk <| Store.create (base / "states")
         let before ← assertOk <| allStates reopened
         let original := (← assertOk <| getState reopened stopped).toJson.compress
         for answer in invalid do
-          assertError s!"invalid {questionType} answer {repr answer}" (reply reopened stopped answer) fun
+          assertError s!"invalid {questionType} answer {repr answer}" (replyText reopened stopped answer) fun
             | .input _ => true
             | _ => false
           assertEqual "no new stored state" (← assertOk <| allStates reopened) before
@@ -504,62 +521,72 @@ def suite : Suite := Testing.suite "ask_user" #[
           assertEqual "same question is waiting" (pending[0]?.map (·.1)) (some stopped)
           assertEqual "answer validation never samples" (← requests.get).size 1
           assertEqual "answer validation never executes" (← calls.get) 0
-        let answered ← assertOk <| reply reopened stopped valid
+        let answered ← assertOk <| replyText reopened stopped valid
         assertEqual "one committed reply" (← assertOk <| children reopened stopped).size 1
         match (← assertOk <| getState reopened answered).appended.toList with
-        | [.observation "q" (.str raw)] => assertEqual "corrected answer remains verbatim" raw valid
-        | _ => fail "a corrected answer must retain its question call id"
+        | [.recorded _ content] =>
+          assertEqual "the corrected answer is recorded" content.compress (recordedAnswer questionType valid).compress
+        | _ => fail "a corrected answer must be the asking call's one result"
         check (← assertOk <| waiting reopened).isEmpty "a valid submitted answer closes waiting"
-        let final ← resumed <| resume { rt with store := reopened } answered (fun _ => pure ())
+        let final ← resumed <| resume { rt with store := reopened } answered
         assertEqual "continuation after correction" ((← assertOk <| getState reopened final).outcome?.map (·.status))
           (some "Submitted")
         assertEqual "one question and one continuation" (← requests.get).size 2,
 
-  test "a stored question form must be complete and well-formed" do
-    let seed : State := { image := recordedImage, workdir := recordedWorkdir, parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, kind := .turn, appended := #[], question? := some { callId := "q", text := "Choose." }, agent? := some testAgent, model? := some testModel }
-    let questionJson (kind : Lean.Json) (options : Lean.Json) : Lean.Json :=
-      .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", kind), ("options", options)]
-    let malformed : Array Lean.Json := #[
-      .mkObj [("call_id", "q"), ("text", "Choose.")],
-      .mkObj [("call_id", "q"), ("text", "Choose."), ("question_type", "yes_no")],
-      .mkObj [("call_id", "q"), ("text", "Choose."), ("options", .arr #[])],
-      questionJson "unknown" (.arr #[]), questionJson .null (.arr #[]),
-      questionJson "multiple_choice" (.arr #[.str "first", .str "second"]),
-      questionJson "yes_no" (.arr #[.str "yes", .str "no"]),
-      questionJson "open_ended" (.arr #[.str "candidate"]),
-      questionJson "single_choice" (.arr #[]),
-      questionJson "single_choice" (.arr #[.str "only"]),
-      questionJson "single_choice" (.arr #[.str "same", .str " same "]),
-      questionJson "single_choice" (.arr #[.str "valid", .str " \n"]),
-      questionJson "single_choice" (.arr #[.str "valid", .num 2]),
-      questionJson "single_choice" (.str "not an array"),
-      questionJson "yes_no" .null]
-    for question in malformed do
-      match State.fromJson (seed.toJson.setObjVal! "question" question) with
+  test "a stored question must be one that can be asked" do
+    let seed : State := { parent? := none, workspace := ⟨String.ofList (List.replicate 64 '0')⟩, appended := #[]
+                          kind := .step none (some (.inr { call := { response := 0, index := 0 }, question := { text := "Choose." } })) }
+    -- The stored state with a question of `fields` as what its step waits on.
+    let waitingOn (fields : List (String × Lean.Json)) : Lean.Json :=
+      seed.toJson.setObjVal! "kind" (.mkObj [("type", "step"), ("elapsed_ms", .null),
+        ("stop", .mkObj [("asked", .mkObj [("call", .mkObj [("response", 0), ("index", 0)]),
+          ("question", .mkObj fields)])])])
+    let form (type : Lean.Json) (options? : Option Lean.Json := none) : Lean.Json :=
+      .mkObj (("type", type) :: (options?.map fun options => [("options", options)]).getD [])
+    let asking (form : Lean.Json) : List (String × Lean.Json) := [("text", "Choose."), ("form", form)]
+    assertEqual "the seed is stored so" (waitingOn (asking (form "open_ended"))).compress seed.toJson.compress
+    let malformed : Array (List (String × Lean.Json)) := #[
+      [("text", "Choose.")],
+      [("form", form "yes_no")],
+      [("text", " \n"), ("form", form "yes_no")],
+      asking (form "unknown"), asking (form .null), asking (form "multiple_choice" (some (.arr #[.str "first", .str "second"]))),
+      asking (form "single_choice"),
+      asking (form "single_choice" (some (.arr #[]))),
+      asking (form "single_choice" (some (.arr #[.str "only"]))),
+      asking (form "single_choice" (some (.arr #[.str "same", .str " same "]))),
+      asking (form "single_choice" (some (.arr #[.str "valid", .str " \n"]))),
+      asking (form "single_choice" (some (.arr #[.str "valid", .num 2]))),
+      asking (form "single_choice" (some (.str "not an array"))),
+      -- Every choice has this answer already; a candidate may not be it.
+      asking (form "single_choice" (some (.arr #[.str "valid", .str "None of the above"]))),
+      asking (form "single_choice" (some (.arr #[.str "valid", .str " none_of_above "])))]
+    for fields in malformed do
+      match State.fromJson (waitingOn fields) with
       | .error _ => pure ()
-      | .ok _ => fail s!"malformed stored form was accepted: {question.compress}"
+      | .ok _ => fail s!"a malformed stored question was accepted: {(Lean.Json.mkObj fields).compress}"
     let parsed ← assertOk <| Result.fromExcept Error.storage
-      (State.fromJson (seed.toJson.setObjVal! "question" (questionJson "open_ended" (.arr #[]))))
-    assertEqual "a complete form reads back" (parsed.question?.map (·.questionType)) (some .openEnded),
+      (State.fromJson (waitingOn (asking (form "single_choice" (some (.arr #[.str "first", .str "second"]))))))
+    assertEqual "a complete question reads back" (parsed.question?.map (·.form)) (some (.singleChoice #["first", "second"])),
 
   test "a question consumes its model turn and a reply does not reset the step limit" do
-    let config : Config := { askUser := true, stepLimit := 1 }
+    let config : Config := { enabled with stepLimit := 1 }
     let (executor, calls) ← countingExecutor
     let (model, requests) ← scripted #[response #[ask]]
     let a := agent config
     let (rt, asked, halt) ← drive a executor model (initialLog config "task" testUname)
     match halt with
-    | .question q => assertEqual "the asking call" q.callId "q"
+    | .question q =>
+      assertEqual "the asking call" ((← assertOk <| logOf rt.store asked).index.callId? q.call) (some "q")
     | _ => fail "the last allowed model turn may still ask its question"
-    let replied ← assertOk <| reply rt.store asked "2"
+    let replied ← assertOk <| replyText rt.store asked "2"
     let answered ← assertOk <| logOf rt.store replied
-    let (_, halt) ← assertOk <| resume rt replied (fun _ => pure ())
+    let (_, halt) ← assertOk <| resume rt replied
     match halt with
     | .outcome outcome => assertEqual "limit after reply" outcome.status "LimitsExceeded"
     | _ => fail "reply must not grant another model turn"
     assertEqual "sample count" (← requests.get).size 1
     assertEqual "executor count" (← calls.get) 0
-    expectSample (next { enabled with stepLimit := 0 } {} answered),
+    expectSample (next { enabled with stepLimit := 0 } answered),
 
   test "step and resume enforce the recorded limit before sampling after a reply" do
     for definition in Catalog.all do
@@ -567,7 +594,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         let base := (← scratch) / s!"{definition.name}-{useResume}"
         IO.FS.createDirAll base
         let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name),
-          ("ask_user", true), ("step_limit", 1)])
+          ("tools", askingTools definition.name), ("step_limit", 1)])
         let store ← assertOk <| Store.create (base / "states")
         let workspaces ← Testing.workspaces
         let project := base / "project"
@@ -578,14 +605,14 @@ def suite : Suite := Testing.suite "ask_user" #[
         let rt : Runtime := { store, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := built }
         let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
           project (← testImage) (some "task") (agent := built.config) (model := testModel)
-        let stopped ← resumed <| resume rt root (fun _ => pure ())
+        let stopped ← resumed <| resume rt root
         check (← assertOk <| getState store stopped).question?.isSome "the allowed model turn asks"
-        let answered ← assertOk <| reply store stopped "2"
+        let answered ← assertOk <| replyText store stopped "2"
         let recorded ← assertOk <| agentOf store answered
         let restored ← assertOk <| Catalog.fromJson recorded
         let rebuilt := { rt with agent := restored }
         let final ← if useResume then
-            resumed <| resume rebuilt answered (fun _ => pure ())
+            resumed <| resume rebuilt answered
           else stepped <| step rebuilt answered
         let terminal ← assertOk <| getState store final
         assertEqual "limit outcome" (terminal.outcome?.map (·.status)) (some "LimitsExceeded")
@@ -594,7 +621,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         assertEqual "terminal workspace" terminal.workspace (← assertOk <| getState store answered).workspace
         assertEqual "one request in all" (← requests.get).size 1
         assertEqual "no execution" (← calls.get) 0
-        assertError "terminal state cannot resume" (resume rebuilt final (fun _ => pure ())) fun
+        assertError "terminal state cannot resume" (resume rebuilt final) fun
           | .input _ => true
           | _ => false
         assertEqual "refusing terminal resume does not sample" (← requests.get).size 1,
@@ -603,34 +630,31 @@ def suite : Suite := Testing.suite "ask_user" #[
     for definition in Catalog.all do
       let base := (← scratch) / definition.name
       IO.FS.createDirAll base
-      let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name), ("ask_user", true)])
+      let built ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name), ("tools", askingTools definition.name)])
       let store ← assertOk <| Store.create (base / "states")
       let workspaces ← Testing.workspaces
       let project := base / "project"
       IO.FS.createDirAll project
       let root ← assertOk <| createRoot store workspaces (built.initialLog "task" testUname)
         project (← testImage) (some "task") (agent := built.config) (model := testModel)
-      let workspace := (← assertOk <| getState store root).workspace
+      let rootState ← assertOk <| getState store root
+      let workspace := rootState.workspace
       -- Reconstruct an already-recorded run with two timed model steps. Fixed durations
       -- exercise persistence and accumulation without sleeps or timing-sensitive assertions.
       let previous : Chat.ToolCall := { id := "previous", name := "bash", arguments := .mkObj [("command", "true")] }
       let first ← assertOk <| putState store {
-        image := recordedImage
-        workdir := recordedWorkdir
-        parent? := some root, workspace, kind := .turn, elapsedMs? := some 700
-        appended := #[.response (response #[previous]),
-          .observation "previous" (Output.toJson { output := "", exitCode? := some 0 })] }
+        parent? := some root, workspace, kind := .step (some 700)
+        appended := #[.sampled default .turn (response #[previous]),
+          ran "" (response := 3) (workspace := workspace)] }
       let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question args)
       let question ← assertOk <| putState store {
-        image := recordedImage
-        workdir := recordedWorkdir
-        parent? := some first, workspace, kind := .turn, elapsedMs? := some 300
-        appended := #[.response (response #[ask])]
-        question? := some { callId := "q", toQuestion := form } }
+        parent? := some first, workspace
+        appended := #[.sampled default .turn (response #[ask])]
+        kind := .step (some 300) (some (.inr { call := { response := 5, index := 0 }, question := form })) }
       let reopened ← assertOk <| Store.create (base / "states")
       assertEqual "recorded steps add up" (← assertOk <| elapsedMs reopened question) 1000
-      let answered ← assertOk <| reply reopened question "2"
-      let alternate ← assertOk <| reply reopened question "none_of_above"
+      let answered ← assertOk <| replyText reopened question "2"
+      let alternate ← assertOk <| replyText reopened question "none_of_above"
       for answer in #[answered, alternate] do
         assertEqual "answer inherits all recorded running time" (← assertOk <| elapsedMs reopened answer) 1000
         assertEqual "the human reply adds no running time"
@@ -639,16 +663,17 @@ def suite : Suite := Testing.suite "ask_user" #[
       let restored ← assertOk <| Catalog.fromJson recorded
       let (executor, calls) ← countingExecutor
       let (model, requests) ← scripted #[response #[submit]]
-      let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := restored, budgetMs? := some 1000 }
+      let rt : Runtime := { store := reopened, workspaces, workDir := base / "work", outputsDir := base / "outputs", executor, model, agent := restored }
+      let spent : Limits := { budgetMs? := some 1000 }
       let before ← assertOk <| allStates reopened
-      let (stopped, halt) ← assertOk <| resume rt answered (fun _ => pure ())
+      let (stopped, halt) ← assertOk <| resume rt answered spent
       check (halt == .outOfTime) "the inherited time exhausts this invocation's budget"
       assertEqual "resume leaves the reply available for later continuation" stopped answered
-      check ((← assertOk <| step rt answered).2 == .outOfTime) "step also refuses another sample"
+      check ((← assertOk <| step rt answered spent.budgetMs?).2 == .outOfTime) "step also refuses another sample"
       assertEqual "the budget writes no terminal or model state" (← assertOk <| allStates reopened) before
       assertEqual "no model request after the exhausted budget" (← requests.get).size 0
       assertEqual "no command after the exhausted budget" (← calls.get) 0
-      let final ← resumed <| resume { rt with budgetMs? := none } answered (fun _ => pure ())
+      let final ← resumed <| resume rt answered
       assertEqual "the same reply remains resumable with more budget"
         ((← assertOk <| getState reopened final).outcome?.map (·.status)) (some "Submitted")
       assertEqual "only the later allowed continuation samples" (← requests.get).size 1
@@ -656,38 +681,40 @@ def suite : Suite := Testing.suite "ask_user" #[
 
   test "invalid asks count as consecutive format errors and a valid ask resets the streak" do
     let config := { enabled with maxConsecutiveFormatErrors := 2 }
-    let bad := Event.response (response #[ask "bad" (args "q" #["only one"])])
-    let prose := Event.response { content? := some "no tool", finishReason? := some "stop" }
-    expectSample (next config {} #[bad])
-    expectDone (next config {} #[prose, .message (.user "try again"), bad]) "RepeatedFormatError"
-    let answered : Log := #[prose, .response (response #[ask]), .observation "q" (.str "none_of_above")]
-    expectSample (next config {} (answered.push bad))
-    expectDone (next config {} (answered ++ #[bad, bad])) "RepeatedFormatError"
-    expectSample (next { config with maxConsecutiveFormatErrors := 0 } {} #[bad, bad, bad]),
+    let bad := Event.sampled default .turn (response #[ask "bad" (args "q" #["only one"])])
+    let prose := Event.sampled default .turn { content? := some "no tool", finishReason? := some "stop" }
+    expectSample (next config #[bad])
+    expectDone (next config #[prose, .told (.user "try again"), bad]) "RepeatedFormatError"
+    let answered : Log := #[prose, .sampled default .turn (response #[ask]),
+      .recorded { response := 1, index := 0 } (.str "none_of_above")]
+    expectSample (next config (answered.push bad))
+    expectDone (next config (answered ++ #[bad, bad])) "RepeatedFormatError"
+    expectSample (next { config with maxConsecutiveFormatErrors := 0 } #[bad, bad, bad]),
 
   test "asking and output recovery compose" do
-    let config : Config := { askUser := true, recoverOutput := true }
+    let config : Config := { enabled with recoverOutput := true }
     let arguments := args "Which part of the output should be inspected next?" #[] "open_ended"
     let output := "\n".intercalate ((List.range 3000).map fun i => s!"line {i + 1} xxxx") ++ "\n"
-    let history : Log := #[.response (response #[bash]),
-      .observation "b" (Output.toJson { output, exitCode? := some 0 })]
+    let history : Log := #[.sampled default .turn (response #[bash]),
+      ran output (response := 3)]
     let (executor, calls) ← countingExecutor
     let (model, _) ← scripted #[response #[ask "q" arguments], response #[submit]]
     let a := agent config
-    let (rt, asked, halt) ← drive a executor model (initialLog config "task" testUname ++ history)
+    let (rt, asked, halt) ← drive a executor model (initialLog config "task" testUname) history
     match halt with
-    | .question q => assertEqual "the asking call" q.callId "q"
+    | .question q =>
+      assertEqual "the asking call" ((← assertOk <| logOf rt.store asked).index.callId? q.call) (some "q")
     | _ => fail "the recovery-enabled agent should ask normally"
-    let replied ← assertOk <| reply rt.store asked "Inspect the middle lines.\nKeep the output unchanged."
-    let (final, halt) ← assertOk <| resume rt replied (fun _ => pure ())
+    let replied ← assertOk <| replyText rt.store asked "Inspect the middle lines.\nKeep the output unchanged."
+    let (final, halt) ← assertOk <| resume rt replied
     match halt with
     | .outcome outcome => assertEqual "submitted after the reply" outcome.status "Submitted"
     | _ => fail "expected submission after the reply"
     let finalLog ← assertOk <| logOf rt.store final
     let dialogue := view config finalLog
-    checkQuestionView dialogue "Inspect the middle lines.\nKeep the output unchanged." arguments
+    checkQuestionResult dialogue (.str "Inspect the middle lines.\nKeep the output unchanged.") arguments
     check (dialogue.any fun
-      | .tool "b" (.str shown) => contains shown "[output truncated; full output: /alaya/outputs/3-b.txt]"
+      | .tool "b" (.str shown) => contains shown "[output truncated; full output: /alaya/outputs/4-b.txt]"
       | _ => false) "output truncation must retain its recovery hint"
     assertEqual "no executor calls" (← calls.get) 0
 ]

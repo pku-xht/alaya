@@ -8,7 +8,7 @@ view may omit old outputs in blocks, naming the files that hold them. -/
 
 namespace ContextTests
 
-open Testing Alaya Alaya.Agent Alaya.Trajectory
+open Testing Alaya Alaya.Agent Alaya.Trajectory Alaya.Driver
 open Alaya.Agent.MiniSwe
 
 private def bashCall (id : String) : Chat.ToolCall :=
@@ -17,13 +17,13 @@ private def bashCall (id : String) : Chat.ToolCall :=
 private def response (id : String) (usage? : Option Chat.TokenUsage := none) : Chat.Response :=
   { toolCalls := #[bashCall id], finishReason? := some "tool_calls", usage? }
 
-private def observed (id output : String) : Event :=
-  .observation id (Output.toJson { output, exitCode? := some 0 })
+/-- The output of the call `id` of the response at log position `response`. -/
+private def observed (output : String) (response : Nat) : Event := ran output (response := response)
 
 /-- `turns` turns, each a call `c<i>` whose output is 500 characters, after a task message. -/
 private def turns (n : Nat) : Log :=
-  #[.message (.user "task")] ++ (List.range n).foldl (init := #[]) fun log i =>
-    log ++ #[.response (response s!"c{i}"), observed s!"c{i}" (String.ofList (List.replicate 500 'x'))]
+  #[.told (.user "task")] ++ (List.range n).foldl (init := #[]) fun log i =>
+    log ++ #[.sampled default .turn (response s!"c{i}"), observed (String.ofList (List.replicate 500 'x')) (log.size + 1)]
 
 private def shownOutput (dialogue : Dialogue) (id : String) : String :=
   dialogue.findSome? (fun
@@ -36,9 +36,9 @@ private def stored (dialogue : Dialogue) : List String :=
 
 private def masking : Config := { masking? := some { keepTurns := 2, block := 3 } }
 
-private def status : Directive → String
-  | .done outcome => outcome.status
-  | .sample => "sample"
+private def status : Effect ⊕ Outcome → String
+  | .inr outcome => outcome.status
+  | .inl (.sample ..) => "sample"
   | _ => "other"
 
 /-- How apiyi refused a request too long for the model, through each API. -/
@@ -85,7 +85,7 @@ def suite : Suite := Testing.suite "context" #[
         throw <| IO.userError s!"turn {t + 1}: grows {grows}",
 
   iotest "an omitted output names its file, which holds it; short ones and recent ones stay" do
-    let log := turns 6 ++ #[.response (response "s"), observed "s" "ok"]
+    let log := turns 6 ++ #[.sampled default .turn (response "s"), observed "ok" (turns 6).size]
     -- Seven turns: the first three are omitted; `s` is in the last.
     let dialogue := view masking log
     let notice := shownOutput dialogue "c0"
@@ -93,49 +93,47 @@ def suite : Suite := Testing.suite "context" #[
       throw <| IO.userError s!"wrong notice: {notice}"
     if shownOutput dialogue "c3" != String.ofList (List.replicate 500 'x') then
       throw <| IO.userError "a kept turn was omitted"
-    let early := view masking (#[.message (.user "task"), .response (response "s"), observed "s" "ok"] ++ (turns 6).extract 1)
+    let early := view masking (#[.told (.user "task"), .sampled default .turn (response "s"), observed "ok" 1] ++ (turns 6).extract 1)
     if shownOutput early "s" != "ok" then throw <| IO.userError "a short output was omitted"
-    let files := (outputs masking log).map (·.1)
-    if files != #["2-c0.txt", "4-c1.txt", "6-c2.txt"] then throw <| IO.userError s!"wrong files: {files}"
-    if stored (view {} log) != stored (view { masking? := none } log) then throw <| IO.userError "off changed the view"
-    if !(outputs {} log).isEmpty then throw <| IO.userError "files with masking off",
+    if stored (view {} log) != stored (view { masking? := none } log) then throw <| IO.userError "off changed the view",
 
   iotest "the context is the last measured request, its response, and what came since" do
     let usage : Chat.TokenUsage := { input? := some 1000, output? := some 50 }
-    let log : Log := #[.message (.user "task"), .response (response "c" (some usage)),
-      observed "c" (String.ofList (List.replicate 4000 'x'))]
-    let tokens := Agent.contextTokens (view {}) log
+    let log : Log := #[.told (.user "task"), .sampled default .turn (response "c" (some usage)),
+      observed (String.ofList (List.replicate 4000 'x')) 1]
+    let size (config : Config) (log : Log) : Nat := Agent.contextTokens (next config) log (view config log)
+    let tokens := size {} log
     -- 4,000 characters of output, plus its JSON, at four characters a token.
     if tokens < 2050 || tokens > 2100 then throw <| IO.userError s!"wrong size: {tokens}"
-    let unmeasured := Agent.contextTokens (view {}) #[.message (.user (String.ofList (List.replicate 400 'y')))]
+    let unmeasured := size {} #[.told (.user (String.ofList (List.replicate 400 'y')))]
     if unmeasured < 100 || unmeasured > 115 then throw <| IO.userError s!"wrong estimate: {unmeasured}"
     -- Once masking rewrites what was measured, the measure no longer holds: the whole is estimated.
     let measured (t : Nat) : Log := (turns t).map fun
-      | .response r => .response { r with usage? := some { input? := some 1, output? := some 1 } }
+      | .sampled digest purpose r => .sampled digest purpose { r with usage? := some { input? := some 1, output? := some 1 } }
       | event => event
-    let small := Agent.contextTokens (view masking) (measured 4)
+    let small := size masking (measured 4)
     if small > 200 then throw <| IO.userError s!"not measured before the boundary moves: {small}"
-    let moved := Agent.contextTokens (view masking) (measured 5)
+    let moved := size masking (measured 5)
     if moved != estimateTokens (view masking (measured 5)) then
       throw <| IO.userError s!"measured across a move of the boundary: {moved}"
     -- The limit is the model's context less the reserve, or less its output size when smaller.
     let model : Models.Spec := { name := "m", contextTokens? := some 3000, outputTokens? := some 500 }
     if contextLimit? {} model != some 2500 then throw <| IO.userError "wrong limit"
     if contextLimit? {} { name := "m" } != none then throw <| IO.userError "a limit with no context size"
-    let stops := (agent {} { model with contextTokens? := some 2500 }).next {} log
-    let goes := (agent {} { model with contextTokens? := some 3000 }).next {} log
+    let stops := (agent {} { model with contextTokens? := some 2500 }).next log
+    let goes := (agent {} { model with contextTokens? := some 3000 }).next log
     if status stops != "ContextExceeded" || status goes != "sample" then
       throw <| IO.userError s!"{status stops}, {status goes}"
-    if status ((agent {}).next {} log) != "sample" then throw <| IO.userError "no model, no check",
+    if status ((agent {}).next log) != "sample" then throw <| IO.userError "no model, no check",
 
   test "an agent from the catalog knows its model's context; one checked for no run does not" do
     let model : Models.Spec := { name := "m", contextTokens? := some 100 }
-    let log : Log := #[.message (.user (String.ofList (List.replicate 4000 'y')))]
+    let log : Log := #[.told (.user (String.ofList (List.replicate 4000 'y')))]
     for definition in Catalog.all do
       let bounded ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name)]) model
       let unbounded ← assertOk <| Catalog.fromJson (.mkObj [("name", definition.name)])
-      assertEqual s!"{definition.name} bounded" (status (bounded.next {} log)) "ContextExceeded"
-      assertEqual s!"{definition.name} unbounded" (status (unbounded.next {} log)) "sample"
+      assertEqual s!"{definition.name} bounded" (status (bounded.next log)) "ContextExceeded"
+      assertEqual s!"{definition.name} unbounded" (status (unbounded.next log)) "sample"
 ,
 
   iotest "a provider's refusal of a too-long request is recognised, in either API's words" do
@@ -161,27 +159,28 @@ def suite : Suite := Testing.suite "context" #[
     IO.FS.createDirAll project
     let work := (← scratch) / "work"
     IO.FS.createDirAll work
-    let executor : Executor := { exec := fun _ _ _ => pure { output := "ok", exitCode? := some 0 }
+    let executor : Executor := { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 }
                                  uname := pure default }
     let outputsDir := (← scratch) / "outputs"
     let rt (model : Model) : Runtime :=
       { store, workspaces, workDir := work, outputsDir, executor, model, agent := agent {} }
-    let root ← assertOk <| createRoot store workspaces #[.message (.user "task")] project
+    let root ← assertOk <| createRoot store workspaces #[.told (.user "task")] project
       (← testImage) (agent := testAgent) (model := testModel)
     let first ← refusing #[response "c1"]
-    let (ended, halt) ← assertOk <| resume (rt first) root (fun _ => pure ())
+    let (ended, halt) ← assertOk <| resume (rt first) root
     match halt with
     | .outcome o => assertEqual "status" o.status "ContextExceeded"
     | _ => fail "the run did not end"
     let state ← assertOk <| getState store ended
     assertEqual "nothing sampled" state.appended.size 0
-    check (state.note?.any fun note => (note.splitOn "maximum context length is 100 tokens").length > 1)
-      s!"the provider's words are not kept: {state.note?}"
+    let reason? := state.outcome?.bind (·.reason?)
+    check (reason?.any fun reason => (reason.splitOn "maximum context length is 100 tokens").length > 1)
+      s!"the provider's words are not kept: {reason?}"
     check ((← assertOk <| getState store (state.parent?.getD root)).appended.size > 0) "the turn before was not kept"
     -- The refusal took no draw: from the same parent, the next sample is its first draw again.
     let parent := state.parent?.getD root
     let again ← refusing #[response "c2"]
-    let (_, halt) ← assertOk <| resume (rt again) parent (fun _ => pure ()) (turns? := some 1)
+    let (_, halt) ← assertOk <| resume (rt again) parent { steps? := some 1 }
     check (halt != .outcome { status := "ContextExceeded" }) "the parent's first draw was spent by the refusal"
 ]
 

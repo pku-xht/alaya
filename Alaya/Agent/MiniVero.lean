@@ -5,7 +5,7 @@ the trajectory machinery, model providers and executor are shared with MiniSwe. 
 namespace Alaya.Agent.MiniVero
 
 open Alaya (Executor Uname)
-open Alaya.Agent (Agent Log Dialogue Session)
+open Alaya.Agent (Agent Log Dialogue)
 
 /-- Vero's evaluation modes. A run is sent the grading rules of its own mode only, as Vero's
 per-mode instruction templates do. -/
@@ -25,22 +25,24 @@ def Mode.all : List Mode := [.proof, .codeproof]
 def Mode.ofString? (name : String) : Option Mode :=
   Mode.all.find? (·.toString == name)
 
-/-- MiniSwe's configuration, and Vero's evaluation mode. -/
+/-- MiniSwe's configuration, offering `time_budget` too, and Vero's evaluation mode. -/
 structure Config where
   base : MiniSwe.Config := {
     stepLimit := 200
     executor := { timeoutSeconds := 600, env := #[] }
-    timeBudget := true }
+    tools := #[Tools.Bash.tool, Tools.Submit.tool, Tools.TimeBudget.tool] }
   mode : Mode := .proof
   deriving Inhabited
 
-/-- The configuration as JSON: MiniSwe's fields with `name` `mini-vero`, `mode`, and
-`time_budget` — whether the agent is offered the tool and asked to pace itself by it. -/
+/-- The configuration as JSON: MiniSwe's fields with `name` `mini-vero`, and `mode`. -/
 def Config.toJson (config : Config) : Lean.Json :=
   match config.base.toJson with
-  | .obj fields => .obj (((fields.insert "name" "mini-vero").insert "mode" (toString config.mode))
-      |>.insert "time_budget" (config.base.timeBudget : Lean.Json))
+  | .obj fields => .obj ((fields.insert "name" "mini-vero").insert "mode" (toString config.mode))
   | other => other
+
+/-- Whether the run is offered `time_budget`, and so asked to pace itself by it. -/
+def Config.pacing (config : Config) : Bool :=
+  config.base.tools.any (·.name == "time_budget")
 
 def Config.fromJson (json : Lean.Json) : Except String Config := do
   let mode ← match json.getObjVal? "mode" with
@@ -51,16 +53,11 @@ def Config.fromJson (json : Lean.Json) : Except String Config := do
       | none => throw s!"unknown mode: {name} (use {" or ".intercalate (Mode.all.map toString)})"
     | .ok other => throw s!"'mode' must be a string, not {other.compress}"
   let defaults := ({} : Config).base
-  let timeBudget ← match json.getObjVal? "time_budget" with
-    | .error _ => pure defaults.timeBudget
-    | .ok (.bool b) => pure b
-    | .ok other => throw s!"'time_budget' must be true or false, not {other.compress}"
-  -- The rest is MiniSwe's, read without the fields that are this agent's own.
+  -- The rest is MiniSwe's, read without the field that is this agent's own.
   let base ← match json with
-    | .obj fields =>
-      MiniSwe.Config.fromJson (.obj ((fields.erase "mode").erase "time_budget")) defaults #["mode", "time_budget"]
+    | .obj fields => MiniSwe.Config.fromJson (.obj (fields.erase "mode")) defaults #["mode"]
     | other => MiniSwe.Config.fromJson other defaults
-  pure { base := { base with timeBudget }, mode }
+  pure { base, mode }
 
 def systemMessage : String :=
   "You are MiniVero, a Lean 4 implementation and proof agent working in a Vero sandbox. " ++
@@ -120,9 +117,9 @@ def taskMessage (task : String) (mode : Mode) (uname : Uname) (pacing : Bool := 
       uname.system ++ " " ++ uname.release ++ " " ++ uname.version ++ " " ++ uname.machine]
 
 def initialLog (config : Config) (task : String) (uname : Uname) : Log :=
-  #[.message (.system systemMessage),
-    .message (.user (MiniSwe.withAsk config.base.askUser
-      (taskMessage task config.mode uname config.base.timeBudget)))]
+  #[.told (.system systemMessage),
+    .told (.user (MiniSwe.withInstructions config.base
+      (taskMessage task config.mode uname config.pacing)))]
 
 /-- MiniVero currently uses MiniSwe's linear model context. Experimental context
 management must be evaluated separately before changing the baseline. -/
@@ -132,6 +129,6 @@ def tools (config : Config) : Array Chat.ToolDefinition := MiniSwe.tools config.
 
 def agent (config : Config := {}) (model : Models.Spec := default) : Agent :=
   { MiniSwe.agent config.base model with
-    config := config.toJson, initialLog := initialLog config, view := view config, tools := tools config }
+    config := config.toJson, initialLog := initialLog config }
 
 end Alaya.Agent.MiniVero

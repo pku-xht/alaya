@@ -46,21 +46,39 @@ structure Uname where
 
 namespace Executor
 
-/-- How commands are run: how long one may take, and what is added to its environment. -/
+/-- How a command is run: how long it may take, and what is added to its environment. Part of
+the command, so it is recorded with it. -/
 structure Config where
-  /-- Per-command wall-clock timeout in seconds; 0 disables it. -/
+  /-- Wall-clock timeout in seconds; 0 disables it. -/
   timeoutSeconds : Nat := 30
   /-- Environment overrides layered onto the inherited environment. -/
   env : Array (String × String) := #[]
-  deriving Inhabited
+  /-- Whether the command sees the whole output of every earlier command of its branch, as
+  files under `/alaya/outputs`; without it, that directory is empty. -/
+  outputs : Bool := false
+  deriving Inhabited, BEq, Repr
+
+def Config.toJson (config : Config) : Lean.Json :=
+  .mkObj [("timeout_seconds", (config.timeoutSeconds : Lean.Json)),
+          ("env", .arr (config.env.map fun (name, value) => .arr #[.str name, .str value])),
+          ("outputs", config.outputs)]
+
+def Config.fromJson (json : Lean.Json) : Except String Config := do
+  let timeoutSeconds ← json.getObjVal? "timeout_seconds" >>= Lean.Json.getNat?
+  let env ← (← json.getObjVal? "env" >>= Lean.Json.getArr?).mapM fun
+    | .arr #[.str name, .str value] => pure (name, value)
+    | other => throw s!"expected a [name, value] pair of strings, got {other.compress}"
+  let outputs ← json.getObjVal? "outputs" >>= Lean.Json.getBool?
+  pure { timeoutSeconds, env, outputs }
 
 end Executor
 
 /-- Where commands run. `exec` runs a shell script (the argv's first element; the rest are its
-positional arguments) in a working directory with stderr merged; `display` is the command as it
-appears in messages. -/
+positional arguments) as `config` says, in a working directory with stderr merged; `display` is
+the command as it appears in messages. -/
 structure Executor where
-  exec : (workDir : System.FilePath) -> (argv : Array String) -> (display : String) -> IO Output
+  exec : (config : Executor.Config) -> (workDir : System.FilePath) -> (argv : Array String) ->
+    (display : String) -> IO Output
   /-- `uname` where the commands run. -/
   uname : IO Uname
   /-- Releases what the executor holds — a container, say — at the end of a run. -/
@@ -91,8 +109,9 @@ def failed (message : String) : Output :=
   { output := "", error? := some message }
 
 /-- Runs one string command as a shell script. -/
-def bash (executor : Executor) (workDir : System.FilePath) (command : String) : IO Output :=
-  executor.exec workDir #[command] command
+def bash (executor : Executor) (config : Config) (workDir : System.FilePath) (command : String) :
+    IO Output :=
+  executor.exec config workDir #[command] command
 
 end Executor
 end Alaya

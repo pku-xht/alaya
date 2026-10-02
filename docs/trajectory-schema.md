@@ -6,7 +6,7 @@ something you can branch, replay, evaluate, intervene in, and read back. The `al
 line that drives it — every command, its options, output and exit status — is `docs/cli.md`.
 
 The trajectory is the same for every agent. Wherever an agent's prompts, tools, or view matter —
-creating a root, taking a turn, rendering what the model was sent — the command line names the
+creating a root, taking a step, rendering what the model was sent — the command line names the
 agent with `--agent NAME` when the root is created — `mini-swe` (`docs/miniswe.md`, which the
 examples below use) or `mini-vero` (`docs/minivero.md`), with any field overridden by `--set`
 (`docs/cli.md` §5) — and the root records its complete configuration, so no later command asks
@@ -25,7 +25,7 @@ export ALAYA_DATA=$PWD/runs   # the data directory every command below uses (§5
 root=$(alaya root --task "make the test suite pass" ./project --agent mini-swe --model gpt-oss-120b --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim)
 echo $root      # adbac197aea8…  a 64-hex hash; any unambiguous prefix names it from here on
 
-alaya show adbac1          # the state: kind, parent, workspace snapshot, note, image, then its log
+alaya show adbac1          # the state: kind, parent, workspace snapshot, task, image, then its log
 ```
 
 ### The state object
@@ -39,17 +39,18 @@ A state is stored as one object with three parts:
 The object is itself content-addressed: its hash covers those three parts, so a state's hash
 names its whole history and its files, and nothing under a hash ever changes. The full log at a
 state is the concatenation of `appended` along the path from the root (`logOf`), and the
-workspace at a state is its `workspace`. A run is therefore a **tree** of states, and it only grows:
+workspace at a state is its `workspace`. `branchOf` gives the states from the root to a state,
+whose slices partition its log (`docs/architecture.md` §5.2). A run is therefore a **tree** of states, and it only grows:
 continuing from any state adds a child, and the original branch is untouched.
 
 *A state object, and what its hash covers.*
 
 ```mermaid
 flowchart LR
-  subgraph S["state 4f2c8b1e0a33, the turn that ran pytest"]
+  subgraph S["state 4f2c8b1e0a33, the step that ran pytest"]
     direction TB
     P["parent: adbac197aea8"]
-    A["appended: response with call c1 bash pytest -q, observation c1"]
+    A["appended: response with call c1 bash pytest -q, executed c1"]
     E["workspace: b66cab13bd86"]
   end
   Parent["state adbac197aea8, the root<br/>no parent · the opening prompts · the project snapshot"]
@@ -62,41 +63,47 @@ flowchart LR
 
 Every state is one of five kinds. The kind says what created the state and therefore what its
 `appended` and `workspace` hold. `intervention`, `reply` and `evaluation` come from the `alaya`
-commands a person runs (`commit` and `tell`, `reply`, `eval`); `root` comes from `root`; `turn`
-comes from the agent, driven by `resume`. A kind is never a second name for a field: a turn that
-asked a person something is a `turn` with `question?` set, and a message is an `intervention`
-with no changes.
+commands a person runs (`commit` and `tell`, `reply`, `eval`); `root` comes from `root`; `step`
+comes from the agent, driven by `resume`. A kind is never a second name for a field: a step that
+asked a person something is a `step` that stopped at a question, and a message is an `intervention`
+with no changes. A state is a sum by kind (`Trajectory.Kind`): what only one kind holds — a
+root's agent and model, a step's time and how it stopped, an intervention's notice, an
+evaluation's verdict — is in its kind and nowhere else. What each kind may append, and what a
+state must agree with in the branch it grows, are rules `putState` checks, and it refuses a
+state that breaks one (`docs/architecture.md` §5.1).
 
 | Kind | Created by | `appended` | `workspace` |
 | --- | --- | --- | --- |
-| `root` | `alaya root` | the agent's opening prompts | the project as given |
-| `turn` | one model turn, or a stop after a reply | the response and observations — up to the ask, when a call asked a person; empty for a stop before sampling | the workspace after those calls ran, or the parent's when none ran |
-| `reply` | `alaya reply`, with an answer or `--unavailable` | one observation: the person's verbatim answer string, or the explicit unavailable object | the parent's |
-| `intervention` | `alaya commit`, or `alaya tell` | one notice: what changed, or the person's message | the directory the person edited, or the parent's |
-| `evaluation` | `alaya eval` | nothing; the verdict is on the state itself | the checkout after the grader ran |
+| `root` | `alaya root` | the agent's opening prompts, then the project's snapshot as a `placed` event | the project as given |
+| `step` | `resume`: at most one sample, first, and what the agent did after it | answers only: the response, then the answers to the effects that followed — commands run, timings of the run, results the agent recorded — up to the ask, when a call asked a person; empty for a stop before sampling | the workspace the last command left, or the parent's when none ran |
+| `reply` | `alaya reply`, with an answer or `--unavailable` | one `recorded` event: the person's verbatim answer string, or the explicit unavailable object | the parent's |
+| `intervention` | `alaya commit`, or `alaya tell` | for a commit, the edited directory's snapshot as a `placed` event, then a notice of what changed; for a tell, the person's message | the directory the person edited, or the parent's |
+| `evaluation` | `alaya eval` | nothing; the verdict is on the state itself | the parent's; the checkout after the grader ran is the verdict's |
 
-Two states constrain what may follow them. A turn with a `question?` waits: only `reply` may be
+Two states constrain what may follow them. A step with a `question?` waits: only `reply` may be
 its child until one exists. An `evaluation` is a leaf: it is a verdict on its parent, not a point a run can go on
 from.
 
 After a reply, the agent may already be done, for example when the question consumed its
-last allowed model turn. The driver then records a terminal `turn` with empty `appended`,
+last allowed model turn. The driver then records a terminal `step` with empty `appended`,
 the parent's workspace and the agent's outcome, without calling the model.
 
-Besides the three parts, a state carries what the run needs to continue and what a reader wants
-to know: the container `image` and `workdir`, set on the root and inherited; on the root, the `agent?` configuration and the `model?` spec the run is continued with
-(`docs/cli.md` §5); a `note?` of provenance (the task for a root, the note for an intervention); the `outcome?` when the state ended the run; the `question?` a turn is
-waiting on; the `intervention?` record behind a notice; and the `evaluation?` verdict.
+Besides the three parts, a state holds what only its kind does. A root records what the run is
+created with and continued with — the `agent` configuration, the `model` spec, the container
+`image` and `workdir` (`docs/cli.md` §5), and the `task` for a reader — and no other state
+repeats it: every command reads it from the root. A step holds its time and how it stopped the
+run, if it did: the outcome, or the question it waits on. An intervention holds the record
+behind its notice, and an evaluation its verdict and the checkout the grader left.
 
 *The run used in the examples of this page, as a tree. Dashed: an evaluation, a leaf.*
 
 ```mermaid
 flowchart TD
   root["adbac197aea8  root<br/>make the test suite pass"]
-  t1["4f2c8b1e0a33  turn<br/>bash pytest -q"]
+  t1["4f2c8b1e0a33  step<br/>bash pytest -q"]
   c["9d0e11a2b7c4  intervention<br/>fixed the fixture by hand, with a notice"]
-  t2["2c7f0a9e5d31  turn<br/>bash pytest -q"]
-  t3["e5a1c3d9f802  turn<br/>submit  [Submitted]"]
+  t2["2c7f0a9e5d31  step<br/>bash pytest -q"]
+  t3["e5a1c3d9f802  step<br/>submit  [Submitted]"]
   ev["7b19d4c2ff01  evaluation<br/>a grader ran pytest  [pass]"]
   q["c61754d16c7a  question<br/>Should I keep the old API?  [Waiting]"]
 
@@ -119,50 +126,56 @@ adbac197aea8  root  make the test suite pass
     c61754d16c7a  ask  Should I keep the old API?  [Waiting]
 ```
 
-Each line is a state: its hash, its kind (a turn shows its first tool call), and what closed it —
+Each line is a state: its hash, its kind (a step shows its first tool call), and what closed it —
 an outcome, or a question still waiting. Indentation shows children; `4f2c8b1e0a33` has two, a
-person's commit and a turn that asked a question.
+person's commit and a step that asked a question.
 
-## 2. Turns, draws, and forks
+## 2. Steps, draws, and forks
 
-### A turn
+### A step
 
-A **turn** is what `resume` adds to the tree: one model sample and the tool calls that
-follow it, until the agent's `next` wants to sample again, stops, or asks a person. Given a parent
-state, the trajectory:
+A **step** is what `resume` adds to the tree: the agent's effects (`docs/agent-api.md` §2)
+carried out from the parent's log until it wants a second sample, stops, or asks a person. A
+step samples at most once, and only as the first thing it does, so every sampled child of a
+state answers the same request. A step is not a model turn: one model turn can be answered over
+several states, as when a call asks a person and the next calls run after the reply, and a step
+may sample something other than a model turn, such as a summary (`docs/architecture.md` §5.3).
+Given a parent state, the trajectory:
 
 1. materializes the parent's workspace snapshot into the working directory;
-2. builds the request — the agent's view of the parent's log, with the agent's tools — and draws
-   one response (how it picks *which* draw is the subject of the next part);
-3. follows the agent's directives: for each `act`, runs the call in the working directory,
-   records the observation, and snapshots the directory;
-4. writes one child state: the response and observations as `appended`, the last snapshot as
-   `workspace`, and, if the agent stopped, the `outcome?` or `question?`.
+2. when the agent's first effect is `sample`, draws one response to its request (how it
+   picks *which* draw is the subject of the next part), and records it with the request's digest;
+3. carries out the effects that follow: for each `exec`, runs the script in the working
+   directory, which holds the workspace, snapshots the directory, and records the output with
+   that snapshot; for each `time`, records the run's time and the
+   invocation's budget; for each `record`, records the agent's result;
+4. writes one child state: those events as `appended`, the last snapshot as `workspace`, and,
+   if the agent stopped, the outcome or what it asked.
 
-*One turn, from a parent state to its child.*
+*One step, from a parent state to its child.*
 
 ```mermaid
 flowchart TD
   P["parent state<br/>log L · workspace W"]
   M["materialize W into the working directory"]
-  R["request := view L, with the tools<br/>response := draw from the model"]
-  A["for each act: run the call · record the observation · snapshot the directory"]
-  C["child state<br/>appended = response + observations · workspace = last snapshot"]
+  R["request := the agent's sample effect<br/>response := draw from the model"]
+  A["for each exec: run the script in the workspace · snapshot the directory · record it"]
+  C["child state<br/>appended = response + answers · workspace = last snapshot"]
   P --> M --> R --> A --> C
 ```
 
 ```sh
-alaya resume 4f2c8b --provider xmcp --turns 1   # exactly one turn
-alaya resume 4f2c8b --provider xmcp             # turns until the run ends or asks
+alaya resume 4f2c8b --provider xmcp --steps 1   # exactly one step
+alaya resume 4f2c8b --provider xmcp             # steps until the run ends or asks
 ```
 
 `resume` prints one line per new state and ends with `done: Submitted`, with the question it
-stopped at, or, when `--turns N` or `--time-budget S` stopped it first, with how to continue.
+stopped at, or, when `--steps N` or `--time-budget S` stopped it first, with how to continue.
 
 **A request too long for the model.** When the provider refuses the request of step 2 because it
-does not fit in the model's context, the turn ends the run instead of failing it: its child is a
-turn with nothing appended, the parent's workspace, the outcome `ContextExceeded`, and a note
-with the provider's words. Nothing was sampled, so it takes no draw: resuming the parent again
+does not fit in the model's context, the step ends the run instead of failing it: its child is a
+step with nothing appended, the parent's workspace, and the outcome `ContextExceeded`, whose
+`reason` keeps the provider's words. Nothing was sampled, so it takes no draw: resuming the parent again
 draws its next response as before. This is the provider's own check; an agent may stop sooner
 on an estimate (`docs/miniswe.md` §10).
 
@@ -174,7 +187,7 @@ the *same* request — the parent's log viewed the same way, with the same tools
 with a response are, in order, draws 0, 1, 2, … of one sequence.
 
 The trajectory therefore never decides "new" or "reuse" itself. It counts the parent's children
-whose `appended` contains a model response — call the count `n` — and asks the cache for draws `0` to `n`
+that sampled — steps whose first event is a response (`State.sampled`); call the count `n` — and asks the cache for draws `0` to `n`
 (`nextN (n+1)`), then uses draw `n`. The cache does the rest:
 
 - if its entry already holds draw `n`, it returns it without a provider call;
@@ -182,34 +195,34 @@ whose `appended` contains a model response — call the count `n` — and asks t
 
 Children a person makes — `reply`, `intervention` — and evaluations are not counted:
 they asked the model nothing, and counting them would skip a draw the cache holds.
-A terminal `turn` recorded after a reply without sampling is likewise not counted.
+A terminal `step` recorded after a reply without sampling is likewise not counted.
 
 *Which draw a continuation receives, by what the state already has under it.*
 
 ```mermaid
 flowchart LR
-  subgraph one["the root has no turn children: n = 0"]
+  subgraph one["the root has no sampled children: n = 0"]
     direction TB
-    S1["adbac197aea8 root"] -->|"draw 0"| T1["4f2c8b1e0a33 turn<br/>bash pytest -q"]
+    S1["adbac197aea8 root"] -->|"draw 0"| T1["4f2c8b1e0a33 step<br/>bash pytest -q"]
   end
-  subgraph two["2c7f0a has one turn child: n = 1"]
+  subgraph two["2c7f0a has one sampled child: n = 1"]
     direction TB
-    S2["2c7f0a9e5d31 turn"] -->|"draw 0, already there"| T2a["e5a1c3d9f802 turn<br/>submit  [Submitted]"]
-    S2 -->|"draw 1, new: a fork"| T2b["a new turn"]
+    S2["2c7f0a9e5d31 step"] -->|"draw 0, already there"| T2a["e5a1c3d9f802 step<br/>submit  [Submitted]"]
+    S2 -->|"draw 1, new: a fork"| T2b["a new step"]
   end
   subgraph three["4f2c8b has a question and a commit: n = 1"]
     direction TB
-    S3["4f2c8b1e0a33 turn"] -->|"draw 0, already there"| T3a["c61754d16c7a question"]
+    S3["4f2c8b1e0a33 step"] -->|"draw 0, already there"| T3a["c61754d16c7a question"]
     S3 -.->|"not counted"| C3["9d0e11a2b7c4 intervention"]
-    S3 -->|"draw 1, new"| T3b["a new turn"]
+    S3 -->|"draw 1, new"| T3b["a new step"]
   end
 ```
 
 ```sh
-alaya resume 2c7f0a --provider P --turns 1   # 2c7f0a has one turn child, e5a1c3 (draw 0),
+alaya resume 2c7f0a --provider P --steps 1   # 2c7f0a has one sampled child, e5a1c3 (draw 0),
                                           # so this is draw 1: a new sample, a fork
-alaya resume 2c7f0a --provider P --turns 1   # draw 2
-alaya tree                                # 2c7f0a now has three turn children, siblings
+alaya resume 2c7f0a --provider P --steps 1   # draw 2
+alaya tree                                # 2c7f0a now has three sampled children, siblings
 ```
 
 Replay needs no command of its own. If the second `resume` had been interrupted after the model
@@ -217,6 +230,8 @@ answered but before the child was written, running it again asks for draw 1 agai
 the recorded response without a provider call. Likewise `alaya rm HASH` followed by a `resume`
 from its parent reproduces the deleted branch draw for draw, as long as the data directory's
 `cache/` is kept.
+
+Commands are run again on a replay: only the model's draws are cached.
 
 ## 3. People in the tree
 
@@ -228,54 +243,55 @@ be forked like a model turn.
 
 ### Changing the workspace: `commit`
 
-`alaya commit HASH DIR [--note NOTE]` snapshots the directory `DIR` and records it as an
-`intervention` child of `HASH`. The agent is always told: one event is appended, a user message
-carrying a **notice** that lists what changed, so what the agent believes about its files never
+`alaya commit HASH DIR [--message TEXT]` snapshots the directory `DIR` and records it as an
+`intervention` child of `HASH`. Two events are appended: the new snapshot, as a `placed` event,
+so the agent's next command runs in it, and a user message carrying a **notice** that lists what
+changed, so what the agent believes about its files never
 disagrees with them. The notice is rendered from a record the state also keeps,
 `intervention? = { message, changed }`, where `changed` lists the paths that differ between the
 parent's workspace and `DIR`, one `+ path`, `- path`, or `M path` line each, and `message` is
-empty:
+what `--message` gave, or empty. The message is what the person says of the change, and it
+follows the list in the same notice:
 
 ```
 <intervention>
 A person changed the workspace while you were paused:
   M src/bija/cli.py
   + tests/extra.bj
+I fixed the identifier lookup in src/bija/cli.py; re-run the suite.
 </intervention>
 ```
 
-A directory with no change is refused: a message alone is `tell`'s (below), and so is anything
-the person wants to say about the change, told to the new state. `--note NOTE` is provenance for
-the reader of the tree, not for the model. The envelope is fixed so the model can tell a
-person's notice from the task and from tool output.
+A directory with no change is refused: a message alone is `tell`'s (below). Everything a commit
+records is told to the agent; there is no note for the reader of the tree alone, and `tree`
+labels a commit by its message, or by what it changed when it has none. The envelope is fixed so
+the model can tell a person's notice from the task and from tool output.
 
 ```sh
 alaya checkout 4f2c8b ./fix                  # the state's files, to edit by hand
 $EDITOR ./fix/src/app.py
-alaya commit 4f2c8b ./fix --note "fixed the fixture"
+alaya commit 4f2c8b ./fix --message "I fixed the identifier lookup in src/app.py; re-run the suite."
 # 9d0e11a2b7c4
-alaya tell 9d0e11 "I fixed the identifier lookup in src/app.py; re-run the suite."
-# 3f81c0d2a9e4
-alaya resume 3f81c0 --provider P   # the agent continues, having read both notices
+alaya resume 9d0e11 --provider P   # the agent continues, having read the notice
 ```
 
 ```mermaid
 flowchart LR
-  t1["4f2c8b1e0a33  turn<br/>bash pytest -q"] --> c["9d0e11a2b7c4  intervention<br/>workspace = ./fix, appended = the notice"]
-  c -.-> t2["2c7f0a9e5d31  turn<br/>the agent's next turn reads the notice"]
+  t1["4f2c8b1e0a33  step<br/>bash pytest -q"] --> c["9d0e11a2b7c4  intervention<br/>workspace = ./fix, appended = the notice"]
+  c -.-> t2["2c7f0a9e5d31  step<br/>the agent's next step reads the notice"]
   classDef new stroke-dasharray: 5 5
   class t2 new
 ```
 
 ### Sending a message: `tell`
 
-`alaya tell HASH TEXT` is the same notice without a workspace change: an `intervention` child
+`alaya tell HASH TEXT` is the same notice without a workspace change, for a message alone: an `intervention` child
 with no changes, whose `workspace` is the parent's and whose one appended event is the user message, with the header
 "A person sent you a message while you were paused." and no path list.
 
-Both notices are `Event.message`, which every view passes through unchanged, so the model sees
-exactly the text above on its next turn. Neither child counts as a draw (§2): the next
-continuation from the parent still receives the draw its turn children imply.
+Both notices are `Event.told`, which every view passes through unchanged, so the model sees
+exactly the text above on its next model turn. Neither child counts as a draw (§2): the next
+continuation from the parent still receives the draw its sampled children imply.
 
 ```sh
 alaya tell 2c7f0a "The failing test is the one to trust; do not edit tests/."
@@ -285,34 +301,34 @@ alaya resume 3a9b7e --provider P
 
 ```mermaid
 flowchart LR
-  t2["2c7f0a9e5d31  turn<br/>bash pytest -q"] --> m["3a9b7e2c1d40  message<br/>workspace unchanged, appended = the notice"]
-  m -.-> n["a new turn<br/>from alaya resume 3a9b7e"]
+  t2["2c7f0a9e5d31  step<br/>bash pytest -q"] --> m["3a9b7e2c1d40  message<br/>workspace unchanged, appended = the notice"]
+  m -.-> n["a new step<br/>from alaya resume 3a9b7e"]
   classDef new stroke-dasharray: 5 5
   class n new
 ```
 
 ### Being asked: `question` and `reply`
 
-An agent that offers a tool for asking a person returns the `ask callId question` directive when
-the model calls it (`docs/agent-api.md` §3). The trajectory then finishes the turn early and
-records it as a `turn` that waits on a question:
+An agent that offers a tool for asking a person returns the `ask call question` effect when
+the model calls it (`docs/agent-api.md` §2). The trajectory then finishes the step early and
+records it as a `step` that waits on a question:
 
-- `appended` holds the response and the observations of the calls *before* the ask; the calls
+- `appended` holds the response and the answers to the calls *before* the ask; the calls
   after it never ran;
-- `question? = { callId, text, questionType, options }` names the asking call and carries
-  the prompt and answer controls for the person;
+- its kind records what it asked, `{ call, question }`: the asking call, and the question,
+  with its text and the form of answer it asks for;
 - `resume`, `commit`, and `tell` refuse the state until it is answered.
 
-`alaya reply HASH TEXT` validates the answer against the recorded question type before
-writing any state. Yes/no requires `yes` or `no`; single choice requires one integer
-from 1 through the number of model-provided candidates, or `none_of_above` for the
-system-provided **None of the above** option. The model must not include that reserved
-option in its candidates. Open-ended questions require nonblank text.
-An invalid reply leaves the question waiting and writes
-no child. A valid answer is recorded as a `reply` child: the parent's workspace, and one
-appended event, `Event.observation callId TEXT`, the answer as the asking call's result,
-verbatim. The next turn from the reply child continues with the calls that were still pending,
-exactly as if the tool had returned the person's words.
+`alaya reply HASH TEXT` reads the text as a reply to the recorded question before writing any
+state. Yes/no requires `yes` or `no`; single choice requires one candidate's number, from 1, or
+`none_of_above` for the **None of the above** every choice has beside its candidates, which is
+why a candidate may not be it. Open-ended questions require nonblank text.
+A text that is no reply to the question leaves it waiting and writes
+no child. A reply is recorded as a `reply` child: the parent's workspace, and one
+appended event, `Event.recorded call ANSWER`, the answer as the asking call's result: `"yes"` or
+`"no"`, the candidate's number, `"none_of_above"`, or the person's text, verbatim. The next step
+from the reply child continues with the calls that were still pending,
+exactly as if the tool had returned the answer.
 
 *A question and its reply, as events in the log.*
 
@@ -321,16 +337,16 @@ flowchart TD
   subgraph Q["c61754 question state, appended"]
     direction TB
     R["response: calls c1 bash, c2 ask_user, c3 bash — c2 asks: Should I keep the old API?"]
-    O1["observation c1: the command's output"]
+    O1["executed c1: the command's output"]
     R --> O1
   end
   subgraph A["8f2e6b reply state, appended"]
     direction TB
-    O2["observation c2: Keep it; add the new one beside it."]
+    O2["recorded c2: Keep it; add the new one beside it."]
   end
-  subgraph N["the next turn, appended"]
+  subgraph N["the next step, appended"]
     direction TB
-    O3["observation c3: c3 runs now"]
+    O3["executed c3: c3 runs now"]
     R2["response: …"]
     O3 --> R2
   end
@@ -340,8 +356,8 @@ flowchart TD
 Answering the same question twice makes two `reply` siblings, which is a fork on the answer.
 `alaya waiting` lists every question no child has answered.
 
-`alaya reply HASH --unavailable` records `{"status":"unavailable"}` as the observation
-of the asking call for any currently supported question type. Normal answers remain JSON strings;
+`alaya reply HASH --unavailable` records `{"status":"unavailable"}` as the result
+of the asking call, to a question of any form. An answer is never an object, so
 unavailable is neither `no`, `none_of_above`, nor empty text. The reply keeps the question's
 workspace and follows the same continuation and budget rules. See
 [the answer page and read-only context commands](ask-user.md#answer-in-the-browser)
@@ -361,9 +377,9 @@ $ alaya resume 8f2e6b --provider P
 
 ```mermaid
 flowchart LR
-  t1["4f2c8b1e0a33  turn"] --> q["c61754d16c7a  question<br/>Should I keep the old API?  [Waiting]"]
-  q --> r["8f2e6b0d4a17  reply<br/>appended = observation c2: Keep it; add the new one beside it."]
-  r -.-> n["a new turn<br/>c3 runs, then the model is sampled"]
+  t1["4f2c8b1e0a33  step"] --> q["c61754d16c7a  question<br/>Should I keep the old API?  [Waiting]"]
+  q --> r["8f2e6b0d4a17  reply<br/>appended = recorded c2: Keep it; add the new one beside it."]
+  r -.-> n["a new step<br/>c3 runs, then the model is sampled"]
   classDef new stroke-dasharray: 5 5
   class n new
 ```
@@ -377,7 +393,7 @@ loop is: resume; on exit 3 read the question, decide, `reply`; resume from the r
 
 ```sh
 alaya resume "$hash" --provider P --json
-# {"state":"c61754…","kind":"turn","outcome":null,"question":"Should I keep the old API?","question_type":"open_ended","options":[]}
+# {"state":"c61754…","kind":"step","outcome":null,"question":"Should I keep the old API?","question_type":"open_ended","options":[]}
 # exit status 3
 reply=$(alaya reply c61754 "Keep it; add the new one beside it.")
 alaya resume "$reply" --provider P --json
@@ -391,7 +407,7 @@ it knows how to hand a program the state's files, collect what the program says,
 
 > The grader runs in a fresh copy of the state at the trajectory's workdir, in the trajectory's
 > image or a grader image, with trusted files read-only at `/grader`. It can change anything;
-> the result is kept as the evaluation's workspace. It prints TAP on stdout: a complete plan with
+> the result is kept as the evaluation's checkout. It prints TAP on stdout: a complete plan with
 > all results `ok` is a pass, any `not ok` is a fail, and anything incomplete is an error.
 
 ### The grader
@@ -412,10 +428,10 @@ visible, and no path is substituted into the command.
 The grader may do anything to the checkout: copy tests over it, apply a patch, build it, or
 rebuild a clean project elsewhere and carry only the agent's edits across. Its reports belong
 in the checkout too, and scratch work in `/tmp`. When it finishes, the checkout is snapshotted as
-the evaluation's `workspace` and discarded, so the tree records what the grader did to the
+the evaluation's `checkout` and discarded, so the tree records what the grader did to the
 files — the tests it copied in, the reports it wrote — as the change from the graded state to
 the evaluation, and `alaya ls` and `alaya cat` read them. None of it reaches a state a run
-continues from: an evaluation is a leaf.
+continues from: an evaluation is a leaf, and its `workspace` is still its parent's.
 
 ### The verdict
 
@@ -450,13 +466,14 @@ The trajectory records:
 | Field | Meaning |
 | --- | --- |
 | `command` | the grader command |
-| `graderImage` | the image it ran in, by digest |
+| `grader_image` | the image it ran in, by digest |
 | `input` | the snapshot of `--input`, or null |
 | `status` | `pass`, `fail` or `error` |
 | `checks` | `[{ok, name, directive}]`, one per top-level test point; `ok` is false only for a failure that counts |
 | `reason` | why the status is `error`, or which checks made it `fail` |
-| `returncode`, `elapsedMs` | the exit status, null when the grader did not finish, and the wall-clock time |
-| `output` | `{stdout, stderr}`, each truncated to 20 000 characters |
+| `returncode`, `elapsed_ms` | the exit status, null when the grader did not finish, and the wall-clock time |
+| `stdout`, `stderr` | the grader's output, each truncated to 20 000 characters |
+| `checkout` | the snapshot of the checkout as the grader left it |
 
 The score, how many checks passed out of how many, is shown wherever the status is — `tree`,
 `show`, the report — as `pass 3/3`, `fail 2/3`, so a partial result is a number rather than a
@@ -523,18 +540,18 @@ contract:
 
 ```lean
 structure Workspaces where
-  snapshot : System.FilePath -> Result Hash              -- capture a directory as it is now
-  materialize : Hash -> System.FilePath -> Result Unit   -- make a directory hold exactly a snapshot
-  diff : Hash -> Hash -> Result (Array Change)           -- added, removed, modified paths
-  readFiles : Hash -> Array String -> Result (Array (Option ByteArray))  -- regular files of a snapshot
-  listEntries : Hash -> String -> Result (Array Entry)   -- immediate snapshot directory entries
-  retainOnly : Array Hash -> Result Unit                 -- drop every snapshot not listed
+  snapshot : System.FilePath -> Result Snapshot              -- capture a directory as it is now
+  materialize : Snapshot -> System.FilePath -> Result Unit   -- make a directory hold exactly a snapshot
+  diff : Snapshot -> Snapshot -> Result (Array Change)           -- added, removed, modified paths
+  readFiles : Snapshot -> Array String -> Result (Array (Option ByteArray))  -- regular files of a snapshot
+  listEntries : Snapshot -> String -> Result (Array Entry)   -- immediate snapshot directory entries
+  retainOnly : Array Snapshot -> Result Unit                 -- drop every snapshot not listed
 ```
 
 | Operation | Used by |
 | --- | --- |
-| `snapshot` | `root`, every act of a turn, `commit`, `eval` (the grader's input and the graded checkout) |
-| `materialize` | the start of `resume`, `eval`, `checkout` |
+| `snapshot` | `root`, every command of a step, `commit`, `eval` (the grader's input and the graded checkout) |
+| `materialize` | the start of `resume`, a command on another snapshot than the working directory holds, `eval`, `checkout` |
 | `diff` | the notice of a `commit`, `alaya diff`, the HTML report |
 | `readFiles` | the HTML report, `cat` and its previews |
 | `listEntries` | `ls`, and `cat`'s check of a path, using metadata before reading a file |
@@ -548,7 +565,7 @@ follow symbolic links.
 An identifier is 64 hexadecimal digits and means something only to the store that issued it.
 **Equal directories need not get equal identifiers**, and nothing compares them: a state's hash
 covers its workspace identifier, which makes a state immutable, not reproducible — a run's
-observations carry timings and temporary paths, and a repeated turn is a new draw, so two
+observations carry timings and temporary paths, and a repeated step is a new draw, so two
 runs do not meet at the same state hash anyway. What the contract does require
 (`Test/Workspaces.lean`):
 
@@ -588,7 +605,8 @@ Every operation is one `restic` process with `--no-cache --insecure-no-password`
 sits beside the states, which are not encrypted either. It is restic's own format, so `restic
 snapshots`, `restic mount` and the rest work on it directly; a crashed run can leave a stale
 lock, which `restic unlock` removes. `rm HASH` deletes a subtree's state files and keeps only
-the snapshots the surviving states name, which also drops those a turn took between its acts.
+the snapshots the surviving states name — their workspaces, and every snapshot their events name,
+since a log can go back to any of them.
 
 A `restic` process spends about 0.8 s deriving the repository key before it does anything,
 which is why reads are batched and the report renders several states at once. On a Lean
@@ -597,7 +615,7 @@ project with Mathlib — 7.2 GB in 121,433 files, an Apple M5 Pro's internal vol
 | | |
 | --- | ---: |
 | first snapshot | 18.5 s |
-| snapshot after an act, nothing or one file changed | 5.6 s |
+| snapshot after a command, nothing or one file changed | 5.6 s |
 | checkout, into an empty directory or in place | 22–25 s |
 | diff of two states | 1.6 s |
 | repository after three snapshots | 2.4 GB |
@@ -616,50 +634,71 @@ an entry is only ever appended to.
 ## 6. The state object
 
 A state object is compact JSON. Field order is canonical (sorted keys), so equal states have
-equal hashes.
-Every field is always written, `null` where it does not apply, and a reader refuses an object
-with a field missing or of another type: nothing is read with a default.
+equal hashes. It is stored as it is held (`Trajectory.State`): each structure is an object of
+its fields, and a constructor is its name under `type` beside its arguments. Every field is
+written, `null` for none, and a reader refuses an object with a field missing or of another
+type: nothing is read with a default, and no other schema version is read.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `v` | 1 | schema version; a reader refuses any other |
+| `v` | 2 | schema version; a reader refuses any other |
 | `parent` | hex or null | the parent state |
-| `workspace` | hex | the workspace: a snapshot ID (§5) |
-| `kind` | string | one of the kinds in §1 |
+| `workspace` | hex | where the run is: the latest snapshot the state's log names (§5) |
+| `kind` | object | what produced the state, with what only that kind holds |
 | `appended` | array of events | what this state adds to the parent's log |
-| `outcome` | `{status, submission}` or null | when this state ended the run |
-| `note` | string or null | provenance |
-| `image` | string | the pinned container image, set on the root and inherited |
-| `workdir` | string | where the workspace is mounted in the image, set on the root and inherited |
-| `elapsed_ms` | integer or null | on a model step (a `turn`), its wall-clock time: from before the model call to after its last act and snapshot; a run's time is the sum from the root |
-| `agent` | object or null | on a root, the agent's complete configuration (`docs/cli.md` §5), which every root records; null elsewhere |
-| `model` | object or null | on a root, the model's complete spec (`docs/cli.md` §5): `{name, params, echo_reasoning, context_tokens, output_tokens}`, which every root records; null elsewhere |
-| `evaluation` | object or null | `{command, graderImage, input, status, checks, reason, returncode, elapsedMs, output}` on an evaluation (§4) |
-| `intervention` | object or null | `{message, changed: ["M path", "+ path", "- path", …]}` on a state that carried a notice |
-| `question` | object or null | `{call_id, text, question_type, options}` on a waiting state |
+
+A **kind** is one of:
+
+```json
+{"type": "root", "root": {"agent": {…}, "model": {…}, "image": "…", "workdir": "…", "task": "…"|null}}
+{"type": "step", "elapsed_ms": n|null, "stop": null | {"outcome": outcome} | {"asked": asked}}
+{"type": "intervention", "intervention": {"message": "…", "changed": ["M path", "+ path", "- path", …]}}
+{"type": "evaluation", "evaluation": {"command", "grader_image", "input", "status", "checks", "reason", "returncode", "elapsed_ms", "stdout", "stderr", "checkout"}}
+{"type": "reply"}
+```
+
+| In a kind | Meaning |
+| --- | --- |
+| `root.agent` | the agent's complete configuration (`docs/cli.md` §5) |
+| `root.model` | the model's complete spec (`docs/cli.md` §5): `{name, params, echo_reasoning, context_tokens, output_tokens}` |
+| `root.image`, `root.workdir` | the pinned container image every command of the run runs in, and where the workspace is mounted in it |
+| `root.task` | the task the run was created for, for a reader |
+| `elapsed_ms` | a step's wall-clock time: from before the model call to after its last command and snapshot; a run's time is the sum from the root |
+| `stop` | how a step stopped the run, if it did: an **outcome** `{status, submission, reason}`, where `reason` is a provider's refusal or null; or what it **asked** and waits on, `{call, question}`: the asking call's ref, and the question, `{text, form}`, whose form is `{"type": "yes_no"}`, `{"type": "open_ended"}` or `{"type": "single_choice", "options": […]}` |
+| `intervention` | what a person said, and what they changed; both are in the notice the agent is shown |
+| `evaluation` | the verdict (§4), and `checkout`, the files as the grader left them |
 
 An **event** is one of:
 
 ```json
-{"type": "message", "message": {"role": "system"|"user", "content": "…"}}
-{"type": "message", "message": {"role": "assistant", "content": …, "reasoning": …, "tool_calls": [call…]}}
-{"type": "message", "message": {"role": "tool", "tool_call_id": "…", "content": <json>}}
-{"type": "response", "response": {"content", "tool_calls": [call…], "reasoning", "finish_reason", "usage": {"input", "output", "total", "reasoning", "cached"}}}
-{"type": "observation", "call_id": "…", "content": <json>}
+{"type": "told", "message": {"role": "system"|"user", "content": "…"}}
+{"type": "told", "message": {"role": "assistant", "content": …, "reasoning": …, "tool_calls": [call…]}}
+{"type": "told", "message": {"role": "tool", "tool_call_id": "…", "content": <json>}}
+{"type": "placed", "snapshot": "<snapshot>"}
+{"type": "sampled", "request": "<sha256>", "purpose": "turn"|…, "response": {"content", "tool_calls": [call…], "reasoning", "finish_reason", "usage": {"input", "output", "total", "reasoning", "cached"}}}
+{"type": "executed", "call": ref, "command": "…", "config": {"timeout_seconds", "env", "outputs"}, "output": {"output", "exit_code", "error"}, "snapshot": "<snapshot>"}
+{"type": "recorded", "call": ref, "content": <json>}
+{"type": "timed", "run_time_ms": n, "budget_ms": n|null}
 ```
 
 where a **call** is `{"id", "name", "arguments": <json>, "invalid_arguments": string|null}` —
 `invalid_arguments` keeps the raw text when the provider's arguments were not JSON, so the
-dialogue sent back to the model is byte-identical to what it produced. An observation's
-`content` is whatever the agent's `act` returned; the trajectory never reads it.
+dialogue sent back to the model is byte-identical to what it produced — and a **ref** is
+`{"response", "index"}`: the log position of the response that made the call, and which of its
+calls it is, so an answer names its call exactly; the call's id is the one the response at that
+position gives it (`docs/agent-api.md` §1). A
+response's `purpose` is what the agent sampled it for, `turn` for its model turns. A response's `request` is
+the SHA-256 of the request it answered without the model's identity (`Model.requestDigest`), so a
+replay can tell whether an agent still makes it. A `recorded` event's `content` is whatever the
+agent recorded, or a person's reply; the trajectory never reads it.
 
-`alaya show HASH` prints a state's fields and its full log in a readable form; with `--view` it
-also prints the dialogue the run's agent makes of the log, which is what the model is sent from
-that state:
+`alaya show HASH` prints a state's fields and its full log in a readable form; with `--request` it
+also prints the request the step was sampled from, as the run's agent makes it and as its
+response's digest confirms — or says the state sampled nothing:
 
 ```sh
 alaya show 4f2c8b
-alaya show 4f2c8b --view
+alaya show 4f2c8b --request
 alaya diff adbac1 4f2c8b        # the workspace changes between two states, one path per line
 ```
 
@@ -677,7 +716,7 @@ alaya diff adbac1 4f2c8b        # the workspace changes between two states, one 
 }
 ```
 
-A response is stored as a state's `response` event stores it (`Alaya.Chat.Stored`), so a
+A response is stored as a state's `sampled` event stores it (`Alaya.Chat.Stored`), so a
 response reads the same in the cache and in the tree.
 
 `responses[i]` is draw `i` of that request under that model identity. The stored key is checked
@@ -700,13 +739,18 @@ an entry is only ever appended to.
 
 - A state's hash covers its parent, its appended events, and its workspace; nothing under a
   hash ever changes.
-- `logOf state` is the concatenation of `appended` from the root; the request the model was
-  sent to produce a turn is `agent.view (logOf parent)` with `agent.tools`.
+- `logOf state` is the concatenation of `appended` from the root; the response at log position
+  k answers the request of `agent.next (log.take k)`, whose digest it records.
 - Sampling from a state with `n` children containing a model response asks for draw `n`;
   children without a response never consume a draw.
-- A state's workspace is the snapshot taken after its last act; an evaluation's is the checkout
-  after the grader ran, and nothing continues from it.
-- A waiting state grows only by `reply`.
-- The trajectory reads no observation's content and knows no tool's name.
-- A tool call `next` answers itself (`Directive.record`) is recorded as an observation
-  like any other; the state's workspace is its parent's.
+- A state's workspace is the last snapshot its log names. An evaluation's is its parent's:
+  the checkout after the grader ran is the verdict's own, and nothing continues from it.
+- A waiting state grows only by `reply`, which answers its question.
+- Every answer names a call made before it that nothing has answered.
+- These three, and what each kind may hold, are checked when a state is written: `putState`
+  refuses a state that breaks one.
+- A run's agent, model, image and workdir are its root's, and no other state repeats them.
+- The trajectory reads no recorded result's content and knows no tool's name.
+- A tool call `next` answers itself (`Effect.record`) is a `recorded` event like a person's
+  reply; nothing runs, and the workspace is unchanged.
+- Every snapshot an event names is kept while the state holding it is.

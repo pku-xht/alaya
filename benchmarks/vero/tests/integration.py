@@ -97,24 +97,28 @@ def test_mode(args, mode):
     def read_state(hash_):
         return json.loads((data / "states" / f"{hash_}.json").read_text())
 
+    def read_evaluation(hash_):
+        return read_state(hash_)["kind"]["evaluation"]
+
     root = state_hash(alaya("root", source, "--task-file", directory / "MINIVERO_TASK.md",
                              "--agent", "mini-vero", "--set", f"agent.mode={mode}",
                              "--model", "gpt-oss-120b",
                              "--image", args.agent_image,
                              "--workdir", "/testbed").stdout)
-    root_state = read_state(root)
-    assert root_state["workdir"] == "/testbed"
+    # What the run was created with is recorded on its root alone.
+    run_record = read_state(root)["kind"]["root"]
+    assert run_record["workdir"] == "/testbed"
 
     def evaluate(state, expected, passed):
         result = alaya("eval", state, "--input", FIXTURE, "--grader-image", args.grader_image,
                        "--grader", f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader",
                        codes=({"pass": 0, "fail": 1, "error": 2}[expected],))
         evaluated = state_hash(result.stdout)
-        record = read_state(evaluated)["evaluation"]
+        record = read_evaluation(evaluated)
         assert record["status"] == expected, record
         assert len(record["checks"]) == 1, record
         assert sum(c["ok"] for c in record["checks"]) == passed, record
-        assert "sha256:" in record["graderImage"]
+        assert "sha256:" in record["grader_image"]
         assert record["input"]
         assert ".vero/report.md" in alaya("ls", evaluated, ".vero").stdout
         report = alaya("cat", evaluated, ".vero/report.md").stdout
@@ -143,7 +147,7 @@ def test_mode(args, mode):
         server.server_close()
         thread.join()
     assert len(ScriptedModel.requests) == 3
-    assert read_state(final)["workdir"] == "/testbed"
+    assert "root" not in read_state(final)["kind"]
     correct = evaluate(final, "pass", 1)
     # Every eval runs the grader and records a new evaluation.
     assert evaluate(final, "pass", 1)["state"] != correct["state"]
@@ -157,7 +161,7 @@ def test_mode(args, mode):
     else:
         proof = branch / "TinyTrivial/Proof/Core.lean"
         proof.write_text(proof.read_text().replace("  intro n\n  rfl", "  sorry"))
-    bad = state_hash(alaya("commit", final, branch, "--note", "negative grading control").stdout)
+    bad = state_hash(alaya("commit", final, branch, "--message", "negative grading control").stdout)
     rejected = evaluate(bad, "fail", 0)
 
     if mode == "codeproof":
@@ -167,7 +171,7 @@ def test_mode(args, mode):
         impl.unlink()
         impl.symlink_to("/grader/TinyTrivial/Impl/Core.lean")
         linked_state = state_hash(alaya("commit", final, linked,
-                                       "--note", "trusted-reference symlink attack").stdout)
+                                       "--message", "trusted-reference symlink attack").stdout)
         symlink_rejection = evaluate(linked_state, "fail", 0)
         assert "anti-cheat" in symlink_rejection["record"]["checks"][0]["name"]
 
@@ -178,19 +182,19 @@ def test_mode(args, mode):
                      "test \"$PWD\" = /testbed && " + non_root +
                      "! touch /grader/should-not-exist 2>/dev/null && "
                      "printf '1..1\\nok 1 - execution contract\\n'")
-    assert read_state(state_hash(contract.stdout))["evaluation"]["status"] == "pass"
+    assert read_evaluation(state_hash(contract.stdout))["status"] == "pass"
 
     cache_command = "printf '1..1\\nok 1 - image identity\\n'"
     first_image = state_hash(alaya("eval", root, "--grader", cache_command).stdout)
     second_image = state_hash(alaya("eval", root, "--grader-image", args.grader_image,
                                     "--grader", cache_command).stdout)
     assert first_image != second_image
-    assert read_state(first_image)["evaluation"]["graderImage"] == root_state["image"]
-    assert read_state(second_image)["evaluation"]["graderImage"] == correct["record"]["graderImage"]
+    assert read_evaluation(first_image)["grader_image"] == run_record["image"]
+    assert read_evaluation(second_image)["grader_image"] == correct["record"]["grader_image"]
 
     timeout = alaya("eval", root, "--timeout", "1", "--grader",
                     "echo 1..1; sleep 20; echo stale > stale.txt; echo 'ok 1 - late'", codes=(2,))
-    assert read_state(state_hash(timeout.stdout))["evaluation"]["status"] == "error"
+    assert read_evaluation(state_hash(timeout.stdout))["status"] == "error"
     for container in run("docker", "ps", "-aq").stdout.split():
         mounts = run("docker", "inspect", "--format", "{{json .Mounts}}", container,
                      codes=(0, 1))
@@ -199,11 +203,11 @@ def test_mode(args, mode):
                            for m in json.loads(mounts.stdout)), "grader container survived timeout"
     retried = alaya("eval", root, "--grader",
                    "test ! -e stale.txt && printf '1..1\\nok 1 - clean retry\\n'")
-    assert read_state(state_hash(retried.stdout))["evaluation"]["status"] == "pass"
+    assert read_evaluation(state_hash(retried.stdout))["status"] == "pass"
     # Every command's scratch, a grader's checkout included, is gone when the command ends.
     assert not list((data / "tmp").iterdir())
     alaya("html", directory / "report.html")
-    result = {"mode": mode, "root": root, "agent_image": root_state["image"],
+    result = {"mode": mode, "root": root, "agent_image": run_record["image"],
               "blank": blank, "correct": correct, "tampered": rejected,
               "budget_exit": partial.returncode, "model_requests": len(ScriptedModel.requests),
               "timeout": state_hash(timeout.stdout), "retry": state_hash(retried.stdout)}

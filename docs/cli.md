@@ -1,7 +1,8 @@
 # The `alaya` command line
 
 `alaya` drives the trajectory from a shell, a script, a UI, or an agent such as Claude Code. Each
-command is a thin layer over one operation of `Alaya.Trajectory`, whose model — states, draws,
+command is a thin layer over one operation of `Alaya.Trajectory` or of the driver that grows it,
+`Alaya.Driver` (`docs/architecture.md`), whose model — states, draws,
 people in the tree, evaluation, what is on disk — is `docs/trajectory-schema.md`. This page is
 the command line itself: the commands, how a command line is read, what a command prints, and
 how it fails.
@@ -12,9 +13,9 @@ how it fails.
 alaya root --task TEXT PROJECT --agent NAME --model NAME [--set PATH=VALUE …] --image IMAGE [--workdir PATH]   create a root
 alaya root --task TEXT --agent NAME --model NAME --image IMAGE --workdir PATH   …from the image's own PATH
 alaya config [--agent NAME] [--model NAME] [--set PATH=VALUE …]   the agents, models and providers, or what root would record
-alaya resume HASH --provider NAME [--turns N] [--time-budget S]   grow one continuation until it ends, asks, or reaches a limit
+alaya resume HASH --provider NAME [--steps N] [--time-budget S]   grow one continuation until it ends, asks, or reaches a limit
 alaya eval   HASH --grader CMD [--input DIR] [--grader-image IMAGE] [--timeout S]   grade a state
-alaya commit HASH DIR [--note NOTE]              record a hand-edited workspace as a child, telling the agent
+alaya commit HASH DIR [--message TEXT]           record a hand-edited workspace as a child, telling the agent
 alaya tell   HASH TEXT                           send the agent a message, as a child
 alaya reply  HASH (TEXT | --unavailable)         answer the question a state is waiting on, or say the person cannot
 alaya waiting                                    list every unanswered question
@@ -22,7 +23,7 @@ alaya ls HASH [PATH]                             list a directory of a state's w
 alaya cat HASH PATH                              print a file from a state's workspace snapshot, or preview it
 alaya checkout HASH DIR                          materialize a state's workspace into DIR
 alaya tree                                       show the whole forest
-alaya show HASH [--view]                         metadata, the log, and optionally the view
+alaya show HASH [--request]                      metadata, the log, and optionally the request its step was sent
 alaya diff A B                                   workspace changes between two states
 alaya html FILE [--hide DIR]                     write the forest as one self-contained page
 alaya rm HASH                                    delete a subtree and the snapshots only it used
@@ -58,16 +59,16 @@ With `--json`, a command prints one JSON object per line:
 
 | Command | Object |
 | --- | --- |
-| `root`, `resume`, `commit`, `tell`, `reply` | each state it creates: `{state, parent, kind, note, outcome, question, question_type, options}` |
-| `resume`, stopped at a limit | then `{state, turns_spent, turns}` or `{state, time_budget_spent, run_time_ms}` |
+| `root`, `resume`, `commit`, `tell`, `reply` | each state it creates: `{state, parent, kind, outcome, reason, question, question_type, options}` |
+| `resume`, stopped at a limit | then `{state, steps_spent, steps}` or `{state, time_budget_spent, run_time_ms}` |
 | `eval` | `{state, status, passed, total, reason}` |
 | `tree` | every state, as `root` prints one |
 | `waiting` | every open question: `{state, question, question_type, options}` |
-| `show` | the state object (`docs/trajectory-schema.md` §6) with its `state` hash, the run's `run_time_ms`, its `history` — one `{state, kind, events}` per state from the root, whose events concatenate to the log — and, with `--view`, the `view` |
-| `ls` | `{state, workspace, path, entries}`, each entry `{name, path, kind, size}` |
-| `cat` | a preview, `{state, workspace, path, kind, content, size}` (§5) |
+| `show` | the state object (`docs/trajectory-schema.md` §6) with its `state` hash, the run's `run_time_ms`, its `history` — one `{state, kind, events}` per state from the root, whose events concatenate to the log — and, with `--request`, the `request` its step was sampled from, null when it sampled nothing |
+| `ls` | `{state, snapshot, path, entries}`, each entry `{name, path, kind, size}` |
+| `cat` | a preview, `{state, snapshot, path, kind, content, size}` (§5) |
 | `diff` | `{a, b, changes}` |
-| `checkout` | `{state, workspace, directory}` |
+| `checkout` | `{state, snapshot, directory}` |
 | `html` | `{file, bytes}` |
 | `rm` | `{removed}` |
 
@@ -83,7 +84,7 @@ same for every command:
 | 0 | done: the command succeeded, a run ended, a verdict passed | — |
 | 1, 2 | `eval`: the verdict is fail, or error | — |
 | 3 | `resume`: the run waits for an answer | `reply`, then resume from the reply |
-| 4 | `resume`: `--turns` or `--time-budget` stopped it | resume from the last state |
+| 4 | `resume`: `--steps` or `--time-budget` stopped it | resume from the last state |
 | 64 | `usage`: the command line does not parse | fix the command line |
 | 65 | `input`: it names something not there, in the wrong condition, or malformed | fix the request |
 | 69 | `environment`: the machine lacks docker, an image, restic or an API key | fix the machine |
@@ -122,7 +123,7 @@ killed outright leaves its scratch under `DATA/tmp/` behind.
 `alaya`, relative to the current directory, not from the image, as it is, not trimmed or
 rewritten, and must be UTF-8; a missing or unreadable file is an error before anything is
 created, not an empty task. Stdin is the file `/dev/stdin`. Either way the task is saved in the
-opening log and the root's note, so the first request carries all of it without a tool read: a
+opening log and as the root's `task`, so the first request carries all of it without a tool read: a
 task specification too long for a command's output preview reaches the model whole, its middle
 included.
 
@@ -185,23 +186,23 @@ for its own reference solution, so an image should carry what a task legitimatel
 
 **Limits.** Every model step records its wall-clock time on its state (`elapsed_ms`), and a
 run's time is the sum along its path from the root: `show` prints both, `tree` each step's.
-Tokens are kept the same way: each turn's response records what the provider reported — input,
-of which cached, output, of which reasoning — and `show` prints the turn's and the run's from the
-root, `tree` each turn's next to its time, `show --json` both as `usage` and `run_usage`, and the
+Tokens are kept the same way: each step's response records what the provider reported — input,
+of which cached, output, of which reasoning — and `show` prints the step's and the run's from the
+root, `tree` each step's next to its time, `show --json` both as `usage` and `run_usage`, and the
 HTML report both, in cards at the top of each state. A response alaya's own cache replayed cost nothing again, but carries what it
 cost when it was first sampled, so a run's tokens are what its responses cost, and adding them up
-across the tree can count a response two branches share twice. The report's **context** card
-says how full the context a continuation would be sampled from is: its size, as
-`Agent.contextTokens` estimates it, as a share of the root's model's `context_tokens`, or in
-tokens when that is not known; clicking it shows that context.
+across the tree can count a response two branches share twice. The report's **context** card,
+on a state that sampled, says how full the request its step was sent was: its size, as the
+provider counted it, or estimated when it did not, as a share of the root's model's
+`context_tokens`, or in tokens when that is not known; clicking it shows that request.
 `--time-budget SECONDS` (default 0, no limit) is this invocation's alone and recorded nowhere.
 Before each step `resume` checks the run's time against the budget; once spent, it writes
 nothing, says so, and exits with status 4, and a later `resume` — with a larger budget, or
 none — continues from the same state. The budget never cuts a step short, so a run can overrun
-it by one step. `--turns N` (default 0, no limit) stops the same way after this invocation's
-`N`th turn when the run has not ended: `--turns 1` is one step. An agent that paces itself reads
-the time left from its session (`docs/agent-api.md` §3), as MiniVero's `time_budget` tool does
-(`docs/minivero.md`).
+it by one step. `--steps N` (default 0, no limit) stops the same way after this invocation's
+`N`th step when the run has not ended: `--steps 1` is one step (`docs/architecture.md` §1). An agent that paces itself times
+the run (`docs/agent-api.md` §2), which records the run's time and this budget in the log, as
+MiniVero's `time_budget` tool does (`docs/minivero.md`).
 
 ### `eval`
 
@@ -212,8 +213,9 @@ with the verdict, and with a failure's status when it records none.
 
 ### `ls` and `cat`
 
-`ls` and `cat` read a state's snapshot directly, without restoring its workspace, which is how
-a report an evaluation left in its workspace is read. A path is clean and relative to the
+`ls` and `cat` read a state's files directly, without restoring them: its workspace, or, on an
+evaluation, the checkout as the grader left it, which is how a report an evaluation left is
+read. A path is clean and relative to the
 workspace's root (no `..`, no leading `/`); a symbolic link is listed, but never followed, and
 `cat` prints only regular files, byte for byte. `ls` prints each entry's size and path, by name,
 with `/` after a directory and `@` after a link. `cat --json` previews any entry instead: a

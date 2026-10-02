@@ -1,10 +1,12 @@
 # Questions: `ask_user`
 
-MiniSwe and MiniVero can ask a question and wait for an answer. `--set agent.ask_user=true` at
-`root` offers the tool; it is off by default. The root records the setting explicitly as `true`
-or `false`, so later commands rebuild the same agent.
+MiniSwe and MiniVero can ask a question and wait for an answer. The tool is off by default;
+naming it in the agent's `tools` at `root` offers it, and the root records the list, so later
+commands rebuild the same agent. The list replaces the default one, so it names the default
+tools too: `bash` and `submit`, and for MiniVero `time_budget`.
 
-For example, `--agent mini-vero --set agent.mode=codeproof --set agent.ask_user=true`.
+For example, `--agent mini-swe --set 'agent.tools=["bash","submit","ask_user"]'`, or
+`--agent mini-vero --set agent.mode=codeproof --set 'agent.tools=["bash","submit","time_budget","ask_user"]'`.
 
 ## Question forms
 
@@ -20,15 +22,11 @@ Earlier experimental `multiple_choice` runs are not supported. Start a new run
 in a fresh data directory when switching from that format.
 
 The model calls the tool alone and includes the relevant context in `question`.
-The answer interface is in English, and the enabled-tool guidance asks the model
-to write its messages, questions, context, and options in English. This is a
-generation instruction, not language validation: recorded content, project files,
-and human replies are preserved verbatim.
 All three fields are required. Yes/no and open-ended questions require an empty
 `options` array. For single-choice questions, the model must provide only the actual
-candidate answers and must not generate **None of the above**. Alaya reserves that
-option and appends it in the answer interface. This is a model instruction;
-model-provided labels are not specially validated or filtered for it.
+candidate answers and must not offer **None of the above**: every choice has that answer
+already, the answer interface appends it, and a call that lists it as a candidate is a format
+error like any other malformed call.
 No free-text custom-answer option is added.
 
 ```json
@@ -52,8 +50,8 @@ No free-text custom-answer option is added.
 ```
 
 For this single-choice question, reply `1`, `2`, or `3` to choose exactly one
-model-provided candidate. The answer interface also offers **None of the above**,
-which returns the ordinary answer string `none_of_above`: the person has judged
+model-provided candidate; the model is returned that number. The answer interface also
+offers **None of the above**, which returns the string `none_of_above`: the person has judged
 that none of the candidates is correct. This differs from **Unable to answer**,
 which reports that the person cannot answer. Leaving every radio button unselected
 is not an answer and cannot be submitted. Use an open-ended question when an
@@ -67,11 +65,12 @@ alternative answer or an explanation is needed.
 }
 ```
 
-Validation checks the tool arguments, blank text and duplicate choices (ignoring
-surrounding whitespace). It does not check whether a candidate is correct. The
+Validation checks the tool arguments, blank text, duplicate choices (ignoring
+surrounding whitespace) and a candidate that is the reserved answer. It does not check whether
+a candidate is correct. The
 original arguments, including `question_type`, remain in the trajectory so
 studies can distinguish the question forms. The waiting state also records the
-original question text, its type and its options as separate fields. Answer
+question as its text and its form, a choice's candidates within the form. Answer
 collectors do not need to parse options out of formatted text.
 
 ## Answer in the browser
@@ -141,9 +140,9 @@ remains available for scripted answer collection and deliberate reply branches.
 
 ## Waiting and replying
 
-`ask_user` produces `Directive.ask`, which uses the existing question state and
-`reply` command. It runs no workspace command. A turn combining it with another
-tool is a format error before any tool runs. Ordinary turn and format-error limits
+`ask_user` produces `Effect.ask`, whose answer is a `Reply` (`docs/agent-api.md` §2); the step
+stops at it, and the `reply` command answers it. It runs no workspace command. A response combining it with another
+tool is a format error before any tool runs. Ordinary step and format-error limits
 still apply. Both the model context and HTML report retain the question and reply.
 If the question used the last allowed model turn, continuing its reply records
 `LimitsExceeded` without another model call.
@@ -155,7 +154,7 @@ spent, Alaya stops without another model call.
 
 ```bash
 alaya root --task-file /path/to/source/MINIVERO_TASK.md /path/to/source \
-  --agent mini-vero --set agent.mode=codeproof --set agent.ask_user=true --model MODEL --data /path/to/run
+  --agent mini-vero --set agent.mode=codeproof --set 'agent.tools=["bash","submit","time_budget","ask_user"]' --model MODEL --data /path/to/run
 alaya resume ROOT --provider PROVIDER --data /path/to/run --json
 # A question stops resume with exit code 3. Use its state hash below.
 alaya waiting --data /path/to/run
@@ -171,26 +170,27 @@ alaya resume REPLY --provider PROVIDER --data /path/to/run --json
 Place reply text after `--` so an open-ended answer such as `--data` or `-m` is
 recorded as text rather than parsed as an option. Keep CLI options before `--`.
 
-The `reply` command enforces the recorded answer form before writing any child
-state. Yes/no rejects every value except `yes` and `no`. Single choice accepts a
-single integer from 1 through the number of model-provided candidates, or the
+The `reply` command reads the text as a reply to the recorded question before writing any
+child state (`Question.parseReply`). Yes/no rejects every value except `yes` and `no`. Single
+choice accepts one number from 1 through the number of model-provided candidates, or the
 exact string `none_of_above`. Arrays, blank selections, and out-of-range numbers
-are rejected. Open-ended replies require nonblank text. Invalid answers leave the question waiting;
-valid answers are recorded unchanged. The browser and command line use this same
-underlying answer-form validation, including after the agent has been reconstructed
-from its recorded configuration. The browser, CLI/API, and core all reject empty
+are rejected. Open-ended replies require nonblank text. A text that is no reply leaves the
+question waiting. A reply is recorded as the value that says it: `"yes"` or `"no"`; a
+candidate's number, the same however it was typed, so `2` and ` 2 ` are one reply and one
+state; `"none_of_above"`; or an open answer's text, verbatim, surrounding whitespace included.
+The browser and command line go through this same reading, including after the agent has been
+reconstructed from its recorded configuration. The browser, CLI/API, and core all reject empty
 or whitespace-only open answers, using the browser's Unicode whitespace definition.
-Valid nonblank answers, including their surrounding whitespace, remain verbatim.
 
 Different valid CLI replies to one question form separate branches with the
 same workspace. Receiving an answer does not change the task's rules or imply
 that the answer is correct. `none_of_above` means none of the listed candidates is correct;
 it is not a substitute for an unavailable answer.
 
-`reply --unavailable` creates the same kind of reply child, but its observation is
+`reply --unavailable` creates the same kind of reply child, but its recorded result is
 the JSON object `{"status":"unavailable"}`. The next model request receives that
-object under the original `ask_user` call ID. Ordinary answers remain JSON strings
-with their exact text, so even an open answer containing the literal text
+object under the original `ask_user` call ID. An answer is never an object: an open answer
+is a string with its exact text, so even one containing the literal text
 `{"status":"unavailable"}` is distinct from the unavailable status. Both paths
 retain the question's workspace and the existing continuation limits. The caller
 resumes from the returned reply hash as usual.

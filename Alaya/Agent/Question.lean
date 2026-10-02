@@ -1,117 +1,176 @@
 import Lean
 
-/-! Structured questions shared by agents, persisted trajectories, and answer collectors. -/
+/-! Questions an agent asks a person, and the answers a person gives: shared by agents, the
+trajectory that records them, and whatever collects the answers. -/
 
 namespace Alaya.Agent
 
-inductive QuestionType where
+/-- The form of answer a question asks for. -/
+inductive Question.Form where
   | yesNo
-  | singleChoice
   | openEnded
+  /-- Exactly one of the candidates, or none of them. -/
+  | singleChoice (options : Array String)
   deriving BEq, Repr, Inhabited
 
-def QuestionType.toString : QuestionType -> String
+namespace Question.Form
+
+/-- The form's name: a tool's `question_type`, and how a stored question and a command's output
+give it. -/
+def name : Form -> String
   | .yesNo => "yes_no"
-  | .singleChoice => "single_choice"
   | .openEnded => "open_ended"
+  | .singleChoice _ => "single_choice"
 
-def QuestionType.fromString : String -> Except String QuestionType
-  | "yes_no" => .ok .yesNo
-  | "single_choice" => .ok .singleChoice
-  | "open_ended" => .ok .openEnded
-  | other => .error s!"Unknown question_type: {other}."
+/-- The candidates of a choice; none for the other forms. -/
+def options : Form -> Array String
+  | .singleChoice options => options
+  | _ => #[]
 
-/-- The original question and its answer form. Presentation keeps the options separate from
-the question text. A generic question without an answer form is open-ended. -/
+end Question.Form
+
+/-- A question: what is asked, and the form of answer it asks for. -/
 structure Question where
   text : String
-  questionType : QuestionType := .openEnded
-  options : Array String := #[]
+  form : Question.Form := .openEnded
   deriving BEq, Repr, Inhabited
+
+/-- A person's answer to a question, or that they cannot give one. -/
+inductive Reply where
+  | yes
+  | no
+  /-- The candidate chosen, numbered from 1. -/
+  | choice (number : Nat)
+  /-- None of the candidates is right: an answer, unlike `unavailable`. -/
+  | noneOfAbove
+  /-- An answer in the person's own words, verbatim. -/
+  | text (text : String)
+  /-- The person cannot answer; it fits a question of any form. -/
+  | unavailable
+  deriving BEq, Repr, Inhabited
+
+/-- How a reply is recorded, and so what the model is shown as the asking call's result: `"yes"`
+or `"no"`, the candidate's number, `"none_of_above"`, the person's text, or the object
+`{"status": "unavailable"}`. Which reply a recorded value is, the question's form says
+(`Question.readReply?`): the text `none_of_above` answers an open question in the person's own
+words, and a choice with none of its candidates. -/
+def Reply.toJson : Reply -> Lean.Json
+  | .yes => "yes"
+  | .no => "no"
+  | .choice number => (number : Lean.Json)
+  | .noneOfAbove => "none_of_above"
+  | .text words => .str words
+  | .unavailable => .mkObj [("status", "unavailable")]
 
 namespace Question
 
-/-- Match JavaScript `String.trim()` so browser and core reject the same blank
-open answer. U+200B (zero-width space) is deliberately not whitespace here. -/
-private def isReplyWhitespace (c : Char) : Bool :=
-  let n := c.toNat
-  (0x0009 <= n && n <= 0x000D) || n == 0x0020 || n == 0x00A0 || n == 0x1680 ||
-    (0x2000 <= n && n <= 0x200A) || n == 0x2028 || n == 0x2029 || n == 0x202F ||
-    n == 0x205F || n == 0x3000 || n == 0xFEFF
+/-- Whitespace as a browser's `String.trim()` has it, so that an answer page and this module
+call the same answers blank. U+200B (zero-width space) is deliberately not whitespace here. -/
+private def isBlank (text : String) : Bool :=
+  text.toList.all fun c =>
+    let n := c.toNat
+    (0x0009 <= n && n <= 0x000D) || n == 0x0020 || n == 0x00A0 || n == 0x1680 ||
+      (0x2000 <= n && n <= 0x200A) || n == 0x2028 || n == 0x2029 || n == 0x202F ||
+      n == 0x205F || n == 0x3000 || n == 0xFEFF
 
-/-- Checks the answer form, without judging the question or its candidates. -/
+/-- What a choice may not offer itself: the answer every choice has beside its candidates. -/
+private def reserved (option : String) : Bool :=
+  let key := option.toLower
+  key == "none of the above" || key == "none_of_above"
+
+/-- What is wrong with a question, if anything, whatever asks it: it says something, and a
+choice has at least two candidates, each saying something, no two alike, and none the answer
+every choice already has. Checked where a question is made — read from a tool call, or from a
+stored state — and nowhere after. -/
 def validate (question : Question) : Except String Unit := do
-  match question.questionType with
-  | .yesNo | .openEnded =>
-    if !question.options.isEmpty then
-      throw "Question options must be empty for yes_no and open_ended questions."
-  | .singleChoice =>
-    if question.options.size < 2 then throw "A choice question needs at least two candidates."
+  if isBlank question.text then throw "A question must not be blank."
+  if let .singleChoice options := question.form then
+    if options.size < 2 then throw "A choice question needs at least two candidates."
     let mut seen : Array String := #[]
-    for option in question.options do
+    for option in options do
       let key := option.trimAscii.toString
       if key.isEmpty then throw "Question choices must not be empty."
       if seen.contains key then throw "Question choices must be distinct."
+      if reserved key then
+        throw "Question choices must not include None of the above: every choice has it already."
       seen := seen.push key
 
-def toJson (question : Question) : Lean.Json :=
-  .mkObj [("text", question.text), ("question_type", question.questionType.toString),
-    ("options", .arr (question.options.map Lean.Json.str))]
+/-- Whether a reply answers a question of this form. -/
+def accepts (question : Question) : Reply -> Bool
+  | .unavailable => true
+  | .yes | .no => question.form == .yesNo
+  | .text text => question.form == .openEnded && !isBlank text
+  | .noneOfAbove => (question.form matches .singleChoice _)
+  | .choice number => 1 <= number && number <= question.form.options.size
 
-/-- A stored question: its text, form, and options, all required. Malformed metadata is
-rejected rather than silently disabling answer validation. -/
+/-- The reply a person's `text` gives the question, or what is wrong with it: exactly `yes` or
+`no`; a candidate's number, from 1, or `none_of_above`; or, to an open question, any text that
+is not blank, kept verbatim. That the person cannot answer is not said in text
+(`Reply.unavailable`). -/
+def parseReply (question : Question) (text : String) : Except String Reply :=
+  match question.form with
+  | .yesNo =>
+    if text == "yes" then pure .yes else if text == "no" then pure .no
+    else throw "A yes_no answer must be exactly yes or no."
+  | .openEnded =>
+    if isBlank text then throw "An open_ended answer must not be blank." else pure (.text text)
+  | .singleChoice options => do
+    if text == "none_of_above" then return .noneOfAbove
+    let digits := text.trimAscii.toString
+    if digits.isEmpty || !digits.all Char.isDigit || digits.startsWith "0" then
+      throw "A single_choice answer must be one candidate's number, from 1, or none_of_above."
+    let number := digits.toNat!
+    if number > options.size then
+      throw s!"Option {number} is outside the range 1 to {options.size}."
+    pure (.choice number)
+
+/-- The reply a recorded value is, to this question (`Reply.toJson`), if it is one. -/
+def readReply? (question : Question) (json : Lean.Json) : Option Reply :=
+  let reply? : Option Reply := match json, question.form with
+    | .obj _, _ => if json == Reply.unavailable.toJson then some .unavailable else none
+    | .str "yes", .yesNo => some .yes
+    | .str "no", .yesNo => some .no
+    | .str text, .openEnded => some (.text text)
+    | .str "none_of_above", .singleChoice _ => some .noneOfAbove
+    | .num _, .singleChoice _ => json.getNat?.toOption.map .choice
+    | _, _ => none
+  reply?.filter question.accepts
+
+def toJson (question : Question) : Lean.Json :=
+  .mkObj [("text", question.text), ("form", .mkObj (("type", question.form.name) ::
+    match question.form with
+    | .singleChoice options => [("options", .arr (options.map Lean.Json.str))]
+    | _ => []))]
+
+/-- A stored question, checked as any question is when it is made (`validate`). -/
 def fromJson (json : Lean.Json) : Except String Question := do
   let text ← json.getObjVal? "text" >>= Lean.Json.getStr?
-  let question ← match json.getObjVal? "question_type", json.getObjVal? "options" with
-    | .ok kind, .ok choices => do
-      let questionType ← kind.getStr? >>= QuestionType.fromString
-      let options ← choices.getArr? >>= (·.mapM Lean.Json.getStr?)
-      pure { text, questionType, options }
-    | _, _ => throw "A question requires both question_type and options."
+  let stored ← json.getObjVal? "form"
+  let form ← match ← stored.getObjVal? "type" >>= Lean.Json.getStr? with
+    | "yes_no" => pure Form.yesNo
+    | "open_ended" => pure Form.openEnded
+    | "single_choice" =>
+      Form.singleChoice <$> (stored.getObjVal? "options" >>= Lean.Json.getArr? >>= (·.mapM Lean.Json.getStr?))
+    | other => throw s!"Unknown question form: {other}."
+  let question : Question := { text, form }
   question.validate
   pure question
 
-/-- Text presentation for terminals and plain reports. Graphical collectors use the clean
-`text`, `questionType`, and `options` fields instead. -/
+/-- The question as a terminal or a plain report shows it, with how to answer it there. A
+graphical collector lays out `text` and the form itself. -/
 def render (question : Question) : String :=
-  match question.questionType with
+  match question.form with
   | .yesNo => question.text ++ "\n\nReply yes or no."
   | .openEnded => question.text ++ "\n\nReply in your own words."
-  | .singleChoice =>
-    let numbered := question.options.mapIdx fun i option => s!"{i + 1}. {option}"
+  | .singleChoice options =>
+    let numbered := options.mapIdx fun i option => s!"{i + 1}. {option}"
     question.text ++ "\n\n" ++ "\n".intercalate numbered.toList ++
       "\nnone_of_above. None of the above\n\nSelect exactly one answer. Reply with one " ++
-      "JSON integer from 1 to " ++ toString question.options.size ++
+      "number from 1 to " ++ toString options.size ++
       ", or the plain text none_of_above if every listed candidate is incorrect. " ++
       "none_of_above is an answer, distinct from being unable to answer."
 
 instance : ToString Question := ⟨render⟩
-
-/-- Validates before a reply is recorded. Successful answers retain their exact original
-text, including whitespace; open-ended answers must contain non-whitespace text. -/
-def validateReply (question : Question) (text : String) : Except String Unit := do
-  question.validate
-  match question.questionType with
-  | .openEnded =>
-    if text.toList.all isReplyWhitespace then throw "An open_ended answer must not be blank."
-  | .yesNo =>
-    if text != "yes" && text != "no" then throw "A yes_no answer must be exactly yes or no."
-  | .singleChoice =>
-    if text == "none_of_above" then return
-    let isJsonWhitespace := fun c => c == ' ' || c == '\t' || c == '\n' || c == '\r'
-    let token := (text.toList.dropWhile isJsonWhitespace).reverse.dropWhile isJsonWhitespace
-    let token := token.reverse
-    match token with
-    | first :: rest =>
-      if first < '1' || first > '9' || !(rest.all fun c => '0' <= c && c <= '9') then
-        throw "The selected option must be one JSON integer numbered from 1."
-    | [] => throw "A single_choice answer must be one JSON integer or the plain text none_of_above."
-    let json ← (Lean.Json.parse text).mapError
-      fun _ => "A single_choice answer must be one JSON integer or the plain text none_of_above."
-    let number ← json.getNat?.mapError
-      fun _ => "The selected option must be one integer numbered from 1."
-    if number == 0 || number > question.options.size then
-      throw s!"Option {number} is outside the range 1 to {question.options.size}."
 
 end Question
 

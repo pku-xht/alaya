@@ -50,14 +50,18 @@ elif args[0] in ("show", "ls", "cat"):
     assert delimiter < len(args), "reads require a positional delimiter"
     positional = args[delimiter + 1:]
     state = positional[0]
-    value = {"state": state, "workspace": "f" * 64}
+    value = {"state": state}
     if args[0] == "show":
         assert len(positional) == 1
         asked = next((q for q in questions if q["state"] == state), None)
-        value.update(kind="turn", question=asked and {"text": asked["question"]},
-                     history=[{"state": state, "kind": "turn", "events": []}])
+        form = asked and {"type": asked["question_type"], "options": asked["options"]}
+        stop = asked and {"asked": {"call": {"response": 0, "index": 0},
+                                    "question": {"text": asked["question"], "form": form}}}
+        value.update(workspace="f" * 64, kind={"type": "step", "stop": stop},
+                     history=[{"state": state, "kind": "step", "events": []}])
     else:
         assert len(positional) == 2
+        value["snapshot"] = "f" * 64
         path = positional[1]
         if ".." in path.split("/") or path.startswith("/"):
             print("invalid snapshot path", file=sys.stderr)
@@ -381,7 +385,7 @@ class QuestionHttpTests(unittest.TestCase):
             status, body, headers = self.request(path=f"/api/{endpoint}?{urlencode(query)}")
             self.assertEqual(status, 200)
             self.assertEqual(body["state"], YES_NO)
-            self.assertEqual(body["workspace"], "f" * 64)
+            self.assertEqual(body["workspace" if endpoint == "context" else "snapshot"], "f" * 64)
             self.assertEqual(headers["Cache-Control"], "no-store")
             if "path" in query:
                 self.assertEqual(body["path"], query["path"])
@@ -419,7 +423,7 @@ class QuestionHttpTests(unittest.TestCase):
     def test_context_is_the_question_branch(self):
         status, body, _ = self.request(path=f"/api/context?{urlencode({'state': YES_NO})}")
         self.assertEqual((status, body), (200, {"state": YES_NO, "workspace": "f" * 64,
-            "history": [{"state": YES_NO, "kind": "turn", "events": []}]}))
+            "history": [{"state": YES_NO, "kind": "step", "events": []}]}))
 
     def test_context_endpoints_require_token_and_same_origin(self):
         for endpoint, query in [("context", {"state": YES_NO}),

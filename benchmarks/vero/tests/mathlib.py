@@ -75,13 +75,13 @@ grading = run(alaya, "eval", root, "--timeout", "5400",
               "--grader", "python /opt/alaya-vero/grade.py --mode proof --benchmark /grader",
               "--data", data, codes=(1,))
 evaluation = state_hash(grading.stdout)
-record = json.loads((data / "states" / f"{evaluation}.json").read_text())["evaluation"]
+record = json.loads((data / "states" / f"{evaluation}.json").read_text())["kind"]["evaluation"]
 assert record["status"] == "fail", record
 assert len(record["checks"]) == spec_total, (len(record["checks"]), spec_total)
 assert not any(check["ok"] for check in record["checks"]), record
 report = json.loads(run(alaya, "cat", evaluation, ".vero/report.json", "--data", data).stdout)
 assert report["summary"]["total_specs"] == spec_total, report["summary"]
-result = {"root": root, "image": state["image"], "snapshot_stats": stats,
+result = {"root": root, "image": state["kind"]["root"]["image"], "snapshot_stats": stats,
           "package_symlinks": {p.name: str(p.readlink()) for p in packages},
           "uid_gid": uid, "network": "none", "build_exit": build.returncode,
           "grading": {"state": evaluation, "status": record["status"],

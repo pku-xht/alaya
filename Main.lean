@@ -6,6 +6,7 @@ import Alaya
 open Alaya
 open Alaya.Agent (Outcome)
 open Alaya.Trajectory
+open Alaya.Driver
 
 private def emit (s : String) : Result Unit := Result.fromIO Error.storage (IO.println s)
 
@@ -68,14 +69,14 @@ private def openWork (data : DataDir) : Result WorkDir := do
   pure { path }
 
 /-- Where a run's commands go: the image and workdir the trajectory recorded, pulled by its
-digest when it is missing, with the agent's files from `outputs` mounted read-only. -/
-private def executorFor (run : Executor.Docker.RunOptions) (state : State) (config : Executor.Config)
+digest when it is missing, with the branch's command outputs mounted read-only. -/
+private def executorFor (run : Executor.Docker.RunOptions) (root : Root)
     (outputs : System.FilePath) : Result Executor := do
-  let settings ← Executor.Docker.settingsOf run state.image state.workdir
+  let settings ← Executor.Docker.settingsOf run root.image root.workdir
   let settings := { settings with
     mounts := #[{ host := outputs, container := Agent.outputsDir, readOnly := true }] }
   settings.ensurePresent
-  Executor.Docker.executor settings config
+  Executor.Docker.executor settings
 
 /-- The agent of an existing run, for its model: what its root recorded. -/
 private def recordedAgent (store : Store) (hash : Hash) : Result Agent.Agent := do
@@ -95,8 +96,8 @@ private structure ResumeArgs where
   run : Executor.Docker.RunOptions
   /-- Seconds of run time, not recorded; 0 is no limit. -/
   budget : Nat
-  /-- Turns this invocation may take; 0 is no limit. -/
-  turns : Nat
+  /-- Steps this invocation may take; 0 is no limit. -/
+  steps : Nat
 
 private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
   ResumeArgs.mk
@@ -106,8 +107,8 @@ private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
     <*> Provider.endpointCli
     <*> Executor.Docker.RunOptions.cli
     <*> Cli.flagD "time-budget" (.nat "S") 0
-      "seconds of run time, summed from the root, after which no turn starts; 0 is no limit"
-    <*> Cli.flagD "turns" .nat 0 "turns this invocation may take; 0 is no limit, 1 is one step"
+      "seconds of run time, summed from the root, after which no step starts; 0 is no limit"
+    <*> Cli.flagD "steps" .nat 0 "steps this invocation may take; 0 is no limit"
 
 private def runtimeFor (data : DataDir) (work : WorkDir) (a : ResumeArgs) (start : Hash) :
     Result Runtime := do
@@ -119,10 +120,9 @@ private def runtimeFor (data : DataDir) (work : WorkDir) (a : ResumeArgs) (start
     | some _, other => throw <| .input s!"--url and --port address a dgx server, not {other}"
   let model ← buildModel modelSpec a.provider data.cache baseUrl?
   let outputsDir := data.scratch / "outputs"
-  let executor ← executorFor a.run (← getState data.store start) spec.executorConfig outputsDir
+  let executor ← executorFor a.run (← runOf data.store start) outputsDir
   pure { store := data.store, workspaces := data.workspaces, workDir := work.path, outputsDir
-         executor, model, agent := spec
-         budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
+         executor, model, agent := spec }
 
 /-- Empties the work directory. Both a checkout and an extraction from an image need it to start
 clean, and it is the one place holding nothing durable. -/
@@ -149,7 +149,7 @@ private def rootProject (data : DataDir) (settings : Executor.Docker.Settings)
 /-- Exit status when a run stopped at a question rather than an outcome. -/
 private def exitWaiting : UInt32 := 3
 
-/-- Exit status when a run stopped at a limit of this invocation, its time budget or its turns:
+/-- Exit status when a run stopped at a limit of this invocation, its time budget or its steps:
 it has not ended, and a later `resume` continues it. -/
 private def exitStopped : UInt32 := 4
 
@@ -157,11 +157,12 @@ private def exitStopped : UInt32 := 4
 private def stateJson (hash : Hash) (state : State) : Lean.Json :=
   .mkObj [
     ("state", hash.hex), ("parent", state.parent?.map (Lean.Json.str ·.hex) |>.getD .null),
-    ("kind", state.kind.toString), ("note", state.note?.map Lean.Json.str |>.getD .null),
+    ("kind", state.kind.toString),
     ("outcome", state.outcome?.map (fun o => Lean.Json.str o.status) |>.getD .null),
+    ("reason", (state.outcome?.bind (·.reason?)).map Lean.Json.str |>.getD .null),
     ("question", state.question?.map (fun q => Lean.Json.str q.text) |>.getD .null),
-    ("question_type", state.question?.map (fun q => Lean.Json.str q.questionType.toString) |>.getD .null),
-    ("options", state.question?.map (fun q => Lean.Json.arr (q.options.map Lean.Json.str)) |>.getD .null)]
+    ("question_type", state.question?.map (fun q => Lean.Json.str q.form.name) |>.getD .null),
+    ("options", state.question?.map (fun q => Lean.Json.arr (q.form.options.map Lean.Json.str)) |>.getD .null)]
 
 /-- A state a command created: the hash with the outcome or the question it stopped at, or one
 JSON object with `--json`. -/
@@ -169,7 +170,7 @@ private def stateLine (data : DataDir) (out : Cli.Out) (child : Hash) : Result U
   let state ← getState data.store child
   let mark := match state.outcome?, state.question? with
     | some o, _ => s!"  [{o.status}]"
-    | none, some q => s!"  ask  {q.toQuestion.render.quote}  [Waiting]"
+    | none, some q => s!"  ask  {q.render.quote}  [Waiting]"
     | none, none => ""
   out.record (stateJson child state) s!"{child.hex}{mark}"
 
@@ -250,26 +251,26 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
     let start ← resolve data.store a.state
     let rt ← runtimeFor data (← openWork data) a start
     try
-      let (stopped, halt) ← resume rt start (stateLine data out)
-        (turns? := if a.turns == 0 then none else some a.turns)
-      match halt with
+      let limits : Limits := {
+        budgetMs? := if a.budget == 0 then none else some (a.budget * 1000)
+        steps? := if a.steps == 0 then none else some a.steps }
+      let (stopped, stop) ← resume rt start limits (stateLine data out)
+      match stop with
       | .outOfTime =>
         let used ← elapsedMs data.store stopped
         out.record (Lean.Json.mkObj [("state", stopped.hex), ("time_budget_spent", true),
             ("run_time_ms", used)])
           s!"time budget spent: {stopped.hex} has run {seconds used}; resume it to continue"
         pure exitStopped
-      | .outOfTurns =>
-        out.record (Lean.Json.mkObj [("state", stopped.hex), ("turns_spent", true),
-            ("turns", a.turns)])
-          s!"{a.turns} turn(s) taken: resume {stopped.hex} to continue"
+      | .outOfSteps =>
+        out.record (Lean.Json.mkObj [("state", stopped.hex), ("steps_spent", true),
+            ("steps", a.steps)])
+          s!"{a.steps} step(s) taken: resume {stopped.hex} to continue"
         pure exitStopped
       | .question _ => pure exitWaiting
       | .outcome o =>
         out.note s!"done: {o.status}"
         pure 0
-      -- A continuation only stops for one of the above.
-      | .continue => pure 0
     finally
       Result.fromIO Error.storage rt.executor.close
 
@@ -342,8 +343,8 @@ exits with its class's status, as for any command, all of them above the verdict
 private def evalRun (a : EvalArgs) (out : Cli.Out) : Result UInt32 := do
   withData a.data (write := true) fun data => do
     let target ← resolve data.store a.state
-    let targetState ← getState data.store target
-    let settings ← Executor.Docker.settingsOf { user? := a.user? } targetState.image targetState.workdir
+    let run ← runOf data.store target
+    let settings ← Executor.Docker.settingsOf { user? := a.user? } run.image run.workdir
     let node ← evaluate data.store data.workspaces (data.scratch / "eval") target a.grader
       settings.user? a.input? a.graderImage? a.timeout
     let some e := (← getState data.store node).evaluation?
@@ -357,9 +358,9 @@ private def evalRun (a : EvalArgs) (out : Cli.Out) : Result UInt32 := do
 /-! ### A person in the tree -/
 
 private def commitRun (data : System.FilePath) (state : String) (dir : System.FilePath)
-    (note? : Option String) (out : Cli.Out) : Result UInt32 := do
+    (message? : Option String) (out : Cli.Out) : Result UInt32 := do
   withData data (write := true) fun data => do
-    let hash ← commit data.store data.workspaces (← resolve data.store state) dir note?
+    let hash ← commit data.store data.workspaces (← resolve data.store state) dir (message?.getD "")
     stateLine data out hash
     pure 0
 
@@ -384,8 +385,8 @@ private def replyRun (data : System.FilePath) (state : String) (answer? : Option
   withData data (write := true) fun data => do
     let waiting ← resolve data.store state
     stateLine data out (← match answer? with
-      | some text => reply data.store waiting text
-      | none => replyUnavailable data.store waiting)
+      | some text => replyText data.store waiting text
+      | none => reply data.store waiting .unavailable)
     pure 0
 
 private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 := do
@@ -393,9 +394,9 @@ private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 
     for (hash, q) in ← waiting data.store do
       out.record (Lean.Json.mkObj [
           ("state", hash.hex), ("question", q.text),
-          ("question_type", q.questionType.toString),
-          ("options", .arr (q.options.map Lean.Json.str))])
-        s!"{hash.hex}  {q.toQuestion.render.quote}"
+          ("question_type", q.form.name),
+          ("options", .arr (q.form.options.map Lean.Json.str))])
+        s!"{hash.hex}  {q.render.quote}"
     pure 0
 
 /-! ### Reading a run -/
@@ -404,14 +405,14 @@ private def lsRun (data : System.FilePath) (state : String) (path? : Option Stri
     Result UInt32 := do
   withData data fun data => do
     let hash ← resolve data.store state
-    let workspace := (← getState data.store hash).workspace
+    let snapshot := (← getState data.store hash).snapshot
     let path := path?.getD ""
-    let entries ← data.workspaces.list workspace path
+    let entries ← data.workspaces.list snapshot path
     let lines := entries.map fun e =>
       let size := e.size.map toString |>.getD "-"
       let suffix := if e.kind == .directory then "/" else if e.kind == .symlink then "@" else ""
       s!"{"".pushn ' ' (10 - min 10 size.length)}{size}  {e.path}{suffix}"
-    report out (Lean.Json.mkObj [("state", hash.hex), ("workspace", workspace.hex), ("path", path),
+    report out (Lean.Json.mkObj [("state", hash.hex), ("snapshot", snapshot.hex), ("path", path),
         ("entries", .arr (entries.map fun e => .mkObj [("name", e.name), ("path", e.path),
           ("kind", e.kind.toString), ("size", e.size.map (fun n => (n : Lean.Json)) |>.getD .null)]))])
       lines
@@ -422,14 +423,14 @@ and otherwise what it is. -/
 private def catRun (data : System.FilePath) (state path : String) (out : Cli.Out) : Result UInt32 := do
   withData data fun data => do
     let hash ← resolve data.store state
-    let workspace := (← getState data.store hash).workspace
+    let snapshot := (← getState data.store hash).snapshot
     if out.json then
-      let preview ← data.workspaces.preview workspace path
-      out.record (Lean.Json.mkObj [("state", hash.hex), ("workspace", workspace.hex), ("path", path),
+      let preview ← data.workspaces.preview snapshot path
+      out.record (Lean.Json.mkObj [("state", hash.hex), ("snapshot", snapshot.hex), ("path", path),
         ("kind", preview.kind), ("content", preview.content?.map Lean.Json.str |>.getD .null),
         ("size", preview.size?.map (fun n => (n : Lean.Json)) |>.getD .null)]) ""
     else
-      let bytes ← data.workspaces.read workspace path
+      let bytes ← data.workspaces.read snapshot path
       Result.fromIO Error.storage do
         let stdout ← IO.getStdout
         stdout.write bytes
@@ -441,10 +442,10 @@ private def checkoutRun (data : System.FilePath) (state : String) (dir : System.
   withData data fun data => do
     let hash ← resolve data.store state
     let state ← getState data.store hash
-    data.workspaces.materialize state.workspace dir
-    out.record (Lean.Json.mkObj [("state", hash.hex), ("workspace", state.workspace.hex),
+    data.workspaces.materialize state.snapshot dir
+    out.record (Lean.Json.mkObj [("state", hash.hex), ("snapshot", state.snapshot.hex),
         ("directory", dir.toString)])
-      s!"checked out {state.workspace.hex} into {dir}"
+      s!"checked out {state.snapshot.hex} into {dir}"
     pure 0
 
 private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 := do
@@ -455,11 +456,13 @@ private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 := 
     else emitLines (← treeLines data.store)
     pure 0
 
-private def showRun (data : System.FilePath) (state : String) (view : Bool) (out : Cli.Out) :
+private def showRun (data : System.FilePath) (state : String) (request : Bool) (out : Cli.Out) :
     Result UInt32 := do
   withData data fun data => do
     let hash ← resolve data.store state
-    let view? ← if view then some <$> (·.view) <$> recordedAgent data.store hash else pure none
+    let request? ← if request then
+        some <$> stepRequest? data.store (← recordedAgent data.store hash) hash
+      else pure none
     if out.json then
       let branch ← ancestors data.store hash
       let some (_, state) := branch.back? | throw <| .storage s!"no state {hash.hex}"
@@ -470,13 +473,11 @@ private def showRun (data : System.FilePath) (state : String) (view : Bool) (out
         |>.setObjVal! "usage" (state.usage?.map (·.toStored) |>.getD .null)
         |>.setObjVal! "run_usage" (← runUsage data.store hash).toStored
         |>.setObjVal! "history" (.arr history)
-      let json := match view? with
-        | some view =>
-          let log := branch.foldl (fun log (_, s) => log ++ s.appended) #[]
-          json.setObjVal! "view" (.arr ((view log).map Chat.Message.toJson))
+      let json := match request? with
+        | some request? => json.setObjVal! "request" (request?.map (·.toJson) |>.getD .null)
         | none => json
       out.record json ""
-    else emitLines (← showLines data.store hash view?)
+    else emitLines (← showLines data.store hash request?)
     pure 0
 
 private def diffRun (data : System.FilePath) (a b : String) (out : Cli.Out) : Result UInt32 := do
@@ -494,16 +495,9 @@ private def htmlRun (data : System.FilePath) (file : System.FilePath) (hide : Ar
     -- Each --hide may list several: --hide .venv --hide __pycache__,.pytest_cache
     let hidden := hide.foldl (init := #[]) fun paths value =>
       paths ++ (value.splitOn ",").toArray.filter (!·.isEmpty)
-    -- The page has one view and one tool list, so the forest's roots must agree on the agent.
-    let roots ← (← allStates data.store).filterM fun h => do pure (← getState data.store h).parent?.isNone
-    let some first := roots[0]? | throw <| .input "nothing to report: the data directory holds no states"
-    let spec ← recordedAgent data.store first
-    for root in roots do
-      if (← recordedAgent data.store root).config.compress != spec.config.compress then
-        throw <| .input <|
-          s!"the roots of {data.path} were created with different agents; a report renders one " ++
-          "agent's runs, so give each its own data directory"
-    let page ← Html.report data.store data.workspaces s!"alaya {data.path}" spec.view spec.tools hidden
+    if (← allStates data.store).isEmpty then
+      throw <| .input "nothing to report: the data directory holds no states"
+    let page ← Html.report data.store data.workspaces s!"alaya {data.path}" (recordedAgent data.store) hidden
     Result.fromIO Error.storage (IO.FS.writeFile file page)
     out.record (Lean.Json.mkObj [("file", file.toString), ("bytes", page.length)])
       s!"wrote {file} ({page.length} bytes)"
@@ -536,7 +530,7 @@ private def commands : Array Cli.Command := #[
   { name := "resume"
     summary := "Grow one continuation until the run ends, asks a question, or reaches a limit."
     examples := #["alaya resume 4f2c8b --provider apiyi --time-budget 3600 --json",
-      "alaya resume 4f2c8b --provider dgx --url spark.local:9000 --turns 1"]
+      "alaya resume 4f2c8b --provider dgx --url spark.local:9000 --steps 1"]
     spec := resumeRun <$> ResumeArgs.cli },
   { name := "eval"
     summary := "Grade a state: run a grader over a fresh copy and record its TAP verdict as a leaf."
@@ -546,9 +540,9 @@ private def commands : Array Cli.Command := #[
     spec := evalRun <$> EvalArgs.cli },
   { name := "commit"
     summary := "Record a hand-edited workspace as a child; the agent is told what changed."
-    examples := #["alaya commit 4f2c8b ./fix --note 'fixed the fixture'"]
+    examples := #["alaya commit 4f2c8b ./fix --message 'I fixed the fixture; the parser bug is still yours.'"]
     spec := commitRun <$> dataDir <*> hashArg <*> Cli.arg "DIR" .path "the edited workspace"
-      <*> Cli.flag? "note" .string "provenance for the tree, not shown to the agent" },
+      <*> Cli.flag? "message" .string "what to tell the agent of the change, after the list of what changed" },
   { name := "tell"
     summary := "Send the agent a message, as a child."
     examples := #["alaya tell 4f2c8b 'keep the old API'"]
@@ -577,10 +571,10 @@ private def commands : Array Cli.Command := #[
     summary := "Show the whole forest; with --json, one object per state."
     spec := treeRun <$> dataDir },
   { name := "show"
-    summary := "A state's metadata and log, and with --view the dialogue the model is sent from it."
-    examples := #["alaya show 4f2c8b --view"]
+    summary := "A state's metadata and log, and with --request the request its step was sampled from."
+    examples := #["alaya show 4f2c8b --request"]
     spec := showRun <$> dataDir <*> hashArg
-      <*> Cli.switch "view" "also print the dialogue the run's agent makes of the log" },
+      <*> Cli.switch "request" "also print the request the state's step was sampled from, as the run's agent makes it" },
   { name := "diff"
     summary := "The workspace changes between two states, one path per line."
     spec := diffRun <$> dataDir <*> Cli.arg "A" .string "the earlier state"
@@ -601,7 +595,7 @@ private def app : Cli.App where
   commands := commands
 
 /-- Exit 0 on success, 3 when a run stopped at a question (`exitWaiting`), 4 when it stopped at
-a limit of the invocation, its time budget or its turns (`exitStopped`); `eval` exits with its
+a limit of the invocation, its time budget or its steps (`exitStopped`); `eval` exits with its
 verdict, 0 pass, 1 fail, 2 error. A failure exits with its class's status, above all of these
 (`Cli.exitFor`): 64 a command line that does not parse, 65 input, 69 environment, 74 storage,
 75 transient, 76 model. -/

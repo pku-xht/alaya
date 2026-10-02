@@ -3,21 +3,25 @@
 `Alaya.Agent.MiniSwe` is a port of [mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent)'s
 default tool-calling agent as an `Alaya.Agent.Agent`. It keeps what defines that agent — its
 prompts, its one `bash` tool, its protocol for reading a response and answering a malformed one,
-its limits — and realizes them through the five operations of the agent API
-(`docs/agent-api.md`): the tools, the view, `next`, `act`, and an identity. Rendering and
-execution are Lean's own rather than imitations of the Python original; the differences that
-change behaviour are listed in §7.
+its limits — and realizes them through the agent API (`docs/agent-api.md`): the tools, the
+view, and `next`, pure functions of the log, with the limits added as combinators. It runs
+nothing itself: a `bash` call is an effect the driver's handler carries out. Rendering and execution
+are Lean's own rather than imitations of the Python original; the differences that change
+behaviour are listed in §8.
 
 ## 1. The agent
 
 ```lean
-def agent (config : Config) (model : Models.Spec) : Agent := {
-  identity := config.toJson                   -- the configuration, as the root records it
-  tools := tools config                       -- bash and submit; optional ask_user
-  view := view config
-  next := next config
-  act := act executor }
+def agent (config : Config) (model : Models.Spec) : Agent :=
+  let base : Agent := {
+    config := config.toJson                   -- the configuration, as the root records it
+    initialLog := initialLog config
+    next := next config }                     -- mini's control flow, without its limits
+  ((base.runCommandsWith config.executor).limitContext (contextLimit? config model)).limitResponses config.stepLimit
 ```
+
+Its model turns are `request config log`: `view config log`, with `tools config` — `bash`,
+`submit`, and whatever else `config.tools` names.
 
 Two things are fixed when the agent is built: the run's **model spec**, whose context size bounds
 the run (§10), and the **configuration**, a JSON object read by `Config.fromJson`, whose
@@ -30,7 +34,7 @@ defaults `alaya config --agent mini-swe` prints:
 | `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
 | `executor.timeout_seconds`, `executor.env` | 30, mini's overrides | how each command is run (`Executor.Config`) |
 | `recover_output` | false | name the file holding a cut output's whole (§9) |
-| `ask_user` | false | offer yes/no, single-choice, and open-ended questions |
+| `tools` | `["bash", "submit"]` | the tools offered, in order, by name (`Tools.all`); `bash` and `submit` are required, and `ask_user` and `time_budget` may be added |
 | `context_reserve` | 8000 | tokens kept free for the next response, or the model's `output_tokens` when less (§10) |
 | `mask_observations` | null | `{keep_turns, block}`: omit old outputs from the view (§10) |
 
@@ -39,19 +43,38 @@ is what `root --task` gives, and `initialLog config task uname` places it. The c
 names the agent at `root` and overrides fields there (`--agent mini-swe --set agent.step_limit=50`;
 `docs/cli.md` §5), and the root records the complete configuration.
 
-The tools are not this agent's: `Alaya.Agent.Tools` defines each on its own — its schema for the
-model, how its arguments are read, and what answers a call — with no knowledge of which agent
-offers it. `bash` runs a command in the workspace through the executor and its observation is
-the `Output`; `submit` ends a run. MiniSwe composes them:
-which are offered, how a malformed call is worded, what the view shows.
+The tools are not this agent's. `Alaya.Agent.Tools` defines each as a `Tool`, with no knowledge of
+which agent offers it:
+
+```lean
+structure Tool where
+  definition : Chat.ToolDefinition                       -- its schema for the model
+  alone : Bool := false                                  -- must be the only call of its turn
+  instruction? : Option String := none                   -- appended to the prompt
+  read : Chat.ToolCall -> Except String (CallRef -> Log -> Effect ⊕ Outcome)
+                                                         -- what is wrong with a call, or how it is answered
+```
+
+`read` gives how a call is answered (`docs/agent-api.md` §3): what to ask for next for it, from
+the log — the effect that answers the call, or the outcome that ends the run. A `bash` call is
+answered by running its script in the workspace; `submit` ends
+the run; `ask_user` asks a person, alone; `time_budget` times the run, then records the seconds
+left. MiniSwe holds a list of tools, its **registry**, and owns the rest: which tool a call
+names, how a malformed call is worded, what the view shows. A tool never changes the agent's
+text, it only adds its instruction after it, so adding a tool — one of `Tools.all`, or any
+`Tool` value given in code — changes nothing in MiniSwe.
 
 ## 2. The opening log
 
 `initialLog config task uname` produces the two events a run starts from: the system message, and
 the instance message with the task and a line describing the machine — the `uname` of the
 executor, so a run pinned to an image is told about the image and not about the host. Both are
-mini's texts, rendered from its `mini.yaml`; the only change is the two sentences that named its
-submission sentinel, which name the `submit` tool. The opening log is frozen into the root state.
+mini's texts, rendered from its `mini.yaml`, with two changes: the two sentences that named its
+submission sentinel name the `submit` tool, and the sentences that require a `bash` call require
+a tool call (`toolNeutral`), so that no tool added after them is contradicted — `ask_user` must
+be called alone. Each offered tool's instruction is then appended, a blank line before it, in
+the order of the tools. The format-error message is built the same way. The opening log is
+frozen into the root state.
 
 ## 3. Tools
 
@@ -74,7 +97,7 @@ Every response is read into either a list of **actions** or a **format error**:
 | has a call whose arguments are not JSON | format error: "Error parsing tool call arguments: …" |
 | has a call to an unknown tool | format error: "Unknown tool '…'." |
 | has a `bash` call without `command`, or with a non-string one | format error saying which |
-| otherwise | one `Action.bash id command` or `Action.submit id message` per call, in order |
+| otherwise | one `Action` per call, in order: which call it is, and how its tool answers it |
 
 The first call with a problem decides; the whole turn is a format error. The message the model
 will see (`formatErrorMessage`) wraps the problem in mini's guidance on how to call the tool,
@@ -93,11 +116,14 @@ would fix.
   **user** message carrying the format error. This is mini's protocol: the malformed turn is
   dropped from the model's context and replaced by the correction, so the model does not see its
   own broken output and try to continue it. The log still holds the response.
-- An **observation** — the `Output` the agent recorded, as JSON — becomes a tool message with
-  the JSON rendered as text: `output`, `exit_code` (null when the command did not complete), and
+- A command's run that answers a call (`executed`) becomes a tool message with its `Output` as JSON, rendered as
+  text: `output`, `exit_code` (null when the command did not complete), and
   `error` when there is one. When `output` is `outputLimit` (10 000) characters or longer, the
   model is shown `output_head` and `output_tail` of 5 000 characters each and `elided_chars`
   instead. The record keeps the whole output.
+- A **recorded** result — a person's answer, a value recorded by `next` — becomes a tool
+  message with its JSON as text.
+- A workspace **placed** or a **timed** reading of the run is not shown.
 
 *Two turns of a log and their view: a malformed response is replaced, a long output is cut.*
 
@@ -107,7 +133,7 @@ flowchart LR
     direction TB
     L1["response: no tool call"]
     L2["response: bash cat big.log"]
-    L3["observation: 12000 chars, exit 0"]
+    L3["executed: 12000 chars, exit 0"]
     L1 --> L2 --> L3
   end
   subgraph V["view"]
@@ -122,26 +148,28 @@ flowchart LR
   L3 --> V3
 ```
 
-## 6. Control and action: `next` and `act`
+## 6. Control: `next`
 
-`next config session log` decides from the log alone; MiniSwe reads the session only to answer
-`time_budget`, which only MiniVero offers:
+`next config log` decides from the log alone, through its index (`docs/agent-api.md` §1): its
+latest turn, and the calls of it nothing has answered.
 
-1. **After a malformed response.** If the trailing responses are `maxConsecutiveFormatErrors`
-   format errors in a row, `done RepeatedFormatError`; otherwise `sample` again — the view
-   will show the correction. A person's message between them does not break the run; an
-   observation does, since it means a turn ran.
-2. **After a response with actions.** The first action whose call no observation has answered
-   yet is next. A `submit` there is `done Submitted`, with its message as the submission; a
-   `bash` there is `act` on that call. Calls after a `submit` in the same response never run.
-3. **When every call is answered**, `sample` — unless `stepLimit` is set and the log already
-   holds that many responses, in which case `done LimitsExceeded`. The limit is checked before
-   the model call, as mini does. Nor when the next request would not fit in the model's
-   context: then `done ContextExceeded` (§10).
+1. **After a malformed response.** If the latest `maxConsecutiveFormatErrors` turns are all
+   format errors, the outcome `RepeatedFormatError`; otherwise `sample` again — the view will show the
+   correction. A person's message between them does not break the run; a turn whose calls
+   parsed does.
+2. **After a response with actions.** The first of its calls nothing has answered yet is next,
+   answered under its reference by its tool. A `submit` there is the
+   outcome `Submitted`, with its message as the submission; a `bash`
+   there is `exec`, of its script, in the workspace. Calls
+   after a `submit` in the same response never run. Whatever the tool, what is asked for is its
+   `read`'s: a `time_budget` call is `time`, then, once the log holds the timing,
+   `record` of the seconds left from it.
+3. **When every call is answered**, `sample` of the view, with the tools, for `Purpose.turn`.
 
-`act executor workspace call` runs the `bash` call's script in the workspace through the
-executor and returns the `Output` as JSON. It is never given a `submit`: `next` ends the run
-first.
+Two combinators then turn a `sample` into a stop (`docs/agent-api.md` §4): when `stepLimit` is
+set and the log already holds that many responses, the outcome `LimitsExceeded`, checked before the
+model call, as mini does; and when the next request would not fit in the model's context,
+`ContextExceeded` (§10). The step limit is checked first.
 
 *One response, from the model to the next sample.*
 
@@ -150,16 +178,16 @@ flowchart TD
   R["response"] --> P["parseActions"]
   P -->|"format error"| F["view shows the correction as a user turn"]
   F --> N1{"3 in a row?"}
-  N1 -->|yes| D1["done RepeatedFormatError"]
+  N1 -->|yes| D1["outcome RepeatedFormatError"]
   N1 -->|no| S["sample"]
   P -->|"actions"| A{"first unanswered call"}
-  A -->|"submit"| D2["done Submitted"]
-  A -->|"bash"| X["act: run the script, record the Output"]
+  A -->|"submit"| D2["outcome Submitted"]
+  A -->|"bash"| X["exec: run the script where the log is, record the Output"]
   X --> A
   A -->|"none left"| L{"step limit reached?"}
-  L -->|yes| D3["done LimitsExceeded"]
+  L -->|yes| D3["outcome LimitsExceeded"]
   L -->|no| C{"context full?"}
-  C -->|yes| D4["done ContextExceeded"]
+  C -->|yes| D4["outcome ContextExceeded"]
   C -->|no| S
 ```
 
@@ -197,7 +225,9 @@ and is gone when a branch is resumed later.
   rather than with the provider's error (§10).
 - With `recoverOutput` on: a cut output's warning names a file (§9).
 - With `mask_observations` set: old outputs are omitted from the view (§10).
-- With `ask_user` enabled (`--set agent.ask_user=true`): [yes/no, single-choice, and open-ended questions](ask-user.md), using the existing question/reply states.
+- Every response must hold a tool call, not a `bash` call: mini's three sentences that say
+  `bash` say a tool (§2).
+- With `ask_user` among the tools: [yes/no, single-choice, and open-ended questions](ask-user.md), using the existing question/reply states.
 
 ## 9. Reading a long output back
 
@@ -208,18 +238,19 @@ warning on a cut output names a file holding the whole of it, as the DeepSeek ha
 [output truncated; full output: /alaya/outputs/17-call_abc.txt]
 ```
 
-and the agent reads it with `bash`. The files are derived from the log, like the view
-(`outputs`): each cut output of the branch, named by its position in the log, which never
-changes on a branch, and by its call id. The trajectory writes them into the command's scratch
-before each sample, and the container mounts that directory read-only at
-`/alaya/outputs`, outside the workdir. A fork or a new container sees its own branch's files;
-nothing is recorded, and no snapshot or grader sees them. The prompts and tools are mini's as
-they are, so only the warning differs.
+and the agent reads it with `bash`. The file is the trajectory's, for any agent
+(`docs/agent-api.md` §3): every output of the branch, named by its position in the log, which
+never changes on a branch, and by its call id, written into the command's scratch before each
+command and mounted read-only at `/alaya/outputs`, outside the workdir. MiniSwe's commands ask
+for them only with `recover_output` or masking on; otherwise the directory is empty, and a
+command sees what mini's would. A fork or a new container sees its own branch's files; no
+snapshot or grader sees them. The prompts and tools are mini's as they are, so only the warning
+differs.
 
 ## 10. Context management
 
-**A full context ends the run cleanly.** When the model spec gives a `context_tokens`, `next`
-ends the run with `done ContextExceeded` instead of sampling a request that would not fit:
+**A full context ends the run cleanly.** When the model spec gives a `context_tokens`, the agent
+ends the run with the outcome `ContextExceeded` instead of sampling a request that would not fit:
 when the request's size reaches the context less `context_reserve`, or less the model's
 `output_tokens` when that is smaller. The size needs no tokenizer (`Agent.contextTokens`): the
 latest response's recorded `usage` says how many tokens the request it answered held and how

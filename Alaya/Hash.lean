@@ -19,4 +19,8 @@ def ofBytes (bytes : ByteArray) : Hash := ⟨Sha256.sumHex bytes⟩
 
 end Hash
 
+/-- The identifier of a workspace snapshot (`Alaya.Workspaces`): a digest like any other, named
+apart so that a signature says it is a workspace it speaks of. -/
+abbrev Snapshot := Hash
+
 end Alaya

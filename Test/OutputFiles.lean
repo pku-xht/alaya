@@ -8,7 +8,7 @@ and written beside the workdir, never into it. -/
 
 namespace OutputFilesTests
 
-open Testing Alaya Alaya.Agent Alaya.Trajectory
+open Testing Alaya Alaya.Agent Alaya.Trajectory Alaya.Driver
 open Alaya.Agent.MiniSwe
 
 /-- 30,000 characters in 3,000 numbered lines: far past `outputLimit`, so the view keeps its
@@ -22,11 +22,16 @@ private def bashCall (id : String) : Chat.ToolCall :=
 private def response (calls : Array Chat.ToolCall) : Chat.Response :=
   { toolCalls := calls, finishReason? := some "tool_calls" }
 
-private def observed (id output : String) : Event :=
-  .observation id (Output.toJson { output, exitCode? := some 0 })
+private def observed (output : String) (response : Nat) (index : Nat := 0)
+    (workspace : Hash := default) : Event :=
+  ran output (response := response) (index := index) (workspace := workspace)
 
-/-- A log in which bash call `c1` produced `longOutput`, at index 1. -/
-private def recorded : Log := #[.response (response #[bashCall "c1"]), observed "c1" longOutput]
+/-- A log, after `before` events, in which bash call `c1` produced `longOutput`, at index
+`before + 1`. -/
+private def recordedAfter (before : Nat) (workspace : Hash := default) : Log :=
+  #[.sampled default .turn (response #[bashCall "c1"]), observed longOutput before (workspace := workspace)]
+
+private def recorded : Log := recordedAfter 0
 
 private def config : Config := { recoverOutput := true }
 
@@ -63,14 +68,7 @@ def suite : Suite := Testing.suite "output files" #[
     | some "Output too long." => pure ()
     | other => throw <| IO.userError s!"mini's warning changed: {other}",
 
-  iotest "the files are the cut outputs, whole, one per position" do
-    -- A provider may reuse an id; the position keeps the files apart.
-    let log := recorded ++ #[.response (response #[bashCall "c1", bashCall "c/2"]),
-      observed "c1" (longOutput ++ "again"), observed "c/2" "short"]
-    let outputs := outputs config log
-    if outputs != #[("1-c1.txt", longOutput), ("3-c1.txt", longOutput ++ "again")] then
-      throw <| IO.userError s!"wrong files: {outputs.map (·.1)}"
-    if !(MiniSwe.outputs {} log).isEmpty then throw <| IO.userError "files with recovery off"
+  iotest "a file is named by its output's position, made safe" do
     if outputFile 7 "functions.bash:0/x" != "7-functions.bash_0_x.txt" then
       throw <| IO.userError s!"unsafe name: {outputFile 7 "functions.bash:0/x"}",
 
@@ -83,24 +81,27 @@ def suite : Suite := Testing.suite "output files" #[
     let work := (← scratch) / "work"
     IO.FS.createDirAll work
     let outputsDir := (← scratch) / "outputs"
-    let executor : Executor := { exec := fun _ _ _ => pure { output := longOutput, exitCode? := some 0 }
+    let executor : Executor := { exec := fun _ _ _ _ => pure { output := longOutput, exitCode? := some 0 }
                                  uname := pure default }
     -- The fork is the root's second draw, so it takes two responses and keeps the second.
     let model ← scripted #[response #[bashCall "c2"], response #[bashCall "c3"],
       response #[bashCall "x"], response #[bashCall "c4"]]
     let rt : Runtime := { store, workspaces, workDir := work, outputsDir, executor, model
                           agent := agent config }
-    let root ← assertOk <| createRoot store workspaces (initialLog config "t" testUname ++ recorded) project
+    let root ← assertOk <| createRoot store workspaces (initialLog config "t" testUname) project
       (← testImage) (agent := testAgent) (model := testModel)
-    -- Each file is there before the model is shown the view that names it.
-    let child ← stepped <| step rt root
-    assertEqual "before the first turn" (← files outputsDir) #["3-c1.txt"]
+    -- The recorded command is a step after the root's opening and workspace, at positions 3 and 4.
+    let recordedStep ← putStep store root
+      (recordedAfter 3 (← assertOk <| getState store root).workspace)
+    -- Each file is there before a command that may read it.
+    let child ← stepped <| step rt recordedStep
+    assertEqual "before the first command" (← files outputsDir) #["4-c1.txt"]
     let _ ← stepped <| step rt child
-    assertEqual "the branch grows" (← files outputsDir) #["3-c1.txt", "5-c2.txt"]
-    assertEqual "whole" (← IO.FS.readFile (outputsDir / "5-c2.txt")) longOutput
-    -- A fork from the root: the other branch's files are gone.
-    let _ ← stepped <| step rt root
-    assertEqual "a fork's files" (← files outputsDir) #["3-c1.txt"]
+    assertEqual "the branch grows" (← files outputsDir) #["4-c1.txt", "6-c2.txt"]
+    assertEqual "whole" (← IO.FS.readFile (outputsDir / "6-c2.txt")) longOutput
+    -- A fork from the recorded step: the other branch's files are gone.
+    let _ ← stepped <| step rt recordedStep
+    assertEqual "a fork's files" (← files outputsDir) #["4-c1.txt"]
     -- Nothing reaches the workspace or the states.
     assertEqual "workspace untouched" (← files work) #["a.txt"]
     assertEqual "nothing recorded" (← assertOk <| getState store child).appended.size 2

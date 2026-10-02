@@ -3,9 +3,12 @@
 Alaya is a framework for experimenting with coding agents that focuses on:
 
 **Agents as pure functions.** Agent runs are stochastic, depend on their environment, and take
-long, so they are hard to reproduce and compare. In Alaya, an agent is a pure function of its
-run's log, and everything impure — model responses, tool results, workspaces — is recorded as a
-tree of immutable states. Any run can be continued, branched, or replayed from any state.
+long, so they are hard to reproduce and compare. In Alaya, an agent is a pure function from its
+run's log to what it asks for next — a model request, a command in the workspace, the time,
+a person's answer — and never does any of it itself. The world's answers are recorded in the log,
+and the log as a tree of immutable states. Any run can be continued, branched, or replayed from
+any state, and carried over to a changed agent up to the first point where it would act
+differently.
 
 **Agent-native operation.** Research is increasingly automated by AI. Alaya is designed to be
 operated entirely by an external agent, such as Claude Code, through a strict, self-describing
@@ -42,31 +45,38 @@ root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton \
 alaya resume "$root" --provider apiyi    # one line per new state; `alaya config` lists models, providers
 alaya eval END --input example/bija --grader /grader/grade.py --timeout 1800
 
-# Find the turn where it went wrong, and see what the model was sent there.
+# Find the step where it went wrong, and see what the model was sent there.
 alaya tree
-alaya show TURN --view
+alaya show STEP --request
 
-# Correct the workspace at that turn by hand, let the agent go on from the correction, and grade
+# Correct the workspace at that step by hand, let the agent go on from the correction, and grade
 # the new branch.
-alaya checkout TURN fix    # its files, to edit by hand in fix/
-fixed=$(alaya commit TURN fix --note "corrected by hand")
+alaya checkout STEP fix    # its files, to edit by hand in fix/
+fixed=$(alaya commit STEP fix --message "I corrected the parser by hand; go on from here.")
 alaya resume "$fixed" --provider apiyi
 alaya eval END2 --input example/bija --grader /grader/grade.py --timeout 1800
 ```
 
-`END`, `TURN` and `END2` stand for state hashes, or any unambiguous prefix of one: `resume`
+`END`, `STEP` and `END2` stand for state hashes, or any unambiguous prefix of one: `resume`
 prints each state it adds, and `tree` the whole forest. The first branch is untouched, so the two
 verdicts compare the same run with and without the correction.
 
 `alaya html report.html` writes the whole forest as one page: each state with its time, tokens
 and how full the context is, its events, and its workspace changes. Below is
 [such a page](example/bija/report.html) for a gpt-6-luna run on Bija, branched by a message
-(`alaya tell`) in the middle of the run, at a turn of the new branch; the two branches' verdicts
+(`alaya tell`) in the middle of the run, at a step of the new branch; the two branches' verdicts
 are the leaves at the bottom of the tree.
 
 ![The HTML report of a gpt-6-luna run on Bija](example/bija/report.png)
 
 ## Documentation
+
+[`docs/architecture.md`](docs/architecture.md) — how the parts fit: the agent, a pure function
+from the log of a run to its next effect, or its outcome; the trajectory, a tree of immutable
+states that partition the log; and the driver, whose handler carries effects out and whose loop
+records their answers.
+Every shared data structure — events, call references, the index of model turns, steps and
+branches — with diagrams of how a log is referenced and partitioned.
 
 [`docs/llm-api.md`](docs/llm-api.md) — the LLM API. `Alaya.Chat` is the typed data of the
 chat-completions protocol: messages, tools, tool calls, structured output, requests, and
@@ -74,10 +84,12 @@ responses. `Alaya.Model` is one interface for anything that answers a request, b
 a provider transport in layers — retry, batching, sampling independence, a persistent response
 cache — each configured separately.
 
-[`docs/agent-api.md`](docs/agent-api.md) — the agent API. An agent records a log of events —
-messages, model responses, tool observations — and is defined by a pure view that turns the log
-into the dialogue the model is sent, a pure `next` that decides whether to sample, act, ask a
-person, or stop, an `act` that runs a tool call in a workspace, and the tools it offers.
+[`docs/agent-api.md`](docs/agent-api.md) — the agent API. A run is a log of events — what the
+world placed in it, and its answer to each of the agent's effects — and an agent is a pure
+`next` from the log to an effect — sample this request, run this command in the workspace,
+time the run, record a result, ask a person — or to the run's outcome. Each effect has a type
+of answer. An agent carries out no effect itself, so its decisions can be recomputed
+and composed with combinators.
 
 [`docs/trajectory-schema.md`](docs/trajectory-schema.md) — the trajectory and cache schema.
 `Alaya.Trajectory` records a run as a tree of content-addressed states, each holding its

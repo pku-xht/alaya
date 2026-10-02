@@ -217,10 +217,16 @@ def agentsSuite : Suite := suite "cli.agents" #[
     refused "type" (.mkObj [("name", "mini-swe"), ("recover_output", "yes")]) "must be true or false"
     refused "mode" (.mkObj [("name", "mini-vero"), ("mode", "both")]) "unknown mode"
     refused "nested" (.mkObj [("name", "mini-swe"), ("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
-    refused "own field, misnamed" (.mkObj [("name", "mini-vero"), ("stepp", 1)]) "mode, time_budget"
+    refused "own field, misnamed" (.mkObj [("name", "mini-vero"), ("stepp", 1)]) "mask_observations, mode"
     let built ← assertOk <| Agent.Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
-    assertEqual "tools follow the settings" (built.tools.map (·.name)) #["bash", "submit", "time_budget"]
-    assertEqual "a nested setting" ((← assertOk <| Agent.Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]).executorConfig.timeoutSeconds) 5
+    assertEqual "tools follow the settings" (toolNames built (built.initialLog "t" default)) #["bash", "submit", "time_budget"]
+    -- How commands run is in each command the agent asks for.
+    let nested ← assertOk <| Agent.Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]
+    let asked : Agent.Log := #[.placed default, .sampled default .turn
+      { toolCalls := #[{ id := "c", name := "bash", arguments := .mkObj [("command", "ls")] }] }]
+    match nested.next asked with
+    | .inl (.exec _ _ config) => assertEqual "a nested setting" config.timeoutSeconds 5
+    | _ => fail "expected the command run"
     assertError "the name is not a setting" (Agent.Catalog.resolve "mini-swe" #[agentSet ["name"] "mini-vero"]) fun
       | .input m => (m.splitOn "--agent NAME").length > 1
       | _ => false,
@@ -236,7 +242,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let child ← assertOk <| Trajectory.tell store root "hello"
     assertEqual "root" (compressed (← assertOk <| Trajectory.agentOf store root)) (compressed built.config)
     assertEqual "child" (compressed (← assertOk <| Trajectory.agentOf store child)) (compressed built.config)
-    check (← assertOk <| Trajectory.getState store child).agent?.isNone "a child carries no record itself"
+    check (← assertOk <| Trajectory.getState store child).root?.isNone "a child carries no record itself"
     let lines ← assertOk <| Trajectory.showLines store root
     check (lines.any fun l => l.startsWith "agent    " && (l.splitOn "\"step_limit\":7").length > 1) "show prints it"
     let tree ← assertOk <| Trajectory.treeLines store

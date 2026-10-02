@@ -54,7 +54,7 @@ def main():
                      "--timeout", "60", "--data", data,
                      codes=({"pass": 0, "fail": 1, "error": 2}[status],))
         evaluation = state_hash(result.stdout)
-        record = json.loads((data / "states" / f"{evaluation}.json").read_text())["evaluation"]
+        record = json.loads((data / "states" / f"{evaluation}.json").read_text())["kind"]["evaluation"]
         assert record["status"] == status, record
         assert sum(c["ok"] for c in record["checks"]) == passed, record
         assert len(record["checks"]) == total, record

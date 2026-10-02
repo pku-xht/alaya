@@ -1,6 +1,6 @@
 # MiniVero
 
-`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Its configuration is MiniSwe's with two more fields, `time_budget` (below) and `mode`: `proof` or `codeproof`, Vero's evaluation mode for the run (`alaya config --agent mini-vero` prints the defaults; a codeproof run is `--agent mini-vero --set agent.mode=codeproof`). The root records it, and every later command builds the agent from the record.
+`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Its configuration is MiniSwe's, with `time_budget` (below) among its default `tools`, and one more field, `mode`: `proof` or `codeproof`, Vero's evaluation mode for the run (`alaya config --agent mini-vero` prints the defaults; a codeproof run is `--agent mini-vero --set agent.mode=codeproof`). The root records it, and every later command builds the agent from the record.
 
 ## How it is built
 
@@ -17,7 +17,7 @@ A run opens with two messages, frozen into the root state:
     3. the rule sections, quoted from Vero's instruction templates;
     4. this agent's mechanics — repository-relative paths, no shell state between calls, one `submit` call — and the executor's `uname`.
 
-The rule sections are: `Marker grammar`, `Oracle commands`, the `Grading` section of the run's mode, `Done condition`, `Checkpointing` (adapted; with `time_budget` on), `Anti-cheating`, and the two scoring facts under `Scoring`. A run is sent the grading rules of its own mode only, as Vero's per-mode templates do: a `proof` run never reads about `unsat_`/`sat_` stubs or Part A, which its sandbox does not have.
+The rule sections are: `Marker grammar`, `Oracle commands`, the `Grading` section of the run's mode, `Done condition`, `Checkpointing` (adapted; with `time_budget` among the tools), `Anti-cheating`, and the two scoring facts under `Scoring`. A run is sent the grading rules of its own mode only, as Vero's per-mode templates do: a `proof` run never reads about `unsat_`/`sat_` stubs or Part A, which its sandbox does not have.
 
 ## Where Vero's text lives
 
@@ -54,21 +54,23 @@ The agent then inspects the Lean declarations and the compiler output, edits onl
 
 MiniVero defaults to 200 model turns and a 600-second shell-command timeout. Use `alaya resume --time-budget SECONDS` to bound an invocation.
 
-Set `"ask_user": true` to offer [yes/no, single-choice, and open-ended questions](ask-user.md).
-This setting is inherited from MiniSwe and recorded in the root configuration.
+Add `ask_user` to `tools` to offer [yes/no, single-choice, and open-ended questions](ask-user.md):
+`"tools": ["bash", "submit", "time_budget", "ask_user"]`.
 
 ## Pacing: `time_budget`
 
 A Vero run may be given a time budget and checkpointed: `alaya resume STATE --time-budget
 SECONDS` stops before a step once the run has taken that long, and a later `resume` continues
-it from its last state (`docs/cli.md` §5). With `time_budget` on — the default —
+it from its last state (`docs/cli.md` §5). With `time_budget` among its tools — the default —
 MiniVero is offered the **`time_budget`** tool and asked to pace itself by it:
 
 - **The tool** takes no arguments and records `{"seconds_left": N}`: the budget less the run's
   time, which is the sum of its steps' recorded times from the root and the current step so
   far, so it is right after a resume, when the clock since the start is not. Without a budget
   it records `{"seconds_left": null, "note": "this run has no time limit"}`. It is answered by
-  `next` from the session (`docs/agent-api.md` §3): nothing runs and nothing is snapshotted.
+  `next` in two effects (`docs/agent-api.md` §2): `time`, which records a reading of the run's
+  time and the budget, then `record` of what that reading leaves. Nothing runs and nothing is
+  snapshotted, and the answer is a function of the log, like every other decision.
 - **The prompt** carries Vero's `Checkpointing` section, after the Done condition and before
   Anti-cheating as in Vero's template, adapted in `MiniVero/checkpointing.md`. Vero's is for a
   chunk of a known number of minutes and says to check elapsed time with `date`; here the

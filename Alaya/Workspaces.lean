@@ -70,31 +70,31 @@ caller compares them. A snapshot keeps at least the contents of a directory's re
 their executable bits, its symbolic links, and its directory structure. -/
 structure Workspaces where
   /-- Captures `directory` as it is now. The snapshot is kept until `retainOnly` drops it. -/
-  snapshot : System.FilePath -> Result Hash
+  snapshot : System.FilePath -> Result Snapshot
   /-- Makes `directory` hold exactly the snapshot, replacing whatever is there. -/
-  materialize : Hash -> System.FilePath -> Result Unit
+  materialize : Snapshot -> System.FilePath -> Result Unit
   /-- What changed from the first snapshot to the second, ordered by path. -/
-  diff : Hash -> Hash -> Result (Array Workspaces.Change)
+  diff : Snapshot -> Snapshot -> Result (Array Workspaces.Change)
   /-- The bytes of the regular file at each path, in order; `none` where the snapshot has no
   such file. Several at once, because a store may pay per request rather than per file. -/
-  readFiles : Hash -> Array String -> Result (Array (Option ByteArray))
+  readFiles : Snapshot -> Array String -> Result (Array (Option ByteArray))
   /-- Immediate directory entries, including hidden entries, from the named snapshot. `""`
   names its root. Never materializes a live workspace. Callers verify each ancestor is a
   directory before following a requested path (`entryAt`). -/
-  listEntries : Hash -> String -> Result (Array Workspaces.Entry)
+  listEntries : Snapshot -> String -> Result (Array Workspaces.Entry)
   /-- Drops every snapshot not listed, and reclaims their space. -/
-  retainOnly : Array Hash -> Result Unit
+  retainOnly : Array Snapshot -> Result Unit
 
 namespace Workspaces
 
 /-- The bytes of the regular file at `path`; `none` when there is no such file. -/
-def readFile? (workspaces : Workspaces) (id : Hash) (path : String) : Result (Option ByteArray) := do
+def readFile? (workspaces : Workspaces) (id : Snapshot) (path : String) : Result (Option ByteArray) := do
   pure ((← workspaces.readFiles id #[path])[0]?.join)
 
 /-- The entry at `path` in snapshot `id`, found by listing each ancestor in turn: a symbolic link
 on the way is never followed, even when its target is inside the snapshot. The empty path is the
 snapshot's root. -/
-def entryAt (workspaces : Workspaces) (id : Hash) (path : String) : Result Entry := do
+def entryAt (workspaces : Workspaces) (id : Snapshot) (path : String) : Result Entry := do
   if !safeSnapshotPath path then
     throw <| .input s!"not a clean relative path in a snapshot: {path}"
   if path.isEmpty then return { name := "", path := "", kind := .directory }
@@ -114,14 +114,14 @@ def entryAt (workspaces : Workspaces) (id : Hash) (path : String) : Result Entry
   pure found
 
 /-- The entries of the directory at `path` in snapshot `id`, by name. -/
-def list (workspaces : Workspaces) (id : Hash) (path : String := "") : Result (Array Entry) := do
+def list (workspaces : Workspaces) (id : Snapshot) (path : String := "") : Result (Array Entry) := do
   let entry ← workspaces.entryAt id path
   if entry.kind != .directory then
     throw <| .input s!"not a directory in the snapshot: {path}"
   pure ((← workspaces.listEntries id path).qsort (·.name < ·.name))
 
 /-- The bytes of the regular file at `path` in snapshot `id`. A link is not followed. -/
-def read (workspaces : Workspaces) (id : Hash) (path : String) : Result ByteArray := do
+def read (workspaces : Workspaces) (id : Snapshot) (path : String) : Result ByteArray := do
   let entry ← workspaces.entryAt id path
   if entry.kind != .file then
     throw <| .input s!"not a regular file in the snapshot ({entry.kind.toString}): {path}"
@@ -143,7 +143,7 @@ structure Preview where
 
 /-- A preview of the entry at `path` in snapshot `id`. A link is described, never followed, and
 only a regular file within the limit is read. -/
-def preview (workspaces : Workspaces) (id : Hash) (path : String) : Result Preview := do
+def preview (workspaces : Workspaces) (id : Snapshot) (path : String) : Result Preview := do
   let entry ← workspaces.entryAt id path
   match entry.kind with
   | .file =>

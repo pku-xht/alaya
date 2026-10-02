@@ -2,6 +2,7 @@ import Std.Sync.Semaphore
 import Alaya.Error
 import Alaya.Chat.Protocol
 import Alaya.Retry
+import Alaya.Hash
 
 namespace Alaya
 
@@ -53,18 +54,27 @@ structure Model where
 
 namespace Model
 
-def cacheKey (model : Model) (request : Chat.Request) : String :=
+/-- The fields that make a request what it is, sent with `structuredOutput`. -/
+private def requestFields (structuredOutput : Chat.StructuredOutput) (request : Chat.Request) :
+    List (String × Lean.Json) :=
   -- Reasoning items have no Chat Completions form, so the request's JSON leaves them out; two
   -- requests that differ only in them are different requests. A request with none keys as before.
   let items := (request.messages.mapIdx fun index message => match message with
     | .assistant _ _ _ items => if items.isEmpty then none else some (Lean.Json.arr #[index, .arr items])
     | _ => none).filterMap id
   let fields := [
-    ("model", model.identity),
-    ("structured_output", model.structuredOutput.toJson),
-    ("request", request.toJson model.structuredOutput)]
-  Lean.Json.mkObj (if items.isEmpty then fields else fields ++ [("reasoning_items", .arr items)])
+    ("structured_output", structuredOutput.toJson),
+    ("request", request.toJson structuredOutput)]
+  if items.isEmpty then fields else fields ++ [("reasoning_items", .arr items)]
+
+def cacheKey (model : Model) (request : Chat.Request) : String :=
+  Lean.Json.mkObj (("model", model.identity) :: requestFields model.structuredOutput request)
     |>.compress
+
+/-- A request's digest, whichever model it goes to: what a log records of the request a response
+answered, so a replay can tell whether an agent still makes it. -/
+def requestDigest (request : Chat.Request) : Hash :=
+  Hash.ofBytes (Lean.Json.mkObj (requestFields .native request)).compress.toUTF8
 
 /-- Retries each single response operation before a batching adapter fans it out. -/
 def retry (inner : Model) (config : Retry.Config) : Result Model :=

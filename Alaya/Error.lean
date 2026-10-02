@@ -16,7 +16,7 @@ inductive Error where
   /-- A provider returned an HTTP response; the status and body support retry and diagnostics. -/
   | http (status : Nat) (body : String) (retryAfterMs? : Option Nat := none)
   /-- The provider refused the request because it does not fit in the model's context: what a
-run ends with, rather than fails with (`Trajectory.advance`). The provider's own words. -/
+run ends with, rather than fails with (`Driver.resume`). The provider's own words. -/
   | contextExceeded (message : String)
   /-- A provider-specific failure not represented by transport, HTTP, or protocol failures. -/
   | provider (message : String)

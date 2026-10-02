@@ -76,7 +76,7 @@ preserves these symlinks without including the dependency trees.
 ## Root and run
 
 Both modes use MiniVero's defaults — `env: []`, `recover_output: false`, and
-`ask_user: false` — and set only the mode (`alaya config --agent mini-vero` prints the rest).
+`tools: ["bash", "submit", "time_budget"]` — and set only the mode (`alaya config --agent mini-vero` prints the rest).
 
 ```sh
 MODE=codeproof    # or proof

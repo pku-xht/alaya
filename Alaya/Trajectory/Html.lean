@@ -1,10 +1,12 @@
-import Alaya.Trajectory
+import Alaya.Trajectory.Render
+import Alaya.Models
 
 /-!
 A standalone HTML report of a whole trajectory forest: the data as JSON in a `<script>` tag,
 with the page that renders it, so a report can be mailed or archived. Each state shows its
-events as recorded and, on request, the view — the context the model is sent from it — which is
-all the report takes from the agent besides its tool list.
+events as recorded and, when it sampled, the request its step was sent — `next` of the log
+before its response, checked against the digest the response records (`Agent.requestAt?`) —
+which is all the report takes from the agent of its tree.
 
 Workspace changes carry the text of the files they touch when that is cheap (small, textual, and
 not obviously machine-generated), so the report can show a line diff. The limits below keep a
@@ -14,7 +16,7 @@ report from growing with an agent's virtual environment.
 namespace Alaya.Trajectory.Html
 
 open Alaya (Result Error)
-open Alaya.Agent (Event Log View)
+open Alaya.Agent (Agent Event Log Dialogue)
 open Alaya.Workspaces (Change ChangeKind)
 
 /-- Paths under these are listed but never carried, and never diffed line by line. -/
@@ -54,7 +56,7 @@ private def jsonText? (bytes? : Option ByteArray) : Option String :=
       | none => none
 
 /-- The text of `paths` in a snapshot, read in one request. -/
-private def readTexts (workspaces : Workspaces) (root? : Option Hash) (paths : Array String) :
+private def readTexts (workspaces : Workspaces) (root? : Option Snapshot) (paths : Array String) :
     Result (Std.HashMap String String) := do
   let some root := root? | return {}
   if paths.isEmpty then return {}
@@ -66,7 +68,7 @@ private def readTexts (workspaces : Workspaces) (root? : Option Hash) (paths : A
 
 /-- The changes, each with the before and after text when both are cheap to carry. A side the
 path is absent from has no text, and a directory has none on either. -/
-private def changesJson (workspaces : Workspaces) (before? : Option Hash) (after : Hash)
+private def changesJson (workspaces : Workspaces) (before? : Option Snapshot) (after : Snapshot)
     (changes : Array Change) : Result (Array Lean.Json) := do
   let carried := changes.filter fun change => !isUninteresting change.path && !change.directory
   let pathsWhere (keep : Change -> Bool) := (carried.filter keep).map (·.path)
@@ -90,43 +92,80 @@ private def callJson (call : Chat.ToolCall) : Lean.Json :=
     ("arguments", call.invalidArguments?.map Lean.Json.str |>.getD call.arguments),
     ("summary", argumentsSummary call)]
 
-/-- An event by its generic shape: who, what was said, which calls, what came back. -/
-private def eventJson : Event -> Lean.Json
-  | .message m =>
+/-- An event by its generic shape, under its own name: who, what was said, which calls, what
+came back. A call is given by its id, which `index`, of the log the event is in, gives. -/
+private def eventJson (index : Agent.Index) : Event -> Lean.Json
+  | .told m =>
     match m with
-    | .system c => .mkObj [("type", "message"), ("role", "system"), ("content", c)]
-    | .user c => .mkObj [("type", "message"), ("role", "user"), ("content", c)]
+    | .system c => .mkObj [("type", "told"), ("role", "system"), ("content", c)]
+    | .user c => .mkObj [("type", "told"), ("role", "user"), ("content", c)]
     | .assistant c? calls reasoning? _ => .mkObj [
-        ("type", "message"), ("role", "assistant"),
+        ("type", "told"), ("role", "assistant"),
         ("content", c?.map Lean.Json.str |>.getD .null),
         ("reasoning", reasoning?.map Lean.Json.str |>.getD .null),
         ("calls", .arr (calls.map callJson))]
     | .tool id content => .mkObj [
-        ("type", "message"), ("role", "tool"), ("callId", id), ("content", content)]
-  | .response r => .mkObj [
-      ("type", "response"),
+        ("type", "told"), ("role", "tool"), ("callId", id), ("content", content)]
+  | .placed snapshot => .mkObj [("type", "placed"), ("snapshot", snapshot.hex)]
+  | .timed runTimeMs budgetMs? => .mkObj [
+      ("type", "timed"), ("runTimeMs", runTimeMs),
+      ("budgetMs", budgetMs?.map (fun ms => (ms : Lean.Json)) |>.getD .null)]
+  | .executed call command _ output snapshot => .mkObj [
+      ("type", "executed"), ("callId", (index.callId? call).getD (toString call)),
+      ("command", command),
+      ("content", output.toJson), ("snapshot", snapshot.hex)]
+  | .sampled _ purpose r => .mkObj [
+      ("type", "sampled"), ("purpose", purpose.toString),
       ("content", r.content?.map Lean.Json.str |>.getD .null),
       ("reasoning", r.reasoning?.map Lean.Json.str |>.getD .null),
       -- With encrypted items, the reasoning text is their summary; without, the reasoning itself.
       ("reasoningItems", (r.reasoningItems.size : Lean.Json)),
       ("finishReason", r.finishReason?.map Lean.Json.str |>.getD .null),
       ("calls", .arr (r.toolCalls.map callJson))]
-  | .observation id content => .mkObj [
-      ("type", "observation"), ("callId", id), ("content", content)]
+  | .recorded call content => .mkObj [
+      ("type", "recorded"), ("callId", (index.callId? call).getD (toString call)), ("content", content)]
 
 private def wireOf (dialogue : Array Chat.Message) : Array String :=
   dialogue.map fun m => m.toJson.compress
 
-private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
+/-- A request minus its messages: the tools, the tool choice, and the response format, exactly
+as `Chat.Request.toJson` lays them out. The page fills in `messages` per state. The model name
+and temperature are added by the provider at request time and are not recorded in a state, so
+they are not here either. -/
+def requestEnvelope (request : Chat.Request) : Lean.Json :=
+  ({ request with messages := #[] } : Chat.Request).toJson
+
+/-- What the page shows of a state beside its events: a root's task, or the reason a step gave
+for ending the run. -/
+private def noteOf (state : State) : Option String :=
+  match state.kind with
+  | .root root => root.task?
+  | _ => state.outcome?.bind (·.reason?)
+
+/-- A verdict as the page reads it. -/
+private def evaluationJson (e : Evaluation) : Lean.Json :=
+  .mkObj [
+    ("command", e.command), ("graderImage", e.graderImage),
+    ("input", e.input?.map (Lean.Json.str ·.hex) |>.getD .null),
+    ("status", e.status.toString), ("verdict", e.verdict),
+    ("checks", .arr (e.checks.map fun c =>
+      .mkObj [("ok", c.ok), ("name", c.name), ("directive", c.directive)])),
+    ("reason", e.reason),
+    ("returncode", e.returncode?.map (fun c => (c : Lean.Json)) |>.getD .null),
+    ("elapsedMs", (e.elapsedMs : Lean.Json)),
+    ("output", .mkObj [("stdout", e.stdout), ("stderr", e.stderr)])]
+
+private def stateJson (store : Store) (workspaces : Workspaces) (agent : Agent)
     (hidden : Array String) (hash : Hash) :
     Result Lean.Json := do
   let state ← getState store hash
+  -- The files the state shows, against its parent's: on an evaluation, what the grader left.
   let parentEnv? ← match state.parent? with
-    | some parent => pure (some (← getState store parent).workspace)
+    | some parent => pure (some (← getState store parent).snapshot)
     | none => pure none
   let changes ← match parentEnv? with
     | none => pure #[]
-    | some before => workspaces.diff before state.workspace
+    | some before => workspaces.diff before state.snapshot
   -- Folded prefixes are counted, never listed: a run that rebuilds a virtual environment
   -- changes hundreds of paths that say nothing, and they would otherwise crowd out the ones
   -- that do — the listing limit applies to what is left after folding.
@@ -148,34 +187,43 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
         ("removed", (fold.removed : Lean.Json)), ("modified", (fold.modified : Lean.Json)),
         ("total", (fold.total : Lean.Json))]
   let shown := listed.extract 0 changeLimit
-  let changesJson ← changesJson workspaces parentEnv? state.workspace shown
-  let evaluation := match state.evaluation? with
-    | none => Lean.Json.null
-    | some e => (State.evaluationToJson e).setObjVal! "verdict" e.verdict
-  -- The context the model is sent from this state, as the view makes it. A state carries only
-  -- what its own turn added to the parent's context when the view extended it — the common
-  -- case, and linear in the forest — and the whole context when the view rewrote earlier
-  -- messages, which a view that elides old output does. The page assembles the rest.
-  let log ← logOf store hash
-  let full := view log
-  -- How full the model's context is: of what it holds, when the root's model says.
-  let contextSize? := (← tryCatch (some <$> (Models.fromJson (← modelOf store hash))) fun _ => pure none)
+  let changesJson ← changesJson workspaces parentEnv? state.snapshot shown
+  -- The request this state was sampled from, when it sampled: the request of `next` of
+  -- the log before its response (`Agent.requestAt?`). A state carries only what that request
+  -- added to the request of the nearest turn above it when it extended it — the common case,
+  -- and linear in the forest — and the whole request when it rewrote earlier messages, which a
+  -- view that elides old output does. The page assembles the rest.
+  let branch ← branchOf store hash
+  let log := branch.log
+  let index := log.index
+  let run ← runOf store hash
+  -- A step that sampled did so first, so its response is where its events begin in the log.
+  -- The positions of the branch's responses, the state's own last if it sampled.
+  let (_, responses) := branch.states.foldl (init := (0, #[])) fun (start, responses) (_, above) =>
+    (start + above.appended.size, if above.sampled then responses.push start else responses)
+  let (sent?, above?) := if state.sampled
+    then (responses.back?.bind (agent.requestAt? log), responses.pop.back?.bind (agent.requestAt? log))
+    else (none, responses.back?.bind (agent.requestAt? log))
+  let full := (sent?.map (·.messages)).getD #[]
+  let base := (above?.map (·.messages)).getD #[]
+  -- How full the model's context was: of what it holds, when the root's model says.
+  let contextSize? := (← tryCatch (some <$> Models.fromJson run.model) fun _ => pure none)
     |>.bind (·.contextTokens?)
-  let parentView ← match state.parent? with
-    | some parent => pure (view (← logOf store parent))
-    | none => pure #[]
-  let extended := full.size >= parentView.size &&
-    wireOf (full.extract 0 parentView.size) == wireOf parentView
-  let wire := if extended then full.extract parentView.size full.size else full
+  let extended := full.size >= base.size && wireOf (full.extract 0 base.size) == wireOf base
+  let wire := if extended then full.extract base.size full.size else full
+  -- The provider's own count of what the request held, or an estimate when it gave none.
+  let tokens? := sent?.map fun request =>
+    (state.usage?.bind (·.input?)).getD (Agent.estimateTokens request.messages)
   pure <| .mkObj [
     ("hash", hash.hex),
+    ("root", branch.root.1.hex),
     ("parent", state.parent?.map (Lean.Json.str ·.hex) |>.getD .null),
     ("kind", state.kind.toString),
-    ("workspace", state.workspace.hex),
-    ("note", state.note?.map Lean.Json.str |>.getD .null),
-    ("image", state.image), ("workdir", state.workdir),
-    ("agent", state.agent?.getD .null),
-    ("model", state.model?.getD .null),
+    ("workspace", state.snapshot.hex),
+    ("note", (noteOf state).map Lean.Json.str |>.getD .null),
+    ("image", run.image), ("workdir", run.workdir),
+    ("agent", state.root?.map (·.agent) |>.getD .null),
+    ("model", state.root?.map (·.model) |>.getD .null),
     -- The page formats these itself: the turn's own time and tokens, and the run's from the root.
     ("elapsedMs", state.elapsedMs?.map (fun ms => (ms : Lean.Json)) |>.getD .null),
     ("runElapsedMs", (← elapsedMs store hash : Lean.Json)),
@@ -184,18 +232,22 @@ private def stateJson (store : Store) (workspaces : Workspaces) (view : View)
     ("outcome", match state.outcome? with
       | none => .null
       | some o => .mkObj [("status", o.status), ("submission", o.submission)]),
-    ("evaluation", evaluation),
-    ("question", state.question?.map (fun q => Lean.Json.mkObj [
-      ("callId", q.callId), ("text", q.text), ("displayText", q.toQuestion.render),
-      ("questionType", q.questionType.toString), ("options", .arr (q.options.map Lean.Json.str))])
+    ("evaluation", state.evaluation?.map evaluationJson |>.getD .null),
+    ("question", state.asked?.map (fun asked => Lean.Json.mkObj [
+      ("callId", (index.callId? asked.call).getD (toString asked.call)),
+      ("text", asked.question.text), ("displayText", asked.question.render),
+      ("questionType", asked.question.form.name),
+      ("options", .arr (asked.question.form.options.map Lean.Json.str))])
       |>.getD .null),
     ("intervention", state.intervention?.map (fun i => Lean.Json.mkObj [
       ("message", i.message), ("changed", .arr (i.changed.map Lean.Json.str))]) |>.getD .null),
-    ("events", .arr (state.appended.map eventJson)),
+    ("events", .arr (state.appended.map (eventJson index))),
+    ("sampled", sent?.isSome),
+    ("envelope", sent?.map requestEnvelope |>.getD .null),
     ("wire", .arr (wire.map Chat.Message.toJson)),
     ("wireFull", !extended),
-    ("wireOwn", ((full.size - parentView.size) : Lean.Json)),
-    ("contextTokens", (Agent.contextTokens view log : Lean.Json)),
+    ("wireOwn", ((if extended then full.size - base.size else full.size) : Lean.Json)),
+    ("contextTokens", tokens?.map (fun n => (n : Lean.Json)) |>.getD .null),
     ("contextSize", contextSize?.map (fun n => (n : Lean.Json)) |>.getD .null),
     ("changes", .arr changesJson),
     ("folded", .arr foldedJson),
@@ -343,7 +395,7 @@ const flat = (s, n = 70) => { s = String(s).replace(/\\s+/g, ' '); return s.leng
 function firstCall(state) {
   for (const e of state.events || []) {
     const calls = e.calls || [];
-    if ((e.type === 'response' || e.role === 'assistant') && calls.length) return calls[0];
+    if ((e.type === 'sampled' || e.role === 'assistant') && calls.length) return calls[0];
   }
   return null;
 }
@@ -355,7 +407,7 @@ function summary(state) {
     return (e.verdict || '') + '  ' + (e.command || '');
   }
   if (state.kind === 'intervention') return isMessage(state)
-    ? (state.intervention || {}).message || 'message' : state.note || 'commit';
+    ? (state.intervention || {}).message || 'message' : (state.intervention || {}).message || 'commit';
   if (state.kind === 'reply') {
     const e = (state.events || [])[0];
     return 'reply: ' + (e && typeof e.content === 'string' ? e.content : JSON.stringify(e && e.content));
@@ -400,7 +452,7 @@ const ROWS_AT_START = 300;   // how much of the forest is open when the page loa
    tick, a cross, or a warning sign for a verdict of pass, fail, or error. */
 const GLYPHS = {
   root: '<circle cx=\"7\" cy=\"7\" r=\"2.6\"/><circle cx=\"7\" cy=\"7\" r=\"5.6\" fill=\"none\"/>',
-  turn: '<path d=\"M2.5 3.5L6 7l-3.5 3.5\" fill=\"none\"/><path d=\"M7.5 10.5h4\" fill=\"none\"/>',
+  step: '<path d=\"M2.5 3.5L6 7l-3.5 3.5\" fill=\"none\"/><path d=\"M7.5 10.5h4\" fill=\"none\"/>',
   intervention: '<path d=\"M7 1.6L12.4 7 7 12.4 1.6 7z\" fill=\"none\"/>',
   message: '<path d=\"M2 3h10v6H6l-3 2.5V9H2z\" fill=\"none\"/>',
   question: '<path d=\"M4.6 5.3a2.4 2.4 0 1 1 3.3 2.2c-.6.3-.9.7-.9 1.4\" fill=\"none\"/>' +
@@ -418,7 +470,7 @@ function isMessage(state) {
 }
 
 function glyphOf(state) {
-  if (state.kind === 'turn' && state.question) return 'question';
+  if (state.kind === 'step' && state.question) return 'question';
   if (isMessage(state)) return 'message';
   if (state.kind !== 'evaluation') return state.kind;
   const status = state.evaluation && state.evaluation.status;
@@ -431,7 +483,7 @@ function icon(state) {
   holder.title = state.kind === 'evaluation' ? 'evaluation: ' + key : key;
   holder.innerHTML = '<svg viewBox=\"0 0 14 14\" width=\"13\" height=\"13\" ' +
     'stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" ' +
-    'stroke-linejoin=\"round\" fill=\"currentColor\">' + (GLYPHS[key] || GLYPHS.turn) +
+    'stroke-linejoin=\"round\" fill=\"currentColor\">' + (GLYPHS[key] || GLYPHS.step) +
     '</svg>';
   return holder;
 }
@@ -731,8 +783,8 @@ function renderCards(state) {
       e.checks.length ? Math.round(100 * passed / e.checks.length) + '% of checks pass' : ''));
     box.append(card('grader time', duration(e.elapsedMs), ''));
   }
-  // An evaluation is a leaf nothing continues from, so it has no context to show.
-  if (state.kind !== 'evaluation') {
+  // Only a state that sampled has a request: the one its step was sent.
+  if (state.sampled) {
     const size = state.contextSize, tokens = state.contextTokens;
     const share = size ? Math.min(100, Math.round(100 * tokens / size)) : null;
     const context = card('context', size ? share + '%' : compact(tokens), size ? '' : 'tokens',
@@ -892,27 +944,36 @@ function renderReasoning(body, event) {
   body.append(box);
 }
 
-/** One recorded event: a message placed verbatim, a model response, or a tool's observation. */
+/** One event of the log, under its name: told, sampled, placed, timed, executed or recorded. */
 function renderEvent(event) {
   const card = el('div', 'msg');
   const head = el('div', 'head');
   const body = el('div', 'body');
-  if (event.type === 'message') {
-    head.append(document.createTextNode(event.role));
+  if (event.type === 'told') {
+    head.append(document.createTextNode('told: ' + event.role));
     if (event.callId) head.append(el('span', 'id', 'tool_call_id ' + event.callId));
     renderReasoning(body, event);
     if (event.role === 'tool') body.append(renderContent(event.content, head));
     else if (event.content) body.append(foldable(el('pre', null, event.content)));
     for (const call of event.calls || []) body.append(renderCall(call));
-  } else if (event.type === 'response') {
-    head.append(document.createTextNode('response'));
+  } else if (event.type === 'sampled') {
+    head.append(document.createTextNode(event.purpose === 'turn' ? 'sampled' : 'sampled: ' + event.purpose));
     if (event.finishReason) head.append(el('span', 'id', 'finish_reason ' + event.finishReason));
     renderReasoning(body, event);
     if (event.content) body.append(foldable(el('pre', null, event.content)));
     for (const call of event.calls || []) body.append(renderCall(call));
+  } else if (event.type === 'placed') {
+    head.append(document.createTextNode('placed'));
+    head.append(el('span', 'id', 'workspace ' + short(event.snapshot)));
+  } else if (event.type === 'timed') {
+    head.append(document.createTextNode('timed'));
+    body.append(el('div', 'muted', 'the run at ' + (event.runTimeMs / 1000).toFixed(1) + ' s' +
+      (event.budgetMs === null ? ', no budget' : ' of ' + (event.budgetMs / 1000).toFixed(1) + ' s')));
   } else {
-    head.append(document.createTextNode('observation'));
+    // Executed or recorded: a call's result.
+    head.append(document.createTextNode(event.type));
     head.append(el('span', 'id', event.callId));
+    if (event.snapshot) head.append(el('span', 'id', 'workspace ' + short(event.snapshot)));
     body.append(renderContent(event.content, head));
   }
   card.append(head, body);
@@ -960,16 +1021,17 @@ function renderEvaluation(parent, state) {
 }
 
 /* --- the model's context -----------------------------------------------
-   The request a continuation from a state is sampled from: the agent's view of the log at that
-   state, in the wire form the provider receives, inside the envelope every sample sends. A state
-   carries what its turn added to the parent's context, or the whole context when the view
-   rewrote earlier messages; the page walks up to the nearest whole context and appends the
-   additions below it. The messages the selected state itself contributed are marked: everything
-   above them is what that state's own turn was sampled from. */
+   The request a state was sampled from, in the wire form the provider receives, inside its
+   envelope: the request whose digest its response records. A state that sampled carries what its
+   request added to the request of the nearest turn above it, or the whole request when it
+   rewrote earlier messages; the page walks up the turns to the nearest whole request and appends
+   the additions below it. The messages new since the turn above are marked. A state that did not
+   sample has no request. */
 
 function contextOf(hash) {
   const chain = [];
   for (let at = byHash.get(hash); at; at = at.parent ? byHash.get(at.parent) : null) {
+    if (!at.sampled) continue;
     chain.push(at);
     if (at.wireFull) break;
   }
@@ -981,7 +1043,8 @@ function contextOf(hash) {
 }
 
 function requestFor(hash) {
-  const request = JSON.parse(JSON.stringify(data.request || {}));
+  const envelope = (data.envelopes || [])[byHash.get(hash).envelope];
+  const request = JSON.parse(JSON.stringify(envelope || {}));
   request.messages = contextOf(hash).messages;
   return request;
 }
@@ -1017,23 +1080,20 @@ function showContext(hash) {
   const { messages, own } = contextOf(hash);
   const request = requestFor(hash);
   const json = JSON.stringify(request);
-  document.getElementById('modal-title').textContent = 'Context at ' + short(hash) + ' \\u2014 ' +
+  document.getElementById('modal-title').textContent = 'Request of ' + short(hash) + ' \\u2014 ' +
     messages.length + ' message(s), ' + json.length + ' bytes of JSON';
   document.getElementById('modal-mode').textContent = modalMode === 'json' ? 'readable' : 'JSON';
   body.textContent = '';
-  body.append(el('p', 'note', 'The request a continuation from this state is sampled from: the ' +
-    'agent\\'s view of the log, as the provider receives it. The model name and temperature are ' +
+  body.append(el('p', 'note', 'The request this state was sampled from, as the provider ' +
+    'received it: the one whose digest its response records. The model name and temperature are ' +
     'added at request time and are not part of a state.'));
   if (modalMode === 'json') {
     body.append(el('pre', 'mono', JSON.stringify(request, null, 2)));
   } else {
     if (!messages.length) body.append(el('div', 'muted', 'empty'));
-    if (own === messages.length && messages.length)
-      body.append(el('div', 'muted', 'This state added nothing to the context; it is its parent\\'s.'));
     messages.forEach((message, index) => {
       if (index === own && own > 0)
-        body.append(el('div', 'divider', 'added by this state \\u2193 \\u2014 everything above ' +
-          'is what its turn was sampled from'));
+        body.append(el('div', 'divider', 'new since the turn above \\u2193'));
       body.append(renderWireMessage(message, index >= own));
     });
   }
@@ -1137,41 +1197,51 @@ wireModal();
 const wanted = data.states.find(s => short(s.hash) === location.hash.slice(1));
 select((wanted || childrenOf('')[0] || data.states[0]).hash);"
 
-/-- The request every sample of an agent sends, minus its messages: the tools, the tool choice,
-and the response format, exactly as `Chat.Request.toJson` lays them out. The page fills in
-`messages` per state. The model name and temperature are added by the provider at request time
-and are not recorded in a state, so they are not here either. -/
-def requestEnvelope (tools : Array Chat.ToolDefinition) : Lean.Json :=
-  ({ messages := #[], tools } : Chat.Request).toJson
-
-/-- Everything the page renders, as one JSON document: the states (see `stateJson`) and the
-request envelope. `view` and `tools` are the agent's; nothing else about it is needed. -/
-def dataJson (store : Store) (workspaces : Workspaces) (view : View)
-    (tools : Array Chat.ToolDefinition) (hidden : Array String := #[]) : Result Lean.Json := do
+/-- Everything the page renders, as one JSON document: the states (see `stateJson`), each
+request envelope once, which states name by index. `agentOf` gives the agent a root records. -/
+def dataJson (store : Store) (workspaces : Workspaces) (agentOf : Hash -> Result Agent)
+    (hidden : Array String := #[]) : Result Lean.Json := do
   let hidden := hidden.map fun prefix' =>
     if prefix'.endsWith "/" then (prefix'.dropEnd 1).toString else prefix'
   let hashes ← allStates store
+  let roots ← hashes.filterM fun hash => do pure (← getState store hash).parent?.isNone
+  let agents : Std.HashMap Hash Agent ← roots.foldlM (init := {}) fun agents root => do
+    pure (agents.insert root (← agentOf root))
+  let stateJson (hash : Hash) : Result Lean.Json := do
+    let some agent := agents.get? (← rootOf store hash)
+      | throw <| .storage s!"the tree of {hash.hex} has no root"
+    stateJson store workspaces agent hidden hash
   -- A few states at a time: a state costs the snapshot store a diff and two reads, which for
   -- restic are processes that mostly wait.
   let mut states : Array Lean.Json := #[]
   let mut rest := hashes
   while !rest.isEmpty do
     let tasks ← (rest.extract 0 8).mapM fun hash => Result.fromIO Error.storage <|
-      IO.asTask (prio := .dedicated) (stateJson store workspaces view hidden hash).toBaseIO
+      IO.asTask (prio := .dedicated) (stateJson hash).toBaseIO
     for task in tasks do
       match task.get with
       | .ok (.ok json) => states := states.push json
       | .ok (.error error) => throw error
       | .error error => throw <| .storage (toString error)
     rest := rest.extract 8 rest.size
-  pure <| .mkObj [("states", .arr states), ("request", requestEnvelope tools)]
+  -- The envelope — tools, tool choice, response format — is the same for most turns.
+  let mut envelopes : Array Lean.Json := #[]
+  let mut named : Array Lean.Json := #[]
+  for state in states do
+    match state.getObjVal? "envelope" with
+    | .ok (.null) | .error _ => named := named.push state
+    | .ok envelope =>
+      let index := (envelopes.findIdx? (·.compress == envelope.compress)).getD envelopes.size
+      if index == envelopes.size then envelopes := envelopes.push envelope
+      named := named.push (state.setObjVal! "envelope" (index : Lean.Json))
+  pure <| .mkObj [("states", .arr named), ("envelopes", .arr envelopes)]
 
 /-- Renders every state in the store as one standalone page. Paths under `hidden` are counted
 rather than listed, so a directory that changes constantly and means nothing — a virtual
 environment, a bytecode cache — is reported without burying the rest. -/
-def report (store : Store) (workspaces : Workspaces) (title : String) (view : View)
-    (tools : Array Chat.ToolDefinition) (hidden : Array String := #[]) : Result String := do
-  let json := (← dataJson store workspaces view tools hidden).compress
+def report (store : Store) (workspaces : Workspaces) (title : String)
+    (agentOf : Hash -> Result Agent) (hidden : Array String := #[]) : Result String := do
+  let json := (← dataJson store workspaces agentOf hidden).compress
   -- `</` cannot appear inside a script element; the JSON parser does not mind the escape.
   let safe := json.replace "</" "<\\/"
   pure <|

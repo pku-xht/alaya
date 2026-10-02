@@ -11,6 +11,7 @@ open Testing
 open Alaya
 open Alaya.Executor
 open Alaya.Trajectory
+open Alaya.Driver
 
 /-- Mini's command settings, with a short timeout. -/
 private def miniConfig : Agent.MiniSwe.Config :=
@@ -48,7 +49,7 @@ private def runtime (settings : Docker.Settings) (work : System.FilePath) (store
     (model : Model) (agentConfig : Agent.MiniSwe.Config := miniConfig)
     (outputsDir : System.FilePath := work.withFileName "outputs") : TestM Runtime := do
   let mounts := #[{ host := outputsDir, container := Agent.outputsDir, readOnly := true }]
-  let executor ← assertOk (Docker.executor { settings with mounts } config)
+  let executor ← assertOk (Docker.executor { settings with mounts })
   pure { store, workspaces := ← workspaces, workDir := work, outputsDir, executor, model
          agent := Agent.MiniSwe.agent agentConfig }
 
@@ -66,16 +67,16 @@ def suite : Suite := Testing.suite "docker" #[
   test "runs commands in the container against the bind-mounted workspace" <| withDocker
     fun settings => do
       let work ← workspace
-      let executor ← assertOk (Docker.executor settings config)
+      let executor ← assertOk (Docker.executor settings)
       try
-        let wrote ← executor.exec work #["echo hi > a.txt; cat a.txt"] "cat"
+        let wrote ← executor.exec config work #["echo hi > a.txt; cat a.txt"] "cat"
         assertEqual "exit code" wrote.exitCode? (some 0)
         assertEqual "output" wrote.output "hi\n"
         -- The file the container wrote is in the host directory the store snapshots.
         assertEqual "host sees it" (← IO.FS.readFile (work / "a.txt")) "hi\n"
         -- And the host still owns it: a checkout has to be able to wipe this directory.
         IO.FS.removeFile (work / "a.txt")
-        let sees ← executor.exec work #["ls /workspace | wc -l"] "ls"
+        let sees ← executor.exec config work #["ls /workspace | wc -l"] "ls"
         assertEqual "container sees the removal" sees.output.trimAscii.toString "0"
       finally
         executor.close,
@@ -83,11 +84,11 @@ def suite : Suite := Testing.suite "docker" #[
   test "merges stderr into stdout at the fd level" <| withDocker
     fun settings => do
       let work ← workspace
-      let executor ← assertOk (Docker.executor settings config)
+      let executor ← assertOk (Docker.executor settings)
       try
-        let merged ← executor.exec work #["echo out; echo err >&2"] "echo"
+        let merged ← executor.exec config work #["echo out; echo err >&2"] "echo"
         assertEqual "merged" merged.output "out\nerr\n"
-        let failing ← executor.exec work #["exit 3"] "exit 3"
+        let failing ← executor.exec config work #["exit 3"] "exit 3"
         assertEqual "exit code passes through" failing.exitCode? (some 3)
       finally
         executor.close,
@@ -95,9 +96,9 @@ def suite : Suite := Testing.suite "docker" #[
   test "environment overrides reach the command, not the docker client" <| withDocker
     fun settings => do
       let work ← workspace
-      let executor ← assertOk (Docker.executor settings config)
+      let executor ← assertOk (Docker.executor settings)
       try
-        let out ← executor.exec work #["echo $PAGER $TQDM_DISABLE"] "echo"
+        let out ← executor.exec config work #["echo $PAGER $TQDM_DISABLE"] "echo"
         assertEqual "mini's overrides" out.output "cat 1\n"
       finally
         executor.close,
@@ -105,13 +106,13 @@ def suite : Suite := Testing.suite "docker" #[
   test "a command past the timeout is a timeout observation" <| withDocker
     fun settings => do
       let work ← workspace
-      let executor ← assertOk (Docker.executor settings { config with timeoutSeconds := 1 })
+      let executor ← assertOk (Docker.executor settings)
       try
-        let out ← executor.exec work #["sleep 30"] "sleep 30"
+        let out ← executor.exec { config with timeoutSeconds := 1 } work #["sleep 30"] "sleep 30"
         assertEqual "no exit code" out.exitCode? none
         assertEqual "error" out.error? (some "'sleep 30' timed out after 1 seconds")
         -- The run survives it: the next command still works.
-        let after ← executor.exec work #["echo alive"] "echo alive"
+        let after ← executor.exec { config with timeoutSeconds := 1 } work #["echo alive"] "echo alive"
         assertEqual "still usable" after.output "alive\n"
       finally
         executor.close,
@@ -119,10 +120,10 @@ def suite : Suite := Testing.suite "docker" #[
   test "a timeout of 0 lets a command run as long as it takes" <| withDocker
     fun settings => do
       let work ← workspace
-      let executor ← assertOk (Docker.executor settings { config with timeoutSeconds := 0 })
+      let executor ← assertOk (Docker.executor settings)
       try
         -- Past the 5-second kill grace, which once was all a 0 allowed.
-        let out ← executor.exec work #["sleep 6; echo done"] "sleep 6; echo done"
+        let out ← executor.exec { config with timeoutSeconds := 0 } work #["sleep 6; echo done"] "sleep 6; echo done"
         assertEqual "no error" out.error? none
         assertEqual "finished" out.output "done\n"
       finally
@@ -131,8 +132,8 @@ def suite : Suite := Testing.suite "docker" #[
   test "close leaves no container behind" <| withDocker
     fun settings => do
       let work ← workspace
-      let executor ← assertOk (Docker.executor settings config)
-      let _ ← executor.exec work #["true"] "true"
+      let executor ← assertOk (Docker.executor settings)
+      let _ ← executor.exec config work #["true"] "true"
       -- Other tests' containers may still be running, so count the difference.
       let running : IO Nat := do
         let out ← IO.Process.output {
@@ -157,7 +158,8 @@ def suite : Suite := Testing.suite "docker" #[
           settings.image (some "t") (agent := testAgent) (model := testModel)
         let child ← stepped <| step rt root
         let state ← assertOk (getState store child)
-        assertEqual "image inherited" state.image settings.image
+        check state.root?.isNone "a step repeats nothing of the root's record"
+        assertEqual "the run's image, from its root" (← assertOk <| runOf store child).image settings.image
         -- The container wrote it, the host snapshotted it.
         assertEqual "snapshot"
           ((← assertOk ((← workspaces).readFile? state.workspace "made.txt")).map (String.fromUTF8? ·))
@@ -205,7 +207,7 @@ def suite : Suite := Testing.suite "docker" #[
         let some e := state.evaluation? | fail "expected an evaluation"
         assertEqual "status" e.status .pass
         assertEqual "checks" e.checks #[{ ok := true, name := "made-in-container" }]
-        assertEqual "image inherited" state.image settings.image
+        assertEqual "the run's image, from its root" (← assertOk <| runOf store node).image settings.image
       finally
         rt.executor.close,
 
@@ -226,12 +228,12 @@ def suite : Suite := Testing.suite "docker" #[
       IO.FS.removeDirAll work
       IO.FS.createDirAll work
       let reading ← scripted #[toolResponse
-        "grep -c MIDDLE /alaya/outputs/1-c1.txt; touch /alaya/outputs/x 2>/dev/null || echo read-only; ls -A"]
+        "grep -c MIDDLE /alaya/outputs/2-c1.txt; touch /alaya/outputs/x 2>/dev/null || echo read-only; ls -A"]
       let second ← runtime settings work store reading recover ((← scratch) / "outputs-2")
       try
         let child ← stepped <| step second saved
         let shown? := (← assertOk <| logOf store child).reverse.findSome? fun
-          | .observation _ content => (Output.fromJson? content).map (·.output)
+          | .executed _ _ _ output _ => some output.output
           | _ => none
         -- The view elided the middle; the file has it, the mount refuses writes, and the
         -- workdir holds nothing of it.
@@ -264,7 +266,7 @@ def suite : Suite := Testing.suite "docker" #[
       assertEqual "stdout is the TAP" e.stdout "1..1\nok 1 - isolated\n"
       assertEqual "stderr apart" e.stderr "noise\n"
       check (!(← (input / "written").pathExists)) "the input stays as it was"
-      check (← assertOk ((← workspaces).readFile? state.workspace "graded.txt")).isSome
+      check (← assertOk ((← workspaces).readFile? e.checkout "graded.txt")).isSome
         "the checkout as the grader left it",
 
   test "a grader past its timeout is an error, and its container is removed" <| withDocker
@@ -323,7 +325,7 @@ def suite : Suite := Testing.suite "docker" #[
           (workdir := "/testbed")
         let child ← stepped <| step rt root
         let state ← assertOk (getState store child)
-        assertEqual "workdir inherited" state.workdir "/testbed"
+        assertEqual "the run's workdir, from its root" (← assertOk <| runOf store child).workdir "/testbed"
         assertEqual "the command ran there"
           ((← assertOk ((← workspaces).readFile? state.workspace "where.txt")).map (String.fromUTF8? ·))
           (some (some "/testbed\n"))
@@ -332,7 +334,7 @@ def suite : Suite := Testing.suite "docker" #[
           settings.user?
         let evaluation ← assertOk (getState store node)
         assertEqual "graded there" (evaluation.evaluation?.map (·.status)) (some .pass)
-        assertEqual "evaluation workdir" evaluation.workdir "/testbed"
+        assertEqual "evaluation workdir" (← assertOk <| runOf store node).workdir "/testbed"
       finally
         rt.executor.close,
 

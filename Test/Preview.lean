@@ -1,5 +1,5 @@
 import Test.Framework
-import Alaya.Trajectory
+import Alaya.Trajectory.Render
 import Alaya.Workspaces.Restic
 
 /-! What `cat --json` shows of a snapshot entry, and what `show --json` takes a branch to be. -/
@@ -9,6 +9,10 @@ namespace PreviewTests
 open Testing Alaya Alaya.Trajectory
 
 private def workspace : Hash := Hash.ofBytes "test snapshot".toUTF8
+
+/-- The kind of a root built by hand here: nothing runs in it. -/
+private def testRoot : Kind :=
+  .root { agent := testAgent, model := testModel, image := recordedImage, workdir := recordedWorkdir }
 
 private def inputError : Error -> Bool
   | .input _ => true
@@ -103,20 +107,22 @@ def suite : Suite := Testing.suite "preview" #[
 
   test "a branch is the states from the root to a state, with nothing from siblings" do
     let store ← assertOk <| Store.create ((← scratch) / "states")
-    let put (parent? : Option Hash) (kind : Kind) (text : String) : TestM Hash :=
-      assertOk <| putState store {
-        image := recordedImage, workdir := recordedWorkdir, parent? := parent?
-        workspace := workspace, kind := kind, appended := #[.message (.user text)]
-        agent? := if parent?.isNone then some testAgent else none
-        model? := if parent?.isNone then some testModel else none }
-    let root ← put none .root "task"
-    let middle ← put (some root) .turn "middle"
-    let _ ← put (some root) .turn "sibling"
-    let leaf ← put (some middle) .intervention "leaf"
+    -- Each kind holds what it may: an opening and a workspace, a clock reading, a notice.
+    let put (parent? : Option Hash) (kind : Kind) (appended : Agent.Log) : TestM Hash :=
+      assertOk <| putState store { parent? := parent?, workspace := workspace, kind := kind, appended }
+    let root ← put none testRoot #[.told (.user "task"), .placed workspace]
+    let middle ← put (some root) .step #[.timed 1 none]
+    let _ ← put (some root) .step #[.timed 2 none]
+    let leaf ← put (some middle) (.intervention { message := "leaf" }) #[.told (.user "leaf")]
     let branch ← assertOk <| ancestors store leaf
     assertEqual "states" (branch.map (·.1)) #[root, middle, leaf]
-    assertEqual "kinds" (branch.map (·.2.kind.toString)) #["root", "turn", "intervention"]
-    assertEqual "the log is theirs" ((← assertOk <| logOf store leaf).size) 3
+    assertEqual "kinds" (branch.map (·.2.kind.toString)) #["root", "step", "intervention"]
+    assertEqual "the log is theirs" ((← assertOk <| logOf store leaf).size) 4
+    -- The branch is those states, and its log their events in order.
+    let onBranch ← assertOk <| branchOf store leaf
+    assertEqual "its tip" onBranch.tip.1 leaf
+    assertEqual "its root" onBranch.root.1 root
+    assertEqual "its log, a state at a time" (onBranch.states.map (·.2.appended.size)) #[2, 1, 1]
     assertEqual "the root" (← assertOk <| rootOf store leaf) root,
 
   test "usage keeps cached and reasoning tokens in either form, and a run's adds up from the root" do
@@ -135,16 +141,14 @@ def suite : Suite := Testing.suite "preview" #[
     assertEqual "DeepSeek's cache hits" deepseek.cached? (some 300)
     assertEqual "the text" (tokens openai) "in 48.2k, 41.9k cached; out 1.1k, 800 reasoning"
     let store ← assertOk <| Store.create ((← scratch) / "states")
-    let turn (parent? : Option Hash) (usage : Chat.TokenUsage) : TestM Hash :=
+    let turn (parent : Hash) (usage : Chat.TokenUsage) : TestM Hash :=
       assertOk <| putState store {
-        image := recordedImage, workdir := recordedWorkdir, parent? := parent?, workspace := workspace
-        kind := if parent?.isNone then .root else .turn
-        appended := #[.response { content? := some "x", usage? := some usage }]
-        agent? := if parent?.isNone then some testAgent else none
-        model? := if parent?.isNone then some testModel else none }
-    let root ← turn none {}
-    let first ← turn (some root) openai
-    let second ← turn (some first) deepseek
+        parent? := some parent, workspace := workspace
+        kind := .step, appended := #[.sampled default .turn { content? := some "x", usage? := some usage }] }
+    let root ← assertOk <| putState store {
+      parent? := none, workspace := workspace, kind := testRoot, appended := #[.placed workspace] }
+    let first ← turn root openai
+    let second ← turn first deepseek
     let run ← assertOk <| runUsage store second
     assertEqual "input" run.input? (some 48711)
     assertEqual "cached" run.cached? (some 42200)
@@ -158,8 +162,7 @@ def suite : Suite := Testing.suite "preview" #[
     let a : Hash := ⟨"".pushn 'a' 64⟩
     let b : Hash := ⟨"".pushn 'b' 64⟩
     let state (parent : Hash) : State :=
-      { image := recordedImage, workdir := recordedWorkdir, parent? := some parent, workspace
-        kind := .turn, appended := #[] }
+      { parent? := some parent, workspace, kind := .step, appended := #[] }
     IO.FS.writeFile (store.dir / s!"{a.hex}.json") (state b).toJson.compress
     IO.FS.writeFile (store.dir / s!"{b.hex}.json") (state a).toJson.compress
     assertError "cycle" (ancestors store a) fun

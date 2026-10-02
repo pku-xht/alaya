@@ -23,4 +23,8 @@ import Alaya.Agent.MiniSwe
 import Alaya.Agent.MiniVero
 import Alaya.Agent.Catalog
 import Alaya.Trajectory
+import Alaya.Trajectory.Interventions
+import Alaya.Trajectory.Evaluation
+import Alaya.Trajectory.Render
+import Alaya.Driver
 import Alaya.Trajectory.Html

@@ -19,7 +19,7 @@ private def openingText (task : String) (mode : MiniVero.Mode := .codeproof) : T
   let log := MiniVero.initialLog { config with mode } task
     { system := "Linux", release := "", version := "", machine := "x86_64" }
   match log[1]? with
-  | some (Event.message (Chat.Message.user text)) => pure text
+  | some (Event.told (Chat.Message.user text)) => pure text
   | _ => fail "missing task"
 
 def suite : Suite := Testing.suite "mini-vero" #[
@@ -112,42 +112,45 @@ def suite : Suite := Testing.suite "mini-vero" #[
       "do not assume Mathlib"] do
       check (!contains text absent) s!"the prompt should not carry {absent}",
   test "a failed compile remains observable and the agent continues" do
-    let executor : Executor := {
-      exec := fun _ _ _ => pure { output := "Lean type mismatch", exitCode? := some 1 }
-      uname := pure default }
     let agent := MiniVero.agent config
     let call : Chat.ToolCall := { id := "c", name := "bash", arguments := .mkObj [("command", "lake lean Proof.lean")] }
-    let output ← assertOk <| agent.act executor { dir := "." } call
-    check ((output.getObjVal? "exit_code").toOption == some 1) "wrong exit code"
-    let log : Log := #[.response { toolCalls := #[call] }, .observation "c" output]
-    match agent.next {} log with
-    | .sample => pure ()
+    let workspace : Hash := ⟨"w"⟩
+    let asked : Log := #[.placed workspace, .sampled default .turn { toolCalls := #[call] }]
+    match agent.next asked with
+    | .inl (.exec { response := 1, index := 0 } "lake lean Proof.lean" { timeoutSeconds := 600, .. }) =>
+      pure ()
+    | _ => fail "expected the command run, answering the response's first call"
+    let log := asked.push (.executed { response := 1, index := 0 } "lake lean Proof.lean" {}
+      { output := "Lean type mismatch", exitCode? := some 1 } workspace)
+    match (MiniVero.view config log).back? with
+    | some (Chat.Message.tool "c" (Lean.Json.str text)) => check (contains text "\"exit_code\": 1") "exit code shown"
+    | _ => fail "missing the output"
+    match agent.next log with
+    | .inl (.sample .turn _) => pure ()
     | _ => fail "should continue after compiler feedback",
   test "submit is terminal but is not claimed to be a passing evaluation" do
     let agent := MiniVero.agent config
-    let log : Log := #[.response { toolCalls := #[{
+    let log : Log := #[.sampled default .turn { toolCalls := #[{
       id := "s", name := "submit", arguments := .mkObj [("message", "done")] }] }]
-    match agent.next {} log with
-    | .done outcome => assertEqual "status" outcome.status "Submitted"
+    match agent.next log with
+    | .inr outcome => assertEqual "status" outcome.status "Submitted"
     | _ => fail "expected submission",
   test "the step limit is enforced and long output stays in the raw log" do
     let cfg : MiniVero.Config := { config with base := { config.base with stepLimit := 1 } }
     let agent := MiniVero.agent cfg
     let call : Chat.ToolCall := { id := "c", name := "bash", arguments := .mkObj [("command", "lake build")] }
     let raw := String.ofList (List.replicate 12000 'x')
-    let log : Log := #[.response { toolCalls := #[call] },
-      .observation "c" (Output.toJson { output := raw, exitCode? := some 0 })]
-    match agent.next {} log with
-    | .done outcome => assertEqual "limit" outcome.status "LimitsExceeded"
+    let log : Log := #[.sampled default .turn { toolCalls := #[call] }, ran raw]
+    match agent.next log with
+    | .inr outcome => assertEqual "limit" outcome.status "LimitsExceeded"
     | _ => fail "missing limit"
-    match (agent.view log)[1]? with
+    match (MiniVero.view cfg log)[1]? with
     | some (Chat.Message.tool _ (Lean.Json.str text)) =>
       check ((text.splitOn "elided_chars").length > 1) "view should truncate"
       check (text.length < raw.length) "view should be smaller"
     | _ => fail "missing view observation"
     match log[1]? with
-    | some (Event.observation _ json) =>
-      check ((json.getObjVal? "output").toOption == some (.str raw)) "raw output lost"
+    | some (Event.executed _ _ _ output _) => check (output.output == raw) "raw output lost"
     | _ => fail "missing raw output",
 
 ]
@@ -168,17 +171,16 @@ private def scripted (responses : Array Chat.Response) : IO Model := do
       | none => throw <| Error.protocol "scripted model exhausted" } }
 
 /-- A MiniVero run over the given model responses, with a root over an empty project. -/
-private def runtime (responses : Array Chat.Response) (budgetMs? : Option Nat) :
-    TestM (Trajectory.Runtime × Hash) := do
+private def runtime (responses : Array Chat.Response) : TestM (Driver.Runtime × Hash) := do
   let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
   let workspaces ← Testing.workspaces
   let project := (← scratch) / "proj"
   IO.FS.createDirAll project
   let work := (← scratch) / "work"
   IO.FS.createDirAll work
-  let executor ← containerExecutor config.base.executor
-  let rt : Trajectory.Runtime := { store, workspaces, workDir := work, outputsDir := work.withFileName "outputs", executor, model := ← scripted responses
-                                   agent := MiniVero.agent config, budgetMs? }
+  let executor ← containerExecutor
+  let rt : Driver.Runtime := { store, workspaces, workDir := work, outputsDir := work.withFileName "outputs", executor, model := ← scripted responses
+                               agent := MiniVero.agent config }
   let uname : Uname := { system := "Linux", release := "", version := "", machine := "x86_64" }
   let root ← assertOk <| Trajectory.createRoot store workspaces (MiniVero.initialLog config "t" uname)
     project (← testImage) (some "t") (agent := config.toJson) (model := testModel)
@@ -193,22 +195,25 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     check (contains text "Do not use ``date``") "it says not to use date"
     check (offset "## Done condition" < offset "## Checkpointing" && offset "## Checkpointing" < offset "## Anti-cheating")
       "after the Done condition, before Anti-cheating, as in Vero"
-    let off := MiniVero.initialLog { config with base := { config.base with timeBudget := false } } "t"
+    let off := MiniVero.initialLog { config with base := { config.base with tools := #[Tools.Bash.tool, Tools.Submit.tool] } } "t"
       { system := "Linux", release := "", version := "", machine := "x86_64" }
     match off[1]? with
-    | some (Event.message (Chat.Message.user plain)) =>
+    | some (Event.told (Chat.Message.user plain)) =>
       check (!contains plain "## Checkpointing") "off, there is no such section"
     | _ => fail "missing task"
     assertEqual "tools" ((MiniVero.tools config).map (·.name)) #["bash", "submit", "time_budget"],
 
-  test "time_budget records the seconds left, or that there is none, and runs nothing" do
+  test "time_budget reads the clock, then records the seconds left, or that there is none" do
     let agent := MiniVero.agent config
-    let log : Log := #[.response (turn #[call "t" "time_budget"])]
-    match agent.next { elapsedMs := 60500, budgetMs? := some 3600000 } log with
-    | .record "t" json => assertEqual "left" (json.getObjVal? "seconds_left" |>.toOption |>.map (·.compress)) (some "3539")
+    let log : Log := #[.sampled default .turn (turn #[call "t" "time_budget"])]
+    match agent.next log with
+    | .inl .time => pure ()
+    | _ => fail "expected the clock read first"
+    match agent.next (log.push (.timed 60500 (some 3600000))) with
+    | .inl (.record _ json) => assertEqual "left" (json.getObjVal? "seconds_left" |>.toOption |>.map (·.compress)) (some "3539")
     | _ => fail "expected the answer recorded"
-    match agent.next {} log with
-    | .record "t" json => check ((json.getObjVal? "seconds_left").toOption == some .null) "no budget, no number"
+    match agent.next (log.push (.timed 60500 none)) with
+    | .inl (.record _ json) => check ((json.getObjVal? "seconds_left").toOption == some .null) "no budget, no number"
     | _ => fail "expected the answer recorded",
 
   test "mini-swe neither offers time_budget nor accepts it in its configuration" do
@@ -222,31 +227,38 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
 
   test "each step records its time, and the tool counts it against the budget" do
     let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
-      turn #[call "t" "time_budget"], turn #[call "s" "submit"]] (some 3600000)
-    let first ← stepped <| step rt root
+      turn #[call "t" "time_budget"], turn #[call "s" "submit"]]
+    let budget := some 3600000
+    let first ← stepped <| step rt root budget
     let slept := (← assertOk <| Trajectory.getState rt.store first).elapsedMs?.getD 0
     check (slept >= 200) s!"the step took the sleep, recorded {slept} ms"
-    let second ← stepped <| step rt first
-    match (← assertOk <| Trajectory.getState rt.store second).appended.back? with
-    | some (.observation "t" json) =>
+    let second ← stepped <| step rt first budget
+    let appended := (← assertOk <| Trajectory.getState rt.store second).appended
+    match appended.back? with
+    | some (.recorded _ json) =>
       let left := (json.getObjVal? "seconds_left" >>= Lean.Json.getNat?).toOption.getD 0
       check (left < 3600 && left + 5 >= 3600) s!"left {left} s of 3600 after {slept} ms"
     | _ => fail "expected the answer as the last event"
+    -- The answer is a function of the log: the reading it came from is recorded before it.
+    match appended[appended.size - 2]? with
+    | some (.timed elapsed (some 3600000)) => check (elapsed >= slept) "the reading counts the run so far"
+    | _ => fail "expected the clock reading before the answer"
     check ((← assertOk <| Trajectory.elapsedMs rt.store second) >= slept) "the run's time adds up",
 
   test "a spent budget stops resume before a step, writes nothing, and a later resume continues" do
     let (rt, root) ← runtime #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
-      turn #[call "s" "submit" (.mkObj [("message", "done")])]] (some 100)
-    let (stopped, halt) ← assertOk <| Trajectory.resume rt root (fun _ => pure ())
+      turn #[call "s" "submit" (.mkObj [("message", "done")])]]
+    let limits : Driver.Limits := { budgetMs? := some 100 }
+    let (stopped, halt) ← assertOk <| Driver.resume rt root limits
     check (halt == .outOfTime) "the budget stopped it"
     check ((← assertOk <| Trajectory.getState rt.store stopped).outcome?.isNone) "the run has not ended"
     let count := (← assertOk <| Trajectory.allStates rt.store).size
-    let (again, halt) ← assertOk <| Trajectory.resume rt stopped (fun _ => pure ())
+    let (again, halt) ← assertOk <| Driver.resume rt stopped limits
     check (halt == .outOfTime && again == stopped) "spent before a step: nothing more"
     assertEqual "no state written" (← assertOk <| Trajectory.allStates rt.store).size count
-    let (_, halt) ← assertOk <| step rt stopped
+    let (_, halt) ← assertOk <| step rt stopped limits.budgetMs?
     check (halt == .outOfTime) "one step is refused too"
-    let (final, halt) ← assertOk <| Trajectory.resume { rt with budgetMs? := none } stopped (fun _ => pure ())
+    let (final, halt) ← assertOk <| Driver.resume rt stopped
     check (halt != .outOfTime) "without a budget it runs on"
     assertEqual "submitted" ((← assertOk <| Trajectory.getState rt.store final).outcome?.map (·.status)) (some "Submitted")
 ]

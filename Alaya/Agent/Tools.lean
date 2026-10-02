@@ -2,15 +2,34 @@ import Alaya.Agent
 import Alaya.Executor
 
 /-!
-The tools an agent can offer, each on its own: its definition for the model, how its arguments
-are read, and what answers a call — a command run in the workspace, or a value computed from
-the log. Nothing here knows which agent offers a tool, what else it offers, or how it words a
-refusal; an agent composes these and decides the rest.
+The tools an agent can offer, each on its own, as a `Tool`: its definition for the model, what
+it adds to the prompt, and how a call is read and answered — a command run in the workspace, a
+value computed from the log, a question for a person, the end of the run. Nothing here knows
+which agent offers a tool, what else it offers, or how it words a refusal; an agent holds a list
+of tools and decides the rest. `all` names every tool, for an agent's configuration.
 -/
 
-namespace Alaya.Agent.Tools
+namespace Alaya.Agent
 
-open Alaya (Result Error Output Executor)
+/-- A tool as an agent offers it. A tool only adds to the prompt, never rewrites it: what it
+needs the model to know is its `instruction?`, appended after the agent's own text. -/
+structure Tool where
+  definition : Chat.ToolDefinition
+  /-- Must be the only call of its turn. -/
+  alone : Bool := false
+  /-- What the model is told of the tool beyond its definition, appended to the prompt. -/
+  instruction? : Option String := none
+  /-- Reads a call: what is wrong with its arguments, or how it is answered — what the agent
+  asks for next, for the call's reference, from the log at the point it is the next call to
+  answer: the effect that answers the call, an effect whose answer it needs first, or the
+  outcome that ends the run instead. -/
+  read : Chat.ToolCall -> Except String (CallRef -> Log -> Effect ⊕ Outcome)
+
+def Tool.name (tool : Tool) : String := tool.definition.name
+
+namespace Tools
+
+open Alaya (Output)
 
 /-! ## bash: a command in the workspace -/
 
@@ -29,11 +48,6 @@ def command (arguments : Lean.Json) : Except String String :=
   | .ok _ => .error "The 'command' argument of the bash tool must be a string."
   | .error _ => .error "Missing 'command' argument in bash tool call."
 
-/-- Runs the command in the workspace through the executor; the observation is the `Output`. -/
-def act (executor : Executor) (workspace : Workspace) (command : String) : Result Lean.Json := do
-  let output ← Result.fromIO Error.storage (executor.bash workspace.dir command)
-  pure output.toJson
-
 /-- The fields saying how a command ended, after `fields`. -/
 private def withStatus (o : Output) (fields : List (String × Lean.Json)) : Lean.Json :=
   let fields := fields ++ [("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null)]
@@ -41,6 +55,14 @@ private def withStatus (o : Output) (fields : List (String × Lean.Json)) : Lean
     | some error => fields ++ [("error", Lean.Json.str error)]
     | none => fields
   .mkObj fields
+
+/-- Runs the command in the workspace, as `Executor.Config`'s defaults say; an
+agent sets how its commands run with `Agent.runCommandsWith`. -/
+def tool : Tool := {
+  definition
+  read := fun call => do
+    let command ← command call.arguments
+    pure fun ref _ => .inl (.exec ref command {}) }
 
 /-- What an omitted output says in its place. -/
 def omittedNotice (file : String) : String := s!"[output omitted; full output: {file}]"
@@ -85,32 +107,36 @@ def message (arguments : Lean.Json) : String :=
   | .ok (.str message) => message
   | _ => ""
 
+/-- Ends the run, its message the submission. -/
+def tool : Tool := {
+  definition
+  read := fun call => pure fun _ _ => .inr { status := "Submitted", submission := message call.arguments } }
+
 end Submit
 
 /-! ## ask_user: a typed question, answered outside the workspace -/
 
 namespace AskUser
 
+/-- How the tool works, and nothing of what to ask or how to treat the answer: that is the
+agent's, or the experiment's, to say. -/
 def instruction : String :=
   "You may ask a concrete question with ask_user instead of running a command. " ++
-  "Write your messages, questions, and answer options in English. " ++
   "Include the relevant context and choose question_type: yes_no for a yes/no answer, " ++
   "single_choice to select exactly one of at least two distinct candidates, or open_ended " ++
   "for a nonblank free-text answer. Only single_choice takes options; otherwise pass an empty array. " ++
-  "A selected candidate returns its one-based option number (starting at 1) as a string. " ++
+  "A yes_no answer returns the string yes or no. " ++
+  "A selected candidate returns its one-based option number (starting at 1), as a number. " ++
   "The platform appends None of the above; never include that reserved label or none_of_above " ++
   "in options. It returns the plain string none_of_above when all listed candidates are incorrect, " ++
   "distinct from being unable to answer. Call ask_user alone, without any other tool. " ++
   "For every question type, the person may be unable to answer; this returns the JSON " ++
-  "object {\"status\":\"unavailable\"} instead of a string answer. " ++
-  "The answer is advice and may be wrong; it does not change " ++
-  "the task's rules."
+  "object {\"status\":\"unavailable\"} instead of an answer."
 
 def definition : Chat.ToolDefinition := {
   name := "ask_user"
   description := "Ask a yes/no, single-choice, or open-ended question and wait for an answer. " ++
-    "Write the question, its context, and all options in English. " ++
-    "Single-choice answers return one candidate's one-based option number (starting at 1) as a string, " ++
+    "Single-choice answers return one candidate's one-based option number (starting at 1), " ++
     "or the platform's None of the above " ++
     "answer (plain text none_of_above). Never include that reserved option yourself. " ++
     "If the person cannot answer, the result is {\"status\":\"unavailable\"}. Call this tool alone."
@@ -124,18 +150,33 @@ def definition : Chat.ToolDefinition := {
       "For yes_no and open_ended, an empty array.")))]
 }
 
-/-- Checks the question's form, not whether a candidate is true. The raw arguments stay in
-the log; the structured question gives collectors and `reply` the same answer contract. -/
+/-- Reads the question a call asks, or says what is wrong with it: the arguments name a form,
+only a choice has options, and the question is one that can be asked (`Question.validate`). It
+does not judge whether a candidate is true. -/
 def question (arguments : Lean.Json) : Except String Question := do
   definition.parameters.validate arguments
-  let questionType ← arguments.getObjVal? "question_type" >>= Lean.Json.getStr? >>=
-    QuestionType.fromString
   let text ← arguments.getObjVal? "question" >>= Lean.Json.getStr?
   let options ← (arguments.getObjVal? "options" >>= Lean.Json.getArr?) >>= (·.mapM Lean.Json.getStr?)
-  if text.trimAscii.toString.isEmpty then throw "ask_user needs a nonempty question."
-  let question : Question := { text, questionType, options }
+  let noOptions : Except String Unit :=
+    if options.isEmpty then pure ()
+    else throw "Question options must be empty for yes_no and open_ended questions."
+  let form ← match ← arguments.getObjVal? "question_type" >>= Lean.Json.getStr? with
+    | "single_choice" => pure (Question.Form.singleChoice options)
+    | "yes_no" => noOptions *> pure .yesNo
+    | "open_ended" => noOptions *> pure .openEnded
+    | other => throw s!"Unknown question_type: {other}."
+  let question : Question := { text, form }
   question.validate
   pure question
+
+/-- Asks a person, and waits; alone in its turn. -/
+def tool : Tool := {
+  definition
+  alone := true
+  instruction? := some instruction
+  read := fun call => do
+    let question ← question call.arguments
+    pure fun ref _ => .inl (.ask ref question) }
 
 end AskUser
 
@@ -150,12 +191,32 @@ def definition : Chat.ToolDefinition := {
   parameters := .object #[]
 }
 
-/-- What a `time_budget` call records: the seconds left, or that there is no limit. -/
-def answer (session : Session) : Lean.Json :=
-  match session.secondsLeft? with
-  | some seconds => .mkObj [("seconds_left", (seconds : Lean.Json))]
+/-- What a `time_budget` call records, from a timing of the run (`Event.timed`): the whole
+seconds left, never negative, or that there is no limit. -/
+def answer (runTimeMs : Nat) (budgetMs? : Option Nat) : Lean.Json :=
+  match budgetMs? with
+  | some budget => .mkObj [("seconds_left", ((budget - runTimeMs) / 1000 : Nat))]
   | none => .mkObj [("seconds_left", .null), ("note", "this run has no time limit")]
+
+def instruction : String :=
+  "You may call time_budget to see how many seconds of this run's time budget are left."
+
+/-- Times the run, then, once the log holds the timing, records what it leaves of the
+budget. -/
+def tool : Tool := {
+  definition
+  instruction? := some instruction
+  read := fun _ => pure fun ref log => match log.back? with
+    | some (.timed runTimeMs budgetMs?) => .inl (.record ref (answer runTimeMs budgetMs?))
+    | _ => .inl .time }
 
 end TimeBudget
 
-end Alaya.Agent.Tools
+/-- Every tool an agent's configuration can name. -/
+def all : Array Tool := #[Bash.tool, Submit.tool, AskUser.tool, TimeBudget.tool]
+
+def named? (name : String) : Option Tool := all.find? (·.name == name)
+
+end Tools
+
+end Alaya.Agent

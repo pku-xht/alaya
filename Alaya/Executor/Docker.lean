@@ -278,12 +278,12 @@ private def execIn (ref : IO.Ref (Option Container)) (settings : Settings) (conf
     pure (failed (toString e))
 
 /-- An executor that runs every command of a run in one container, with the working directory
-bind-mounted. `settings.image` should already be pinned, since it is what the trajectory
-records. -/
-def executor (settings : Settings) (config : Config) : Result Executor := do
+bind-mounted, each as its own configuration says. `settings.image` should already be pinned,
+since it is what the trajectory records. -/
+def executor (settings : Settings) : Result Executor := do
   let ref ← Result.fromIO Error.storage (IO.mkRef (none : Option Container))
   pure {
-    exec := execIn ref settings config
+    exec := execIn ref settings
     uname := (uname settings).toUserIO
     close := do
       match ← ref.get with

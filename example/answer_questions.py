@@ -201,10 +201,13 @@ class QuestionApplication:
         """The branch from the root to the question, one step per state."""
         if not self._listed(state):
             raise ApiError(404, "This is not a question the page has listed.")
-        value = self._inspect(self._run("show", state, json_output=True), state)
+        value = self._inspect(self._run("show", state, json_output=True), state, snapshot="workspace")
         history = value.get("history")
-        # A question is a turn that carries the question it waits on.
-        if not isinstance(value.get("question"), dict) or not isinstance(history, list) or not all(
+        # A question is a step that stopped at the question it waits on.
+        kind = value.get("kind")
+        stop = kind.get("stop") if isinstance(kind, dict) else None
+        waits = isinstance(stop, dict) and isinstance(stop.get("asked"), dict)
+        if not waits or not isinstance(history, list) or not all(
             isinstance(step, dict) and isinstance(step.get("kind"), str)
             and isinstance(step.get("events"), list) for step in history
         ):
@@ -230,15 +233,15 @@ class QuestionApplication:
         return value
 
     @staticmethod
-    def _inspect(output: str, state: str, path: str | None = None) -> dict:
+    def _inspect(output: str, state: str, path: str | None = None, snapshot: str = "snapshot") -> dict:
         try:
             value = json.loads(output)
         except json.JSONDecodeError as error:
             raise ApiError(502, "Alaya returned invalid context JSON.") from error
         if (
             not isinstance(value, dict) or value.get("state") != state
-            or not isinstance(value.get("workspace"), str)
-            or not STATE_HASH.fullmatch(value["workspace"])
+            or not isinstance(value.get(snapshot), str)
+            or not STATE_HASH.fullmatch(value[snapshot])
             or (path is not None and value.get("path") != path)
         ):
             raise ApiError(502, "Alaya returned context for an unexpected state or path.")
