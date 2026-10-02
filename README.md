@@ -2,23 +2,27 @@
 
 Alaya is a framework for experimenting with coding agents that focuses on:
 
-**Agents as pure functions.** Agent runs are stochastic, depend on their environment, and take
-long, so they are hard to reproduce and compare. In Alaya, an agent is a pure function from its
-run's log to what it asks for next — a model request, a command in the workspace, the time,
-a person's answer — and never does any of it itself. The world's answers are recorded in the log,
-and the log as a tree of immutable states. Any run can be continued, branched, or replayed from
-any state, and carried over to a changed agent up to the first point where it would act
-differently.
+**Agents as pure functions.** Agent runs are random, depend on their environment, and take a
+long time, which makes them hard to analyse and expensive to experiment with. In Alaya, an agent
+is a pure function: given the log of its run, it returns what it wants next, such as a model
+request or a command. Alaya carries out the request and records the result in the log, including
+a snapshot of the workspace, so the log holds everything the agent's behaviour depends on. Every
+run is therefore complete data that can be analysed without running it again, and any point in a
+run can start a controlled experiment: vary a single factor, such as a message, a file, or the
+model, or resample the continuation, and compare the outcomes.
 
-**Agent-native operation.** Research is increasingly automated by AI. Alaya is designed to be
-operated entirely by an external agent, such as Claude Code, through a strict, self-describing
-command line with JSON output and exit codes that say what happened.
+**Agent-native operation.** An experiment with agents involves many runs and evaluations, and
+research itself is increasingly carried out by AI. Alaya is designed to be operated entirely by
+an external agent, such as Claude Code or Codex, through a strict, self-describing command line
+with JSON output and exit codes that say what happened. An external agent can therefore carry out
+a whole experiment on its own, from starting runs to grading and analysing them.
 
-**Long-horizon tasks, benchmarks, and human interaction.** Runs can be paused and resumed across
-invocations, execute in a benchmark's own container images, and are graded separately against
-hidden tests. A person can answer the agent's questions or step into a run at any point. Alaya
-includes MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for the Vero benchmark of
-verified Lean code.
+**Reliable runs on realistic benchmarks.** Runs on realistic benchmarks take hours, need the
+benchmark's own environment, and are graded against hidden tests. Alaya saves a run after every
+step, so an interrupted run continues where it stopped; runs every command in an isolated
+container of the benchmark's own image; and grades any state with the benchmark's own grader,
+against tests the agent never sees. Alaya includes MiniSwe, a port of mini-SWE-agent for
+SWE-bench, and MiniVero, for the Vero benchmark of verified Lean code.
 
 ## Getting started
 
@@ -61,11 +65,9 @@ alaya eval END2 --input example/bija --grader /grader/grade.py --timeout 1800
 prints each state it adds, and `tree` the whole forest. The first branch is untouched, so the two
 verdicts compare the same run with and without the correction.
 
-`alaya html report.html` writes the whole forest as one page: each state with its time, tokens
-and how full the context is, its events, and its workspace changes. Below is
-[such a page](example/bija/report.html) for a gpt-6-luna run on Bija, branched by a message
-(`alaya tell`) in the middle of the run, at a step of the new branch; the two branches' verdicts
-are the leaves at the bottom of the tree.
+`alaya html report.html` writes all runs as one page. Below is the page for a
+gpt-6-luna run on [Bija](example/bija/README.md), with a second branch that starts mid-run where
+a person sent the agent a message.
 
 ![The HTML report of a gpt-6-luna run on Bija](example/bija/report.png)
 
