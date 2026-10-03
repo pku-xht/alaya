@@ -1,28 +1,29 @@
 # Alaya
 
-Alaya is a framework for experimenting with coding agents that focuses on:
+Alaya is a framework for experimenting with coding agents, built on three principles:
 
-**Agents as pure functions.** Agent runs are random, depend on their environment, and take a
-long time, which makes them hard to analyse and expensive to experiment with. In Alaya, an agent
-is a pure function: given the log of its run, it returns what it wants next, such as a model
-request or a command. Alaya carries out the request and records the result in the log, including
-a snapshot of the workspace, so the log holds everything the agent's behaviour depends on. Every
-run is therefore complete data that can be analysed without running it again, and any point in a
-run can start a controlled experiment: vary a single factor, such as a message, a file, or the
-model, or resample the continuation, and compare the outcomes.
+**Agents as pure functions.** Agent runs are random and depend on their environment, which makes
+them hard to analyse and experiment with. In Alaya, a run is a log of events, such as model
+responses, command outputs and messages from a person, and an agent is a pure function from this
+log to its next effect, such as a model request or a command. Alaya carries out each effect and
+records its result, filesystem snapshots included. Every run is therefore complete data that can
+be analysed without running it again, and any point in a run can start a controlled experiment:
+vary a single factor, such as a message, a file, or the model, or resample the continuation, and
+compare the outcomes.
 
-**Agent-native operation.** An experiment with agents involves many runs and evaluations, and
-research itself is increasingly carried out by AI. Alaya is designed to be operated entirely by
-an external agent, such as Claude Code or Codex, through a strict, self-describing command line
-with JSON output and exit codes that say what happened. An external agent can therefore carry out
-a whole experiment on its own, from starting runs to grading and analysing them.
+**Agent-native operation.** Experiments with agents produce more data than a person can process
+by hand, and research itself is increasingly automated by AI. Alaya is designed to be operated
+entirely by an external agent, such as Claude Code or Codex, through a strict, self-describing
+command line. An external agent can therefore carry out research on its own, from proposing
+ideas to evaluating them in experiments.
 
-**Reliable runs on realistic benchmarks.** Runs on realistic benchmarks take hours, need the
-benchmark's own environment, and are graded against hidden tests. Alaya saves a run after every
-step, so an interrupted run continues where it stopped; runs every command in an isolated
-container of the benchmark's own image; and grades any state with the benchmark's own grader,
-against tests the agent never sees. Alaya includes MiniSwe, a port of mini-SWE-agent for
-SWE-bench, and MiniVero, for the Vero benchmark of verified Lean code.
+**Reliable runs on realistic benchmarks.** Runs on realistic benchmarks are long and expensive,
+need non-trivial environments, and are graded in ways that differ from benchmark to benchmark.
+Alaya saves a run after every step and caches model responses, so an interrupted run continues
+where it stopped; runs every command in an isolated container of the benchmark's image; and
+grades every outcome through one interface, with an adapter for each benchmark. Alaya includes
+MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for the Vero benchmark of
+verified Lean code.
 
 ## Getting started
 
