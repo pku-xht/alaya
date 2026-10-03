@@ -1085,8 +1085,7 @@ function showContext(hash) {
   document.getElementById('modal-mode').textContent = modalMode === 'json' ? 'readable' : 'JSON';
   body.textContent = '';
   body.append(el('p', 'note', 'The request this state was sampled from, as the provider ' +
-    'received it: the one whose digest its response records. The model name and temperature are ' +
-    'added at request time and are not part of a state.'));
+    'received it.'));
   if (modalMode === 'json') {
     body.append(el('pre', 'mono', JSON.stringify(request, null, 2)));
   } else {
