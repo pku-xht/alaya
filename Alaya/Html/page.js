@@ -419,8 +419,9 @@ function whereOf(i) {
   return line;
 }
 
-/** What a tool is called with: a long text, such as a command or a question, as a block under
-its name, and the rest as facts. `title` goes before the first block's label. */
+/** The fields of what a call is given, or of a value it gave: a long text, such as a command or
+a question, as a block under its name, and the rest as facts. `title` goes before the first
+block's label. */
 function renderArguments(parent, title, args) {
   if (typeof args === 'string') { block(parent, title || 'arguments', args); return; }
   const entriesOf = args && typeof args === 'object' && !Array.isArray(args) ? Object.entries(args) : null;
@@ -467,24 +468,25 @@ function renderVerdict(parent, verdict) {
   }
 }
 
-/** A value a call gave: a verdict, a command's result, an agent's outcome, text, or JSON. */
-function renderValue(parent, value) {
-  if (typeof value === 'string') { block(parent, 'value', value); return; }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    if (Array.isArray(value.checks)) { renderVerdict(parent, value); return; }
-    if (typeof value.output === 'string') {
+/** A value a call gave. Its `kind` is what the report says it is — a verdict, a command's
+result, an agent's outcome — and the page does not guess: a value of no kind is shown as what
+it holds, a text, the fields of an object, or JSON. */
+function renderValue(parent, value, kind) {
+  switch (kind) {
+    case 'verdict': renderVerdict(parent, value); return;
+    case 'command':
       facts(parent, [['exit status', given(value.exit_code) ? String(value.exit_code) : 'none', value.exit_code === 0 ? 'ok' : 'bad'],
         ['failure', value.error, 'bad'], ['whole output', value.file]]);
       block(parent, 'output', value.output || '(no output)');
       return;
-    }
-    if (typeof value.status === 'string' && typeof value.submission === 'string') {
+    case 'outcome':
       facts(parent, [['status', value.status], ['reason', value.reason]]);
       if (value.submission) block(parent, 'submission', value.submission, 'prose');
       return;
-    }
   }
-  block(parent, 'value', json(value));
+  if (typeof value === 'string') block(parent, 'value', value);
+  else if (value && typeof value === 'object' && !Array.isArray(value)) renderArguments(parent, '', value);
+  else block(parent, 'value', json(value));
 }
 
 /** A run's configuration: the agent's, the model's, and where its commands run. */
@@ -511,7 +513,8 @@ function renderConfig(parent, config) {
 /** What an entry holds. */
 function renderEvent(parent, i) {
   const x = entries[i], e = x.e;
-  const took = x.t >= 50 ? duration(x.t) : null;
+  // An operation always says how long it took; a mark only when that is worth saying.
+  const took = ['sample', 'exec', 'time', 'external'].includes(e.k) || x.t >= 50 ? duration(x.t) : null;
   if (given(e.error)) {
     facts(parent, [['time', took]]);
     if (e.k === 'exec' || e.k === 'external') block(parent, 'command', e.command);
@@ -570,7 +573,7 @@ function renderEvent(parent, i) {
       block(parent, 'output', e.output || '(no output)');
       break;
     case 'time':
-      facts(parent, [['run time', duration(e.spent)], ['budget', given(e.budget) ? duration(e.budget) : 'none']]);
+      facts(parent, [['time', took], ['run time', duration(e.spent)], ['budget', given(e.budget) ? duration(e.budget) : 'none']]);
       break;
     case 'external':
       facts(parent, [['time', took ? took + ', the program ' + duration(e.elapsed) : null],
@@ -585,7 +588,7 @@ function renderEvent(parent, i) {
       // The agent's arguments are the run's configuration, shown below.
       if (e.routine !== 'agent') renderArguments(parent, '', e.arguments);
       break;
-    case 'return': renderValue(parent, e.value); break;
+    case 'return': renderValue(parent, e.value, e.kind); break;
     case 'fail': block(parent, 'error', e.error, 'bad'); break;
     case 'stop': block(parent, 'reason', e.text, 'prose'); break;
     case 'comment': block(parent, null, e.text, 'prose'); break;

@@ -33,13 +33,19 @@ def suite : Suite := Testing.suite "render" #[
     assertEqual "seconds" (Render.seconds 12345, Render.seconds 0) ("12.3 s", "0.0 s")
     for (value, line) in #[
         ("{\"status\":\"fail\",\"passed\":2,\"total\":3,\"reason\":\"failed: b\",\"checks\":[]}", "fail 2/3"),
-        ("[{\"status\":\"pass\",\"passed\":1,\"total\":1},{\"status\":\"error\",\"passed\":0,\"total\":0}]", "pass 1/1, error 0/0"),
+        ("[\"a\",2,{\"n\":1}]", "a, 2, n: 1"),
         ("{\"status\":\"Submitted\",\"submission\":\"done\\nand more\"}", "Submitted: done and more"),
         ("{\"status\":\"LimitsExceeded\",\"submission\":\"\"}", "LimitsExceeded"),
-        ("{\"status\":\"unavailable\"}", "unavailable"),
+        ("{\"status\":\"unavailable\"}", "status: unavailable"),
         ("{\"output\":\"\\nfirst line\\nsecond\",\"exit_code\":0,\"error\":null,\"file\":null}", "exit 0: first line"),
-        ("{\"output\":\"\",\"exit_code\":null,\"error\":\"timed out\"}", "no status: "),
-        ("\"plain\\ntext\"", "plain text"), ("7", "7"), ("{\"seconds_left\":12}", "{\"seconds_left\":12}")] do
+        ("{\"output\":\"\",\"exit_code\":null,\"error\":\"timed out\",\"file\":null}", "timed out: "),
+        ("{\"output\":\"\",\"exit_code\":null,\"error\":null,\"file\":null}", "no status: "),
+        -- A value that only resembles one of Alaya's own is shown as what it holds.
+        ("{\"passed\":true,\"output\":\"12 passed\"}", "output: 12 passed, passed: true"),
+        ("{\"status\":\"fail\",\"passed\":2,\"total\":3}", "passed: 2, status: fail, total: 3"),
+        ("{\"status\":\"Submitted\",\"submission\":\"done\",\"patch\":\"p\"}", "patch: p, status: Submitted, submission: done"),
+        ("{}", ""),
+        ("\"plain\\ntext\"", "plain text"), ("7", "7"), ("{\"seconds_left\":12}", "seconds_left: 12")] do
       assertEqual value (Render.valueSummary (json value)) line
     assertEqual "a long value is cut" (Render.valueSummary (.str (String.ofList (List.replicate 200 'x')))).length 80,
 
@@ -73,7 +79,7 @@ def suite : Suite := Testing.suite "render" #[
       (.opened #[0] ⟨agentRoutine, config.toJson⟩, "open agent: mini-swe, gpt-oss-120b"),
       (.opened #[0, 1] ⟨"bash", .mkObj [("command", "ls")]⟩, "open bash \"ls\""),
       (.opened #[0, 1] ⟨"ask_user", (askCall "q" "Keep it?").arguments⟩, "open ask_user \"Keep it?\""),
-      (.opened #[0, 1] ⟨"time_budget", .mkObj []⟩, "open time_budget \"{}\""),
+      (.opened #[0, 1] ⟨"time_budget", .mkObj []⟩, "open time_budget"),
       (.returned #[0] (json "{\"status\":\"Submitted\",\"submission\":\"done\"}"), "return Submitted: done"),
       (.failed #[0, 1] "no routine named bash", "fail: no routine named bash"),
       (.stopped "to grade this point", "stopped: to grade this point"),
@@ -112,8 +118,8 @@ def suite : Suite := Testing.suite "render" #[
     -- Once the agent is over, the run waits for a grader, and then ends with its verdict: how it
     -- stands is how the agent ended, and the verdict once there is one.
     let outcome := json "{\"status\":\"Submitted\",\"submission\":\"all done\"}"
-    let fail := json "{\"status\":\"fail\",\"passed\":352,\"total\":464}"
-    let pass := json "{\"status\":\"pass\",\"passed\":2,\"total\":2}"
+    let fail := json "{\"status\":\"fail\",\"passed\":352,\"total\":464,\"checks\":[]}"
+    let pass := json "{\"status\":\"pass\",\"passed\":2,\"total\":2,\"checks\":[]}"
     let standings : Array (AgentEnd × Next Agent × String) := #[
       (.returned outcome, .waits #[], "done: Submitted: all done"),
       (.returned outcome, .done fail, "done: fail 352/464"),

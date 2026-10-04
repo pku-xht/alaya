@@ -8,13 +8,19 @@ structure Config where
   directory : System.FilePath
   readOnly : Bool := false
 
+/-- An entry as stored: its key, and its draws in order, each the response and the time the
+model took to give it. The time is beside the response and not in it, since a response is stored
+here as a log stores it, and a log keeps the time as its entry's. -/
 private def responsesToJson (key : String) (responses : Array Chat.Response) : Lean.Json :=
-  .mkObj [("key", key), ("responses", .arr <| responses.map (·.toStored))]
+  .mkObj [("key", key), ("draws", .arr <| responses.map fun response =>
+    .mkObj [("response", response.toStored), ("elapsed_ms", response.elapsedMs?.getD 0)])]
 
 private def responsesFromJson (key : String) (json : Lean.Json) : Except String (Array Chat.Response) := do
   let storedKey ← json.getObjVal? "key" >>= Lean.Json.getStr?
   if storedKey != key then throw "cached entry key does not match its filename"
-  (← json.getObjVal? "responses" >>= Lean.Json.getArr?).mapM Chat.Response.ofStored
+  (← json.getObjVal? "draws" >>= Lean.Json.getArr?).mapM fun draw => do
+    let response ← Chat.Response.ofStored (← draw.getObjVal? "response")
+    pure { response with elapsedMs? := some (← draw.getObjVal? "elapsed_ms" >>= Lean.Json.getNat?) }
 
 private def fileName (key : String) : String :=
   s!"{hash key}.json"
@@ -47,7 +53,9 @@ private def save (config : Config) (key : String) (responses : Array Chat.Respon
 private def io (action : IO α) : Result α :=
   Result.fromIO Error.cache action
 
-/-- Replays response sequences from disk and extends them on cache misses.
+/-- Replays response sequences from disk and extends them on cache misses. Every response it
+gives carries the time its draw took (`elapsedMs?`): measured when the draw is made — the whole
+of the call that made it, its retries included — and read back with it after.
 
 Concurrent streams in this process serialize extensions of the same cache entry. Cache directories
 must not be written by more than one process at a time. -/
@@ -82,9 +90,13 @@ def persistent (inner : Model) (config : Config) : Result Model := do
           else if config.readOnly then
             throw <| .cache "persistent cache miss in read-only mode"
           else
+            let before ← io IO.monoMsNow
             let sampled ← (← inner.sample request).nextN missing
             if sampled.size != missing then
               throw <| .protocol "model returned the wrong number of responses"
+            -- Draws made in one call each took that call: what a caller that waited for it saw.
+            let took := (← io IO.monoMsNow) - before
+            let sampled := sampled.map fun response => { response with elapsedMs? := some took }
             let _ ← io <| responses.modify fun responses => responses ++ sampled
             let saved ← io responses.get
             let _ ← io <| save config key saved

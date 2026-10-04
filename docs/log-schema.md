@@ -19,7 +19,9 @@ An entry is one JSON object, compact, in a file of its own:
 Its **name** is the SHA-256 of `{"parent": …, "event": …}`, compact with sorted keys: the time it
 took is no part of it, so the same event after the same entry is one entry, whenever it happened.
 A name therefore stands for the whole log from its root to that entry. `elapsed_ms` is how long
-the event took to happen as the driver saw it — an operation's time, or a mark's — and a run's
+the event took to happen as the driver saw it — an operation's time, or a mark's — except that a
+response takes the time its draw took when it was made, which the model cache keeps with it
+(§6): a sample costs the same time whether the model answered it now or the cache did. A run's
 time at an entry is the sum along its log. A reader refuses an entry whose content does not hash
 to its name. The format has no version: a data directory is read by the Alaya that wrote it.
 
@@ -118,7 +120,7 @@ continuations are draws 0, 1, 2, … of one sequence, which the model cache keep
 takes draw `n`, `n` the continuations of the entry that are responses; a refusal of the request
 as too long, the one failure of a sample a log holds, took no draw. So
 running a point again is a new draw, and a run that crashed after its model answered takes the
-response the cache kept.
+response the cache kept, with the time it took.
 
 **People.** A person appends at any entry: `tell` a `said` notice, `commit` a `changed` notice with
 the snapshot of a directory and the lines of what changed, `reply` a `replied` notice — refused
@@ -335,16 +337,19 @@ project with Mathlib — 7.2 GB in 121,433 files, an Apple M5 Pro's internal vol
 ```json
 {
   "key": "<compress {model: <identity>, structured_output: <mode>, request: <Request.toJson>}>",
-  "responses": [
-    {"content": …, "tool_calls": [call…], "reasoning": …, "reasoning_items": […], "finish_reason": …, "usage": {…}},
+  "draws": [
+    {"response": {"content": …, "tool_calls": [call…], "reasoning": …, "reasoning_items": […], "finish_reason": …, "usage": {…}},
+     "elapsed_ms": 7600},
     …
   ]
 }
 ```
 
 A response is stored as a `sample`'s answer stores it (`Alaya.Chat.Stored`), so a response reads
-the same in the cache and in the log. `responses[i]` is draw `i` of that request under that model
-identity. The stored key is checked against the file name on load, and a corrupt entry reads as
+the same in the cache and in the log. `draws[i]` is draw `i` of that request under that model
+identity, and its `elapsed_ms` how long the model took to give it, retries included: what the
+entry of a sample that takes the draw has as its time. It is beside the response, not in it,
+because a log keeps an event's time outside the event. The stored key is checked against the file name on load, and a corrupt entry reads as
 empty and is replaced on the next successful sample. The key contains the full request, so
 anything that changes what the model is sent — the view, the tool list, the model identity
 including options such as reasoning echo — changes the key. The directory is safe to keep
@@ -359,7 +364,7 @@ between runs: an entry is only ever appended to.
 - Every log the driver writes is a trace of its run's program: replay agrees with it at every
   prefix. A log that is not is refused, never driven on.
 - A sample from an entry with `n` sampled continuations is draw `n` of its request; a refusal is
-  no draw.
+  no draw. A response's entry has the time of its draw, in every log that holds the draw.
 - A reply is appended only where its question waits, in the form it asks for; a stop, a message
   and a change only while the agent runs; a grader only once the agent is over, where none is
   assigned yet, and only one that can be read.

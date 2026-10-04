@@ -82,7 +82,7 @@ external : String → String → Option Snapshot → Nat → Program Agent Exter
 | --- | --- | --- |
 | `sample` | a response of the run's model to a request | the response, or, when the provider refuses the request as too long for the model's context, its words as an error; no other failure of a provider is an answer |
 | `exec` | a command in the workspace, at the version the log has reached, with `config`'s timeout and environment | its output, the version it left, and with `config.outputs` the file a later command finds the whole output in |
-| `time` | the run's time along its log | the time, and the invocation's budget |
+| `time` | the run's time along its log, a response counting for the time its draw took | the time, and the invocation's budget |
 | `external` | a program in a fresh container of `image`, with no network, on a checkout of the workspace, `input?` at `/grader` | how it ended, its stdout and stderr, and the checkout as it left it; the run's workspace stays where it is |
 
 The log keeps an operation by its **key** (`Op.key`): all of it, except that a sample is kept by

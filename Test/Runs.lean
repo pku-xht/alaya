@@ -248,6 +248,42 @@ def suite : Suite := Testing.suite "runs" #[
       check (stop matches .over (.returned _) _) "the run finishes on what the cache kept"
       assertEqual "the same events" (describe (← logAt second secondEnd)) (describe (← logAt first firstEnd)),
 
+  test "a response costs the time its draw took, in every log that holds it" do
+    withMini {} fun run => do
+      -- A model that takes a while over each response, behind a cache on disk.
+      let inner ← scriptedModel script
+      let slow : Model := { inner with sample := fun request => do
+        let stream ← inner.sample request
+        pure (Model.Stream.ofNext do
+          Result.fromIO Error.cache (IO.sleep 120)
+          stream.next) }
+      let directory := (← scratch) / s!"cache-{← IO.monoNanosNow}"
+      let sampleTimes (rt : Driver.Runtime) (tip : Hash) : TestM (Array Nat) := do
+        let entries ← assertOk <| rt.store.entries (← assertOk rt.store.forest) tip
+        pure <| entries.filterMap fun entry => match entry.event with
+          | .answered _ (.sample _) (.ok _) => some entry.elapsedMs
+          | _ => none
+      let (first, firstEnd, _) ← drive run (echoing) (← assertOk <| Cache.persistent slow { directory })
+      let times ← sampleTimes first firstEnd
+      check (!times.isEmpty && times.all (· ≥ 120)) s!"each sample took the model's time: {times}"
+      -- The log made again from the cache, by a model that has no response to give: no time
+      -- passes, and every sample costs what its draw took.
+      let (second, secondEnd, stop) ← drive run (echoing)
+        (← assertOk <| Cache.persistent (← scriptedModel #[]) { directory })
+      check (stop matches .over (.returned _) _) "the run finishes on what the cache kept"
+      assertEqual "the times of the draws, not of the reads" (← sampleTimes second secondEnd) times
+      -- The cache keeps a draw's time beside its response; a response as stored holds none.
+      let mut kept := #[]
+      for file in ← directory.readDir do
+        let json ← match Json.parse (← IO.FS.readFile file.path) with
+          | .ok json => pure json
+          | .error problem => fail problem
+        for draw in (json.getObjVal? "draws" >>= Json.getArr?).toOption.getD #[] do
+          kept := kept.push ((draw.getObjVal? "elapsed_ms" >>= Json.getNat?).toOption.getD 0)
+          check ((draw.getObjVal? "response" >>= (·.getObjVal? "elapsed_ms")).toOption.isNone)
+            "the response holds no time"
+      assertEqual "a time a draw" (kept.qsort (· < ·)) (times.qsort (· < ·)),
+
   test "running a point again is a fork: a new draw, the first one kept" do
     withMini {} fun run => do
       let responses := script ++ #[responseWith #[submitCall "s2" "the other"]]

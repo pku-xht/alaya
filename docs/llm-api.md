@@ -170,6 +170,7 @@ structure Response where
   finishReason? : Option String := none
   reasoning? : Option String := none
   reasoningItems : Array Lean.Json := #[]
+  elapsedMs? : Option Nat := none     -- how long its draw took, where the cache measured it
 ```
 
 `fromJson` reads the first choice. `finishReason?` matters to agents: mini-SWE-agent
@@ -423,8 +424,11 @@ let shared ← model.independent
 
 `Cache.persistent config` replays recorded draws from disk and extends the entry on a miss. The
 entry for a key lives at `cache/<hash key>.json` (Lean's generic `hash` of the key string) and
-holds every draw recorded so far. A stream over a request walks the entry from index 0; `nextN n`
-returns cached draws and asks the inner model only for the missing ones, then saves atomically.
+holds every draw recorded so far, each with the time the model took to give it. A stream over a
+request walks the entry from index 0; `nextN n` returns cached draws and asks the inner model
+only for the missing ones, timing the call, then saves atomically. Every response the cache gives
+carries its draw's time in `elapsedMs?`, the same on a miss and on every later hit, so what a
+response cost does not depend on when it is read.
 In `readOnly` mode a miss is an error, which is how a replay proves it never called a provider.
 Concurrent streams in one process serialize extensions of the same entry; a cache directory must
 not be written by two processes.

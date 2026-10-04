@@ -149,7 +149,9 @@ def eventJson : Event Agent → Json
   | .opened _ call =>
     .mkObj [("k", "open"), ("routine", call.name), ("arguments", call.arguments),
       ("summary", Render.argumentsSummary call.arguments)]
-  | .returned _ value => .mkObj [("k", "return"), ("value", value), ("summary", Render.valueSummary value)]
+  | .returned _ value =>
+    .mkObj [("k", "return"), ("value", value), ("summary", Render.valueSummary value),
+      ("kind", orNull (Render.valueKind? value) (Json.str ·.name))]
   | .failed _ error => .mkObj [("k", "fail"), ("error", error)]
   | .stopped reason => .mkObj [("k", "stop"), ("text", reason)]
   | .commented _ text => .mkObj [("k", "comment"), ("text", text)]

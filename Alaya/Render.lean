@@ -14,8 +14,17 @@ def flatten (s : String) (limit : Nat := 80) : String :=
   let flat := (s.replace "\n" " ").replace "\r" " "
   if flat.length > limit then (flat.take (limit - 3)).toString ++ "..." else flat
 
-/-- Arguments as one string: the value of the one string field, or of a string `command` field
-beside others — the shapes a command tool takes — otherwise the compact JSON. -/
+/-- The fields of an object in a line, `name: value, …`: a text as it is, anything else as
+compact JSON. -/
+private def fieldsLine (value : Json) : String :=
+  match value with
+  | .obj fields =>
+    ", ".intercalate <| (fields.foldl (fun (acc : Array String) name field =>
+      acc.push s!"{name}: {match field with | .str text => text | other => other.compress}") #[]).toList
+  | other => other.compress
+
+/-- Arguments as one string: the value of the one string field, or of a string `command` or
+`question` field beside others — what a call is about — otherwise the fields in a line. -/
 def argumentsSummary (arguments : Json) : String :=
   match arguments with
   | .str value => value
@@ -26,35 +35,89 @@ def argumentsSummary (arguments : Json) : String :=
       match arguments.getObjVal? "command", arguments.getObjVal? "question" with
       | .ok (.str command), _ => command
       | _, .ok (.str question) => question
-      | _, _ => arguments.compress
+      | _, _ => fieldsLine arguments
   | other => other.compress
 
 /-- A model's tool call, `name  arguments`, on one line. -/
 def callSummary (call : Chat.ToolCall) : String :=
   call.name ++ " " ++ flatten (call.invalidArguments?.getD (argumentsSummary call.arguments)) 60
 
-/-- A value a call gave, on one line: a verdict by its status and score, an agent's outcome by
-its status and submission, a command's result by its status and first line, anything else as
-compact JSON. -/
-partial def valueSummary (value : Json) : String :=
+/-- What a value is, when it has the shape one of Alaya's own writes: a grader's verdict
+(`verdictJson`), a command's result (`Tools.Bash.result`), an agent's outcome
+(`MiniSwe.outcome`). Any routine may return any value, so a value is of a kind only when it has
+every field of the kind, each of its type, and no other; anything else is of no kind, and is
+shown as what it holds. -/
+inductive ValueKind where
+  | verdict
+  | command
+  | outcome
+  deriving BEq, Repr
+
+def ValueKind.name : ValueKind → String
+  | .verdict => "verdict"
+  | .command => "command"
+  | .outcome => "outcome"
+
+private def isText : Json → Bool
+  | .str _ => true
+  | _ => false
+
+private def isNumber : Json → Bool
+  | .num _ => true
+  | _ => false
+
+private def isArray : Json → Bool
+  | .arr _ => true
+  | _ => false
+
+private def orNull (fits : Json → Bool) : Json → Bool
+  | .null => true
+  | other => fits other
+
+/-- Whether `value` is an object that has every field of `required`, each as its test says, and
+beside them only fields of `optional`. -/
+private def shaped (value : Json) (required : List (String × (Json → Bool)))
+    (optional : List String := []) : Bool :=
   match value with
-  | .str s => flatten s
-  | .arr values => ", ".intercalate (values.map valueSummary).toList
-  | .obj _ =>
-    let field (name : String) := value.getObjVal? name |>.toOption
-    match field "status", field "passed", field "total", field "submission", field "output" with
-    | some (.str status), some passed, some total, _, _ => s!"{status} {passed.compress}/{total.compress}"
-    | some (.str status), _, _, some (.str submission), _ =>
-      if submission.isEmpty then status else s!"{status}: {flatten submission 60}"
-    | some (.str status), _, _, _, _ => status
-    | _, _, _, _, some (.str output) =>
-      let status := match field "exit_code" with
-        | some (.num code) => s!"exit {code}"
-        | _ => "no status"
-      let first := (output.splitOn "\n").find? (!·.trimAscii.isEmpty) |>.getD ""
-      s!"{status}: {flatten first 60}"
-    | _, _, _, _, _ => flatten value.compress
-  | _ => flatten value.compress
+  | .obj fields =>
+    required.all (fun (name, fits) => (value.getObjVal? name).toOption.any fits) &&
+    fields.foldl (fun known name _ => known && (required.any (·.1 == name) || optional.contains name)) true
+  | _ => false
+
+def valueKind? (value : Json) : Option ValueKind :=
+  if shaped value [("status", isText), ("passed", isNumber), ("total", isNumber), ("checks", isArray)]
+      ["reason", "exit_code", "elapsed_ms"] then some .verdict
+  else if shaped value [("output", isText), ("exit_code", orNull isNumber), ("error", orNull isText),
+      ("file", orNull isText)] then some .command
+  else if shaped value [("status", isText), ("submission", isText)] ["reason"] then some .outcome
+  else none
+
+/-- A value a call gave, on one line: a verdict by its status and score, an agent's outcome by
+its status and submission, a command's result by how it ended and its first line; a value of no
+such kind as what it holds — a text, the fields of an object, the elements of a list. -/
+partial def valueSummary (value : Json) : String :=
+  let field (name : String) := value.getObjVal? name |>.toOption
+  let text (name : String) := (field name >>= (·.getStr?.toOption)).getD ""
+  match valueKind? value, value with
+  | some .verdict, _ =>
+    s!"{text "status"} {((field "passed").getD .null).compress}/{((field "total").getD .null).compress}"
+  | some .outcome, _ =>
+    if (text "submission").isEmpty then text "status" else s!"{text "status"}: {flatten (text "submission") 60}"
+  | some .command, _ =>
+    let status := match field "exit_code", field "error" with
+      | some (.num code), _ => s!"exit {code}"
+      | _, some (.str error) => flatten error 40
+      | _, _ => "no status"
+    let first := ((text "output").splitOn "\n").find? (!·.trimAscii.isEmpty) |>.getD ""
+    s!"{status}: {flatten first 60}"
+  | none, .str s => flatten s
+  | none, .arr values => ", ".intercalate (values.map valueSummary).toList
+  | none, .obj _ => flatten (fieldsLine value)
+  | none, other => flatten other.compress
+
+/-- `label rest`, or `label` alone when there is nothing to add. -/
+private def labelled (label rest : String) : String :=
+  if rest.isEmpty then label else s!"{label} {rest}"
 
 private def count (n : Nat) : String :=
   if n < 1000 then toString n
@@ -108,8 +171,10 @@ def eventSummary : Event Agent → String
       let name (field : String) := (call.arguments.getObjVal? field >>= (·.getObjVal? "name") >>=
         Json.getStr?).toOption.getD "?"
       s!"open agent: {name "agent"}, {name "model"}"
-    else s!"open {call.name} {(flatten (argumentsSummary call.arguments) 60).quote}"
-  | .returned _ value => s!"return {valueSummary value}"
+    else
+      let arguments := argumentsSummary call.arguments
+      labelled s!"open {call.name}" (if arguments.isEmpty then "" else (flatten arguments 60).quote)
+  | .returned _ value => labelled "return" (valueSummary value)
   | .failed _ error => s!"fail: {flatten error}"
   | .stopped reason => s!"stopped: {flatten reason}"
   | .commented _ text => s!"# {flatten text}"

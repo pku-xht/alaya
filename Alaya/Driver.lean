@@ -191,13 +191,17 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
       else if limits.budgetMs?.any (spent + (now - stamp) ≥ ·) then some "the time budget is spent"
       else if sampling && limits.samples?.any (samples ≥ ·) then some s!"{samples} response(s) sampled"
       else none
-    let append (event : Event Agent) (checkout : Checkout) (samples : Nat) : Result (Hash × Stop) := do
+    -- An entry's time is how long its event took the driver, except for a response whose own
+    -- time is known (`took?`): a draw costs what it took when it was made, cached or not.
+    let appendTook (took? : Option Nat) (event : Event Agent) (checkout : Checkout) (samples : Nat) :
+        Result (Hash × Stop) := do
       let now ← nowMs
-      let entry : Entry := { parent? := some tip, event, elapsedMs := now - stamp }
+      let entry : Entry := { parent? := some tip, event, elapsedMs := took?.getD (now - stamp) }
       let (hash, forest) ← rt.store.put forest entry
       onEntry hash entry
       loop forest hash (log.push event) (replayer.feed event) (spent + entry.elapsedMs) now samples
         checkout
+    let append := appendTook none
     match replayer.next with
     -- The run has ended: with its verdict, or, when its grading failed, an error.
     | .done value => pure (tip, .over ((agentEnd? log).getD (.returned .null)) (some value))
@@ -234,8 +238,9 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
         for child in forest.childrenOf tip do
           if sampled (← rt.store.get forest child).event then draw := draw + 1
         let answer ← modelAnswer rt draw request
-        append (.answered call.frame (.sample (Model.requestDigest request))
-          (answer.map (.response ·))) checkout (samples + 1)
+        appendTook (answer.toOption.bind (·.elapsedMs?))
+          (.answered call.frame (.sample (Model.requestDigest request)) (answer.map (.response ·)))
+          checkout (samples + 1)
       | .exec command config =>
         let mut checkout := checkout
         if checkout.version? != some version then

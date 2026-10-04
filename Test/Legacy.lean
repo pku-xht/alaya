@@ -113,6 +113,8 @@ private def cacheAndBatchTests : IO Unit := do
   let secondStream ← get <| persistent.sample request
   let second ← get secondStream.next
   expectEqual "persistent replay" first.content? second.content?
+  expectEqual "a draw's time is measured" first.elapsedMs?.isSome true
+  expectEqual "and replayed with it" second.elapsedMs? first.elapsedMs?
   expectEqual "persistent samples once" (← samples) 4
 
 private def retryTests : IO Unit := do

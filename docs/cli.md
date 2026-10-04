@@ -218,7 +218,8 @@ with **no network** unless `--network` names one.
 
 **Limits.** `--samples N` (default 0, no limit) pauses before the agent samples its `N+1`th
 response, or reads its inbox after the `N`th; `--time-budget SECONDS` (default 0, no limit)
-pauses before anything the agent does once the run's time, summed along its log, is spent.
+pauses before anything the agent does once the run's time, summed along its log, is spent; a
+response counts for the time its draw took, also when the cache gives it.
 Neither is recorded
 except where the agent times the run (`time_budget` reports the budget). A paused run is driven
 on by a later `run` from its last entry — with a larger budget, or none — and a person may append
