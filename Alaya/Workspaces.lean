@@ -2,12 +2,12 @@ import Alaya.Hash
 import Alaya.Error
 
 /-!
-Where a trajectory keeps the directories its states refer to.
+Where the versions of a run's workspace are kept.
 
-A state names its workspace by an identifier and never looks inside it: the trajectory asks to
-snapshot a directory, to write a snapshot back out, to say what changed between two snapshots,
-and to read one file of one. `Workspaces` is that contract, and `Workspaces.Restic` keeps it
-with a restic repository. See `docs/trajectory-schema.md` §5.
+A log names a version of the workspace by an identifier and never looks inside it: the driver
+and the commands of a person ask to snapshot a directory, to write a snapshot back out, to say
+what changed between two snapshots, and to read one file of one. `Workspaces` is that contract,
+and `Workspaces.Restic` keeps it with a restic repository. See `docs/log-schema.md` §5.
 -/
 
 namespace Alaya

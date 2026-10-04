@@ -1,0 +1,139 @@
+0  -  arrived: changed → w0
+1  [0]  opened: agent "system: "You are a coding agent.", agent: tools [bash, time_budget, commit, ask_user], retries 2, model: a-model, max tokens 4096"
+2  -  arrived: said the task
+3  [0]  heard [2]
+4  [0]  answered: sample after "the task"
+5  [0, 0]  opened: ask_user "Which target?"
+6  -  arrived: replied to [0, 0]: the default one
+7  [0, 0]  heard [6]
+8  [0, 0]  returned: the default one
+9  [0]  heard []
+10  [0]  answered: sample after "the default one"
+11  [0, 1]  opened: bash "make"
+12  [0, 1]  answered: exec make → w1
+13  [0, 1]  returned: output of make
+14  [0]  heard []
+15  [0]  answered: sample after "output of make"
+16  [0, 2]  opened: commit "fix"
+17  [0, 2, 0]  opened: delegate "run the tests"
+18  [0, 2, 0]  answered: sample after "run the tests"
+19  [0, 2, 0, 0]  opened: time_budget ""
+20  [0, 2, 0, 0]  answered: time
+21  [0, 2, 0, 0]  returned: 3188 s left
+22  -  arrived: changed → w2
+23  [0, 2, 0, 1]  opened: bash "pytest"
+24  [0, 2, 0, 1]  answered: exec pytest → w3
+25  [0, 2, 0, 1]  returned: output of pytest
+26  [0, 2, 0]  answered: sample after "output of pytest"
+27  [0, 2, 0]  returned: 48 tests pass
+28  [0, 2, 1]  opened: bash "git add"
+29  [0, 2, 1]  answered: exec git add → w4
+30  [0, 2, 1]  returned: output of git add
+31  [0, 2, 2]  opened: bash "git commit -m fix"
+32  [0, 2, 2]  answered: exec git commit -m fix → w5
+33  [0, 2, 2]  returned: output of git commit -m fix
+34  [0, 2]  returned: 48 tests pass
+35  [0]  heard [22]
+36  [0]  answered: sample after "The workspace was changed: a person edited README"
+37  [0, 3]  opened: bash "git diff"
+38  [0, 3]  answered: exec git diff → w5
+39  [0, 3]  returned: output of git diff
+40  [0]  heard []
+41  [0]  answered: sample after "output of git diff"
+42  [0]  returned: done
+43  [1]  opened: hidden_tests ""
+44  [1]  answered: external pytest /grader, in grader@sha256:9f2c → exit 0, w5, graded
+45  [1]  returned: pass 4/4
+46  []  returned: pass 4/4
+done: pass 4/4
+workspace w5
+replay agrees with the run wherever the driver asked: true
+the states of the run, where the workspace is at a new version, forked and stopped:
+  at 1, workspace w0: done: fail 0/4, in 6 more events
+  at 13, workspace w1: done: fail 1/4, in 5 more events
+  at 23, workspace w2: done: fail 1/4, in 5 more events
+  at 25, workspace w3: done: fail 1/4, in 5 more events
+  at 30, workspace w4: done: fail 1/4, in 5 more events
+  at 33, workspace w5: done: pass 4/4, in 5 more events
+the fork stopped at 24:
+  23  [0, 2, 0, 1]  opened: bash "pytest"
+  24  -  stopped: to grade this state
+  25  [1]  opened: hidden_tests ""
+  26  [1]  answered: external pytest /grader, in grader@sha256:9f2c → exit 1, w2, graded
+  27  [1]  returned: fail 1/4
+  28  []  returned: fail 1/4
+the run itself is as it was: true
+the agent cannot go on after a stop: mismatch at 25
+a stop once the agent is over: mismatch at 44
+a reply when no question waits: false
+a reply of another form than asked: false
+that the person cannot answer: true
+a reply of another form, put in the log: wait: [0, 0] reads the inbox once something arrives
+while the person has not replied: wait: [0, 0] reads the inbox once something arrives
+  and the log ends with: [0, 0]  opened: ask_user "Which target?"
+resumed to the same log: true
+with another notice while a question waits: wait: [0, 0] reads the inbox once something arrives
+  and the log ends with: -  arrived: changed → w1
+  6  -  arrived: changed → w1
+  7  -  arrived: replied to [0, 0]: the default one
+  8  [0, 0]  heard [7]
+  9  [0, 0]  returned: the default one
+  10  [0]  heard [6]
+with a commit that fails the first time:
+  30  [0, 2, 2]  opened: bash "git commit -m fix"
+  31  [0, 2, 2]  answered: exec git commit -m fix → w4
+  32  [0, 2, 2]  failed: exit 1: nothing to commit
+  33  [0, 2]  failed: exit 1: nothing to commit
+  34  [0]  heard []
+  35  [0]  answered: sample after "error: exit 1: nothing to commit"
+  36  [0, 3]  opened: commit "fix"
+  and the run ends, after 61 events: done: pass 4/4
+with a model that fails to answer once:
+  17  [0, 2, 0]  opened: delegate "run the tests"
+  18  [0, 2, 0]  answered: sample after "run the tests": failed: overloaded
+  19  [0, 2, 0]  answered: sample after "run the tests"
+  and the run ends, after 48 events: done: pass 4/4
+with a model that keeps failing a sub-agent:
+  17  [0, 2, 0]  opened: delegate "run the tests"
+  18  [0, 2, 0]  answered: sample after "run the tests": failed: overloaded
+  19  [0, 2, 0]  answered: sample after "run the tests": failed: overloaded
+  20  [0, 2, 0]  answered: sample after "run the tests": failed: overloaded
+  21  [0, 2, 0]  failed: overloaded
+  22  -  arrived: changed → w2
+  23  [0, 2]  failed: overloaded
+  24  [0]  heard [22]
+  25  [0]  answered: sample after "The workspace was changed: a person edited README"
+  and the run ends, after 36 events: done: fail 1/4
+with a tool that the run does not have:
+  10  [0]  answered: sample after "the default one"
+  11  [0, 1]  opened: bash "make"
+  12  [0, 1]  failed: no tool named bash
+  13  [0]  heard []
+  14  [0]  answered: sample after "error: no tool named bash"
+with a model that asks for a tool it was not offered:
+  4  [0]  answered: sample after "the task"
+  5  [0]  heard []
+  6  [0]  answered: sample after "error: hidden_tests is not a tool of this conversation"
+with an agent that fails:
+  3  [0]  failed: no model
+  4  [1]  opened: hidden_tests ""
+  5  [1]  answered: external pytest /grader, in grader@sha256:9f2c → exit 1, w0, graded
+  6  [1]  returned: fail 0/4
+  7  []  returned: fail 0/4
+  done: fail 0/4
+with graders that fail, the run ends: failed: no grader
+with no workspace yet: wait: there is no workspace to start on, after 0 events
+with no task yet: wait: [0] reads the inbox once something arrives, after 2 events
+resumed to the same log: true
+after a crash at 24: ask [0, 2, 0, 1] exec pytest
+resumed to the same log: true
+an answer removed: mismatch at 18
+  where the program would ask [0, 2, 0] sample after "run the tests"
+an answer left over: mismatch at 47
+an opening removed: mismatch at 6
+a reply removed: mismatch at 6
+a return removed: mismatch at 8
+a read not marked: mismatch at 35
+a log with no root: mismatch at 0
+a notice put in before a read: mismatch at 36
+a loop that reads nothing: unguarded loop in [0]

@@ -1,444 +1,185 @@
 # Agent API
 
-`Alaya.Agent` fixes the minimal assumptions about an agent that trajectory management
-(`docs/trajectory-schema.md`) relies on. How the agent, the trajectory and the driver fit
-together, with every data structure they share, is `docs/architecture.md`.
+An agent of Alaya is a **program** over the signature `Agent` (`Alaya.Program`, `Alaya.Agent`):
+a tree of the operations it asks the world for, each continued with its answer. It carries out
+nothing. The driver replays it against the log of its run to find what it asks for next, carries
+that out, and appends the answer (`docs/architecture.md`). What follows from this:
 
-- the agent's history is a **log** of events: what the world placed in it unasked — messages,
-  workspaces — and the world's answer to each thing the agent asked for — model responses,
-  command outputs, timings of the run, a person's replies;
-- what the agent asks for next is a pure function of the log alone, the agent's **next**, and
-  it is an **effect** or the run's **outcome**. An effect is a description of one — sample this
-  request, run this command in the workspace, time the run, ask a person — never the effect
-  carried out;
-- each effect has a type of **answer**, and the driver's handler gives it one: the driver
-  records the answer as one event, with what identifies the effect, so the log says what the
-  agent asked for as well as what came back.
+- **Every decision can be recomputed.** What an agent asks at any point is replay of the log up
+  to there; nothing it decides depends on what the log does not hold — not the wall clock, not
+  the invocation that drove it.
+- **The structure of a run is in its log.** Every tool runs in a frame of its own, bracketed by
+  its opening and its end, so a reader sees which call each event happened in, sub-agents and
+  tools that call tools included, without the program.
+- **Samples are draws.** A model's response is a draw of its request, which the model cache
+  keeps, so running a point again is a new draw, and a crash takes the draw the cache kept.
+- **The workspace is in the log.** Every command's answer names the version of the workspace it
+  left, so any point of a run can be checked out, compared, graded, or gone on from.
 
-An agent therefore carries out no effect: there is nothing in it to call but pure
-functions, and everything impure is done by the one loop that handles its effects, the
-driver's (`Driver.resume`), and recorded there. An agent is a value of the record `Agent`;
-`Alaya.Agent.MiniSwe` (`docs/miniswe.md`) is one.
-
-What follows from this:
-
-- **Every decision can be recomputed.** The effect at log position k is `next (log.take k)`,
-  and the event at k says what it answered. Nothing an agent decides depends on what the log
-  does not hold — not the wall clock, not the invocation that resumed it.
-- **Samples can be replayed.** A sample is a draw of a request, which the model cache keys, so a
-  fork is a new draw of the same request and a replay is the same draw again.
-- **The workspace is in the log.** Every command's answer names the snapshot of the workspace
-  after it, so where the files are at any point is read off the log, and any state of a run can
-  be checked out, compared, or continued from.
-
-## 1. The log
-
-The log is the record of a run: everything that was put in front of the agent, everything it
-asked for, and every answer, in order and unchanged. It is flat and append-only — each state of
-a trajectory appends a slice of it, and a position never changes on a branch — and its events
-say what they refer to: an answer names the call it answers, and a response what it was for.
+## 1. Programs
 
 ```lean
-structure CallRef where
-  response : Nat   -- the log position of the response that made the call
-  index : Nat      -- which of its calls
+inductive Program (σ : Signature) : Type → Type 1 where
+  | pure | fail | perform | inbox | call | iter          -- docs/architecture.md §2
 
-inductive Event where
-  | told (message : Chat.Message)               -- the agent was told: a prompt, a person's note, placed as is
-  | placed (snapshot : Snapshot)                -- a workspace placed by the world: the project, a person's edit
-  | sampled (request : Hash) (purpose : Purpose) (response : Chat.Response)
-                                                -- answers sample: the request's digest, what it was for, the turn
-  | executed (call : CallRef) (command : String) (config : Executor.Config)
-      (output : Output) (snapshot : Snapshot)  -- answers exec: which call, what ran, how, what it printed, the snapshot it left
-  | recorded (call : CallRef) (content : Json)     -- answers record, or ask: a call's result without the workspace
-  | timed (runTimeMs : Nat) (budgetMs? : Option Nat)  -- answers time: how long the run has taken, and the invocation's time budget
+instance : Monad (Program σ)
+instance : MonadExcept String (Program σ)               -- throw, try … catch
 
-abbrev Log := Array Event
+perform : (op : σ.Op) → Program σ (σ.Answer op)         -- fails where the world could not answer
+inbox   : Program σ (List Notice)                       -- every notice not yet read and addressed to no one
+await   : (Frame → Notice → Bool) → Program σ (List Notice)   -- wait for the notices it is for
+call    : (name : String) → Json → Program σ Json       -- a tool, by name; its failure is ours
+iter    : (S → Program σ (S ⊕ α)) → S → Program σ α     -- a loop whose state is data
+retry   : Nat → Program σ α → Program σ α               -- try again while it fails
 ```
 
-`Snapshot` is `Hash` under the name that says what it identifies: a snapshot of a workspace
-(`Alaya.Workspaces`), where `request : Hash` is a digest of something else. `Event.isAnswer` says which sort an event is: an answer to an effect, or what the world placed
-unasked. An answer names its call by **position**, not by recency and not by its id. A sample taken between
-a call and its answer — a summary, a check — therefore cannot hide the call, and a provider that
-reuses an id for a later call cannot make one answer count for both. A reference holds nothing
-the log already says: the call's id, like its name and arguments, is read off the log
-(`Index.call?`, `Index.callId?`). A response's **purpose** says what was sampled:
+A program is written in `do` notation like any monadic code. Three rules make it one the driver
+can replay:
+
+- **It is a function of its answers.** What it asks next is decided from what came back before:
+  a request, a command, a question are computed from earlier answers and notices, and from the
+  run's configuration, which is in the log.
+- **Every round of a loop reads an event.** A loop that goes round without asking for an
+  operation, reading the inbox, or calling a tool is `unguarded`, a broken run. MiniSwe's loop
+  samples every round.
+- **What comes from outside comes through the inbox.** A person's messages and changes are
+  notices; a program sees them by reading its inbox, and the read is marked in the log with the
+  positions of what it took. A read that waits — `await` — is how a program stops for a person.
+
+`try`/`catch` catch a failure inside a frame and leave no mark. A call catches its tool's failure
+and marks it (`failed`), so the caller sees the error and the log shows which call failed.
+
+## 2. Alaya's operations
 
 ```lean
-inductive Purpose where
-  | turn                    -- a model turn, whose tool calls the agent runs
-  | other (name : String)   -- any other sample, by the agent's name for it: a summary, a check
+inductive Op where
+  | sample (request : Chat.Request)                            -- answered by Chat.Response
+  | exec (command : String) (config : Executor.Config)         -- answered by Execution
+  | time                                                       -- answered by Timing
+  | external (command image : String) (input? : Option Snapshot) (timeoutSeconds : Nat)
+                                                               -- answered by External
+
+structure Execution where output : Output ; workspace : Snapshot ; file? : Option String
+structure Timing where spentMs : Nat ; budgetMs? : Option Nat
+structure External where
+  exitCode? : Option Int ; stdout : String ; stderr : String
+  checkout : Snapshot ; elapsedMs : Nat ; error? : Option String
+
+sample   : Chat.Request → Program Agent Chat.Response
+exec     : String → Executor.Config → Program Agent Execution
+time     : Program Agent Timing
+external : String → String → Option Snapshot → Nat → Program Agent External
 ```
 
-Each event is named for what happened. A **told** event is text someone other than the model
-or a tool placed in the conversation: the prompts that open a run, a notice from a person. A **placed** event is a snapshot the world placed:
-the project of a root, a directory a person edited. A **sampled** event is a model's answer as it
-came back, with the digest of the request it answered (`Model.requestDigest`), which says what
-was asked without storing it, and its purpose. An **executed** event is a command's run: the
-call it answers, the script, its timeout and
-environment, the `Output`, and the snapshot it left. After a `placed` or an `executed`, the workspace is at the event's `snapshot`. A **recorded** event is a tool call's result
-that no command produced: one the agent computed itself, or a person's answer to a question. A **timed** event is a reading of
-how long the run has taken, and of the time budget of the invocation that read it.
+| Operation | What it is | The answer |
+| --- | --- | --- |
+| `sample` | a response of the run's model to a request | the response, or, when the provider refuses the request as too long for the model's context, its words as an error; no other failure of a provider is an answer |
+| `exec` | a command in the workspace, at the version the log has reached, with `config`'s timeout and environment | its output, the version it left, and with `config.outputs` the file a later command finds the whole output in |
+| `time` | the run's time along its log | the time, and the invocation's budget |
+| `external` | a program in a fresh container of `image`, with no network, on a checkout of the workspace, `input?` at `/grader` | how it ended, its stdout and stderr, and the checkout as it left it; the run's workspace stays where it is |
 
-*A short run as a log.*
+The log keeps an operation by its **key** (`Op.key`): all of it, except that a sample is kept by
+the digest of its request (`Model.requestDigest`), so the log does not hold the dialogue again
+with every response. The request itself is what replay asks for at that point, which is how
+`alaya show --request` and the HTML report show it.
 
-```mermaid
-flowchart LR
-  E1["1 told<br/>system: You can run bash."]
-  E2["2 told<br/>user: List the files."]
-  E0["3 placed<br/>w0, the project"]
-  E3["4 sampled<br/>Listing. + call c1: bash ls"]
-  E4["5 executed c1<br/>ls → a.txt b.txt, exit 0 · w1"]
-  E5["6 sampled<br/>call c2: submit"]
-  E1 --> E2 --> E0 --> E3 --> E4 --> E5
-```
-
-```lean
-let log : Log := #[
-  .told (.system "You can run bash."),
-  .told (.user "List the files."),
-  .placed w0,
-  .sampled d1 .turn { content? := some "Listing.", toolCalls := #[{ id := "c1", name := "bash", arguments := .mkObj [("command", "ls")] }] },
-  .executed { response := 3, index := 0 } "ls" {} { output := "a.txt\nb.txt\n", exitCode? := some 0 } w1,
-  .sampled d2 .turn { toolCalls := #[{ id := "c2", name := "submit", arguments := .mkObj [("message", "done")] }] }]
-```
-
-### The index
-
-The structure of a log — its turns, each call joined to what answered it, where the workspace
-is — is read off it, not stored beside it: `Log.index` reads a log in one pass into an `Index`,
-which agents and readers query instead of each scanning the log its own way. Being a function
-of the log, it cannot disagree with it.
-
-```lean
-structure Call where
-  ref : CallRef
-  call : Chat.ToolCall
-  answer? : Option Nat       -- the position of the event that answered it
-
-structure Turn where
-  position : Nat             -- the response's
-  response : Chat.Response
-  calls : Array Call
-
-structure Index where
-  turns : Array Turn         -- the responses for Purpose.turn, oldest first
-  responses : Nat            -- how many responses, of any purpose: the model calls made
-  turnOf : Array Nat         -- for each event, the turn it is part of, from 1; 0 before the first
-  workspace? : Option Snapshot   -- the last snapshot placed or left by a command
-  workspaces : Array Snapshot    -- every snapshot named
-  calls : Array Chat.ToolCall  -- every tool call made, of turns and of a person's assistant messages
-
-let index := log.index
-index.turns.size       -- 2
-index.pending          -- #[c2]: the latest turn's calls nothing has answered yet
-index.call? ref        -- a call, with its answer's position, by its reference
-index.callId? ref      -- its id, as the model gave it: some "c1"
-index.workspace?       -- some w1: where the log is
-index.workspaces       -- #[w0, w1]
-```
-
-`Alaya.Agent.Log` keeps the few facts most agents want as functions of the log, each read off
-the index: `responses` (the model calls made), `pending`, `calls`, `workspace?` and
-`workspaces`. `Log.checkAnswers` says what is wrong with a log's answers, if anything: each
-names a call made before it that nothing has answered. The trajectory
-checks it whenever a state is written (`docs/architecture.md` §5.1), so a log that is read is
-one whose index means what it says.
-
-## 2. Effects
-
-What happens next is decided by `next : Log -> Effect ⊕ Outcome`, a pure and total function of
-the log: an effect to carry out, or the outcome the run ends with.
-
-```lean
-inductive Effect where
-  | sample (purpose : Purpose) (request : Chat.Request)      -- draw a response to this request, for this
-  | exec (call : CallRef) (command : String) (config : Executor.Config)
-                                                             -- run the script for the call in the workspace, so
-  | record (call : CallRef) (content : Lean.Json)            -- record a result the agent computed itself
-  | time                                                     -- time the run: how long it has taken, and its budget
-  | ask (call : CallRef) (question : Question)               -- ask a person and wait for a valid answer
-
-structure Outcome where
-  status : String                                            -- "Submitted", "LimitsExceeded", …
-  submission : String := ""
-  reason? : Option String := none                            -- why, in words: a provider's refusal
-```
-
-The sum is the type itself, with no name of its own: `.inl effect` asks for an effect and
-`.inr outcome` ends the run. Each effect has a type of answer, and one event records it:
-
-```lean
-def Effect.Answer : Effect -> Type
-  | .sample .. => Chat.Response
-  | .exec ..   => Output × Snapshot      -- the output, and the snapshot after
-  | .record .. => Unit
-  | .time      => Nat × Option Nat       -- the run's time in ms, and its budget
-  | .ask ..    => Lean.Json              -- a person's reply
-
-Effect.event   : (effect : Effect) -> effect.Answer -> Event          -- how an answer is recorded
-Effect.answer? : (effect : Effect) -> Event -> Option effect.Answer   -- whether an event answers the effect, and with what
-```
-
-These two functions are the only place the pairing of effects and events is written. `event`
-records what identifies the effect beside its answer: a `sampled` records the purpose and the
-request's digest; an `executed`, the call, script and configuration; a
-`recorded`, the call (and, for `record`, the content); a `timed`, the run's time and the
-budget. `answer?` reads the pairing back: a response for the same purpose whose digest is the
-request's, a run of the same script, the same way, for the same call, a result recorded
-for the same call, a reading.
-
-**`sample`** carries the whole request: the messages and the tools, and its purpose. The agent
-builds it, so nothing about what the model is sent is fixed by the loop — a turn of the main
-dialogue, a summary of it, a check of a draft, each with its own messages and tools. Its answer
-is a `sampled` with that purpose, so the index takes only the agent's turns as turns, and a
-summary sampled between a call and its answer leaves the call pending. The invariant: **the response at log position k was sampled from the request of
-`next (log.take k)`**, which the recorded digest lets anyone check.
-
-**`exec`** runs a command in the workspace, where the log is (`log.workspace?`: the latest
-snapshot it names), and says how it runs: its timeout, its environment, and whether it sees the
-branch's earlier outputs (§3). The loop runs the script in the run's container through the
-run's executor, snapshots the directory, and records `executed` with the snapshot after, as the
-answer to the call the command was run for. A command that fails to run is an `Output` that
-says so, not an error, so a run survives a failed command.
-
-A run has one workspace, and it only moves forward: a command cannot name another snapshot. A
-model expects files to change only when it changes them, so an agent that put its commands on
-an earlier snapshot would show the model results that contradict what it did. What is changed
-from outside is said: a person's `commit` places a new workspace together with a notice of what
-changed (`docs/trajectory-schema.md` §3). Trying another way from an earlier point is a fork
-of the trajectory, not a move within one log.
-
-**`record`** is how an agent answers a tool call itself: `next` computes the result from the
-log, and the loop records it as the call's result (`recorded`), with nothing run and no snapshot taken.
-It is for tools that need no workspace — the time left (`docs/minivero.md`), a value the agent
-keeps for itself.
-
-**`time`** is how an agent learns how long its run has taken: the loop records the run's time —
-its recorded steps from the root, and the current one so far — and the time budget the `resume`
-was given, as a `timed` event. It is the run that is timed, not the day: the event holds no
-wall-clock time, so it means the same after a resume as before. Time is an input, so it is in
-the log: a decision taken from it is recomputable, and a `resume` with another budget changes
-nothing that was already decided. MiniVero's `time_budget` tool times the run, then records the
-seconds left from that timing.
-
-**`ask`** is how an agent asks a person something. The trajectory records the question and stops;
-the person's answer arrives later as the result recorded for the asking call, and the log continues
-as if the tool had returned. A question is its text and the form of answer it asks for, and an
-answer is a reply of that form:
-
-```lean
-structure Question where
-  text : String
-  form : Question.Form := .openEnded     -- yesNo | openEnded | singleChoice (options)
-
-inductive Reply where
-  | yes | no                             -- to a yes/no question
-  | choice (number : Nat)                -- a candidate of a choice, numbered from 1
-  | noneOfAbove                          -- none of a choice's candidates: an answer
-  | text (text : String)                 -- to an open question, verbatim
-  | unavailable                          -- the person cannot answer; fits any form
-
-Question.validate   : Question -> Except String Unit         -- what is wrong with a question, where it is made
-Question.accepts    : Question -> Reply -> Bool               -- whether a reply fits the form
-Question.parseReply : Question -> String -> Except String Reply   -- the reply a person's text gives
-Reply.toJson        : Reply -> Json                           -- how it is recorded, and shown to the model
-Question.readReply? : Question -> Json -> Option Reply        -- a recorded value, read as the form says
-```
-
-A question is checked once, where it is made: it says something, and a choice has at least two
-candidates, each saying something, no two alike, and none of them **None of the above**, which
-every choice has already. The answer of `ask` is a `Reply` (`Effect.Answer`), so a recorded
-result that the question's form does not accept answers nothing, and a reply state holding one
-is not written. A reply is recorded as the simplest value that says it — `"yes"`, the
-candidate's number, `"none_of_above"`, the person's text, or `{"status": "unavailable"}` — and
-the form says which reply a recorded value is.
-
-## 3. The agent record
-
-```lean
-structure Agent where
-  config : Lean.Json                     -- its complete configuration: what a root records
-  initialLog : String -> Uname -> Log    -- the opening log of a run for a task, on a machine
-  next : Log -> Effect ⊕ Outcome
-```
-
-That is all an agent is. What the model is sent, which tools it is offered, what runs and how —
-its timeout, its environment — are in the effects `next` gives, so nothing about them is
-fixed outside the agent, and all of it is recorded. The opening log is the agent's too, frozen
-into the root.
-
-**What a reader is shown.** Only what the invariant gives: the request a response was sampled
-from, `next` of the log before it (`Agent.requestAt?`), checked against the digest the response
-records — so a reader shows the request exactly, or, when this build of the agent no longer
-makes it, nothing. `alaya show --request` and the HTML report show, for a state that sampled, the
-request its step was sent, and its size as the provider counted it; a state that sampled nothing
-has no request. `Agent.request?` is `next`'s request, when it samples. `limitContext` measures
-the request it is about to send (`contextTokens`), from the latest turn's recorded `usage` and an
-estimate of what was added since.
-
-**A view is the agent's own.** An agent builds its requests however it likes; MiniSwe builds
-its model turns from a **view**, a pure and total function from the log to the dialogue, whose
-domain is the whole log, not a single event, because "elide observations older than N turns"
-needs position and "stay under a token budget" needs everything. It applies the agent's
-presentation policies: a long tool output is shown truncated; a response with no valid tool call
-is shown as an error message rather than as the response; an old observation may be left out to
-save context.
-
-*An example: MiniSwe's view of an eight-event log.*
-
-```mermaid
-flowchart LR
-  subgraph LOG["Log (the record)"]
-    direction TB
-    L1["Event.told (system prompt)"]
-    L2["Event.told (user: the task)"]
-    L0["Event.placed (the project)"]
-    L3["Event.sampled (assistant text + bash 'cat big.log')"]
-    L4["Event.executed (c1: output 12000 chars, exit code 0) - recorded whole"]
-    L5["Event.sampled (no tool call: a format error)"]
-    L6["Event.told (user: a person's intervention notice)"]
-    L7["Event.sampled (assistant + bash 'pytest')"]
-  end
-
-  subgraph VIEW["view log (the dialogue)"]
-    direction TB
-    V1["system message (passed through)"]
-    V2["user message (passed through)"]
-    V0["(not shown)"]
-    V3["assistant message with the tool call"]
-    V4["tool message: output_head 5000 chars + output_tail 5000 chars + elided_chars 2000 - truncated for the model"]
-    V5["user message with the format-error text - response dropped, error shown instead"]
-    V6["user message (passed through)"]
-    V7["assistant message with the tool call"]
-  end
-
-  L1 --> V1
-  L2 --> V2
-  L0 --> V0
-  L3 --> V3
-  L4 --> V4
-  L5 --> V5
-  L6 --> V6
-  L7 --> V7
-```
-
-**Outputs are files, for a command that asks.** A command whose configuration says `outputs`
-sees the whole output of every earlier command of its branch, read-only at `/alaya/outputs`,
-named by its position in the log and, when it answers a call, the call's id
-(`Agent.outputFile`); one that does not sees an empty directory. The trajectory writes the files from the `executed` events before each command,
-for any agent, and the setting is recorded with the command like its timeout. A view that cuts
-or omits an output can name its file, and the agent reads it with a command (`docs/miniswe.md`
-§9–10).
-
-**Tools.** `Alaya.Agent.Tools` defines each tool as a `Tool` value, with no knowledge of any
-agent:
+## 3. Tools
 
 ```lean
 structure Tool where
-  definition : Chat.ToolDefinition          -- its schema for the model
-  alone : Bool := false                     -- must be the only call of its turn
-  instruction? : Option String := none      -- appended to the prompt
-  read : Chat.ToolCall -> Except String (CallRef -> Log -> Effect ⊕ Outcome)
+  definition : Chat.ToolDefinition                -- its schema for a model
+  alone : Bool := false                           -- must be the only call of its turn
+  instruction? : Option String := none            -- appended to the prompt
+  check : Json → Except String Unit               -- what is wrong with a call's arguments
+  run : Json → Program Agent Json                 -- the program that answers a call
 ```
 
-`read` gives what is wrong with a call's arguments, or how the call is answered: what to ask
-for next, for the call's reference, from the log at the point it is the next call to answer.
+A tool is a program from a call's arguments to its result, under a name. Programs call a tool by
+its name alone, so it always runs in a frame of its own, and a tool may call tools — a sub-agent
+is a tool whose program is a conversation of its own. The tools of a run are its agent's tools
+and `grade`, which no agent offers its model: the run calls it with the grader assigned. The
+agent's call is a tool too, `agent`, called with the run's configuration.
 
-| Tool | A call is answered by |
+| Tool | Program |
 | --- | --- |
-| `bash` | `.inl (.exec call command {})` |
-| `submit` | `.inr { status := "Submitted", submission }` |
-| `ask_user` | `.inl (.ask call question)` |
-| `time_budget` | `.inl .time`, then, once the log's last event is the timing, `.inl (.record call secondsLeft)` |
+| `bash` | `exec` of its `command`, with the agent's executor settings; gives the whole output, its status, and its file |
+| `submit` | not run: an agent that offers it ends with its message |
+| `ask_user` | `await` a reply to its own frame, of the form the question asks for (`docs/ask-user.md`) |
+| `time_budget` | `time`, and the seconds left of the budget, or that there is none |
+| `grade` | `external` of the grader its arguments describe, the one assigned to the run, and the verdict of the TAP it printed |
 
-A tool that needs an answer before it can answer its call asks for it and reads it off the log
-the next time, as `time_budget` does: a tool is decided from the log alone, like the agent. An
-agent holds a list of tools and owns the rest: how a response is parsed, how a malformed call
-is worded, its own prompt text, which a tool only ever appends to (`docs/miniswe.md` §1).
+`Agents.Tools.all` lists the tools an agent's configuration can name. A tool knows nothing of the
+agent that offers it: the agent decides what its model is offered, how a malformed call is
+worded, and how a result is shown.
 
-`Alaya.Agent.Catalog` is how the command line gets an agent: each agent it can name (`mini-swe`,
-`mini-vero`) has its defaults in code and reads a configuration into an `Agent` for the run's
-model spec, whose sizes it may keep within. The root records both, the complete `config` and
-the spec, from which every later command builds the same agent again (`docs/cli.md` §5).
+## 4. An agent
 
-## 4. Combinators
-
-An agent is data and pure functions, so an agent can be made from another. One function makes
-them all: `interpose` rewrites what `next` gives, given the log it was decided from.
+An agent is the program of the `agent` tool, built from its configuration (`Agents.Catalog`):
 
 ```lean
-def Agent.interpose (agent : Agent) (rewrite : Log -> Effect ⊕ Outcome -> Effect ⊕ Outcome) : Agent :=
-  { agent with next := fun log => rewrite log (agent.next log) }
+structure Built where
+  config : Json                                       -- the complete configuration
+  tools : Array Tool                                  -- the tools it offers, which the run has
+  program : Models.Spec → Uname → Program Agent Json  -- for a run of a model on a machine
 
-agent.limitResponses 50       -- .inr LimitsExceeded instead of a 51st sample
-agent.limitContext (some n)   -- .inr ContextExceeded instead of a sample once the request holds n tokens
-agent.runCommandsWith config  -- every exec runs as config says
+structure Definition where
+  name : String
+  make : Json → Except String Built
 ```
 
-`limitResponses` and `limitContext` rewrite only a `sample`, into an outcome; they compose in any
-order, the outermost applied last. `runCommandsWith config` sets how every command the agent
-asks for runs — its timeout and environment — whatever the tool that asked said: how commands
-run is the agent's policy, not a tool's. MiniSwe is its control flow
-with `((base.runCommandsWith executor).limitContext limit).limitResponses stepLimit`, so the step
-limit is checked before the context, as mini checks them.
-
-## 5. The loop
-
-There is one loop that follows an agent, the driver's (`Driver.resume`, `Alaya.Driver`,
-`docs/trajectory-schema.md` §2): ask `next`, have the **handler** answer the effect, push the
-answer's event, and persist each **step** as a state. The handler is the driver's own: it
-carries out one effect and gives its answer, typed by the effect (`Effect.Answer`), or nothing
-when the answer comes later from outside the run, as a person's does to `ask`. It is the only
-code that samples the model, runs commands, or reads the clock; the loop records
-`effect.event answer` and asks again.
+MiniSwe (`docs/miniswe.md`) is the pattern:
 
 ```lean
-structure Limits where             -- what one invocation allows; neither is recorded
-  budgetMs? : Option Nat := none   -- the run's time, summed from the root, after which no step starts
-  steps? : Option Nat := none      -- the steps this invocation may take
+def converse (config : Config) (opening : String → Array Chat.Message) : Program Agent Json := do
+  let notices ← await fun _ notice => notice matches .said _   -- wait for the task
+  iter (round config) { items := (opening task).map .told, … } -- go round until it ends
 
-inductive Stop where               -- why a resume stopped
-  | outcome (outcome : Outcome) | question (question : Question) | outOfTime | outOfSteps
-
-resume : Runtime -> Hash -> Limits -> (onStep : Hash -> Result Unit) -> Result (Hash × Stop)
+def round (config : Config) (history : History) : Program Agent (History ⊕ Json) := do
+  let history ← listen history                                 -- what a person said or changed
+  if limits are reached then return .inr (outcome …)
+  let response ← sample (request config history)               -- the view of the conversation
+  match parseActions response config with
+  | .formatError message => return .inl (history with the format error)
+  | .calls calls => for each call: submit ends the agent; any other is `call name arguments`,
+                    its failure given to the model as its result
 ```
 
-A step samples at most once, and only
-as the first thing it does: it ends before a second sample, so every sampled child of a state is
-a draw of the same request. A step either goes on or stops the run, at an outcome or at a
-question a person has to answer, and records which (`docs/architecture.md` §5.1). `resume` takes
-steps until one stops the run or the invocation reaches a limit; its limits are checked
-between steps and never inside one, since a step stopped between its tool calls would leave
-calls unanswered. A step is the tree's unit; a model turn is the log's, and one model turn can
-be answered over several states (`docs/architecture.md` §5.3). Tests drive an agent through the same loop, with a scripted model
-and directory snapshots in place of restic.
+The state of the loop is the conversation as data — what was told, each turn with its calls'
+results, each malformed response — so the request of every round is a function of it, and limits
+that count turns or measure the context read it too.
 
-*The loop, as `Driver.resume` carries out a step.*
+## 5. A run
 
-```mermaid
-flowchart TD
-  NEXT{"next log (pure)"}
+```lean
+structure RunConfig where
+  agent : Json                       -- the agent's complete configuration
+  model : Json                       -- the model's complete spec
+  environment : Environment          -- the pinned image, the workdir, the machine's uname
 
-  NEXT -->|".inl (sample purpose request)"| S0{"first in the step?"}
-  S0 -->|no| END["the step ends; the run goes on"]
-  S0 -->|yes| S2["handler: a draw of request"]
-  S2 --> PUSH
-
-  NEXT -->|".inl (exec call command config)"| A1["handler: run in the workspace · snapshot"]
-  A1 --> PUSH
-
-  NEXT -->|".inl (record call content)"| O1["handler: nothing to do"]
-  O1 --> PUSH
-
-  NEXT -->|".inl time"| C1["handler: the run's time, the budget"]
-  C1 --> PUSH
-
-  PUSH["log.push (effect.event answer)"] --> NEXT
-
-  NEXT -->|".inl (ask call question)"| SU["handler: no answer yet · the step stops at the question"]
-  NEXT -->|".inr outcome"| DO["the step stops at the outcome"]
-
-  classDef terminal fill:#eee,stroke-dasharray: 5 5
-  class SU,DO,END terminal
+RunConfig.run : RunConfig → Models.Spec → Except String (Run Agent)
+configOf : Log Agent → Result RunConfig                 -- the arguments of the agent's call
+assignment : Grader → Event Agent                       -- the notice that assigns a grader
+agentEnd? : Log Agent → Option AgentEnd                 -- how the agent ended, once it has
 ```
+
+The run calls the agent with the configuration. What follows the agent, `grading`, is three
+steps: it waits for an `assigned` notice, calls `grade` with the grader the notice names, in the
+frame after the agent's, and returns the verdict, which is the result of the run. A grader is
+assigned only once the agent is over, and only where the log has none (`Driver.append`), which
+is what `alaya grade` does after stopping the agent where it still runs; a point is graded again
+on a fork.
+
+Programs live in `Type 1`, since a continuation is a function, so a `Run` is built by pure
+functions and passed to the driver; it is never returned through `IO`.
+
+## 6. Questions and replies
+
+```lean
+questionOf? : Log Agent → Next Agent → Option (Frame × Question)   -- the question a log waits on
+replyTo : Log Agent → Next Agent → Reply → Except String (Event Agent)
+```
+
+A log waits on a question when replay waits in the frame of an `ask_user` call: the question is
+read off the call's opening. A reply is the notice `replied frame reply`, refused when no question
+waits or when it is not of the form the question asks for, so a log never holds a reply that its
+program cannot take. Its wait takes it at the next read, and the tool gives it to the model.

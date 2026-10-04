@@ -1,505 +1,277 @@
-# Architecture: the agent, the trajectory, and the driver
+# Architecture: programs, the log, and the driver
 
 Alaya has three parts, and each holds one responsibility:
 
-- **The agent** decides. It is a pure function from the log of a run to the next thing it asks
-  for, an **effect** — a description of what to do, which it never does itself — or to the
-  **outcome** the run ends with. (`Alaya.Agent`, `docs/agent-api.md`)
-- **The trajectory** remembers. It records a run as a tree of immutable, content-addressed
-  **states**, each holding a slice of the log. (`Alaya.Trajectory`, `docs/trajectory-schema.md`)
-- **The driver** acts for the agent. Its **handler** answers the agent's effects — samples the
-  model, runs commands, reads the clock — and its loop records each answer as an event in a new
-  state. It is the only part that carries out what the agent asks. (`Alaya.Driver`)
+- **Programs** decide. An agent, and every tool it calls, is a **program**: a tree of the
+  operations it asks the world for — sample this request, run this command, read the clock, run
+  this grader — each continued with its answer. A program carries out nothing itself.
+  (`Alaya.Program`, `Alaya.Agent`, `docs/agent-api.md`)
+- **The log** remembers. A run is a flat, append-only list of **events**: what arrived from
+  outside, what the world answered, and marks of what the program did. Logs are kept as a
+  forest of **entries**, each one event and the entry before it, named by the hash of the two.
+  (`Alaya.Store`, `docs/log-schema.md`)
+- **The driver** acts. It replays the program against the log to find what it does next, carries
+  out the operation it asks for, and appends the answer — or appends the mark it makes — an
+  entry at a time. It is the only part that touches the world. (`Alaya.Replay`, `Alaya.Driver`)
 
-Two other things add to a trajectory, and neither is the agent's: a **person**, who creates a
-root and later edits the workspace, tells the agent something, or answers its question
-(`Alaya.Trajectory.Interventions`), and a **grader**, which records a verdict on a state
-(`Alaya.Trajectory.Evaluation`). What a person adds enters the agent's log as events from the
-world; a verdict never does. `Alaya.Trajectory.Render` and `Alaya.Trajectory.Html` only read.
+A person and a grader add to logs too. A person appends **notices** — the task, a message, a
+change to the workspace, a reply to a question — or a **stop**, at any entry; appending where a
+log already goes on is a fork. A **grader** is no part of a run's configuration: once its agent
+is over, a run waits for a person to **assign** it one, a notice, calls it, and ends with its
+verdict. So the verdict is in the log like everything else, and any point of any run is graded,
+by any grader, by stopping a fork there and assigning one. `Alaya.Render` and `Alaya.Html` only read.
+
+The design is the sketch in `functional_agents/` (`programs.pdf` lays it out, with the papers it
+draws on); `Test/Prototype.lean` runs the sketch's own test against Alaya's interpreter and
+checks that it prints the same lines. Alaya's runs differ from the sketch's in one thing, where
+the grader comes from: in the sketch a run is created with its graders; here it waits for one
+to be assigned, so a grader is chosen when a point is graded, never when a run is created.
 
 | Module | Holds | Effects |
 | --- | --- | --- |
-| `Alaya.Agent`, `Alaya.Agent.*` | events, logs, effects and their answers, the index, `Agent`, tools, combinators, MiniSwe | none |
-| `Alaya.Trajectory` | event JSON, `State`, `Kind` and its rules, the store, `Branch`, queries | reads and writes the store |
-| `Alaya.Driver` | `Runtime`, `Limits`, `Stop`, `resume`, `buildModel` | the model, the executor, workspaces, the clock |
-| `Alaya.Trajectory.Interventions` | `createRoot`, `commit`, `tell`, `reply` | snapshots a person's directory |
-| `Alaya.Trajectory.Evaluation` | `evaluate` | runs a grader's container |
-| `Alaya.Trajectory.Render`, `.Html` | `show`, `tree`, `diff`, the HTML report | none beyond reading |
-
-This page defines every data structure the three share, how each is built from the others, and
-how they coordinate. The other pages go deeper into one part each.
+| `Alaya.Program` | `Signature`, `Frame`, `ToolCall`, `Notice`, `Program`, `Run`, `Event`, `Log` | none |
+| `Alaya.Replay` | the interpreter: `Machine`, `Replayer`, `Next`, `next` | none |
+| `Alaya.Agent` | Alaya's signature `Agent`: `Op`, its answers, keys, JSON; `workspace?` | none |
+| `Alaya.Agents.*` | tools, MiniSwe, MiniVero, the catalog | none |
+| `Alaya.Run` | `RunConfig`, the run it builds, `configOf`, questions and replies | none |
+| `Alaya.Store` | `Entry`, `Forest`, the store of entries | reads and writes `DATA/entries` |
+| `Alaya.Driver` | `Runtime`, `Limits`, `Stop`, `drive`, `append` | the model, the executor, workspaces, the clock |
+| `Alaya.Notices` | `create`, `changed`, `remove` | snapshots a person's directory |
+| `Alaya.Walk`, `.Render`, `.Html` | the walk of the forest, text, the report | reads only |
 
 ## 1. Vocabulary
 
 | Term | Meaning | Where |
 | --- | --- | --- |
-| **event** | one thing that happened, recorded verbatim | `Agent.Event` |
-| **log** | the events of a run, in order; flat and append-only | `Agent.Log := Array Event` |
-| **position** | an event's index in the log; it never changes on a branch | `Nat` |
-| **world event** | what the world did unasked: the agent was `told` something, or a workspace was `placed` | |
-| **snapshot** | the identifier of a workspace's files at one moment: a `Hash`, named for what it identifies | `Alaya.Snapshot` |
-| **answer** | an event that answers one of the agent's effects | |
-| **effect** | what the agent asks for: a description, with a type of answer | `Agent.Effect`, `Effect.Answer` |
-| **outcome** | why a run stopped, and what it produced | `Agent.Outcome` |
-| **handler** | what answers an effect inside the driver: the model, the executor, the clock | |
-| **call** | a tool call the model made in a response | `Chat.ToolCall` |
-| **call reference** | a call, named by the position of its response and its index there | `Agent.CallRef` |
-| **purpose** | what a sample was for: `turn`, a model turn, or `other name`, as the agent names it | `Agent.Purpose` |
-| **model turn** | a response for `turn` and its calls, wherever their answers are | `Agent.Turn` |
-| **index** | what a log says — its model turns, calls, workspaces — read off it in one pass | `Agent.Index` |
-| **state** | a node of the trajectory tree: a parent, a slice of the log, a workspace | `Trajectory.State` |
-| **step** | a state the driver writes: answers to the agent's effects, at most one sample, first | `Kind.step` |
-| **branch** | the states from a root to a state: that state's log, a slice at a time | `Trajectory.Branch` |
-| **draw** | one of the sequence of responses a model gives one request, numbered from 0 | the model cache |
+| **operation** | what a program asks the world for, with a type of answer | `Op`, `Op.Answer` |
+| **program** | a tree of operations, failures, reads of the inbox, calls and loops | `Program` |
+| **tool** | a program from a call's arguments to its result, under a name | `Agents.Tool` |
+| **call** | a tool, by name, with its arguments; it runs in a frame of its own | `ToolCall` |
+| **frame** | the path of calls from the run, each its ordinal among its parent's calls | `Frame` |
+| **run** | the tools it has, the agent's call, and what follows the agent | `Run` |
+| **notice** | what arrives from outside: `said`, `changed`, `replied`, `assigned` | `Notice` |
+| **event** | one thing that happened: a notice, an answer, or a mark | `Event` |
+| **log** | the events of a run, in order; flat and append-only | `Log` |
+| **entry** | one event and the entry before it, named by the hash of the two | `Entry` |
+| **forest** | every entry kept, with its parent and children | `Forest` |
+| **branch** | the log from a root to an entry nothing follows | |
+| **replay** | reading a log with the program, to continue it where it stopped | `Replayer` |
+| **next** | what a run does after a log: ask, mark, wait, end, or find the log broken | `Next` |
+| **draw** | one of the responses a model gives one request, numbered from 0 | the model cache |
+| **version** | a snapshot of the workspace a command or a person left | `Snapshot` |
 
-Two words are easy to confuse, and the API keeps them apart. A **model turn** is about the log:
-a response the agent sampled to act on, with the calls in it. A **step** is about the tree: a
-state the driver wrote. A step starts at most one model turn; a model turn can be answered over
-several states (§5).
-
-## 2. The log
-
-### 2.1 Events
+## 2. Programs
 
 ```lean
-inductive Event where
-  | told        (message : Chat.Message)
-  | placed      (snapshot : Snapshot)
-  | sampled     (request : Hash) (purpose : Purpose) (response : Chat.Response)
-  | executed    (call : CallRef) (command : String) (config : Executor.Config)
-                (output : Output) (snapshot : Snapshot)
-  | recorded    (call : CallRef) (content : Json)
-  | timed       (runTimeMs : Nat) (budgetMs? : Option Nat)
+structure Signature where
+  Op : Type ; Answer : Op → Type              -- the operations, each with its answer
+  Key : Type ; key : Op → Key ; sameKey       -- what the log keeps of an operation
+  Stored : Type ; store ; read                -- how the log keeps every answer
 
-abbrev Log := Array Event
-
-Event.isAnswer : Event → Bool    -- an answer to an effect, or what the world placed
+inductive Program (σ : Signature) : Type → Type 1 where
+  | pure    : α → Program σ α
+  | fail    : String → Program σ α                                     -- give up
+  | perform : (op : σ.Op) → (Except String (σ.Answer op) → Program σ α) → Program σ α
+  | inbox   : Option (Frame → Notice → Bool) → (List Notice → Program σ α) → Program σ α
+  | call    : ToolCall → (Except String Json → Program σ α) → Program σ α
+  | iter    : (S → Program σ (S ⊕ β)) → S → (β → Program σ α) → Program σ α
 ```
 
-| Event | Sort | Answers | What it holds |
-| --- | --- | --- | --- |
-| `told` | world | — | text placed as is: the agent's opening prompts, a person's notice |
-| `placed` | world | — | a snapshot the world placed as the workspace: the project, a person's edit |
-| `sampled` | answer | `sample` | the model's response, the digest of the request, and its purpose |
-| `executed` | answer | `exec` | the call it answers, the script, how it ran, the output, the snapshot it left |
-| `recorded` | answer | `record`, `ask` | a call's result that no command produced: the agent's own, or a person's reply |
-| `timed` | answer | `time` | how long the run has taken so far, and the invocation's time budget |
-
-### 2.2 References between events
-
-An event refers to earlier events in three ways, and only backwards:
-
-- **A call and its answer.** An `executed` and a `recorded` each name the call they answer by a
-  `CallRef`: the position of the response that made the call, and the call's index in it.
-  The call's id is not in the reference: it is read off the log, like the call (`Index.callId?`).
-  An answer never names its call by recency or by its id, so a sample
-  taken in between cannot hide the call, and a provider that reuses an id cannot make one answer
-  count for two calls.
-
-  ```lean
-  structure CallRef where
-    response : Nat     -- the log position of the response that made the call
-    index : Nat        -- which of its calls
-  ```
-
-- **A workspace and the commands on it.** A `placed` and an `executed` each name a `snapshot`:
-  where the workspace is after the event. The latest one named is where the log *is*
-  (`Index.workspace?`), and a command always runs
-  there: the snapshot before it is the one named last before it. A run's workspace only moves
-  forward, so what the model is shown of its files never contradicts what it did to them.
-- **A response and everything before it.** A response records the digest of the request it was
-  sampled from, and that request is a function of the whole log before it (§4, invariant I1).
-
-*The example run used throughout this page — an agent with `bash`, `ask_user` and
-`time_budget` that also compacts its context with a summary — as its log, by position, with
-what refers to what.*
-
-```mermaid
-flowchart TB
-  subgraph log["the log, oldest first"]
-    direction TB
-    e0["0 · told · system prompt"]
-    e1["1 · told · user: the task"]
-    e2["2 · placed · w0"]
-    e3["3 · sampled, turn · calls a: bash ls, b: ask_user"]
-    e4["4 · executed a · leaves w1"]
-    e5["5 · recorded b · a person: yes"]
-    e6["6 · sampled, summary"]
-    e7["7 · sampled, turn · calls c: bash make, d: time_budget"]
-    e8["8 · executed c · leaves w2"]
-    e9["9 · timed · the run at 61 s of 3600 s"]
-    e10["10 · recorded d · seconds_left 3539"]
-    e11["11 · told · a person's notice"]
-    e12["12 · sampled, turn · call e: submit"]
-    e0 ~~~ e1 ~~~ e2 ~~~ e3 ~~~ e4 ~~~ e5 ~~~ e6 ~~~ e7 ~~~ e8 ~~~ e9 ~~~ e10 ~~~ e11 ~~~ e12
-  end
-  e4 -->|"answers 3.0"| e3
-  e5 -->|"answers 3.1"| e3
-  e8 -->|"answers 7.0"| e7
-  e10 -->|"answers 7.1"| e7
-  e4 -.->|"runs on w0"| e2
-  e8 -.->|"runs on w1"| e4
-  e10 -.->|"from the reading"| e9
-```
-
-Solid arrows are call references; dotted ones are the workspace chain and a value the agent
-derived. Every response also depends on all the events before it, through its request (not
-drawn).
-
-### 2.3 The index
-
-The structure of a log is read off it, never stored beside it. `Log.index` reads the log once,
-oldest first, into an `Index`; being a function of the log, it cannot disagree with it.
+A program is the free monad on its signature with four constructors more. **`fail`** gives up,
+up to the call it is in; `try` and `catch` are a function of the whole program (`attempt`) and
+leave no mark. **`perform`** asks for an operation, continued with its answer or with the error
+when the world could not give one. **`inbox`** reads the notices that arrived: a plain read takes
+every one not yet read that is addressed to no one, so not a reply or a grader; a read that **waits** says which notices it is for, is
+made only once one has arrived, and takes those. **`call`** names a tool and holds no body: the
+interpreter runs the tool the run has under that name, in a child frame, and the call ends with
+the tool's value or its failure — a call catches its tool's failure. **`iter`** is a loop whose
+state is data: it goes round until a round gives a result, and a round must read an event, which
+is what makes replay of a finite log end.
 
 ```lean
-structure Call where
-  ref : CallRef
-  call : Chat.ToolCall
-  answer? : Option Nat           -- the position of the event that answered it
-
-structure Turn where             -- a model turn
-  position : Nat                 -- its response's
-  response : Chat.Response
-  calls : Array Call
-
-structure Index where
-  turns : Array Turn             -- the responses for turn, oldest first
-  responses : Nat                -- how many responses, of any purpose: the model calls made
-  turnOf : Array Nat             -- per position: the model turn it is part of, from 1; 0 before the first
-  workspace? : Option Snapshot   -- the latest snapshot named
-  workspaces : Array Snapshot    -- every snapshot named
-  calls : Array Chat.ToolCall    -- every call made
-
-Log.index : Log → Index
-Index.lastTurn? : Option Turn
-Index.pending : Array Call       -- the latest model turn's calls nothing has answered
-Index.call? : CallRef → Option Call
-Index.callId? : CallRef → Option String   -- the call's id, as the model gave it
-Log.checkAnswers : Log → (start : Nat) → Except String Unit   -- what is wrong with the answers from start on
+structure Run (σ : Signature) where
+  tools : String → Option (Json → Program σ Json)   -- the tools of the run, by name
+  call : ToolCall                                   -- the agent's call, in frame #[0]
+  after : Except String Json → Program σ Json       -- what follows the agent
 ```
 
-**Model turns partition the log.** An event belongs to the model turn of the latest `turn`
-response at or before it (`turnOf`); events before the first belong to none. A response of
-another purpose does not start a model turn: it belongs to the one it was sampled in.
+A run is the agent, called in frame `#[0]` with the run's configuration, and then what follows
+it in the run's own frame `#[]`, given what the agent returned or its error. In Alaya what
+follows is the run's grading (`Alaya.grading`): it waits for a grader to be **assigned**, a
+notice that names it, calls the grader in `#[1]`, and returns its verdict, which is the result
+of the run. A log has one grader; a point is graded again on a fork.
 
-*The example log, partitioned into model turns.*
+Alaya's signature is `Agent` (`Alaya.Agent`, `docs/agent-api.md` §2): `sample`, `exec`, `time`
+and `external`.
 
-```
-position   0    1    2    3    4    5    6    7    8    9    10   11   12
-event      told told plcd smpl exec rec  smpl smpl exec tmd  rec  told smpl
-purpose                   turn           summ turn                     turn
-turnOf     0    0    0    1    1    1    1    2    2    2    2    2    3
-           └── before ──┘ └──── turn 1 ─────┘ └────── turn 2 ──────┘  └ 3 ┘
-```
-
-Turn 1 holds its response, the answers to its calls `a` and `b`, and the summary sampled after
-them; turn 2 holds its response, the answers to `c` and `d`, and a person's notice; turn 3 is
-the submission. `Index.pending` after position 4 is `[b]`; after position 6 it is still `[]`,
-since `b` was answered at 5 — and a summary at 6 could not have hidden `b` if it had not been.
-
-## 3. Effects and answers
+## 3. The log
 
 ```lean
-inductive Effect where
-  | sample (purpose : Purpose) (request : Chat.Request)
-  | exec   (call : CallRef) (command : String) (config : Executor.Config)
-  | record (call : CallRef) (content : Json)
-  | time
-  | ask    (call : CallRef) (question : Question)
-
-Effect.Answer   : Effect → Type                                    -- what answers an effect
-Effect.event    : (effect : Effect) → effect.Answer → Event        -- how its answer is recorded
-Effect.answer?  : (effect : Effect) → Event → Option effect.Answer -- whether an event answers it
-Effect.describe : Effect → String
+inductive Event (σ : Signature) where
+  | arrived  (notice : Notice)                                    -- from outside, unasked
+  | heard    (frame : Frame) (notices : Array Nat)                -- a read: the positions it took
+  | answered (frame : Frame) (key : σ.Key) (answer : Except String σ.Stored)
+  | opened   (frame : Frame) (tool : ToolCall)                    -- a call opens: the call itself
+  | returned (frame : Frame) (value : Json)                       -- … and ends with its value
+  | failed   (frame : Frame) (error : String)                     -- … or with its failure
+  | stopped  (reason : String)                                    -- from outside: the agent ends
 ```
 
-| Effect | `Answer` | Handled by | Recorded as | Which identifies it by |
-| --- | --- | --- | --- | --- |
-| `sample p r` | `Chat.Response` | the model: a draw of `r` | `response d p resp` | the purpose, and `d = requestDigest r` |
-| `exec c s cfg` | `Output × Snapshot` | the executor, in the workspace, as `cfg` says | `executed c s cfg out w'` | the call, script and config |
-| `record c v` | `Unit` | nobody: the agent computed `v` | `recorded c v` | the call and the value |
-| `time` | `Nat × Option Nat` | the driver's clock | `timed ms budget` | — |
-| `ask c q` | `Reply` | a person, later, through `alaya reply` | `recorded c answer` | the call, and a reply `q`'s form accepts |
+A log starts with its **root**, `arrived (changed workspace _)`: the workspace a run starts on.
+Its second event is the opening of the agent's call, `opened #[0] ⟨"agent", config⟩`, so the log
+holds the run's configuration — the agent, the model, the container — from there
+on, and every later command builds the same run from the log alone (`Alaya.configOf`, in
+`Alaya/Run.lean`).
 
-`event` and `answer?` are the only place this pairing is written: the driver records
-`effect.event answer`, a reply is the `event` of its question's `ask`, and a reply is checked
-against that question with `answer?`.
+*The opening of a run on a scripted model that asks a question, then runs a command.*
 
-The end of a run is not an effect. `next` gives `Effect ⊕ Outcome`: `.inl effect`, or
-`.inr outcome`, which nothing answers.
-
-`Executor.Config` is part of the command: its `timeoutSeconds`, its `env`, and `outputs`, whether
-it sees the whole output of every earlier command of its branch as files under `/alaya/outputs`
-(`Agent.outputFile position id?`).
-
-## 4. The agent
-
-```lean
-structure Agent where
-  config : Json                       -- its complete configuration: what a root records
-  initialLog : String → Uname → Log   -- its opening for a task, on a machine
-  next : Log → Effect ⊕ Outcome       -- the whole policy
+```
+0  -      changed → 3f2a…: the workspace the run starts from
+1  0      open agent: mini-swe, gpt-6-luna
+2  -      said "Implement the language in SPEC.md"
+3  0      inbox: takes [2]                 the agent's wait for its task
+4  0      inbox: nothing                   the round's read
+5  0      sample → ask_user Should I …?
+6  0.0    open ask_user "Should I …?"
+7  -      replied to 0.0: "yes"            a person's reply, checked against the question
+8  0.0    inbox: takes [7]
+9  0.0    return yes
+10 0      inbox: nothing
+11 0      sample → bash make
+12 0.1    open bash "make"
+13 0.1    exec make → exit 0, 9c1e…        the version of the workspace it left
+14 0.1    return exit 0: …
 ```
 
-That is all an agent is. Everything it does — what the model is sent, which tools it offers,
-which commands run and how — is in the effects `next` gives, so all of it is recorded.
+Notices apart, a frame with its sub-frames is one interval of the log, from its opening to its
+end, so the nesting of a run is in the log itself (Wu, Schrijvers and Hinze 2014). Once the
+agent's call has ended, or a stop has ended it, the run is over; its log goes on only with a
+grader and its call, and is complete when it ends with the return of the run's frame `#[]`, the
+verdict.
 
-**Invariant I1 (what a response answers).** The response at position k was sampled from the
-request of `next (log.take k)`, and records that request's digest. Readers rely on nothing else:
+## 4. Replay
 
-```lean
-Agent.request?  : Agent → Log → Option Chat.Request          -- next's request, when it samples
-Agent.requestAt? : Agent → Log → Nat → Option Chat.Request   -- the request response k answered,
-                                                             -- if this agent still makes it
-contextTokens : (Log → Effect ⊕ Outcome) → Log → Dialogue → Nat   -- a request's size, from the latest usage
-```
+Replay reads a log with the program, from its root: every answer is given back to the program
+in order, to continue it where it stopped, and every mark — an opening, an end, a read — is
+checked against the one the program makes. What it finds is `Next`:
 
-**Built from parts.** An agent is data and pure functions, so it is built from smaller ones:
-
-- **Tools** (`Alaya.Agent.Tools`), each a `Tool`: its definition, whether it must be called alone,
-  an instruction appended to the prompt, and `read`, which turns a call into what to ask for
-  next for it, from the log: the effect that answers the call, or the outcome that ends the
-  run. `bash` is `exec`; `submit` is `Submitted`; `ask_user` is `ask`; `time_budget` is `time`,
-  then, once the log holds the timing, `record`.
-  An agent holds a list of them and owns the rest: parsing, prompts, the view.
-- **Combinators**, `Agent → Agent`, each an `interpose`, which rewrites what `next` gives:
-  `limitResponses n` and `limitContext n` turn a `sample` into an outcome; `runCommandsWith cfg`
-  sets how every `exec` runs.
-- **MiniSwe** (`docs/miniswe.md`): a view of the log, a parser over its tools, mini's control
-  flow as `next`, wrapped in the three
-  combinators. MiniVero is MiniSwe with Vero's prompts.
-
-## 5. The trajectory
-
-### 5.1 States
-
-```lean
-structure State where              -- what every state holds
-  parent? : Option Hash
-  workspace : Snapshot             -- where the run is: the latest snapshot its log names
-  kind : Kind
-  appended : Log                   -- this state's slice of the log
-
-inductive Kind where               -- what produced a state, with what only that kind holds
-  | root (root : Root)
-  | step (elapsedMs? : Option Nat)                  -- its wall-clock time
-         (stop? : Option (Outcome ⊕ Asked))         -- how it stopped the run, if it did
-  | intervention (intervention : Intervention)
-  | evaluation (evaluation : Evaluation)
-  | reply
-
-structure Root where               -- what a run is created with; no other state repeats it
-  agent ; model : Json             -- the complete configurations
-  image ; workdir : String         -- the container every command of the run runs in
-  task? : Option String            -- for a reader; the agent has it in its opening log
-
-structure Asked where              -- what a step that waits has asked: the `ask` it stopped at
-  call : CallRef ; question : Question
-
-structure Intervention where
-  message : String                 -- what the person said: a tell's whole, or what a commit says of its change
-  changed : Array String           -- what a commit changed, a line a path; empty for a tell
-
-structure Evaluation where
-  command ; graderImage ; input? ; status ; checks ; reason ; returncode? ; elapsedMs ; stdout ; stderr
-  checkout : Snapshot              -- the files as the grader left them
-
-State.root? ; State.outcome? ; State.question? ; State.elapsedMs?
-State.intervention? ; State.evaluation?            -- read off the kind
-State.snapshot : Snapshot          -- the files a reader is shown: an evaluation's checkout, else the workspace
-runOf : Store → Hash → Result Root -- what the run of a state was created with, from its root
-```
-
-A state is a sum by kind: a step cannot hold a verdict, a reply cannot hold an outcome, and a
-step ends the run or waits on a question, never both. Nothing is held twice: the image, the
-workdir, the agent and the model are the root's, and every other state reads them there
-(`runOf`); a provider's refusal is the `reason?` of the outcome it explains; a verdict's files
-are the verdict's, so `workspace` means one thing on every state. The stored object is the
-same shape, field for field (`docs/trajectory-schema.md` §6).
-
-A state's hash covers its content, so a hash names its whole history; nothing under a hash ever
-changes, and a run only grows: continuing from any state adds a child.
-
-**What each kind may hold** — checked by `putState` (`State.validate`), which refuses a state
-that breaks it:
-
-| Kind | Written by | `appended` |
-| --- | --- | --- |
-| `root` | `alaya root` | the agent's opening `told`s, then one `placed`: the project |
-| `step` | `resume` | answers only — no `told`, no `placed` — with at most one `sampled`, and only first |
-| `intervention` | `alaya commit` / `alaya tell` | `placed` then `told` (a commit), or `told` alone (a tell) |
-| `reply` | `alaya reply` | one `recorded`, answering the parent's question |
-| `evaluation` | `alaya eval` | nothing: the verdict is a field; always a leaf |
-
-So **world events live only in roots, interventions, and replies**, and **answers live only in
-steps and replies.** A step ends before a second sample, at an outcome, at `ask`, or at a provider's
-refusal; it can be empty (a stop with nothing to do), start with a sample, or start with other
-effects (calls left pending by a reply).
-
-**What a state must agree with in its branch** — checked by `putState` too
-(`State.continues`), against the parent and the log before it:
-
-| Rule | Refused |
+| `Next` | The log … |
 | --- | --- |
-| nothing grows from an evaluation | a step under a verdict |
-| a state that waits grows only by a reply, which answers its question; an evaluation is a verdict on any state | a step under a question; a reply to another call, or where nothing is asked |
-| each answer names a call made before it that nothing has answered (`Log.checkAnswers`) | an answer to no call; a second answer to a call |
-| its `workspace` is the latest snapshot its log names | a workspace the log does not name; an evaluation at its checkout |
+| `ask call` | ends where the program asks for an operation |
+| `hears`, `opens`, `returns`, `fails` | ends where the program makes a mark |
+| `waits frame` | ends where a read waits and nothing it is for has arrived; in `#[]`, where the agent is over and no grader is assigned |
+| `done value`, `raised error` | is complete: the run returned its verdict, or its grader's call failed |
+| `mismatch position` | holds an event there that is not what the program does |
+| `unguarded frame` | the program went round a loop without reading an event |
 
-### 5.2 Branches
+A log that is no trace of the program is a result of its own, not an outcome of the agent: the
+driver refuses to go on from it. Matching is by position, so a program changed after a log was
+written reads it only up to its first changed operation.
 
-The log at a state is the concatenation of the `appended` of the states from the root to it:
-its **branch**.
+A **stop** ends every frame of the agent, whatever the nesting, without marks; nothing in the
+agent catches it, and what follows the agent runs, given the error `stopped`. A stop where the
+agent is over is a mismatch. `agentEnd? log` reads off a log how its agent ended: returned,
+failed, or stopped.
 
-```lean
-structure Branch where states : Array (Hash × State)     -- root → state
+The interpreter keeps its continuation between events (`Machine`, `Replayer.feed`): the driver
+feeds it an event at a time and never replays from the start, and a reader replays a whole log in
+one pass. `next run log` is that machine folded over the log.
 
-branchOf : Store → Hash → Result Branch
-Branch.log : Log                   -- the state's log
-Branch.tip : Hash × State          -- the state itself
-Branch.root : Hash × State
-Branch.elapsedMs : Nat
-```
+## 5. The forest
 
-**States partition the log.** Every position is in exactly one state's `appended`, in order: a
-state's slice begins where the events of the states above it end, which for the branch's own
-state is `log.size - appended.size`. Nothing stores these positions; a reader that wants one
-adds up the slices before it.
-
-*The example log, partitioned both ways.*
-
-```
-position   0    1    2  │ 3    4  │ 5  │ 6  │ 7    8    9    10 │ 11 │ 12
-state      root         │ step S1 │ R  │ S2 │ step S3           │ I  │ S4
-kind       root         │ step    │rep.│step│ step              │int.│ step
-           opening + w0 │ sampled │    │sum.│ sampled           │tell│ sampled
-model turn 0    0    0  │ 1    1  │ 1  │ 1  │ 2    2    2    2  │ 2  │ 3
-```
-
-*The same run as a tree. Each state's slice is in brackets.*
+An entry is `{parent, event, elapsed_ms}`, named by the SHA-256 of `{parent, event}` — the time is
+no part of the name. A name therefore stands for a whole log, and logs that share a prefix share
+its entries: two continuations of an entry are a fork. Nothing is rewritten; a point of a run is
+an entry, and its log is the path to it.
 
 ```mermaid
 flowchart TD
-  root["root · [0, 3)<br/>opening, workspace w0"]
-  S1["step S1 · [3, 5)<br/>turn 1 sampled; a ran; b asks"]
-  R["reply R · [5, 6)<br/>b answered"]
-  S2["step S2 · [6, 7)<br/>a summary sampled"]
-  S3["step S3 · [7, 11)<br/>turn 2 sampled; c ran; timed; d recorded"]
-  I["intervention I · [11, 12)<br/>a person's notice"]
-  S4["step S4 · [12, 13)<br/>turn 3 sampled: submit  [Submitted]"]
-  root --> S1 --> R --> S2 --> S3 --> I --> S4
+  r["0 changed: the project"] --> o["1 open agent"] --> t["2 said: the task"] --> h["3 inbox"]
+  h --> s1["… sample (draw 0) …"] --> e1["… return pass 41/48"]
+  h --> s2["… sample (draw 1) …"] --> e2["… return pass 48/48"]
+  s1 --> n["k said: a person's note"] --> e3["… return pass 45/48"]
+  s1 --> st["k stopped"] --> q["k+1 assigned: a grader"] --> g["… return fail 12/48: the point graded"]
 ```
 
-### 5.3 How the two partitions relate
+`Forest` is read from one listing of `DATA/entries`, whose file names hold each entry's name and
+its parent's (`docs/log-schema.md` §5).
 
-- **A model turn starts at the start of a step.** A step samples only first, so every `turn`
-  response is the first event of the step that sampled it, and that step's `sampled` is true.
-- **Not every step starts a model turn.** S2 samples a summary; a step after a reply may sample
-  nothing and only stop, or start with a command left pending.
-- **A model turn can span states.** Turn 1 starts in S1, whose step ends at the `ask`; its call
-  `b` is answered in the reply R; the summary S2 is part of it too. Its calls are joined to their
-  answers through call references, whichever state holds them (`Index.call?`).
-- **A step never spans model turns.** A second sample ends it, so a step holds the start of at
-  most one model turn, plus answers to calls of the latest one.
-
-## 6. The driver (`Alaya.Driver`)
+## 6. The driver
 
 ```lean
-structure Runtime where            -- what a run runs on
-  store : Store ; workspaces : Workspaces ; workDir ; outputsDir ; executor : Executor
-  model : Model ; agent : Agent
+structure Runtime where          -- what a run is driven with
+  store ; workspaces ; workDir ; outputsDir ; scratch ; executor ; workdir
+  model? : Option Model          -- none when no provider was named
+  graderUser? : Option String
 
-structure Limits where             -- what one invocation allows; neither is recorded
-  budgetMs? : Option Nat           -- the run's time, summed from the root, after which no step starts
-  steps? : Option Nat              -- the steps this invocation may take
+structure Limits where           -- what one invocation allows; nothing of it is recorded
+  samples? : Option Nat          -- responses this invocation may sample
+  budgetMs? : Option Nat         -- the run's time, summed along its log, after which nothing starts
 
-inductive Stop where               -- why a resume stopped
-  | outcome (Outcome) | question (Question) | outOfTime | outOfSteps
+inductive Stop where
+  | over (agent : AgentEnd) (verdict? : Option Json)  -- the agent is over; graded, with the verdict
+  | waits (frame : Frame) (question? : Option Question) | paused (reason : String)
 
-resume : Runtime → Hash → Limits → (onStep : Hash → Result Unit) → Result (Hash × Stop)
+drive  : Runtime → Run Agent → (tip : Hash) → Limits → OnEntry → Result (Hash × Stop)
+append : Store → Run Agent → (tip : Hash) → Event Agent → Result (Hash × Entry)
 ```
 
-`resume` takes steps from a state until one stops the run or the invocation reaches a limit.
-One step asks `next`, has the **handler** answer the effect, records `effect.event answer`, and
-asks again, until the agent wants a second sample, gives an outcome, or asks a person; then it
-writes the child state. How a step stopped the run is `Option (Outcome ⊕ Asked)`, the same
-value its state stores (§5.1): nothing, when the run goes on.
+`drive` asks the machine what is next after the log at `tip` and either carries out the
+operation — appending the answer — or appends the mark, until the agent is over and the run
+waits for a grader, the run is graded, it waits for a person, or it reaches a limit. `append`
+checks that the log can take what a person adds: a stop, a message, a change or a reply only
+while the agent runs, a grader only once it is over and where none is assigned yet. Each entry records how long it took, so a run's time is the sum
+along its log.
 
-The handler is internal to the driver: it carries out one effect and gives its answer, typed by
-the effect, or nothing when the answer comes later from outside the run, as a person's does to
-`ask`. It is the one place that touches the world, through three interfaces nothing else calls:
-
-| Behind the handler | Interface | Holds |
+| Operation | Carried out by | Answer |
 | --- | --- | --- |
-| `Model` | `sample : Request → Result Stream`; `Stream.nextN` | provider, retry, batching, the persistent cache of draws per request |
-| `Executor` | `exec : Config → workDir → argv → display → IO Output` | one container per run |
-| `Workspaces` | `snapshot`, `materialize`, `diff`, `readFiles`, `listEntries`, `retainOnly` | the restic repository |
+| `sample request` | the model: draw `n` of the request, `n` the responses the tip already has as children | `Chat.Response` |
+| `exec command config` | the executor, in the work directory restored to the version the log has reached | the output, and the version it left |
+| `time` | the driver's clock: the run's time along the log, and this invocation's budget | `Timing` |
+| `external command image input timeout` | a fresh container on a checkout of the workspace, `input` at `/grader` | stdout, stderr, the checkout as it left it |
 
-*One step, as the driver carries it out.*
+**Draws.** A sample from an entry with no sampled continuation takes draw 0 — so a run that
+crashed after its model answered takes the response the cache kept — and one from an entry that
+has `n` takes draw `n`: running a point again is a new draw, a fork.
 
-```mermaid
-sequenceDiagram
-  participant T as Trajectory
-  participant D as Driver (one step)
-  participant A as Agent.next
-  participant W as Handler (Model · Executor · Clock)
-  T->>D: branchOf parent: log L, workspace
-  loop until a second sample, an outcome, or ask
-    D->>A: next L
-    A-->>D: effect
-    alt sample, first in the step
-      D->>W: draw n of the request (n = the parent's sampled children)
-      W-->>D: response
-    else exec
-      D->>W: prepare outputs, run in the workspace, snapshot
-      W-->>D: output, snapshot after
-    else time / record
-      D->>W: read the clock / nothing to do
-      W-->>D: the reading / unit
-    end
-    D->>D: L := L.push (effect.event answer)
-  end
-  D->>T: putState step: appended = the answers, workspace = the latest, outcome or question
-```
+**Failures.** A model's refusal of a request as too long for its context is logged as the
+operation's answer, an error in the provider's words, which the program deals with: trying again
+would not help, and it says something of the run. MiniSwe catches it and ends with
+`ContextExceeded`, as it does before a request it knows would not fit. Any other failure is not
+the program's — a provider that cannot be reached after Alaya's retries, a key or a request it
+rejects, a response it garbles, a full disk — and stops the driver with nothing logged for the
+operation; the next `run` asks for it again. A command happens at least once: what it does
+beyond the workspace may happen twice.
 
-**Draws.** Every sampled child of a state answers the same request — the request of `next` of the
-parent's log — so its children with a response are draws 0, 1, 2, … of one sequence, which the
-model cache keeps. A new continuation takes draw `n`, where `n` counts the parent's children
-that sampled; a fork is a new draw, a replay is the same one.
-
-**Limits.** `--time-budget` and `--steps` are checked between steps, never inside one, since a
-step cut between its calls would leave calls unanswered. A limit writes nothing: a later
-`resume` goes on from the same state.
+**Limits** are checked before an operation of the agent and before a read of its inbox, so a run
+paused at one stops where a message a person appends is heard at once. A limit writes nothing,
+and holds the agent only: a grader runs to its end.
 
 ## 7. How the parts coordinate
 
-| Operation | Agent | Trajectory | Driver |
+| Command | Programs | Log and forest | Driver |
 | --- | --- | --- | --- |
-| `alaya root` | `initialLog task uname` | `createRoot`: a root of the opening and the project's workspace | `uname` from the image |
-| `alaya resume` | `next`, once per effect | `branchOf` the start; `putState` each step | `resume`: the handler, the draws, the limits |
-| `alaya commit` / `tell` | — | an intervention: world events | — |
-| `alaya reply` | — | a reply: the `event` of the question's `ask`, with the person's answer | — |
-| `alaya eval` | — | an evaluation leaf | the grader's container |
-| `show --request`, `html` | `requestAt?`: I1, checked against the digest | `branchOf`: the log, and where each state's slice begins | — |
+| `alaya new` | the run built from its configuration | the root, the agent's opening, the task | — |
+| `alaya run` | replayed, then driven | an entry per event | `drive` |
+| `alaya tell`, `commit`, `reply`, `stop` | replayed, to check the event fits | one entry | `append` |
+| `alaya grade` | replayed, then driven | a stop if the agent runs, the notice that assigns the grader, then an entry per event | `append`, `drive` |
+| `alaya log`, `show`, `tree`, `waiting`, `html` | replayed, for what each point asked and what comes next | read | — |
 
-The agent never sees how an event arrived: a person's reply and a command's output are both
-answers in its log, and its next decision is `next` of that log. The trajectory never interprets
-an event beyond its kind's shape rules. The driver never decides: it does what `next` says and
-records what happened.
+The program never sees how an event arrived: a person's reply and a command's output are both in
+its log, and its next decision is replay of that log. The forest never interprets an event. The
+driver never decides: it does what replay says and appends what happened.
 
 ## 8. Invariants
 
-1. **I1 — responses.** The response at position k answers `next (log.take k)`'s request, whose
-   digest it records.
-2. **Answers.** Every `executed` and every `recorded` names, by
-   `CallRef`, a call made earlier; each call is answered at most once: checked when a state is
-   written. Every answer in a step is `effect.event answer` for the effect `next` asked for there.
-3. **Kinds.** Each state holds only what its kind may, and agrees with the branch it grows
-   (§5.1): checked when it is written.
-4. **Steps.** A step samples at most once, and only first; so every sampled child of a state is
-   a draw of one request.
-5. **Partitions.** A branch's states partition its log; a model turn starts at a step's start.
-6. **Workspaces.** A state's workspace is the latest snapshot its log names, checked when it is
-   written; every snapshot an event names is kept while the state holding it is.
-7. **Immutability.** A state's hash covers its parent, its events and its workspace; nothing under
-   a hash changes, and a run only grows.
+1. **Names.** An entry's name is the hash of its parent's name and its event; nothing under a
+   name changes, and a log only grows.
+2. **Traces.** Every log the driver writes is a trace of its run's program: at every prefix,
+   `next` is the event the log goes on with. A log that is not is refused, never driven.
+3. **Configuration.** A run's configuration is the arguments of its agent's call, the second
+   event of its log; nothing else records it.
+4. **Brackets.** Every call is opened, and ends with a return or a failure, unless a stop ends
+   the agent; frames nest as calls do. The run's own frame returns once, with the verdict of the
+   one grader a log has.
+5. **Workspace.** The version a log has reached is the last one a command or a change from
+   outside left; every command runs there, and every snapshot a remaining entry names is kept.
+6. **Draws.** A sample from an entry with `n` sampled continuations is draw `n` of its request.

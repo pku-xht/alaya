@@ -1,8 +1,8 @@
 # Questions: `ask_user`
 
 MiniSwe and MiniVero can ask a question and wait for an answer. The tool is off by default;
-naming it in the agent's `tools` at `root` offers it, and the root records the list, so later
-commands rebuild the same agent. The list replaces the default one, so it names the default
+naming it in the agent's `tools` at `new` offers it, and the run's configuration holds the list,
+so later commands rebuild the same agent. The list replaces the default one, so it names the default
 tools too: `bash` and `submit`, and for MiniVero `time_budget`.
 
 For example, `--agent mini-swe --set 'agent.tools=["bash","submit","ask_user"]'`, or
@@ -68,10 +68,10 @@ alternative answer or an explanation is needed.
 Validation checks the tool arguments, blank text, duplicate choices (ignoring
 surrounding whitespace) and a candidate that is the reserved answer. It does not check whether
 a candidate is correct. The
-original arguments, including `question_type`, remain in the trajectory so
-studies can distinguish the question forms. The waiting state also records the
-question as its text and its form, a choice's candidates within the form. Answer
-collectors do not need to parse options out of formatted text.
+original arguments, including `question_type`, are the opening of the `ask_user` call in the
+log, so studies can distinguish the question forms, and the question a log waits on is read off
+that opening as its text and its form, a choice's candidates within the form (`alaya waiting
+--json`). Answer collectors do not need to parse options out of formatted text.
 
 ## Answer in the browser
 
@@ -98,15 +98,14 @@ Open the printed address. The page shows the questions waiting in that data dire
   It does not select `no` or **None of the above**, or send an empty text answer.
 
 The current question and answer controls are shown by default. **Full conversation**
-expands the original task, recorded messages, tool calls, tool results and earlier
-human replies on this branch, through the question. The task appears within the
-starting instructions, without a separate task panel. The conversation does not
-include sibling branches, later answers or evaluations.
-This is the recorded history, rather than a newly generated summary or only the
-model's compressed context. The model should still include the background needed
-to understand its question.
+expands what the model was sent before it asked — the task within the starting instructions,
+its earlier responses, tool calls and results, and earlier human replies on this branch — and
+the response that asked: the request its sample answered, as `alaya show --request` gives it,
+and that response. It does not include sibling branches, later answers or graders. This is the
+model's own context, rather than a newly generated summary; the model should still include the
+background needed to understand its question.
 
-**Project files** browses the question state's workspace snapshot, including
+**Project files** browses the workspace as the log had it at the question, including
 hidden files and directories. It is read-only and does not follow subsequent
 workspace edits. UTF-8 files up to 1 MiB are displayed in full; binary files,
 larger files, symbolic links and special files show an explicit preview limitation.
@@ -115,7 +114,7 @@ in this portable browser. Browsing reads snapshot metadata and requested files;
 it never checks out over the agent's live workspace.
 
 Selections are not recorded until **Submit answer** is clicked. A successful
-submission saves a reply in the existing trajectory and removes the question
+submission appends the reply to the waiting log and removes the question
 from the waiting list. The page listens for new questions automatically; there
 is no manual refresh control. Newly observed questions are appended, while
 existing questions keep their position, unsubmitted answers, focus, and expanded
@@ -131,32 +130,34 @@ unfinished answer. Reuse the default port or the same explicit `--port` value
 when restarting; the page cannot discover a different port. An unavailable update source
 does not clear the existing questions. Answer submissions are never automatically
 retried. The server sends authenticated events at `/api/events`, checks for
-waiting-state changes once per second while clients are listening, and shares
+changes to the waiting list once per second while clients are listening, and shares
 that check across listeners. It does not sample a model.
 
 The server listens only on the local loopback address and does not start a model
-run. Continue from the recorded reply with the normal `resume` command. The CLI
+run. Drive the run on from the reply with the normal `run` command. The CLI
 remains available for scripted answer collection and deliberate reply branches.
 
 ## Waiting and replying
 
-`ask_user` produces `Effect.ask`, whose answer is a `Reply` (`docs/agent-api.md` §2); the step
-stops at it, and the `reply` command answers it. It runs no workspace command. A response combining it with another
-tool is a format error before any tool runs. Ordinary step and format-error limits
-still apply. Both the model context and HTML report retain the question and reply.
-If the question used the last allowed model turn, continuing its reply records
-`LimitsExceeded` without another model call.
+`ask_user` is a tool whose program waits: it reads its inbox for a reply to its own call, of the
+form its question asks for, and gives it to the model as the call's result
+(`docs/agent-api.md` §6). The run stops there — `alaya run` exits 3, saying what it waits for —
+and `alaya reply` appends the reply as a notice to the call. It runs no workspace command. A
+response combining it with another tool is a format error before any tool runs. Ordinary step and
+format-error limits still apply. The log, the model's context and the HTML report keep the
+question and the reply. If the question used the last allowed model turn, the run goes on after
+the reply to `LimitsExceeded` without another model call.
 
-With `--time-budget`, the recorded model-step time carries through a reply.
-Time spent waiting for a person is not a model step and does not consume that
-budget. Pass the intended total budget again when resuming; if it is already
-spent, Alaya stops without another model call.
+With `--time-budget`, the run's time is its entries' times along the log, which a reply does not
+add to: time spent waiting for a person is not the run's. Pass the intended total budget again
+when driving on; if it is already spent, Alaya pauses without another model call.
 
 ```bash
-alaya root --task-file /path/to/source/MINIVERO_TASK.md /path/to/source \
-  --agent mini-vero --set agent.mode=codeproof --set 'agent.tools=["bash","submit","time_budget","ask_user"]' --model MODEL --data /path/to/run
-alaya resume ROOT --provider PROVIDER --data /path/to/run --json
-# A question stops resume with exit code 3. Use its state hash below.
+tip=$(alaya new --task-file /path/to/MINIVERO_TASK.md /path/to/source --image IMAGE \
+  --agent mini-vero --set agent.mode=codeproof --set 'agent.tools=["bash","submit","time_budget","ask_user"]' \
+  --model MODEL --data /path/to/run | tail -n 1 | cut -d' ' -f1)
+alaya run "$tip" --provider PROVIDER --data /path/to/run
+# A question stops the run with exit code 3. Its last entry is QUESTION below.
 alaya waiting --data /path/to/run
 # For a single-choice question, choose one model-provided candidate:
 alaya reply --data /path/to/run -- QUESTION '2'
@@ -164,53 +165,54 @@ alaya reply --data /path/to/run -- QUESTION '2'
 alaya reply --data /path/to/run -- QUESTION 'none_of_above'
 # Alternatively, when the person cannot answer (all supported question types):
 alaya reply --data /path/to/run --unavailable -- QUESTION
-alaya resume REPLY --provider PROVIDER --data /path/to/run --json
+alaya run REPLY --provider PROVIDER --data /path/to/run
 ```
 
 Place reply text after `--` so an open-ended answer such as `--data` or `-m` is
 recorded as text rather than parsed as an option. Keep CLI options before `--`.
 
-The `reply` command reads the text as a reply to the recorded question before writing any
-child state (`Question.parseReply`). Yes/no rejects every value except `yes` and `no`. Single
+The `reply` command reads the text as a reply to the question the log waits on before it appends
+anything (`Question.parseReply`). Yes/no rejects every value except `yes` and `no`. Single
 choice accepts one number from 1 through the number of model-provided candidates, or the
 exact string `none_of_above`. Arrays, blank selections, and out-of-range numbers
 are rejected. Open-ended replies require nonblank text. A text that is no reply leaves the
-question waiting. A reply is recorded as the value that says it: `"yes"` or `"no"`; a
-candidate's number, the same however it was typed, so `2` and ` 2 ` are one reply and one
-state; `"none_of_above"`; or an open answer's text, verbatim, surrounding whitespace included.
-The browser and command line go through this same reading, including after the agent has been
-reconstructed from its recorded configuration. The browser, CLI/API, and core all reject empty
+question waiting. A reply is kept as what it is — yes, no, a candidate's number, none of the
+above, an open answer's text verbatim, surrounding whitespace included, or that the person
+cannot answer — and the model is shown it as `"yes"` or `"no"`; a candidate's number, the same
+however it was typed, so `2` and ` 2 ` are one reply and one entry; `"none_of_above"`; or the
+text. The browser and command line go through this same reading. The browser, CLI/API, and core all reject empty
 or whitespace-only open answers, using the browser's Unicode whitespace definition.
 
 Different valid CLI replies to one question form separate branches with the
-same workspace. Receiving an answer does not change the task's rules or imply
+same workspace: each is a continuation of the waiting entry. A second reply on one branch is
+refused, since no question waits there any more. Receiving an answer does not change the task's rules or imply
 that the answer is correct. `none_of_above` means none of the listed candidates is correct;
 it is not a substitute for an unavailable answer.
 
-`reply --unavailable` creates the same kind of reply child, but its recorded result is
+`reply --unavailable` appends the same kind of reply, but the model is shown
 the JSON object `{"status":"unavailable"}`. The next model request receives that
 object under the original `ask_user` call ID. An answer is never an object: an open answer
 is a string with its exact text, so even one containing the literal text
 `{"status":"unavailable"}` is distinct from the unavailable status. Both paths
-retain the question's workspace and the existing continuation limits. The caller
-resumes from the returned reply hash as usual.
+retain the question's workspace and the existing limits. The caller drives the
+run on from the returned entry as usual.
 
 Read-only collectors use the same commands the page does:
 
 ```bash
-alaya show --data /path/to/run --json -- QUESTION
+alaya log --data /path/to/run --json -- QUESTION
+alaya show --data /path/to/run --json --request -- QUESTION:N
 alaya ls --data /path/to/run --json -- QUESTION ''
 alaya ls --data /path/to/run --json -- QUESTION src
 alaya cat --data /path/to/run --json -- QUESTION src/Main.lean
 ```
 
-`show --json` gives the question's `history`: one `{state, kind, events}` per state from the
-root to the question, with their original events, the task among the root's. `ls --json` gives
-the `path` and its immediate `entries`, by name; `cat --json` previews an entry, with `path`,
-`kind` (`text`, `binary`, `too_large`, `symlink`, `directory` or `other`), `content` (only for
-`text`) and `size`. The empty directory path names the project root. None of them samples a
-model or creates a reply. They read any state, so the page reads only the questions it has
-listed, never an evaluation and the grader's evidence in it.
+`log --json` gives the waiting log an entry a line; `show --json --request` at the position `N`
+of the response that asked gives the request it answered. `ls --json` gives the `path` and its
+immediate `entries`, by name; `cat --json` previews an entry, with `path`, `kind` (`text`,
+`binary`, `too_large`, `symlink`, `directory` or `other`), `content` (only for `text`) and `size`.
+The empty directory path names the project root. None of them samples a model or appends
+anything. They read any entry, so the page reads only the questions it has listed.
 
 This tool supplies the interaction. Answer collection, simulation, budgets and
 comparative grading remain the caller's policy.

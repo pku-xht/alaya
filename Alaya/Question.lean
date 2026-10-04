@@ -1,9 +1,9 @@
 import Lean
 
 /-! Questions an agent asks a person, and the answers a person gives: shared by agents, the
-trajectory that records them, and whatever collects the answers. -/
+log that records them, and whatever collects the answers. -/
 
-namespace Alaya.Agent
+namespace Alaya
 
 /-- The form of answer a question asks for. -/
 inductive Question.Form where
@@ -15,8 +15,7 @@ inductive Question.Form where
 
 namespace Question.Form
 
-/-- The form's name: a tool's `question_type`, and how a stored question and a command's output
-give it. -/
+/-- The form's name: a tool's `question_type`, and how a command's output gives it. -/
 def name : Form -> String
   | .yesNo => "yes_no"
   | .openEnded => "open_ended"
@@ -49,11 +48,11 @@ inductive Reply where
   | unavailable
   deriving BEq, Repr, Inhabited
 
-/-- How a reply is recorded, and so what the model is shown as the asking call's result: `"yes"`
-or `"no"`, the candidate's number, `"none_of_above"`, the person's text, or the object
-`{"status": "unavailable"}`. Which reply a recorded value is, the question's form says
-(`Question.readReply?`): the text `none_of_above` answers an open question in the person's own
-words, and a choice with none of its candidates. -/
+/-- What the asking call gives, and so what the model is shown as its result: `"yes"` or `"no"`,
+the candidate's number, `"none_of_above"`, the person's text, or the object
+`{"status": "unavailable"}`. The log keeps a reply by its kind instead (`Reply.toStored`), since
+this form needs the question to read: the text `none_of_above` answers an open question in the
+person's own words, and a choice with none of its candidates. -/
 def Reply.toJson : Reply -> Lean.Json
   | .yes => "yes"
   | .no => "no"
@@ -80,8 +79,8 @@ private def reserved (option : String) : Bool :=
 
 /-- What is wrong with a question, if anything, whatever asks it: it says something, and a
 choice has at least two candidates, each saying something, no two alike, and none the answer
-every choice already has. Checked where a question is made — read from a tool call, or from a
-stored state — and nowhere after. -/
+every choice already has. Checked where a question is read from a call's arguments, at the
+call and again off its opening in the log, and nowhere after. -/
 def validate (question : Question) : Except String Unit := do
   if isBlank question.text then throw "A question must not be blank."
   if let .singleChoice options := question.form then
@@ -124,37 +123,11 @@ def parseReply (question : Question) (text : String) : Except String Reply :=
       throw s!"Option {number} is outside the range 1 to {options.size}."
     pure (.choice number)
 
-/-- The reply a recorded value is, to this question (`Reply.toJson`), if it is one. -/
-def readReply? (question : Question) (json : Lean.Json) : Option Reply :=
-  let reply? : Option Reply := match json, question.form with
-    | .obj _, _ => if json == Reply.unavailable.toJson then some .unavailable else none
-    | .str "yes", .yesNo => some .yes
-    | .str "no", .yesNo => some .no
-    | .str text, .openEnded => some (.text text)
-    | .str "none_of_above", .singleChoice _ => some .noneOfAbove
-    | .num _, .singleChoice _ => json.getNat?.toOption.map .choice
-    | _, _ => none
-  reply?.filter question.accepts
-
 def toJson (question : Question) : Lean.Json :=
   .mkObj [("text", question.text), ("form", .mkObj (("type", question.form.name) ::
     match question.form with
     | .singleChoice options => [("options", .arr (options.map Lean.Json.str))]
     | _ => []))]
-
-/-- A stored question, checked as any question is when it is made (`validate`). -/
-def fromJson (json : Lean.Json) : Except String Question := do
-  let text ← json.getObjVal? "text" >>= Lean.Json.getStr?
-  let stored ← json.getObjVal? "form"
-  let form ← match ← stored.getObjVal? "type" >>= Lean.Json.getStr? with
-    | "yes_no" => pure Form.yesNo
-    | "open_ended" => pure Form.openEnded
-    | "single_choice" =>
-      Form.singleChoice <$> (stored.getObjVal? "options" >>= Lean.Json.getArr? >>= (·.mapM Lean.Json.getStr?))
-    | other => throw s!"Unknown question form: {other}."
-  let question : Question := { text, form }
-  question.validate
-  pure question
 
 /-- The question as a terminal or a plain report shows it, with how to answer it there. A
 graphical collector lays out `text` and the form itself. -/
@@ -174,4 +147,4 @@ instance : ToString Question := ⟨render⟩
 
 end Question
 
-end Alaya.Agent
+end Alaya

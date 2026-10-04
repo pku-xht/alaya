@@ -1,18 +1,14 @@
 import Test.Framework
-import Alaya.Trajectory.Render
 import Alaya.Workspaces.Restic
 
-/-! What `cat --json` shows of a snapshot entry, and what `show --json` takes a branch to be. -/
+/-! What `cat --json` shows of a snapshot entry, read from the snapshot and never the live
+directory. -/
 
 namespace PreviewTests
 
-open Testing Alaya Alaya.Trajectory
+open Testing Alaya
 
 private def workspace : Hash := Hash.ofBytes "test snapshot".toUTF8
-
-/-- The kind of a root built by hand here: nothing runs in it. -/
-private def testRoot : Kind :=
-  .root { agent := testAgent, model := testModel, image := recordedImage, workdir := recordedWorkdir }
 
 private def inputError : Error -> Bool
   | .input _ => true
@@ -103,71 +99,7 @@ def suite : Suite := Testing.suite "preview" #[
     assertError "later file absent" (workspaces.preview old "after.txt") inputError
     assertEqual "link is not read" (← assertOk <| workspaces.preview old "file-link").kind "symlink"
     assertError "outside link not traversed" (workspaces.preview old "link/secret") inputError
-    assertEqual "live working copy was not overwritten" (← IO.FS.readFile (source / "code.lean")) "new code",
-
-  test "a branch is the states from the root to a state, with nothing from siblings" do
-    let store ← assertOk <| Store.create ((← scratch) / "states")
-    -- Each kind holds what it may: an opening and a workspace, a clock reading, a notice.
-    let put (parent? : Option Hash) (kind : Kind) (appended : Agent.Log) : TestM Hash :=
-      assertOk <| putState store { parent? := parent?, workspace := workspace, kind := kind, appended }
-    let root ← put none testRoot #[.told (.user "task"), .placed workspace]
-    let middle ← put (some root) .step #[.timed 1 none]
-    let _ ← put (some root) .step #[.timed 2 none]
-    let leaf ← put (some middle) (.intervention { message := "leaf" }) #[.told (.user "leaf")]
-    let branch ← assertOk <| ancestors store leaf
-    assertEqual "states" (branch.map (·.1)) #[root, middle, leaf]
-    assertEqual "kinds" (branch.map (·.2.kind.toString)) #["root", "step", "intervention"]
-    assertEqual "the log is theirs" ((← assertOk <| logOf store leaf).size) 4
-    -- The branch is those states, and its log their events in order.
-    let onBranch ← assertOk <| branchOf store leaf
-    assertEqual "its tip" onBranch.tip.1 leaf
-    assertEqual "its root" onBranch.root.1 root
-    assertEqual "its log, a state at a time" (onBranch.states.map (·.2.appended.size)) #[2, 1, 1]
-    assertEqual "the root" (← assertOk <| rootOf store leaf) root,
-
-  test "usage keeps cached and reasoning tokens in either form, and a run's adds up from the root" do
-    let parse (usage : Lean.Json) : TestM Chat.TokenUsage := do
-      let raw := Lean.Json.mkObj [("choices", .arr #[.mkObj [("message", .mkObj [("content", "x")])]]),
-        ("usage", usage)]
-      let responses ← assertOk <| Chat.Response.fromJsons raw
-      pure (responses[0]!.usage?.getD {})
-    let openai ← parse (.mkObj [("prompt_tokens", (48211 : Nat)), ("completion_tokens", (1102 : Nat)),
-      ("prompt_tokens_details", .mkObj [("cached_tokens", (41900 : Nat))]),
-      ("completion_tokens_details", .mkObj [("reasoning_tokens", (800 : Nat))])])
-    assertEqual "cached" openai.cached? (some 41900)
-    assertEqual "reasoning" openai.reasoning? (some 800)
-    let deepseek ← parse (.mkObj [("prompt_tokens", (500 : Nat)), ("completion_tokens", (20 : Nat)),
-      ("prompt_cache_hit_tokens", (300 : Nat)), ("prompt_cache_miss_tokens", (200 : Nat))])
-    assertEqual "DeepSeek's cache hits" deepseek.cached? (some 300)
-    assertEqual "the text" (tokens openai) "in 48.2k, 41.9k cached; out 1.1k, 800 reasoning"
-    let store ← assertOk <| Store.create ((← scratch) / "states")
-    let turn (parent : Hash) (usage : Chat.TokenUsage) : TestM Hash :=
-      assertOk <| putState store {
-        parent? := some parent, workspace := workspace
-        kind := .step, appended := #[.sampled default .turn { content? := some "x", usage? := some usage }] }
-    let root ← assertOk <| putState store {
-      parent? := none, workspace := workspace, kind := testRoot, appended := #[.placed workspace] }
-    let first ← turn root openai
-    let second ← turn first deepseek
-    let run ← assertOk <| runUsage store second
-    assertEqual "input" run.input? (some 48711)
-    assertEqual "cached" run.cached? (some 42200)
-    assertEqual "reasoning, where only one reported it" run.reasoning? (some 800)
-    let tree ← assertOk <| treeLines store
-    check (tree.any fun l => (l.splitOn "in 500, 300 cached; out 20").length > 1) s!"tree shows a turn's tokens: {tree}",
-
-  test "parents that form a cycle are an error, not an endless walk" do
-    let store ← assertOk <| Store.create ((← scratch) / "states")
-    -- Content-addressed states cannot form a cycle; files edited by hand can.
-    let a : Hash := ⟨"".pushn 'a' 64⟩
-    let b : Hash := ⟨"".pushn 'b' 64⟩
-    let state (parent : Hash) : State :=
-      { parent? := some parent, workspace, kind := .step, appended := #[] }
-    IO.FS.writeFile (store.dir / s!"{a.hex}.json") (state b).toJson.compress
-    IO.FS.writeFile (store.dir / s!"{b.hex}.json") (state a).toJson.compress
-    assertError "cycle" (ancestors store a) fun
-      | .storage m => (m.splitOn "form a cycle").length > 1
-      | _ => false
+    assertEqual "live working copy was not overwritten" (← IO.FS.readFile (source / "code.lean")) "new code"
 ]
 
 end PreviewTests

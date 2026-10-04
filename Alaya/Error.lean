@@ -2,8 +2,8 @@ namespace Alaya
 
 inductive Error where
   /-- The request names something that is not there, is not in the condition the operation
-  needs, or is malformed: an unknown state, a question already answered, an agent file that is
-  not JSON, a temperature that is not finite. The caller fixes the request. -/
+  needs, or is malformed: an unknown entry, a reply where no question waits, a setting that names
+  no field, a temperature that is not finite. The caller fixes the request. -/
   | input (message : String)
   /-- The machine lacks something the operation needs: docker or its daemon, an image, restic, an
   API key. The caller fixes the machine. -/
@@ -16,7 +16,8 @@ inductive Error where
   /-- A provider returned an HTTP response; the status and body support retry and diagnostics. -/
   | http (status : Nat) (body : String) (retryAfterMs? : Option Nat := none)
   /-- The provider refused the request because it does not fit in the model's context: what a
-run ends with, rather than fails with (`Driver.resume`). The provider's own words. -/
+run's agent is answered with, not one that stops the driver (`Driver.drive`). The provider's own
+words. -/
   | contextExceeded (message : String)
   /-- A provider-specific failure not represented by transport, HTTP, or protocol failures. -/
   | provider (message : String)
@@ -26,7 +27,7 @@ run ends with, rather than fails with (`Driver.resume`). The provider's own word
   | structuredOutput (message : String)
   /-- Reading, extending, or atomically persisting a cache entry failed. -/
   | cache (message : String)
-  /-- Reading or writing the states, or a workspace snapshot, failed. -/
+  /-- Reading or writing the entries, or a workspace snapshot, failed. -/
   | storage (message : String)
   deriving Repr, Inhabited
 

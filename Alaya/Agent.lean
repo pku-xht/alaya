@@ -1,394 +1,278 @@
+import Alaya.Replay
 import Alaya.Model
-import Alaya.Hash
 import Alaya.Executor
-import Alaya.Agent.Question
+import Alaya.Chat.Stored
 
-/-! The agent API: the log of events, the effects an agent asks for and what answers each, and
-the agent itself, a function from the log to what it asks for next. See `docs/agent-api.md`. -/
+/-! What an agent of Alaya may ask the world for: its signature, `Agent`. A model samples, a
+command runs in the workspace, the clock tells the run's time, and an external program runs in a
+container of its own on a checkout of the workspace, which is how a grader works. Each has its
+type of answer, and the log keeps every operation by a key and every answer as JSON
+(`docs/log-schema.md`). See `docs/agent-api.md`. -/
 
-namespace Alaya.Agent
+namespace Alaya
 
-open Alaya (Result Error)
+open Lean (Json)
 
-/-- The context a sample is conditioned on: the output of a view. -/
-abbrev Dialogue := Array Chat.Message
-
-/-- A tool call, by where it was made: the log position of the response that made it, which
-never changes on a branch, and which of its calls it is. An answer names the call it answers by
-this, not by recency, so a sample taken between a call and its answer cannot hide the call, and
-not by the call's id, so a provider that reuses an id cannot confuse two. The id, like the call
-itself, is read off the log (`Index.call?`). -/
-structure CallRef where
-  response : Nat
-  index : Nat
-  deriving BEq, Repr, Inhabited
-
-/-- A reference as a reader is shown it where the log is not at hand: `3.0`, the first call of
-the response at position 3. -/
-instance : ToString CallRef := ⟨fun ref => s!"{ref.response}.{ref.index}"⟩
-
-/-- What a sample is for: a model turn of the agent's, whose tool calls it runs, or any other
-sample — a summary, a check of a draft — by the name the agent gives it. -/
-inductive Purpose where
-  | turn
-  /-- A sample that is not a model turn, by a name other than `turn`'s. -/
-  | other (name : String)
-  deriving BEq, Repr, Inhabited
-
-namespace Purpose
-
-/-- The purpose as a state records it: `turn`, or the other sample's name. -/
-def toString : Purpose -> String
-  | .turn => "turn"
-  | .other name => name
-
-def ofString : String -> Purpose
-  | "turn" => .turn
-  | name => .other name
-
-instance : ToString Purpose := ⟨Purpose.toString⟩
-
-end Purpose
-
-/-- One thing that happened, recorded verbatim, and named for what happened. A log holds two
-sorts: what the world did unasked — told the agent something, placed a workspace — and the
-world's answer to each of the agent's effects, recorded with what identifies the effect, so the
-log says what the agent asked for as well as what came back, and with the call it answers,
-where it answers one. -/
-inductive Event where
-  /-- The agent was told something: text placed in the context by something other than the model
-  or a tool — the prompts that open a run, a person's notice. -/
-  | told (message : Chat.Message)
-  /-- A workspace placed by the world, the project of a root or a person's edit: the workspace
-  is then at `snapshot`. -/
-  | placed (snapshot : Snapshot)
-  /-- The answer to `sample`: the model's response, whether or not it parsed, with the digest of
-  the request (`Model.requestDigest`) and what the sample was for. -/
-  | sampled (request : Hash) (purpose : Purpose) (response : Chat.Response)
-  /-- The answer to `exec`: the call the run answers, the command, how it ran, its output, and
-  the snapshot of the workspace it left: as with `placed`, the workspace is then at `snapshot`.
-  The command ran where the workspace was, on the latest snapshot the log names before it. -/
-  | executed (call : CallRef) (command : String) (config : Executor.Config)
-      (output : Output) (snapshot : Snapshot)
-  /-- One tool call's result, without the workspace: computed by the agent (`record`), or a
-  person's answer to `ask`. -/
-  | recorded (call : CallRef) (content : Lean.Json)
-  /-- The answer to `time`: how long the run has taken so far — its recorded steps, and the
-  current one — and the time budget of the invocation that timed it, when it has one. -/
-  | timed (runTimeMs : Nat) (budgetMs? : Option Nat)
+/-- What a command left: its output, the version of the workspace it left, and, when the command
+was run so, the file where a later command finds the whole of its output. -/
+structure Execution where
+  output : Output
+  workspace : Snapshot
+  file? : Option String := none
   deriving Inhabited
 
-/-- Whether the event answers an effect, rather than being placed by the world unasked. -/
-def Event.isAnswer : Event -> Bool
-  | .sampled .. | .executed .. | .recorded .. | .timed .. => true
-  | .told _ | .placed _ => false
+/-- The run's time so far, along its log, and the time budget of the invocation that timed it. -/
+structure Timing where
+  spentMs : Nat
+  budgetMs? : Option Nat := none
+  deriving Inhabited
 
-/-- Everything that happened, in order. -/
-abbrev Log := Array Event
+/-- What an external program left: how it ended, what it printed, and the checkout it ran on, as
+it left it. `error?` says why it did not finish, when it did not: a timeout, or a failure to
+start it. -/
+structure External where
+  exitCode? : Option Int := none
+  stdout : String
+  stderr : String
+  checkout : Snapshot
+  elapsedMs : Nat
+  error? : Option String := none
+  deriving Inhabited
 
-/-- Why a run stopped, and what it produced. -/
-structure Outcome where
-  /-- A short machine-readable status, e.g. "Submitted" or "LimitsExceeded". -/
-  status : String
-  /-- The agent's final output, when it submitted one. -/
-  submission : String := ""
-  /-- Why, in words, when the status does not say it all: a provider's refusal of a request. -/
-  reason? : Option String := none
-  deriving Repr, BEq, Inhabited
-
-/-! ## Effects: what an agent asks for, and what answers it -/
-
-/-- What an agent asks the world to do: a description of an effect, never the effect itself. The
-driver carries it out and records its answer as one event. -/
-inductive Effect where
-  /-- Draw a response to `request`, for `purpose`. -/
-  | sample (purpose : Purpose) (request : Chat.Request)
-  /-- Run `command` for `call` in the workspace, where the log is (`Log.workspace?`), with
-  `config`'s timeout and environment; answered by `Event.executed`, with the snapshot after it.
-  A run has one workspace, which only moves forward: a command cannot name another snapshot, so
-  what the model is shown of its files never contradicts what it did to them. -/
-  | exec (call : CallRef) (command : String) (config : Executor.Config)
-  /-- Record `content` as the result of `call`: one the agent computed itself, without the
-  workspace — a page of an earlier output, the time left. Answered by `Event.recorded`. -/
-  | record (call : CallRef) (content : Lean.Json)
-  /-- Time the run: how long it has taken so far, and the time budget it has. -/
+/-- What an agent may ask for. -/
+inductive Op where
+  /-- A response of the model to `request`. -/
+  | sample (request : Chat.Request)
+  /-- `command`, run in the workspace at the version the log has reached, as `config` says. -/
+  | exec (command : String) (config : Executor.Config)
+  /-- The run's time. -/
   | time
-  /-- Stop and wait for a person; their reply is recorded as the result of `call`
-  (`Event.recorded`). -/
-  | ask (call : CallRef) (question : Question)
+  /-- An external program, opaque to the run: `command` in a fresh container of `image`, with no
+  network, on a checkout of the workspace, with `input?`, files that are not in the workspace,
+  mounted to read at `/grader`. The checkout it leaves is in its answer; the workspace of the run
+  stays where it is. -/
+  | external (command image : String) (input? : Option Snapshot) (timeoutSeconds : Nat)
   deriving Inhabited
 
-namespace Effect
+def Op.Answer : Op → Type
+  | .sample _ => Chat.Response
+  | .exec .. => Execution
+  | .time => Timing
+  | .external .. => External
 
-/-- What the world answers an effect with. -/
-def Answer : Effect -> Type
-  | .sample .. => Chat.Response
-  /- The output, and the snapshot of the workspace after the command. -/
-  | .exec .. => Output × Snapshot
-  | .record .. => Unit
-  /- The run's time in milliseconds, and its budget. -/
-  | .time => Nat × Option Nat
-  | .ask .. => Reply
+/-- What the log keeps of an operation: all of it, except that a sample is kept by the digest of
+its request (`Model.requestDigest`), so the log does not hold the dialogue again with every
+response. The request itself is what replay asks for at that point. -/
+inductive Op.Key where
+  | sample (digest : Hash)
+  | exec (command : String) (config : Executor.Config)
+  | time
+  | external (command image : String) (input? : Option Snapshot) (timeoutSeconds : Nat)
+  deriving BEq, Inhabited
 
-/-- How an answer is recorded: the event it becomes, with what identifies the effect. -/
-def event : (effect : Effect) -> effect.Answer -> Event
-  | .sample purpose request, response => .sampled (Model.requestDigest request) purpose response
-  | .exec call command config, (output, snapshot) => .executed call command config output snapshot
-  | .record call content, () => .recorded call content
-  | .time, (runTimeMs, budgetMs?) => .timed runTimeMs budgetMs?
-  | .ask call _, reply => .recorded call reply.toJson
+def Op.key : Op → Op.Key
+  | .sample request => .sample (Model.requestDigest request)
+  | .exec command config => .exec command config
+  | .time => .time
+  | .external command image input? timeout => .external command image input? timeout
 
-/-- The answer `event` gives `effect`, if it answers it: a response for the same purpose whose
-digest is the request's, a run of the same command, the same way, for the same call, a result
-recorded for the same call — for `record`, with the same content; for `ask`, a reply the
-question's form accepts — a timing of the run. -/
-def answer? : (effect : Effect) -> Event -> Option effect.Answer
-  | .sample purpose request, .sampled digest purpose' response =>
-    if purpose == purpose' && digest == Model.requestDigest request then some response else none
-  | .exec call command config, .executed call' command' config' output snapshot =>
-    if call == call' && command == command' && config == config' then some (output, snapshot) else none
-  | .record call content, .recorded call' content' =>
-    if call == call' && content == content' then some () else none
-  | .time, .timed runTimeMs budgetMs? => some (runTimeMs, budgetMs?)
-  | .ask call question, .recorded call' content =>
-    if call == call' then question.readReply? content else none
+/-- An answer, of whichever operation, as the log keeps it. -/
+inductive Stored where
+  | response (response : Chat.Response)
+  | execution (execution : Execution)
+  | timing (timing : Timing)
+  | external (external : External)
+  deriving Inhabited
+
+def Op.store : (op : Op) → op.Answer → Stored
+  | .sample _, r => .response r
+  | .exec .., e => .execution e
+  | .time, t => .timing t
+  | .external .., ran => .external ran
+
+def Op.read : (op : Op) → Stored → Option op.Answer
+  | .sample _, .response r => some r
+  | .exec .., .execution e => some e
+  | .time, .timing t => some t
+  | .external .., .external ran => some ran
   | _, _ => none
 
-/-- The effect in a few words, for messages. -/
-def describe : Effect -> String
-  | .sample purpose request => s!"sample a {purpose} request of {request.messages.size} messages"
-  | .exec call command _ => s!"run for call {call}: {command}"
-  | .record call _ => s!"record a result for call {call}"
+/-- The signature of Alaya's agents. -/
+abbrev Agent : Signature :=
+  { Op, Answer := Op.Answer, Key := Op.Key, key := Op.key, sameKey := (· == ·)
+    Stored, store := Op.store, read := Op.read }
+
+/-- The operations, as programs: each fails where it was performed when the world could not
+answer it. -/
+def sample (request : Chat.Request) : Program Agent Chat.Response := perform (σ := Agent) (.sample request)
+def exec (command : String) (config : Executor.Config := {}) : Program Agent Execution :=
+  perform (σ := Agent) (.exec command config)
+def time : Program Agent Timing := perform (σ := Agent) .time
+def external (command image : String) (input? : Option Snapshot) (timeoutSeconds : Nat) :
+    Program Agent External :=
+  perform (σ := Agent) (.external command image input? timeoutSeconds)
+
+/-- The operation in a few words, for messages. -/
+def Op.describe : Op → String
+  | .sample request => s!"sample a request of {request.messages.size} messages"
+  | .exec command _ => s!"run {command}"
   | .time => "time the run"
-  | .ask call question => s!"ask for call {call}: {question.text}"
+  | .external command image _ _ => s!"run {command} in {image}"
 
-end Effect
+/-! ## The workspace a log has reached -/
 
-/-- Where a run's commands find the whole output of every command of their branch, read-only
-and outside any workdir: the output recorded at log position `index` by call `id` is the file
-`outputFile index id`. The trajectory writes them, from the log, for any agent; a view that cuts
-or omits an output can name its file. -/
-def outputsDir : String := "/alaya/outputs"
-
-/-- The file holding the output recorded at `index` by the call `id` (`Index.callId?`): named by
-its position, which never changes on a branch, with the id, made safe for a file name, for
-reading. -/
-def outputFile (index : Nat) (id : String) : String :=
-  let safe := id.map fun c => if c.isAlphanum || c == '-' || c == '_' || c == '.' then c else '_'
-  s!"{index}-{safe}.txt"
-
-/-- Where a command finds `outputFile index id`. -/
-def outputPath (index : Nat) (id : String) : String := s!"{outputsDir}/{outputFile index id}"
-
-/-- An agent: the configuration a run records of it, the log it opens a run with, and the one
-function it decides by, from the log alone: the effect it asks for next, or the run's outcome.
-Everything it does — what the model is sent, what runs and how — is in the effects `next`
-gives. -/
-structure Agent where
-  /-- The complete configuration, in canonical form: what a root records, and all a later
-  command needs to build the same agent again. -/
-  config : Lean.Json
-  /-- The opening log of a run for a task, on a machine described by `uname`. -/
-  initialLog : String -> Uname -> Log
-  next : Log -> Effect ⊕ Outcome
-
-/-- The request the agent would sample from `log`, if it would sample. -/
-def Agent.request? (agent : Agent) (log : Log) : Option Chat.Request :=
-  match agent.next log with
-  | .inl (.sample _ request) => some request
+/-- The version of the workspace an event leaves, when it leaves one: a command does, and so
+does a change from outside. -/
+def versionAfter? : Event Agent → Option Snapshot
+  | .answered _ _ (.ok (.execution execution)) => some execution.workspace
+  | .arrived (.changed workspace _) => some workspace
   | _ => none
 
-/-! ## The index: what a log says, read off it once
+/-- The version of the workspace a log has reached; the first is the root's. -/
+def workspace? (log : Log Agent) : Option Snapshot :=
+  log.foldl (init := none) fun version event => (versionAfter? event).or version
 
-The log is the record, flat and append-only; its structure — turns, calls and what answered
-them, where the workspace is — is read off it by `Log.index`, in one pass, so no agent and no
-reader rescans the log its own way, and nothing is stored twice. -/
+/-! ## The log as JSON -/
 
-/-- A tool call of a turn, with the position of the event that answered it, if one has. -/
-structure Call where
-  ref : CallRef
-  call : Chat.ToolCall
-  answer? : Option Nat := none
+private def nullable (json : Json) (name : String) (read : Json → Except String α) :
+    Except String (Option α) := do
+  match json.getObjVal? name with
+  | .error _ | .ok .null => pure none
+  | .ok value => some <$> read value
 
-/-- A model turn: a response for `Purpose.turn`, where it is, and its calls. -/
-structure Turn where
-  position : Nat
-  response : Chat.Response
-  calls : Array Call
+private def orNull (value? : Option α) (write : α → Json) : Json :=
+  value?.map write |>.getD .null
 
-/-- What a log says. -/
-structure Index where
-  /-- The model turns, oldest first. -/
-  turns : Array Turn := #[]
-  /-- How many responses of any purpose: the model calls made. -/
-  responses : Nat := 0
-  /-- For each event, how many turns have begun by it, its own included: the turn it is part of,
-  from 1, or 0 before the first. -/
-  turnOf : Array Nat := #[]
-  /-- The workspace the log is at: the last one placed in it or left by a command. -/
-  workspace? : Option Snapshot := none
-  /-- Every workspace the log names, in order. -/
-  workspaces : Array Snapshot := #[]
-  /-- Every tool call made, in order — of turns, and of assistant messages a person wrote. -/
-  calls : Array Chat.ToolCall := #[]
+private def str (json : Json) (name : String) : Except String String :=
+  json.getObjVal? name >>= Json.getStr?
 
-namespace Index
+private def nat (json : Json) (name : String) : Except String Nat :=
+  json.getObjVal? name >>= Json.getNat?
 
-def lastTurn? (index : Index) : Option Turn := index.turns.back?
+private def hashOf (json : Json) : Except String Hash := do
+  let hex ← json.getStr?
+  if Hash.valid hex then pure ⟨hex⟩ else throw s!"not a digest: {hex}"
 
-/-- The calls of the latest turn that nothing has answered yet, in order. -/
-def pending (index : Index) : Array Call :=
-  match index.lastTurn? with
-  | some turn => turn.calls.filter (·.answer?.isNone)
-  | none => #[]
+def Frame.toJson (frame : Frame) : Json := .arr (frame.map fun (n : Nat) => (n : Json))
 
-/-- The turn a call was made in, and the call. -/
-def call? (index : Index) (ref : CallRef) : Option Call := do
-  let turn ← index.turns.find? (·.position == ref.response)
-  turn.calls[ref.index]?
+def Frame.fromJson (json : Json) : Except String Frame := do
+  (← json.getArr?).mapM Json.getNat?
 
-/-- The id of the call `ref` names, as the model gave it. -/
-def callId? (index : Index) (ref : CallRef) : Option String := (index.call? ref).map (·.call.id)
+def ToolCall.toJson (call : ToolCall) : Json :=
+  .mkObj [("name", call.name), ("arguments", call.arguments)]
 
-/-- `index` with `event`, at `position`, read into it. -/
-private def add (index : Index) (position : Nat) (event : Event) : Index :=
-  let answer (index : Index) (ref : CallRef) : Index :=
-    match index.turns.findIdx? (·.position == ref.response) with
-    | none => index
-    | some t => { index with turns := index.turns.modify t fun turn =>
-        { turn with calls := turn.calls.modify ref.index ({ · with answer? := some position }) } }
-  let index := match event with
-    | .told (.assistant _ calls _) => { index with calls := index.calls ++ calls }
-    | .told _ => index
-    | .placed snapshot =>
-      { index with workspace? := some snapshot, workspaces := index.workspaces.push snapshot }
-    | .sampled _ purpose response =>
-      let index := { index with responses := index.responses + 1 }
-      if purpose != Purpose.turn then index else
-      let calls := response.toolCalls.mapIdx fun i (call : Chat.ToolCall) =>
-        ({ ref := { response := position, index := i }, call } : Call)
-      { index with turns := index.turns.push { position, response, calls }
-                   calls := index.calls ++ response.toolCalls }
-    | .executed ref _ _ _ snapshot =>
-      answer { index with workspace? := some snapshot
-                          workspaces := index.workspaces.push snapshot } ref
-    | .recorded ref _ => answer index ref
-    | .timed .. => index
-  { index with turnOf := index.turnOf.push index.turns.size }
+def ToolCall.fromJson (json : Json) : Except String ToolCall := do
+  pure { name := ← str json "name", arguments := ← json.getObjVal? "arguments" }
 
-end Index
+/-- A reply as the log keeps it: its kind under `type`, which needs no question to read. -/
+def Reply.toStored : Reply → Json
+  | .yes => .mkObj [("type", "yes")]
+  | .no => .mkObj [("type", "no")]
+  | .choice number => .mkObj [("type", "choice"), ("number", number)]
+  | .noneOfAbove => .mkObj [("type", "none_of_above")]
+  | .text words => .mkObj [("type", "text"), ("text", words)]
+  | .unavailable => .mkObj [("type", "unavailable")]
 
-/-- What `log` says, read in one pass. -/
-def Log.index (log : Log) : Index :=
-  (log.foldl (init := (({} : Index), 0)) fun (index, position) event =>
-    (index.add position event, position + 1)).1
+def Reply.ofStored (json : Json) : Except String Reply := do
+  match ← str json "type" with
+  | "yes" => pure .yes
+  | "no" => pure .no
+  | "choice" => .choice <$> nat json "number"
+  | "none_of_above" => pure .noneOfAbove
+  | "text" => .text <$> str json "text"
+  | "unavailable" => pure .unavailable
+  | other => throw s!"unknown reply: {other}"
 
-/-- What is wrong with the answers `log` holds from position `start` on, if anything: each
-`executed` and each `recorded` answers a call made before it that nothing has answered yet. -/
-def Log.checkAnswers (log : Log) (start : Nat := 0) : Except String Unit := do
-  let mut index : Index := {}
-  for (event, position) in log.zipIdx do
-    let ref? := if position < start then none else match event with
-      | .executed ref .. | .recorded ref _ => some ref
-      | _ => none
-    if let some ref := ref? then
-      let named := s!"the answer at position {position} names call {ref.index} of the response at {ref.response}"
-      match index.call? ref with
-      | none => throw s!"{named}, which is no call made before it"
-      | some call =>
-        if call.answer?.isSome then throw s!"{named}, which is already answered"
-    index := index.add position event
+def Notice.toJson : Notice → Json
+  | .said message => .mkObj [("type", "said"), ("message", message)]
+  | .changed workspace summary =>
+    .mkObj [("type", "changed"), ("workspace", workspace.hex), ("summary", summary)]
+  | .replied to reply => .mkObj [("type", "replied"), ("to", to.toJson), ("reply", reply.toStored)]
+  | .assigned grader => .mkObj [("type", "assigned"), ("grader", grader)]
 
-namespace Log
+def Notice.fromJson (json : Json) : Except String Notice := do
+  match ← str json "type" with
+  | "said" => .said <$> str json "message"
+  | "changed" => pure (.changed (← json.getObjVal? "workspace" >>= hashOf) (← str json "summary"))
+  | "replied" =>
+    pure (.replied (← json.getObjVal? "to" >>= Frame.fromJson) (← json.getObjVal? "reply" >>= Reply.ofStored))
+  | "assigned" => .assigned <$> json.getObjVal? "grader"
+  | other => throw s!"unknown notice: {other}"
 
-/-- How many responses the log holds, of any purpose: the model calls made. -/
-def responses (log : Log) : Nat := log.index.responses
+def Op.Key.toJson : Op.Key → Json
+  | .sample digest => .mkObj [("type", "sample"), ("request", digest.hex)]
+  | .exec command config => .mkObj [("type", "exec"), ("command", command), ("config", config.toJson)]
+  | .time => .mkObj [("type", "time")]
+  | .external command image input? timeout =>
+    .mkObj [("type", "external"), ("command", command), ("image", image),
+      ("input", orNull input? (Json.str ·.hex)), ("timeout_seconds", timeout)]
 
-def workspace? (log : Log) : Option Snapshot := log.index.workspace?
+def Op.Key.fromJson (json : Json) : Except String Op.Key := do
+  match ← str json "type" with
+  | "sample" => .sample <$> (json.getObjVal? "request" >>= hashOf)
+  | "exec" => pure (.exec (← str json "command") (← json.getObjVal? "config" >>= Executor.Config.fromJson))
+  | "time" => pure .time
+  | "external" =>
+    pure (.external (← str json "command") (← str json "image") (← nullable json "input" hashOf)
+      (← nat json "timeout_seconds"))
+  | other => throw s!"unknown operation: {other}"
 
-def workspaces (log : Log) : Array Snapshot := log.index.workspaces
+def Stored.toJson : Stored → Json
+  | .response r => r.toStored
+  | .execution e =>
+    .mkObj [("output", e.output.toJson), ("workspace", e.workspace.hex), ("file", orNull e.file? .str)]
+  | .timing t => .mkObj [("spent_ms", t.spentMs), ("budget_ms", orNull t.budgetMs? fun n => (n : Json))]
+  | .external e =>
+    .mkObj [("exit_code", orNull e.exitCode? fun n => (n : Json)), ("stdout", e.stdout),
+      ("stderr", e.stderr), ("checkout", e.checkout.hex), ("elapsed_ms", e.elapsedMs),
+      ("error", orNull e.error? .str)]
 
-def pending (log : Log) : Array Call := log.index.pending
+/-- An answer, read as the answer of the operation `key` names. -/
+def Stored.fromJson (key : Op.Key) (json : Json) : Except String Stored := do
+  match key with
+  | .sample _ => .response <$> Chat.Response.ofStored json
+  | .exec .. =>
+    let some output := Output.fromJson? (← json.getObjVal? "output")
+      | throw "an execution's output is not a command's output"
+    pure (.execution { output, workspace := ← json.getObjVal? "workspace" >>= hashOf
+                       file? := ← nullable json "file" Json.getStr? })
+  | .time => pure (.timing { spentMs := ← nat json "spent_ms", budgetMs? := ← nullable json "budget_ms" Json.getNat? })
+  | .external .. =>
+    pure (.external {
+      exitCode? := ← nullable json "exit_code" Json.getInt?
+      stdout := ← str json "stdout", stderr := ← str json "stderr"
+      checkout := ← json.getObjVal? "checkout" >>= hashOf
+      elapsedMs := ← nat json "elapsed_ms"
+      error? := ← nullable json "error" Json.getStr? })
 
-def calls (log : Log) : Array Chat.ToolCall := log.index.calls
+def eventToJson : Event Agent → Json
+  | .arrived notice => .mkObj [("type", "arrived"), ("notice", notice.toJson)]
+  | .heard frame notices =>
+    .mkObj [("type", "heard"), ("frame", frame.toJson), ("notices", .arr (notices.map fun (n : Nat) => (n : Json)))]
+  | .answered frame key answer =>
+    .mkObj [("type", "answered"), ("frame", frame.toJson), ("op", key.toJson),
+      ("answer", match answer with | .ok stored => Stored.toJson stored | .error _ => .null),
+      ("error", match answer with | .ok _ => .null | .error error => .str error)]
+  | .opened frame tool => .mkObj [("type", "opened"), ("frame", frame.toJson), ("tool", tool.toJson)]
+  | .returned frame value => .mkObj [("type", "returned"), ("frame", frame.toJson), ("value", value)]
+  | .failed frame error => .mkObj [("type", "failed"), ("frame", frame.toJson), ("error", error)]
+  | .stopped reason => .mkObj [("type", "stopped"), ("reason", reason)]
 
-end Log
+def eventFromJson (json : Json) : Except String (Event Agent) := do
+  let frame : Except String Frame := json.getObjVal? "frame" >>= Frame.fromJson
+  match ← str json "type" with
+  | "arrived" => .arrived <$> (json.getObjVal? "notice" >>= Notice.fromJson)
+  | "heard" => pure (.heard (← frame) (← (← json.getObjVal? "notices" >>= Json.getArr?).mapM Json.getNat?))
+  | "answered" =>
+    let key ← json.getObjVal? "op" >>= Op.Key.fromJson
+    let answer ← match ← nullable json "error" Json.getStr? with
+      | some error => pure (.error error)
+      | none => .ok <$> (json.getObjVal? "answer" >>= Stored.fromJson key)
+    pure (.answered (← frame) key answer)
+  | "opened" => pure (.opened (← frame) (← json.getObjVal? "tool" >>= ToolCall.fromJson))
+  | "returned" => pure (.returned (← frame) (← json.getObjVal? "value"))
+  | "failed" => pure (.failed (← frame) (← str json "error"))
+  | "stopped" => .stopped <$> str json "reason"
+  | other => throw s!"unknown event: {other}"
 
-/-- The tokens of a request with `dialogue`, estimated at four characters a token of its JSON. -/
-def estimateTokens (dialogue : Dialogue) : Nat :=
-  (dialogue.foldl (fun n m => n + m.toJson.compress.length) 0 + 3) / 4
-
-/-- The tokens `full`, a request's messages from `log`, holds, known without a tokenizer. The
-latest model turn's recorded `usage` says how many the request it answered held — the request of
-`next` just before it — and how many it returned; what `full` holds after that request and the
-message that shows the turn is estimated. When `full` no longer begins with that request, as
-when old outputs have since been elided, or no turn has `usage`, the whole is estimated. -/
-def contextTokens (next : Log -> Effect ⊕ Outcome) (log : Log) (full : Dialogue) : Nat :=
-  let wire (dialogue : Dialogue) := dialogue.map (·.toJson.compress)
-  let measured? := log.index.turns.reverse.findSome? fun turn =>
-    turn.response.usage?.bind (·.input?) |>.map fun input =>
-      (turn.position, input, turn.response.usage?.bind (·.output?))
-  match measured? with
-  | none => estimateTokens full
-  | some (position, input, output?) =>
-    match next (log.extract 0 position) with
-    | .inl (.sample _ sent) =>
-      let before := sent.messages
-      if before.size < full.size && wire (full.extract 0 before.size) == wire before then
-        let response := output?.getD (estimateTokens (full.extract before.size (before.size + 1)))
-        input + response + estimateTokens (full.extract (before.size + 1) full.size)
-      else estimateTokens full
-    | _ => estimateTokens full
-
-/-- The request the response at `position` of `log` was sampled from: the request of `next` of
-the log before it, which is what the response records the digest of. `none` when there is no
-response there, or the agent no longer makes a request there, as when it has since changed. -/
-def Agent.requestAt? (agent : Agent) (log : Log) (position : Nat) : Option Chat.Request := do
-  let .sampled digest _ _ ← log[position]? | none
-  let request ← agent.request? (log.extract 0 position)
-  if Model.requestDigest request == digest then some request else none
-
-/-! ## Combinators: an agent from an agent
-
-Each rewrites what `next` gives and nothing else, so they compose in any order; the outermost is
-applied last. -/
-
-namespace Agent
-
-/-- `agent`, with `rewrite` applied to what it asks for next, given the log it decided from. -/
-def interpose (agent : Agent) (rewrite : Log -> Effect ⊕ Outcome -> Effect ⊕ Outcome) : Agent :=
-  { agent with next := fun log => rewrite log (agent.next log) }
-
-/-- Stops with `LimitsExceeded` instead of a sample once the log holds `limit` responses, of any
-purpose; 0 is no limit. -/
-def limitResponses (agent : Agent) (limit : Nat) : Agent :=
-  if limit == 0 then agent else
-  agent.interpose fun log next =>
-    match next with
-    | .inl (.sample ..) => if log.responses >= limit then .inr { status := "LimitsExceeded" } else next
-    | _ => next
-
-/-- Stops with `ContextExceeded` instead of a sample whose request holds `limit?` tokens
-(`contextTokens`); `none` is no limit. -/
-def limitContext (agent : Agent) (limit? : Option Nat) : Agent :=
-  match limit? with
-  | none => agent
-  | some limit =>
-    agent.interpose fun log next =>
-      match next with
-      | .inl (.sample _ request) =>
-        if contextTokens agent.next log request.messages >= limit then .inr { status := "ContextExceeded" }
-        else next
-      | _ => next
-
-/-- Runs every command with `config`'s timeout and environment, whatever the tool that asked for
-it said: how commands run is the agent's policy, not a tool's. -/
-def runCommandsWith (agent : Agent) (config : Executor.Config) : Agent :=
-  agent.interpose fun _ next =>
-    match next with
-    | .inl (.exec call command _) => .inl (.exec call command config)
-    | _ => next
-
-end Agent
-
-end Alaya.Agent
+end Alaya

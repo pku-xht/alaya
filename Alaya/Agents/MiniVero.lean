@@ -1,11 +1,10 @@
-import Alaya.Agent.MiniSwe
+import Alaya.Agents.MiniSwe
 
-/-! A minimal MiniSwe specialization for Vero. Rendering and grading are external;
-the trajectory machinery, model providers and executor are shared with MiniSwe. -/
-namespace Alaya.Agent.MiniVero
+/-! A minimal MiniSwe specialization for Vero: MiniSwe's loop with Vero's prompts. Rendering and
+grading are external; the log, model providers and executor are shared with MiniSwe. -/
+namespace Alaya.Agents.MiniVero
 
 open Alaya (Executor Uname)
-open Alaya.Agent (Agent Log Dialogue)
 
 /-- Vero's evaluation modes. A run is sent the grading rules of its own mode only, as Vero's
 per-mode instruction templates do. -/
@@ -30,7 +29,7 @@ structure Config where
   base : MiniSwe.Config := {
     stepLimit := 200
     executor := { timeoutSeconds := 600, env := #[] }
-    tools := #[Tools.Bash.tool, Tools.Submit.tool, Tools.TimeBudget.tool] }
+    tools := #["bash", "submit", "time_budget"] }
   mode : Mode := .proof
   deriving Inhabited
 
@@ -42,7 +41,7 @@ def Config.toJson (config : Config) : Lean.Json :=
 
 /-- Whether the run is offered `time_budget`, and so asked to pace itself by it. -/
 def Config.pacing (config : Config) : Bool :=
-  config.base.tools.any (·.name == "time_budget")
+  config.base.tools.contains "time_budget"
 
 def Config.fromJson (json : Lean.Json) : Except String Config := do
   let mode ← match json.getObjVal? "mode" with
@@ -116,19 +115,15 @@ def taskMessage (task : String) (mode : Mode) (uname : Uname) (pacing : Bool := 
     "Environment: " ++
       uname.system ++ " " ++ uname.release ++ " " ++ uname.version ++ " " ++ uname.machine]
 
-def initialLog (config : Config) (task : String) (uname : Uname) : Log :=
-  #[.told (.system systemMessage),
-    .told (.user (MiniSwe.withInstructions config.base
-      (taskMessage task config.mode uname config.pacing)))]
+/-- The opening of a conversation: the system message and the task. -/
+def openingMessages (config : Config) (task : String) (uname : Uname) : Array Chat.Message :=
+  #[.system systemMessage,
+    .user (MiniSwe.withInstructions config.base (taskMessage task config.mode uname config.pacing))]
 
-/-- MiniVero currently uses MiniSwe's linear model context. Experimental context
-management must be evaluated separately before changing the baseline. -/
-def view (config : Config) : Log -> Dialogue := MiniSwe.view config.base
+/-- MiniVero, for a run of `model` on a machine described by `uname`: MiniSwe's loop, with its
+linear context, and Vero's opening. -/
+def program (config : Config) (model : Models.Spec) (uname : Uname) : Program Agent Lean.Json :=
+  MiniSwe.converse { config.base with contextLimit? := MiniSwe.contextLimit? config.base model }
+    (openingMessages config · uname)
 
-def tools (config : Config) : Array Chat.ToolDefinition := MiniSwe.tools config.base
-
-def agent (config : Config := {}) (model : Models.Spec := default) : Agent :=
-  { MiniSwe.agent config.base model with
-    config := config.toJson, initialLog := initialLog config }
-
-end Alaya.Agent.MiniVero
+end Alaya.Agents.MiniVero

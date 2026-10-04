@@ -2,8 +2,8 @@ import Alaya.Sha256
 
 namespace Alaya
 
-/-- A SHA-256 digest, held as lowercase hex: the name of a state, which is the hash of its
-bytes, and the form of a workspace snapshot's identifier. -/
+/-- A SHA-256 digest, held as lowercase hex: the name of an entry of a log, which is the hash
+of its event and of the entry before it, and the form of a workspace snapshot's identifier. -/
 structure Hash where
   hex : String
   deriving BEq, Hashable, Repr, Inhabited

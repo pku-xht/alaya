@@ -2,7 +2,7 @@ import Alaya.Chat.Protocol
 
 /-!
 How Alaya stores chat data: tool calls, token usage, responses and messages, as JSON. The model
-cache and the trajectory's states both use these, so a response reads the same wherever it is
+cache and the log both use these, so a response reads the same wherever it is
 kept. The wire format sent to a provider is another thing, and stays in `Protocol`.
 
 Every field is written, `null` where it does not apply, and read strictly: a field missing or

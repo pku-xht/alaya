@@ -2,14 +2,15 @@
 
 Alaya is a framework for experimenting with coding agents, built on three principles:
 
-**Agents as pure functions.** Agent runs are random and depend on their environment, which makes
-them hard to analyse and experiment with. In Alaya, a run is a log of events, such as model
-responses, command outputs and messages from a person, and an agent is a pure function from this
-log to its next effect, such as a model request or a command. Alaya carries out each effect and
-records its result, filesystem snapshots included. Every run is therefore complete data that can
-be analysed without running it again, and any point in a run can start a controlled experiment:
-vary a single factor, such as a message, a file, or the model, or resample the continuation, and
-compare the outcomes.
+**Agents as programs over a log.** Agent runs are random and depend on their environment, which
+makes them hard to analyse and experiment with. In Alaya, an agent is a program that only asks:
+for a model's response, a command's output, the time, a person's reply. A run is the log of
+those answers and of everything that arrived from outside, and replaying the program against
+the log tells what it does next. Alaya carries out each request and appends its answer,
+filesystem snapshots included. Every run is therefore complete data that can be analysed without
+running it again, the calls of its tools nested in the log as they were made, and any point
+of a run can start a controlled experiment: vary a single factor, such as a message, a file, or
+the model, or resample the continuation, and compare the outcomes.
 
 **Agent-native operation.** Experiments with agents produce more data than a person can process
 by hand, and research itself is increasingly automated by AI. Alaya is designed to be operated
@@ -19,9 +20,10 @@ ideas to evaluating them in experiments.
 
 **Reliable runs on realistic benchmarks.** Runs on realistic benchmarks are long and expensive,
 need non-trivial environments, and are graded in ways that differ from benchmark to benchmark.
-Alaya saves a run after every step and caches model responses, so an interrupted run continues
-where it stopped; runs every command in an isolated container of the benchmark's image; and
-grades every outcome through one interface, with an adapter for each benchmark. Alaya includes
+Alaya appends to a run's log as it goes and caches model responses, so an interrupted run
+continues where it stopped; runs every command in an isolated container of the benchmark's image;
+and grades any point of any run through one interface, a grader assigned to it once its agent is
+over, with an adapter for each benchmark. Alaya includes
 MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for the Vero benchmark of
 verified Lean code.
 
@@ -29,7 +31,7 @@ verified Lean code.
 
 ```sh
 lake build              # the alaya executable, in .lake/build/bin/
-lake exe tests          # the test suite; pass a substring to run a subset
+lake exe tests          # the test suite, which runs that executable too; pass a substring to run a subset
 ```
 
 Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls `curl` for every request to
@@ -42,44 +44,62 @@ language from its specification, graded against programs the agent never sees.
 
 ```sh
 docker build -t alaya-bija example/bija
-export ALAYA_DATA=$PWD/runs    # the data directory; `root` creates it
+export ALAYA_DATA=$PWD/runs    # the data directory; `new` creates it
+last() { tail -n 1 | cut -d' ' -f1; }
 
-# Run the agent until it submits, then grade where it ended.
-root=$(alaya root --task-file example/bija/TASK.txt example/bija/skeleton \
-  --agent mini-swe --model gpt-6-luna --set model.params.reasoning_effort=high --image alaya-bija)
-alaya resume "$root" --provider apiyi    # one line per new state; `alaya config` lists models, providers
-alaya eval END --input example/bija --grader /grader/grade.py --timeout 1800
+# A run: the project, the agent's configuration, and the task.
+tip=$(alaya new --task-file example/bija/TASK.txt example/bija/skeleton --agent mini-swe \
+  --model gpt-6-luna --set model.params.reasoning_effort=high --image alaya-bija | last)
+end=$(alaya run "$tip" --provider apiyi | last)   # an entry a line; `alaya config` lists models, providers
 
-# Find the step where it went wrong, and see what the model was sent there.
+# Grade it: a grader is a command that prints TAP, run on a checkout of the workspace.
+grader=(--grader 'python3 /grader/grade.py' --grader-input example/bija)
+alaya grade "$end" "${grader[@]}"
+
+# Find where it went wrong, and see what the model was sent there.
 alaya tree
-alaya show STEP --request
+alaya log "$end"
+alaya show "$end:140" --request
 
-# Correct the workspace at that step by hand, let the agent go on from the correction, and grade
-# the new branch.
-alaya checkout STEP fix    # its files, to edit by hand in fix/
-fixed=$(alaya commit STEP fix --message "I corrected the parser by hand; go on from here.")
-alaya resume "$fixed" --provider apiyi
-alaya eval END2 --input example/bija --grader /grader/grade.py --timeout 1800
+# Grade that point too: a fork stopped there, graded the same way.
+alaya grade "$end:140" "${grader[@]}"
+
+# Correct the workspace at that point by hand, and let the agent go on from the correction.
+alaya checkout "$end:140" fix              # its files, to edit by hand in fix/
+fixed=$(alaya commit "$end:140" fix --message "I corrected the parser by hand; go on from here." | last)
+fixed_end=$(alaya run "$fixed" --provider apiyi | last)
+alaya grade "$fixed_end" "${grader[@]}"
 ```
 
-`END`, `STEP` and `END2` stand for state hashes, or any unambiguous prefix of one: `resume`
-prints each state it adds, and `tree` the whole forest. The first branch is untouched, so the two
-verdicts compare the same run with and without the correction.
+`ENTRY:N` names the entry at position `N` of a log, and every command that appends prints each
+entry it adds; `alaya tree` shows the whole forest. The first branch is untouched, so the
+verdicts compare the same run with and without the correction, and with the agent stopped early.
 
-`alaya html report.html` writes all runs as one page. Below is the page for a
-gpt-6-luna run on [Bija](example/bija/README.md), with a second branch that starts mid-run where
-a person sent the agent a message.
+`alaya html report.html` writes all runs as one page, for reading: each branch's log, an entry a
+row, nested by the calls it happened in, with switches where branches fork, and an entry in full
+— its reasoning, its calls and output, the request the model was sent, its time and tokens, and
+the workspace changes. Below is the page for a gpt-6-luna run on [Bija](example/bija/README.md), graded 362 of 464,
+with a second branch that starts mid-run, where a person sent the agent a note on how the suite
+checks diagnostics, graded 410 of 464, and a third that grades the point where the note went in
+as it stood, 362 of 464; the page shows a turn of the second.
 
 ![The HTML report of a gpt-6-luna run on Bija](example/bija/report.png)
 
 ## Documentation
 
-[`docs/architecture.md`](docs/architecture.md) — how the parts fit: the agent, a pure function
-from the log of a run to its next effect, or its outcome; the trajectory, a tree of immutable
-states that partition the log; and the driver, whose handler carries effects out and whose loop
-records their answers.
-Every shared data structure — events, call references, the index of model turns, steps and
-branches — with diagrams of how a log is referenced and partitioned.
+[`docs/architecture.md`](docs/architecture.md) — how the parts fit: programs, which only ask;
+the log, flat and append-only, kept as a forest of entries named by their content; replay, which
+reads a log with its program to find what comes next; and the driver, which carries that out and
+appends the answer. Every shared data structure, with diagrams.
+
+[`docs/agent-api.md`](docs/agent-api.md) — the agent API. A program over Alaya's operations —
+sample, run a command, time the run, run a grader — with failures, reads of the inbox, calls of
+tools by name in frames of their own, and loops; tools, agents, runs, questions and replies.
+
+[`docs/log-schema.md`](docs/log-schema.md) — the log and cache schema: the entry and the event as
+stored, how runs grow and fork, draws, what a person appends, grading a point of a run by
+stopping a fork there, the data directory, the workspace snapshots kept in a restic repository,
+and the model cache entry.
 
 [`docs/llm-api.md`](docs/llm-api.md) — the LLM API. `Alaya.Chat` is the typed data of the
 chat-completions protocol: messages, tools, tool calls, structured output, requests, and
@@ -87,28 +107,14 @@ responses. `Alaya.Model` is one interface for anything that answers a request, b
 a provider transport in layers — retry, batching, sampling independence, a persistent response
 cache — each configured separately.
 
-[`docs/agent-api.md`](docs/agent-api.md) — the agent API. A run is a log of events — what the
-world placed in it, and its answer to each of the agent's effects — and an agent is a pure
-`next` from the log to an effect — sample this request, run this command in the workspace,
-time the run, record a result, ask a person — or to the run's outcome. Each effect has a type
-of answer. An agent carries out no effect itself, so its decisions can be recomputed
-and composed with combinators.
-
-[`docs/trajectory-schema.md`](docs/trajectory-schema.md) — the trajectory and cache schema.
-`Alaya.Trajectory` records a run as a tree of content-addressed states, each holding its
-parent, the events it appends, and a snapshot of the workspace, so a run can be replayed,
-forked, evaluated against hidden tests, and continued after a person intervenes. The page
-specifies the state object, the store layout, the workspace snapshots kept in a restic
-repository, and the model cache entry.
-
 [`docs/cli.md`](docs/cli.md) — the `alaya` command line, for scripts, UIs and agents: every
 command, how a command line is read, the data directory, text and JSON output, and one exit
 status per class of failure.
 
-[`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agent.MiniSwe` is the port of
-mini-SWE-agent as one agent: the original's prompts, cut from its `mini.yaml`, its `bash` tool, and protocol for reading a
-response and answering a malformed one, realized through the agent API with Lean-native
-rendering, and commands run in a container.
+[`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agents.MiniSwe` is the port of
+mini-SWE-agent as a program: the original's prompts, cut from its `mini.yaml`, its `bash` tool,
+and protocol for reading a response and answering a malformed one, realized as a loop over the
+conversation, with Lean-native rendering, and commands run in a container.
 
 [`docs/minivero.md`](docs/minivero.md) — MiniVero, the agent for Vero's Lean implementation and
 proof tasks: MiniSwe with its own prompts, a `proof` or `codeproof` mode, and a `time_budget`
@@ -117,3 +123,6 @@ tool to pace a run by, graded by the Vero benchmark in `benchmarks/vero/`.
 [`docs/ask-user.md`](docs/ask-user.md) — `ask_user`, the tool with which MiniSwe and MiniVero
 ask a person a question and wait: yes/no, single-choice and open-ended forms, answering with
 `alaya reply`, and a local page that serves the waiting questions.
+
+The design follows the sketch in `functional_agents/`, whose own test
+`Test/Prototype.lean` runs against Alaya's interpreter.

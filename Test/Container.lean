@@ -21,7 +21,7 @@ def testSettings : IO Executor.Docker.Settings := do
   let settings ← settings.pin.toUserIO
   pure { settings with extraRunArgs := #["--label", testLabel] }
 
-/-- The pinned test image, as a trajectory records it. -/
+/-- The pinned test image, as a run records it. -/
 def testImage : IO String := do
   pure (← testSettings).image
 

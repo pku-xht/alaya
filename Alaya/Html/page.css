@@ -1,0 +1,115 @@
+*{box-sizing:border-box}
+:root{--ink:#1c1e21;--mute:#6f7985;--faint:#a3abb5;--line:#e3e6ea;--soft:#f6f7f9;--side:#fafbfc;
+--sel:#dfe9f6;--hover:#eef1f5;--blue:#3567a0;--green:#2a7a4b;--red:#b3261e;--amber:#a8690f;
+--violet:#7556a3;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+body{margin:0;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+color:var(--ink);background:#fff}
+pre,.mono{font-family:var(--mono);font-size:12px}
+#layout{display:flex;height:100vh}
+#side{width:540px;min-width:320px;max-width:70vw;display:flex;flex-direction:column;
+border-right:1px solid var(--line);background:var(--side);resize:horizontal;overflow:hidden}
+#tools{display:flex;gap:8px;padding:8px;border-bottom:1px solid var(--line)}
+#find{flex:1;min-width:0;padding:3px 8px;border:1px solid var(--line);border-radius:5px;font:inherit;
+background:#fff}
+#found{align-self:center;font-size:11px;color:var(--mute);white-space:nowrap}
+#branches{flex:none;max-height:30vh;overflow:auto;padding:4px 6px;border-bottom:1px solid var(--line)}
+#log{flex:1;overflow:auto;padding:4px 6px 40vh}
+#detail{flex:1;overflow:auto;padding:22px 30px 80px}
+
+/* A row: the branches and the log are lists of the same rows. A position, or a range of them;
+   the depth, as thin guides; an icon; what the row says; and, at its end, what it took, a
+   switch between the branches that fork there, how its log ends. */
+.row{display:flex;align-items:center;height:22px;padding:0 6px;border-radius:4px;cursor:pointer;
+white-space:nowrap;min-width:0}
+.row:hover{background:var(--hover)}
+.row.on{background:var(--sel)}
+.row.hit{box-shadow:inset 0 0 0 1px #c8a02a;background:#fdf6e0}
+.row .pos{flex:none;min-width:22px;margin-right:8px;text-align:right;color:var(--faint);font-size:11px;
+font-variant-numeric:tabular-nums}
+.row.branch .pos{min-width:46px}
+.row .guide{flex:none;width:14px;height:22px;margin-left:7px;margin-right:-7px;border-left:1px solid #d3d9e0}
+.row .sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.row .sum b{font-weight:600}
+.row.notice .sum{color:var(--violet)}
+.row .took{flex:none;margin-left:8px;color:var(--faint);font-size:11px;font-variant-numeric:tabular-nums}
+.hash{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.ic{flex:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;
+margin-right:6px}
+.i-root{color:#4a4f57}.i-sample{color:var(--blue)}.i-exec{color:#2b6f6f}.i-open{color:var(--mute)}
+.i-return{color:var(--green)}.i-fail,.i-stop{color:var(--red)}.i-heard,.i-time{color:var(--faint)}
+.i-said,.i-changed,.i-replied,.i-assigned{color:var(--violet)}.i-external{color:#2b6f6f}
+.i-question{color:var(--amber)}
+.fork{flex:none;display:inline-flex;align-items:center;margin-left:8px;border:1px solid var(--line);
+border-radius:9px;font-size:11px;color:var(--mute);background:#fff}
+.fork button{border:0;background:none;padding:0 5px;cursor:pointer;color:inherit;font:inherit}
+.fork button:hover{color:var(--ink)}
+.fork span{font-variant-numeric:tabular-nums}
+.chip{flex:none;display:inline-block;padding:0 7px;border-radius:9px;font-size:11px;line-height:17px;
+margin-left:8px;background:#eceef1;color:#454b53;white-space:nowrap}
+.chip.ok{background:#dcf1e2;color:#1c5c33}.chip.bad{background:#f8dfdd;color:#8a2a25}
+.chip.wait{background:#fbe9cf;color:#7a4a08}
+
+/* The page of an entry: what it is and where; a few facts; what it holds, as labelled blocks;
+   then the request it answered and the files it changed; and how the run stands there. */
+.page{max-width:1000px}
+.head{display:flex;align-items:baseline;gap:10px}
+.head .ic{align-self:center;margin-right:0}
+h1{font-size:16px;font-weight:600;margin:0}
+.head .at,.head .mono{color:var(--mute);font-size:12px}
+.where{color:var(--mute);font-size:12px;margin:1px 0 16px}
+a{color:var(--blue);cursor:pointer;text-decoration:none}
+a:hover{text-decoration:underline}
+.ends{margin:0 0 16px;padding:7px 12px;border-left:3px solid var(--faint);background:var(--soft);
+border-radius:0 5px 5px 0}
+.ends.done{border-color:var(--green)}.ends.failed,.ends.broken{border-color:var(--red)}
+.ends.question,.ends.waits,.ends.stopped,.ends.paused{border-color:var(--amber)}
+h2{font-size:13px;font-weight:600;margin:26px 0 10px;padding-top:14px;border-top:1px solid var(--line);
+display:flex;align-items:baseline;gap:10px}
+h2 small{font-size:12px;font-weight:400;color:var(--mute)}
+.facts{display:grid;grid-template-columns:max-content 1fr;gap:2px 18px;margin:0 0 12px}
+.facts dt{color:var(--mute);white-space:nowrap}
+.facts dd{margin:0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;white-space:pre-wrap}
+.facts.mono dd{font-family:var(--mono);font-size:12px}
+.ok{color:var(--green)}.bad{color:var(--red)}.warn{color:var(--amber)}
+.quiet{color:var(--mute)}
+.label{margin:12px 0 4px;font-size:11px;color:var(--mute)}
+pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+pre.block{padding:8px 11px;border:1px solid var(--line);border-radius:6px;background:var(--soft);
+line-height:1.45}
+pre.prose{font:inherit;line-height:1.55;background:#fff;max-width:88ch}
+pre.bad{border-color:#eec9c6;background:#fdf4f3;color:var(--ink)}
+pre.quiet{color:var(--mute)}
+.fold{position:relative}
+.fold.closed .clip{max-height:17em;overflow:hidden}
+.fold.closed .clip:after{content:'';position:absolute;left:1px;right:1px;bottom:25px;height:36px;
+border-radius:0 0 6px 6px;background:linear-gradient(transparent,rgba(255,255,255,.92))}
+button{font:inherit}
+.fold>button,button.plain{margin-top:5px;padding:0;border:0;background:none;color:var(--blue);font-size:12px;
+cursor:pointer}
+.fold>button:hover,button.plain:hover{text-decoration:underline}
+details.more{margin:8px 0}
+details.more>summary,details.file>summary{cursor:pointer}
+details.more>summary{color:var(--mute);font-size:12px}
+.verdict{margin:0 0 6px;font-size:14px}
+.checks{display:grid;grid-template-columns:max-content 1fr;gap:1px 12px;font-family:var(--mono);font-size:12px}
+.taken>div{display:flex;gap:8px;align-items:baseline}
+.taken .pos{color:var(--faint);font-size:11px;min-width:22px;text-align:right}
+/* A message of a request: its role, then its blocks. What the request adds is marked. */
+.msg{margin:10px 0;padding-left:12px;border-left:2px solid var(--line)}
+.msg.new{border-left-color:var(--blue)}
+.msg .role{font-size:11px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+.msg .label{margin-top:6px}
+.msg pre.block{margin-top:4px}
+/* A file changed: a line, and under it its diff. */
+.file{display:block;padding:2px 0}
+.file>summary,div.file{display:flex;gap:8px;align-items:baseline;list-style:none}
+.file>summary::-webkit-details-marker{display:none}
+.sign{flex:none;width:12px;text-align:center;font-family:var(--mono);font-weight:700;color:var(--mute)}
+.sign.added{color:var(--green)}.sign.removed{color:var(--red)}.sign.modified{color:var(--amber)}
+.path{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+.stat{color:var(--mute);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.diff{margin:4px 0 8px 20px;border:1px solid var(--line);border-radius:6px;overflow-x:auto}
+.diff div{padding:0 10px;white-space:pre;font-family:var(--mono);font-size:12px;line-height:1.45}
+.diff .plus{background:#e7f6ec}.diff .minus{background:#fdecea}
+.diff .gap{background:var(--soft);color:var(--mute);font-family:inherit;font-size:11px}
+.standing{margin-top:30px;padding-top:10px;border-top:1px solid var(--line);color:var(--mute);font-size:12px}

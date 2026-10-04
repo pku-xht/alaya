@@ -5,7 +5,7 @@ import Alaya.Provider.Responses
 import Alaya.Provider.Dgx
 
 /-!
-Who serves a model: chosen per invocation (`resume --provider NAME`), never recorded. A provider
+Who serves a model: chosen per invocation (`run --provider NAME`), never recorded. A provider
 is data — its API key variable, its URL, and how it serves particular models — and serving a
 model through one first checks the model's recorded requirements against what the provider
 declares, so that changing providers either sends the model the same requests or fails before

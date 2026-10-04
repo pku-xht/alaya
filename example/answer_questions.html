@@ -63,6 +63,9 @@
     .event-label { margin: 0 0 8px; color: #5d6d82; font-size: 12px; font-weight: 650; }
     .record-text { font: 13px/1.65 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; overflow: auto; max-height: 420px; }
     .tool-call { margin-top: 10px; padding: 10px 12px; border-left: 2px solid #bacce5; background: #f7f9fc; }
+    .tool-call.question-call { border-left-color: #5478b7; background: #edf3ff; }
+    .record-text.reasoning { color: #697686; }
+    .reasoning + .event-label { margin-top: 12px; }
     .raw-event { margin-top: 10px; color: #697686; font-size: 12px; }
     .raw-event > summary { padding: 6px 0; }
     .raw-event .record-text { color: #344253; }
@@ -171,38 +174,44 @@
       node.append(element('summary', null, title));
       return node;
     }
-    // `calls` names each tool call by where it was made, as an answer names it: the log position
-    // of its response and its index there. A message a person placed names its call by id.
-    function historyEvent(event, kind, calls, position) {
-      const node = element('div', 'history-event');
-      const message = event.message || event.response || event;
-      const role = event.type === 'sampled' ? 'assistant' : message.role;
-      const callName = event.call ? calls.get(`${event.call.response}.${event.call.index}`)
-        : calls.get(message.tool_call_id);
-      const isResult = event.type === 'recorded' || event.type === 'executed' || role === 'tool';
-      const content = event.type === 'executed' ? event.output
-        : event.type === 'placed' ? `Snapshot ${event.snapshot}`
-        : event.type === 'timed' ? `${(event.run_time_ms / 1000).toFixed(1)} s of the run` +
-          (event.budget_ms === null ? ', no time budget' : ` of ${(event.budget_ms / 1000).toFixed(1)} s`)
-        : message.content;
-      const label = isResult ? (kind === 'reply' ? 'Previous answer' : `Tool result${callName ? ` · ${callName}` : ''}`)
-        : event.type === 'placed' ? 'Workspace' : event.type === 'timed' ? 'Run time'
-        : ({system: 'Task instructions', user: 'User', assistant: 'Assistant'}[role] || 'Recorded event');
-      node.append(element('p', 'event-label', label));
-      if (content !== null && content !== undefined) {
-        const unavailable = kind === 'reply' && content.status === 'unavailable';
-        node.append(recordText(unavailable ? 'Unable to answer' : content));
+    function prettyArguments(text) {
+      try { return JSON.stringify(JSON.parse(text), null, 2); }
+      catch (_) { return text; }
+    }
+    // One step per message the model was sent, then the response that asked. `calls` names a
+    // tool result by the id of the call it answers.
+    function messageStep(message, index, calls, asking) {
+      const role = message.role;
+      const callName = role === 'tool' ? calls.get(message.tool_call_id) : undefined;
+      const label = asking ? 'Assistant · asks this question'
+        : role === 'tool' ? `Tool result${callName ? ` · ${callName}` : ''}`
+        : ({system: 'Task instructions', user: 'User', assistant: 'Assistant'}[role] || 'Message');
+      const node = disclosure(`${index + 1}. ${label}`, 'history-step');
+      if (asking) node.open = true;
+      const body = element('div', 'history-events');
+      const content = element('div', 'history-event');
+      if (message.reasoning_content) {
+        content.append(element('p', 'event-label', 'Reasoning'), recordText(message.reasoning_content, 'reasoning'));
       }
-      for (const [index, call] of (message.tool_calls || []).entries()) {
-        calls.set(`${position}.${index}`, call.name);
-        calls.set(call.id, call.name);
-        const block = element('div', 'tool-call');
-        block.append(element('p', 'event-label', `Tool call · ${call.name}`), recordText(call.arguments));
-        node.append(block);
+      if (typeof message.content === 'string' && message.content !== '') {
+        if (message.reasoning_content) content.append(element('p', 'event-label', 'Message'));
+        content.append(recordText(message.content));
       }
-      const raw = disclosure('Full recorded event', 'raw-event');
-      raw.append(recordText(event));
-      node.append(raw);
+      for (const call of message.tool_calls || []) {
+        const name = call.function.name;
+        calls.set(call.id, name);
+        const isQuestion = asking && name === 'ask_user';
+        const block = element('div', isQuestion ? 'tool-call question-call' : 'tool-call');
+        block.append(element('p', 'event-label', isQuestion ? 'The question · ask_user' : `Tool call · ${name}`),
+          recordText(prettyArguments(call.function.arguments)));
+        content.append(block);
+      }
+      if (!content.childNodes.length) content.append(element('p', 'context-status', 'This message is empty.'));
+      const raw = disclosure('Full message', 'raw-event');
+      raw.append(recordText(message));
+      content.append(raw);
+      body.append(content);
+      node.append(body);
       return node;
     }
     function contextPanels(question) {
@@ -210,12 +219,12 @@
       let contextVersion = 0;
       let navigationVersion = 0;
       let filesLoaded = false;
-      const query = `state=${encodeURIComponent(question.state)}`;
+      const query = `entry=${encodeURIComponent(question.entry)}`;
       const panels = element('div', 'context-panels');
       const history = disclosure('Full conversation', 'context-panel');
       history.dataset.panel = 'history';
       const historyBody = element('div', 'panel-body');
-      historyBody.append(element('p', 'help', 'This branch’s recorded conversation, from the task instructions through this question.'));
+      historyBody.append(element('p', 'help', 'What the model was sent before it asked, and its question.'));
       const historyContent = element('div');
       historyContent.append(element('p', 'context-status', 'Loading conversation…'));
       historyBody.append(historyContent);
@@ -252,19 +261,10 @@
           const result = await api(`/api/context?${query}`);
           if (disposed || version !== contextVersion) return;
           const calls = new Map();
-          // The history is the branch's log, a state at a time: an event's position is its place in it.
-          let position = 0;
-          const steps = result.history.map((step, index) => {
-            // An intervention is a commit, which places a workspace, or a tell, which only says something.
-            const labels = {root: 'Starting instructions', reply: 'Human reply', step: 'Agent step', evaluation: 'Evaluation',
-              intervention: step.events.some(event => event.type === 'placed') ? 'Workspace change' : 'Human message'};
-            const node = disclosure(`${index + 1}. ${labels[step.kind] || 'Recorded step'} · ${step.events.length} event${step.events.length === 1 ? '' : 's'}`, 'history-step');
-            const events = element('div', 'history-events');
-            for (const event of step.events) events.append(historyEvent(event, step.kind, calls, position++));
-            if (!step.events.length) events.append(element('p', 'context-status', 'No messages or tool results in this step.'));
-            node.append(events);
-            return node;
-          });
+          // The last message is the response that asked: its `ask_user` call is this question.
+          const last = result.messages.length - 1;
+          const steps = result.messages.map((message, index) =>
+            messageStep(message, index, calls, index === last && message.role === 'assistant'));
           historyContent.replaceChildren(...steps);
           if (!steps.length) historyContent.append(element('p', 'context-status', 'No conversation was recorded before this question.'));
         } catch (problem) {
@@ -356,7 +356,7 @@
     }
     function questionForm(question) {
       const form = element('form', 'question');
-      form.dataset.state = question.state;
+      form.dataset.entry = question.entry;
       const context = contextPanels(question);
       const kinds = {yes_no: 'Yes / no', single_choice: 'Single choice', open_ended: 'Open question'};
       form.append(element('p', 'type', kinds[question.question_type]));
@@ -364,7 +364,7 @@
       fieldset.append(element('legend', null, question.question));
       const fields = element('div', 'fields');
       const help = element('p', 'help');
-      help.id = `help-${question.state}`;
+      help.id = `help-${question.entry}`;
       fieldset.setAttribute('aria-describedby', help.id);
       fields.append(help);
       let textarea;
@@ -384,7 +384,7 @@
           const label = element('label', 'option');
           const input = element('input');
           input.type = 'radio';
-          input.name = `answer-${question.state}`;
+          input.name = `answer-${question.entry}`;
           input.value = binary ? ['yes', 'no'][index]
             : index === question.options.length ? 'none_of_above' : String(index + 1);
           input.required = true;
@@ -446,10 +446,10 @@
         error.hidden = true;
         updateBusy();
         try {
-          await api('/api/reply', isUnavailable ? {state: question.state, status: 'unavailable'} : {state: question.state, answer});
-          answered.add(question.state);
+          await api('/api/reply', isUnavailable ? {entry: question.entry, status: 'unavailable'} : {entry: question.entry, answer});
+          answered.add(question.entry);
           context.dispose();
-          forms.delete(question.state);
+          forms.delete(question.entry);
           form.remove();
           updateCount();
           announce(isUnavailable ? 'Saved as unable to answer. The agent can continue.' : 'Answer submitted and saved.');
@@ -474,20 +474,20 @@
         pendingQuestions = incoming;
         return;
       }
-      const waiting = new Set(incoming.map(question => question.state));
-      for (const [state, form] of forms) {
-        if (!waiting.has(state)) {
+      const waiting = new Set(incoming.map(question => question.entry));
+      for (const [entry, form] of forms) {
+        if (!waiting.has(entry)) {
           form.dispose();
           form.node.remove();
-          forms.delete(state);
+          forms.delete(entry);
         }
       }
       for (const question of incoming) {
         // Keep existing nodes in place: their answers, focus and disclosures belong
         // to the person. Newly observed questions join the end of the list.
-        if (forms.has(question.state) || answered.has(question.state)) continue;
+        if (forms.has(question.entry) || answered.has(question.entry)) continue;
         const form = questionForm(question);
-        forms.set(question.state, form);
+        forms.set(question.entry, form);
         form.update();
         questions.append(form.node);
       }
@@ -507,7 +507,7 @@
       const value = JSON.parse(data.join('\n'));
       if (type === 'questions') {
         if (!Array.isArray(value.questions) || value.questions.some(question =>
-          !question || !/^[0-9a-f]{64}$/.test(question.state) || typeof question.question !== 'string' ||
+          !question || !/^[0-9a-f]{64}$/.test(question.entry) || typeof question.question !== 'string' ||
           !['yes_no', 'single_choice', 'open_ended'].includes(question.question_type) ||
           !Array.isArray(question.options) || question.options.some(option => typeof option !== 'string'))) {
           throw new Error('Invalid question update.');

@@ -41,7 +41,7 @@ inductive Message where
   | system (content : String)
   | user (content : String)
   | assistant (content? : Option String := none) (toolCalls : Array ToolCall := #[])
-      (reasoning? : Option String := none)
+      (reasoning? : Option String := none) (reasoningItems : Array Lean.Json := #[])
   | tool (callId : String) (content : Lean.Json)
 ```
 
@@ -169,6 +169,7 @@ structure Response where
   usage? : Option TokenUsage := none
   finishReason? : Option String := none
   reasoning? : Option String := none
+  reasoningItems : Array Lean.Json := #[]
 ```
 
 `fromJson` reads the first choice. `finishReason?` matters to agents: mini-SWE-agent
@@ -189,7 +190,7 @@ structure Request where
 `toolChoice` says what the model may do with the tools: `.auto` leaves it free, `.required`
 makes it call one, `.function name` makes it call that one, and `.none` forbids calls for this
 request. `Request.toJson` is deterministic: keys are emitted in sorted order, so equal requests produce
-equal strings, which is what makes the request usable as a cache key (§4). It takes the model's
+equal strings, which is what makes the request usable as a cache key (§3). It takes the model's
 `StructuredOutput` mode, since that decides whether a schema travels as `response_format` or as
 an instruction in the last message.
 
@@ -217,7 +218,7 @@ as a `Stream`. `next` gives the next draw, `nextN` the next several.
 
 **Drawing several.** `nextN n` could simply call `next` n times, and by default it does. But a
 model may have a cheaper way: a provider can be asked for n completions in one request, and the
-concurrent batcher (§4) sends n requests at the same time. Such a model puts that way into the
+concurrent batcher (§3) sends n requests at the same time. Such a model puts that way into the
 stream's private field, and `nextN` uses it when present.
 
 **Identity.** `identity` is a JSON value that says what is answering: for a provider's model,
@@ -226,7 +227,7 @@ sent back — and never the provider, so the same model's answers are the same d
 served them.
 
 **The cache key.** `Model.cacheKey request` names a draw sequence as a string, so that the cache
-(§4) can store and find the draws of a request. It is the identity and the request together,
+(§3) can store and find the draws of a request. It is the identity and the request together,
 serialized as one JSON object with sorted keys and no whitespace:
 
 ```json
@@ -288,9 +289,9 @@ A model is named independently of who serves it, by its ID as its creator publis
 (`gpt-oss-120b`, `deepseek-v4.1-flash`), and its defaults are a row of the model table,
 `Alaya.Models`: a `Spec` of `params` — request fields sent as they are, such as `temperature`
 or `reasoning_effort` — whether its earlier reasoning is sent back, and the context
-and output sizes when known. A root records the complete spec (`docs/cli.md` §5).
+and output sizes when known. A run's configuration holds the complete spec (`docs/cli.md` §5).
 
-A provider is who serves it, chosen per invocation (`resume --provider NAME`). Providers are
+A provider is who serves it, chosen per invocation (`run --provider NAME`). Providers are
 data, in `Alaya.Provider`:
 
 | Provider | Default endpoint | Key variable | Endpoint override | Serves |
@@ -360,8 +361,9 @@ its chain of thought across tool calls; Chat Completions has no field for them, 
 every turn reasons afresh. With `echo_reasoning` `items`, as `gpt-6-luna` has it, the transport
 asks for them (`include: ["reasoning.encrypted_content"]`, with `reasoning.summary` `auto` for a
 readable summary), the response records them as received, and every later request sends each
-turn's items back before its text and calls. `show` and the HTML report give the summary, and of
-the encrypted items only their size.
+turn's items back before its text and calls. The HTML report gives the summary, and of the
+encrypted items only how many there are; `show` prints the stored response whole, items
+included.
 
 `echo_reasoning` is thus `none`, `text` or `items`, and a route must honour it: `text` needs Chat
 Completions, `items` the Responses API, and a route that cannot is refused before any request.
@@ -468,14 +470,14 @@ reports it: the `alaya` command line exits with one status per class
 
 | Constructor | Meaning | Class |
 | --- | --- | --- |
-| `input` | the request names something that is not there, is in the wrong condition, or is malformed: an unknown state, an answered question, an agent file that is not JSON, a non-finite temperature | `input` |
+| `input` | the request names something that is not there, is in the wrong condition, or is malformed: an unknown entry, a reply where no question waits, a setting that names no field, a non-finite temperature | `input` |
 | `environment` | the machine lacks something: docker or its daemon, an image, restic, an API key | `environment` |
 | `busy` | another process is writing the data directory (`Alaya.Lock`) | `transient` |
 | `transport` | the request may or may not have arrived | `transient` |
 | `http status body retryAfterMs?` | the provider answered with a failure | `transient` for 408, 409, 425, 429 and 5xx, the statuses `Retry` retries; `model` otherwise |
-| `contextExceeded` | the provider refused the request as too long for the model's context: a 400, 413 or 422 whose error says so, in OpenAI's code `context_length_exceeded` or the usual words ("maximum context length", "context window", "prompt is too long"); a run ends on it with `ContextExceeded` (`docs/trajectory-schema.md` §2) rather than failing | `model` |
+| `contextExceeded` | the provider refused the request as too long for the model's context: a 400, 413 or 422 whose error says so, in OpenAI's code `context_length_exceeded` or the usual words ("maximum context length", "context window", "prompt is too long"); the driver logs it as the sample's answer, the one failure of a provider it does not stop at, and MiniSwe ends with `ContextExceeded` (`docs/architecture.md` §6) | `model` |
 | `provider` | a provider-specific failure that is none of the above | `model` |
 | `protocol` | a payload that is not the chat protocol | `model` |
 | `structuredOutput` | the reply did not satisfy the requested schema | `model` |
 | `cache` | the response cache could not be read or extended | `storage` |
-| `storage` | reading or writing the states, or a workspace snapshot, failed | `storage` |
+| `storage` | reading or writing the entries, or a workspace snapshot, failed | `storage` |

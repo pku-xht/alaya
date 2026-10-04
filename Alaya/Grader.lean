@@ -1,8 +1,8 @@
 import Alaya.Tap
 
 /-!
-A grader's verdict, from the TAP it printed on stdout (`Alaya.Tap`, `docs/trajectory-schema.md`
-§7). The grader's exit status is recorded but decides nothing: "the checks ran and some failed"
+A grader's verdict, from the TAP it printed on stdout (`Alaya.Tap`, `docs/log-schema.md`
+§4). The grader's exit status is recorded but decides nothing: "the checks ran and some failed"
 and "the grader crashed" can share a status, and only an incomplete TAP stream tells them apart.
 
 - **error**: the grader did not finish (it timed out, or could not be started), or its TAP is

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Serve Alaya's waiting questions on a local browser page (Python 3.10+).
 
-This only records replies. Resume the resulting states separately with Alaya.
+This only records replies. Drive the run on from the new entry separately with `alaya run`.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import Iterator, Sequence
 from urllib.parse import parse_qs, urlsplit
 
 
-STATE_HASH = re.compile(r"[0-9a-f]{64}\Z")
+ENTRY_HASH = re.compile(r"[0-9a-f]{64}\Z")
 MAX_BODY_BYTES = 1024 * 1024
 CLI_TIMEOUT_SECONDS = 30
 EVENT_POLL_SECONDS = 1
@@ -99,8 +99,8 @@ class QuestionApplication:
                 raise ApiError(502, "Alaya returned invalid question JSON.") from error
             if (
                 not isinstance(question, dict)
-                or not isinstance(question.get("state"), str)
-                or not STATE_HASH.fullmatch(question["state"])
+                or not isinstance(question.get("entry"), str)
+                or not ENTRY_HASH.fullmatch(question["entry"])
                 or not isinstance(question.get("question"), str)
                 or question.get("question_type") not in
                 ("yes_no", "single_choice", "open_ended")
@@ -109,8 +109,8 @@ class QuestionApplication:
             ):
                 raise ApiError(502, "Alaya returned an invalid question record.")
             questions.append(question)
-        # `ls` and `cat` read any state; this page shows only the questions it has listed.
-        self.listed.update(question["state"] for question in questions)
+        # `log`, `show`, `ls` and `cat` read any entry; this page shows only the questions it has listed.
+        self.listed.update(question["entry"] for question in questions)
         return questions
 
     def questions(self) -> list[dict]:
@@ -191,76 +191,156 @@ class QuestionApplication:
         if self.events_thread is not None:
             self.events_thread.join(timeout=CLI_TIMEOUT_SECONDS + 1)
 
-    def _listed(self, state: str) -> bool:
-        if state not in self.listed:
+    def _listed(self, entry: str) -> bool:
+        if entry not in self.listed:
             with self.lock:
                 self._waiting()
-        return state in self.listed
+        return entry in self.listed
 
-    def context(self, state: str) -> dict:
-        """The branch from the root to the question, one step per state."""
-        if not self._listed(state):
+    def context(self, entry: str) -> dict:
+        """What the model was sent before it asked, and the response that asked.
+
+        The question's log names the last response a model sampled, the one that called
+        `ask_user`; `show --request` gives the request that response answered.
+        """
+        if not self._listed(entry):
             raise ApiError(404, "This is not a question the page has listed.")
-        value = self._inspect(self._run("show", state, json_output=True), state, snapshot="workspace")
-        history = value.get("history")
-        # A question is a step that stopped at the question it waits on.
-        kind = value.get("kind")
-        stop = kind.get("stop") if isinstance(kind, dict) else None
-        waits = isinstance(stop, dict) and isinstance(stop.get("asked"), dict)
-        if not waits or not isinstance(history, list) or not all(
-            isinstance(step, dict) and isinstance(step.get("kind"), str)
-            and isinstance(step.get("events"), list) for step in history
+        sample = self._last_sample(self._run("log", entry, json_output=True), entry)
+        value = self._inspect(self._run("show", sample["entry"], json_output=True, flags=["--request"]),
+                              sample["entry"], snapshot="workspace")
+        request = value.get("request")
+        messages = request.get("messages") if isinstance(request, dict) else None
+        if not isinstance(messages, list) or not all(map(self._valid_message, messages)):
+            raise ApiError(502, "Alaya returned an invalid model request.")
+        answer = sample["event"]["answer"]
+        calls = answer.get("tool_calls")
+        if (
+            not isinstance(answer.get("content"), (str, type(None)))
+            or not isinstance(answer.get("reasoning"), (str, type(None)))
+            or not isinstance(calls, list) or not all(
+                isinstance(call, dict) and isinstance(call.get("id"), str)
+                and isinstance(call.get("name"), str)
+                and isinstance(call.get("invalid_arguments"), (str, type(None)))
+                for call in calls)
         ):
-            raise ApiError(502, "Alaya returned an invalid question history.")
-        return {"state": state, "workspace": value["workspace"], "history": history}
+            raise ApiError(502, "Alaya returned an invalid model response.")
+        response = {"role": "assistant"}
+        if answer["content"] is not None:
+            response["content"] = answer["content"]
+        if answer["reasoning"] is not None:
+            response["reasoning_content"] = answer["reasoning"]
+        # Arguments that did not parse as JSON are kept as the model wrote them.
+        response["tool_calls"] = [{
+            "id": call["id"], "type": "function",
+            "function": {"name": call["name"], "arguments": call["invalid_arguments"]
+                         if call["invalid_arguments"] is not None
+                         else json.dumps(call.get("arguments"), ensure_ascii=False)},
+        } for call in calls]
+        return {"entry": entry, "workspace": value["workspace"], "messages": [*messages, response]}
 
-    def files(self, state: str, path: str) -> dict:
+    @staticmethod
+    def _last_sample(output: str, entry: str) -> dict:
+        """The last entry of `log --json` whose event is a model's response to a sample."""
+        records = []
+        # As for `waiting`, only an actual LF terminates a record.
+        for line in output.split("\n"):
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as error:
+                raise ApiError(502, "Alaya returned invalid log JSON.") from error
+        if not records or not isinstance(records[-1], dict) or set(records[-1]) != {"next"}:
+            raise ApiError(502, "Alaya returned an invalid log.")
+        entries = records[:-1]
+        if not entries or not all(
+            isinstance(record, dict) and isinstance(record.get("entry"), str)
+            and ENTRY_HASH.fullmatch(record["entry"]) and isinstance(record.get("position"), int)
+            and isinstance(record.get("event"), dict) and isinstance(record["event"].get("type"), str)
+            for record in entries
+        ):
+            raise ApiError(502, "Alaya returned an invalid log entry.")
+        if entries[-1]["entry"] != entry:
+            raise ApiError(502, "Alaya returned the log of an unexpected entry.")
+        for record in reversed(entries):
+            event = record["event"]
+            op = event.get("op")
+            if (event["type"] == "answered" and isinstance(op, dict) and op.get("type") == "sample"
+                    and event.get("answer") is not None):
+                if not isinstance(event["answer"], dict):
+                    raise ApiError(502, "Alaya returned an invalid model response.")
+                return record
+        raise ApiError(502, "This question's log has no model response that asked it.")
+
+    @staticmethod
+    def _valid_message(message: object) -> bool:
+        if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
+            return False
+        role = message.get("role")
+        if role in ("system", "user"):
+            return isinstance(message.get("content"), str)
+        if role == "tool":
+            return isinstance(message.get("tool_call_id"), str) and isinstance(message.get("content"), str)
+        if role != "assistant" or not isinstance(message.get("reasoning_content", ""), str):
+            return False
+        calls = message.get("tool_calls", [])
+        return isinstance(calls, list) and all(
+            isinstance(call, dict) and isinstance(call.get("id"), str)
+            and isinstance(call.get("function"), dict)
+            and isinstance(call["function"].get("name"), str)
+            and isinstance(call["function"].get("arguments"), str)
+            for call in calls)
+
+    def files(self, entry: str, path: str) -> dict:
         """A directory of the question's snapshot."""
-        if not self._listed(state):
+        if not self._listed(entry):
             raise ApiError(404, "This is not a question the page has listed.")
-        value = self._inspect(self._run("ls", state, path, json_output=True), state, path)
+        value = self._inspect(self._run("ls", entry, path, json_output=True), entry, path)
         if not isinstance(value.get("entries"), list):
             raise ApiError(502, "Alaya returned an invalid directory listing.")
         return value
 
-    def file(self, state: str, path: str) -> dict:
-        """A preview of one entry of the question's snapshot."""
-        if not self._listed(state):
+    def file(self, entry: str, path: str) -> dict:
+        """A preview of one file of the question's snapshot."""
+        if not self._listed(entry):
             raise ApiError(404, "This is not a question the page has listed.")
-        value = self._inspect(self._run("cat", state, path, json_output=True), state, path)
+        value = self._inspect(self._run("cat", entry, path, json_output=True), entry, path)
         if not isinstance(value.get("kind"), str):
             raise ApiError(502, "Alaya returned an invalid file preview.")
         return value
 
     @staticmethod
-    def _inspect(output: str, state: str, path: str | None = None, snapshot: str = "snapshot") -> dict:
+    def _inspect(output: str, entry: str, path: str | None = None, snapshot: str = "snapshot") -> dict:
         try:
             value = json.loads(output)
         except json.JSONDecodeError as error:
             raise ApiError(502, "Alaya returned invalid context JSON.") from error
         if (
-            not isinstance(value, dict) or value.get("state") != state
+            not isinstance(value, dict) or value.get("entry") != entry
             or not isinstance(value.get(snapshot), str)
-            or not STATE_HASH.fullmatch(value[snapshot])
+            or not ENTRY_HASH.fullmatch(value[snapshot])
             or (path is not None and value.get("path") != path)
         ):
-            raise ApiError(502, "Alaya returned context for an unexpected state or path.")
+            raise ApiError(502, "Alaya returned context for an unexpected entry or path.")
         return value
 
-    def reply(self, state: str, answer: str | None) -> str:
+    def reply(self, entry: str, answer: str | None) -> str:
         # Serialize the fresh waiting check and write across browser tabs.
         # Alaya's direct CLI still permits intentional reply forks.
         with self.lock:
             waiting = self._waiting()
-            if not any(question["state"] == state for question in waiting):
+            if not any(question["entry"] == entry for question in waiting):
                 self._publish("questions", {"questions": waiting})
                 raise ApiError(409, "This question is no longer waiting. The list updates automatically.")
-            reply = (self._run("reply", state, flags=["--unavailable"]) if answer is None
-                     else self._run("reply", state, answer)).strip()
-            if not STATE_HASH.fullmatch(reply):
+            output = (self._run("reply", entry, flags=["--unavailable"]) if answer is None
+                      else self._run("reply", entry, answer))
+            # One line per appended entry, `<name>  <position>  <frame>  <summary>`: the reply is the last.
+            lines = [line for line in output.split("\n") if line.strip()]
+            reply = lines[-1].split(None, 1)[0] if lines else ""
+            if not ENTRY_HASH.fullmatch(reply):
                 self.events_refresh.set()
-                raise ApiError(502, "Alaya returned an invalid reply state. The list updates automatically.")
-            self._publish("questions", {"questions": [q for q in waiting if q["state"] != state]})
+                raise ApiError(502, "Alaya returned an invalid reply entry. The list updates automatically.")
+            self._publish("questions", {"questions": [q for q in waiting if q["entry"] != entry]})
             self.events_refresh.set()
             return reply
 
@@ -360,22 +440,22 @@ class QuestionHandler(BaseHTTPRequestHandler):
                                      max_num_fields=2, errors="strict")
                 except (ValueError, UnicodeDecodeError) as error:
                     raise ApiError(400, "Invalid context query.") from error
-                expected = {"state"} if url.path == "/api/context" else {"state", "path"}
+                expected = {"entry"} if url.path == "/api/context" else {"entry", "path"}
                 if set(query) != expected or any(len(values) != 1 for values in query.values()):
-                    raise ApiError(400, "Expected one question state and, for files, one path.")
-                state = query["state"][0]
-                if not STATE_HASH.fullmatch(state):
-                    raise ApiError(400, "Invalid question state hash.")
+                    raise ApiError(400, "Expected one question entry and, for files, one path.")
+                entry = query["entry"][0]
+                if not ENTRY_HASH.fullmatch(entry):
+                    raise ApiError(400, "Invalid question entry hash.")
                 path = query["path"][0] if "path" in query else None
                 if path is not None and ("\0" in path or len(path) > 4096):
                     raise ApiError(400, "Invalid snapshot path.")
                 application = self.server.application
                 if url.path == "/api/context":
-                    self._json(200, application.context(state))
+                    self._json(200, application.context(entry))
                 elif url.path == "/api/files":
-                    self._json(200, application.files(state, path))
+                    self._json(200, application.files(entry, path))
                 else:
-                    self._json(200, application.file(state, path))
+                    self._json(200, application.file(entry, path))
             else:
                 raise ApiError(404, "Not found.")
         except ApiError as error:
@@ -402,15 +482,15 @@ class QuestionHandler(BaseHTTPRequestHandler):
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
             raise ApiError(400, "Invalid JSON body.") from error
-        if not isinstance(value, dict) or set(value) not in ({"state", "answer"}, {"state", "status"}):
-            raise ApiError(400, "Expected state and answer, or state and unavailable status.")
-        state = value["state"]
-        if not isinstance(state, str) or not STATE_HASH.fullmatch(state):
-            raise ApiError(400, "Invalid question state hash.")
+        if not isinstance(value, dict) or set(value) not in ({"entry", "answer"}, {"entry", "status"}):
+            raise ApiError(400, "Expected entry and answer, or entry and unavailable status.")
+        entry = value["entry"]
+        if not isinstance(entry, str) or not ENTRY_HASH.fullmatch(entry):
+            raise ApiError(400, "Invalid question entry hash.")
         if "status" in value:
             if value["status"] != "unavailable":
                 raise ApiError(400, "The only reply status is unavailable.")
-            return state, None
+            return entry, None
         answer = value["answer"]
         if not isinstance(answer, str) or "\0" in answer:
             raise ApiError(400, "The answer must be a string without NUL characters.")
@@ -418,15 +498,15 @@ class QuestionHandler(BaseHTTPRequestHandler):
             answer.encode("utf-8")
         except UnicodeEncodeError as error:
             raise ApiError(400, "The answer must contain valid Unicode.") from error
-        return state, answer
+        return entry, answer
 
     def do_POST(self) -> None:
         try:
             self._authorize()
             if self.path != "/api/reply":
                 raise ApiError(404, "Not found.")
-            state, answer = self._read_reply()
-            self._json(200, {"reply": self.server.application.reply(state, answer)})
+            entry, answer = self._read_reply()
+            self._json(200, {"reply": self.server.application.reply(entry, answer)})
         except ApiError as error:
             self._json(error.status, {"error": str(error)})
 
@@ -454,7 +534,7 @@ def main() -> None:
         )
         with QuestionServer(application, args.port) as server:
             print(f"Answer questions at {server.origin}/", flush=True)
-            print("Replies are saved; resume their states separately. Ctrl+C stops this page.", flush=True)
+            print("Replies are saved; drive the runs on from their new entries with `alaya run`. Ctrl+C stops this page.", flush=True)
             try:
                 server.serve_forever()
             except KeyboardInterrupt:

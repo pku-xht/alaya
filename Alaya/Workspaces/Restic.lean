@@ -11,7 +11,7 @@ A workspace identifier is a restic snapshot ID. It covers the time of the snapsh
 metadata of every file, so two snapshots of equal directories have different identifiers.
 
 Every operation is one `restic` process. The repository is unencrypted-by-password
-(`--insecure-no-password`): it sits beside the states, which are not encrypted either.
+(`--insecure-no-password`): it sits beside the entries, which are not encrypted either.
 -/
 
 namespace Alaya.Workspaces.Restic
@@ -31,8 +31,8 @@ private structure Finished where
   stdout : ByteArray
   stderr : String
 
-/-- Runs `restic` with the repository's flags. Standard output is kept as bytes — `dump` writes
-a file's content there — and standard error is drained concurrently so neither pipe can fill. -/
+/-- Runs `restic` with the repository's flags. Standard output is kept as bytes, which
+`jsonLines` decodes, and standard error is drained concurrently so neither pipe can fill. -/
 private def run (settings : Settings) (args : Array String)
     (cwd? : Option System.FilePath := none) : Result Finished :=
   Result.fromIO Error.storage do
@@ -176,7 +176,7 @@ def listEntries (settings : Settings) (id : Snapshot) (path : String) : Result (
   pure (entries.qsort fun a b => a.path < b.path)
 
 /-- Numbers this process's read directories. A clock alone is not enough: reads run
-concurrently (the HTML report reads several states at once), two can see the same tick, and
+concurrently (the HTML report reads several snapshots at once), two can see the same tick, and
 the first to finish would remove the directory the other is reading from. -/
 private initialize readCounter : IO.Ref Nat ← IO.mkRef 0
 
