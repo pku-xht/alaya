@@ -74,6 +74,22 @@ private def printed (log : Log Agent) (command : String) : Option String :=
     | .answered _ (.exec ran _) (.ok (.execution e)) => if ran == command then some e.output.output else none
     | _ => none
 
+/-- A run whose agent comments on what it does: before a command, and on what it printed. -/
+private def commenting : Run Agent :=
+  { routines := fun name =>
+      if name == agentRoutine then some fun _ => do
+        comment "before the command"
+        let ran ← exec "echo one"
+        comment s!"it printed {ran.output.output}"
+        return "done"
+      else none
+    call := ⟨agentRoutine, (testConfig testAgent).toJson⟩
+    after := grading }
+
+/-- The comments of a log: who made each, a frame or a person, and what it says. -/
+private def comments (log : Log Agent) : Array (Option Frame × String) :=
+  log.filterMap fun | .commented frame? text => some (frame?, text) | _ => none
+
 /-- A log as lines, the names of snapshots left out: two runs take snapshots of their own. -/
 private def describe (log : Log Agent) : Array String := log.map fun
   | .answered frame key (.ok (.execution e)) =>
@@ -293,7 +309,7 @@ def suite : Suite := Testing.suite "runs" #[
         | .input _ => true
         | _ => false
       -- A grader is assigned once the agent is over, and not before; one that can be read.
-      let grader : Agents.Tools.Grade.Grader := { command := "true", image := recordedImage }
+      let grader : Grader := { command := "true", image := recordedImage }
       assertError "a grader while the agent runs" (Driver.append rt.store run paused (assignment grader)) fun
         | .input message => contains message "still running"
         | _ => false
@@ -305,7 +321,7 @@ def suite : Suite := Testing.suite "runs" #[
       check ((next run log) matches .hears #[] _) "what follows the agent takes the grader"
       -- While a grader runs, the agent is over too: a stop has no place, nor a message.
       let grading := settle run log
-      check ((next run grading) matches .ask { frame := #[1], .. }) "the grader's program is asked for, in its own frame"
+      check ((next run grading) matches .ask { frame := #[], op := .external .., .. }) "the grader's program is asked for, in the run's own frame"
       let forest ← assertOk rt.store.forest
       let mut during := asked
       let mut forest := forest
@@ -334,6 +350,38 @@ def suite : Suite := Testing.suite "runs" #[
       assertError "nor is anything appended to it" (Driver.append rt.store run bad (.arrived (.said "go on"))) fun
         | .input message => contains message "no trace"
         | _ => false,
+
+  test "a program's comments are written once, and a person's is passed over by the run that goes on from it" do
+    let run := commenting
+    let rt ← runtime (echoing) none
+    let tip ← start rt run
+    let (first, stop) ← assertOk <| Driver.drive rt run tip
+    check (stop matches .over (.returned _) none) "the agent is over"
+    let log ← logAt rt first
+    assertEqual "the program's comments, in their places" (comments log)
+      #[(some #[0], "before the command"), (some #[0], "it printed ok")]
+    -- Driven again from its end, nothing is written: the comments are there.
+    let count := (← assertOk rt.store.forest).entries.size
+    let _ ← assertOk <| Driver.drive rt run first
+    assertEqual "no entry written" (← assertOk rt.store.forest).entries.size count
+    -- A person's comment where the run started: the run goes on from it as if it were not there.
+    let (noted, entry) ← assertOk <| Notices.comment rt.store tip "watch the command"
+    check (entry.event matches .commented none "watch the command") "a person's comment has no frame"
+    let (second, stop) ← assertOk <| Driver.drive rt run noted
+    check (stop matches .over (.returned _) none) "the agent is over, from the comment too"
+    assertEqual "the person's comment, then the program's" (comments (← logAt rt second))
+      #[(none, "watch the command"), (some #[0], "before the command"), (some #[0], "it printed ok")]
+    -- A comment is taken at any entry, with nothing to check: where the agent is over, where a
+    -- stop or a message is refused, and on a log that is no trace of its run.
+    let (after, _) ← assertOk <| Notices.comment rt.store first "after the end"
+    check ((next run (← logAt rt after)) matches .waits #[]) "the run stands as it stood"
+    assertError "a message there" (Driver.append rt.store run after (.arrived (.said "late"))) fun
+      | .input _ => true
+      | _ => false
+    let forest ← assertOk rt.store.forest
+    let (bad, _) ← assertOk <| rt.store.put forest { parent? := some tip, event := .returned #[0, 5] "x" }
+    let _ ← assertOk <| Notices.comment rt.store bad "this log is broken"
+    pure (),
 
   test "a person's message and a person's change are told to the model as interventions" do
     let told (notice : Notice) : String :=

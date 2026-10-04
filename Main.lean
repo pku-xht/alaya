@@ -309,7 +309,7 @@ private def GradeArgs.cli : Cli.Spec GradeArgs :=
 /-- The grader the arguments describe, for a run in `runImage`: its image pinned, its input
 snapshotted. -/
 private def GradeArgs.grader (a : GradeArgs) (workspaces : Workspaces) (runImage : String) :
-    Result Agents.Tools.Grade.Grader := do
+    Result Grader := do
   let image ← match a.image? with
     | some reference => pure (← Executor.Docker.Settings.pin { image := reference }).image
     | none => pure runImage
@@ -410,6 +410,15 @@ private def replyRun (data : System.FilePath) (reference : String) (answer? : Op
         | none => pure .unavailable
       Result.fromExcept Error.input (replyTo log next reply)
 
+/-- Appends a person's comment after an entry. Nothing reads it, so nothing is checked: the log
+need not even be one its run can still be built from. -/
+private def commentRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
+  withData data (write := true) fun data => do
+    let (forest, tip) ← resolve data reference
+    let (hash, entry) ← Notices.comment data.store tip text
+    entryRecord out hash (forest.path tip).size entry
+    pure 0
+
 private def stopRun (data : System.FilePath) (reference reason : String) (out : Cli.Out) : Result UInt32 :=
   withData data (write := true) fun data =>
     appendTo data reference out fun _ _ => pure (.stopped reason)
@@ -504,7 +513,7 @@ private def showRun (data : System.FilePath) (reference : String) (request : Boo
         ("run_time_ms", spent), ("run_usage", usage.toStored),
         ("workspace", (workspace? log).map (Json.str ·.hex) |>.getD .null),
         ("calls", .arr (stack.map fun call => .mkObj [("frame", call.frame.toJson),
-          ("tool", call.tool.toJson), ("position", call.position)])),
+          ("routine", call.call.toJson), ("position", call.position)])),
         ("next", after), ("request", requestJson)]) ""
       return 0
     let mut lines : Array String := #[
@@ -515,7 +524,7 @@ private def showRun (data : System.FilePath) (reference : String) (request : Boo
       s!"workspace  {((workspace? log).map (·.hex)).getD "none"}"]
     let spentTokens := Render.tokens usage
     if !spentTokens.isEmpty then lines := lines.push s!"tokens     the run: {spentTokens}"
-    lines := lines.push s!"calls      {if stack.isEmpty then "none open" else " > ".intercalate (stack.map fun c => s!"{c.tool.name} ({c.frame.render})").toList}"
+    lines := lines.push s!"calls      {if stack.isEmpty then "none open" else " > ".intercalate (stack.map fun c => s!"{c.call.name} ({c.frame.render})").toList}"
     lines := lines.push s!"after it   {after}"
     lines := lines ++ #["", Render.eventSummary entry.event, (eventToJson entry.event).pretty]
     if request then
@@ -691,6 +700,10 @@ private def commands : Array Cli.Command := #[
     examples := #["alaya stop 4f2c8b:120 --reason 'enough'"]
     spec := stopRun <$> dataDir <*> entryArg
       <*> Cli.flagD "reason" .string "stopped from outside" "why, as the log keeps it" },
+  { name := "comment"
+    summary := "Append a comment after an entry: for whoever reads the log, and ignored by everything else."
+    examples := #["alaya comment 4f2c8b:140 'the parser goes wrong here'"]
+    spec := commentRun <$> dataDir <*> entryArg <*> Cli.arg "TEXT" .string "the comment" },
   { name := "waiting"
     summary := "List every log that waits for a reply, with its question."
     examples := #["alaya waiting --json"]

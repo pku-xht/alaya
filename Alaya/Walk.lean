@@ -14,7 +14,7 @@ open Lean (Json)
 /-- A call open at an entry: its frame, the call, and the position of its opening. -/
 structure OpenCall where
   frame : Frame
-  tool : ToolCall
+  call : RoutineCall
   position : Nat
 
 /-- What a reader knows at an entry of the forest. -/
@@ -58,7 +58,7 @@ def addUsage (a b : Chat.TokenUsage) : Chat.TokenUsage :=
 
 /-- The calls open after `event`, given those open before it. -/
 def OpenCall.after (stack : Array OpenCall) (position : Nat) : Event Agent → Array OpenCall
-  | .opened frame tool => stack.push { frame, tool, position }
+  | .opened frame call => stack.push { frame, call, position }
   | .returned _ _ | .failed _ _ => stack.pop
   | .stopped _ => stack.filter fun call => !call.frame.inAgent
   | _ => stack
@@ -92,8 +92,8 @@ partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit
     -- The run is known from the opening of the agent's call, the second event.
     let (config?, replayer?) : Option RunConfig × Option (Replayer Agent) :=
       match place.position, event with
-      | 1, .opened #[0] tool =>
-        match RunConfig.fromJson tool.arguments with
+      | 1, .opened #[0] call =>
+        match RunConfig.fromJson call.arguments with
         | .ok config =>
           match runOf? config with
           | some run =>
@@ -113,7 +113,7 @@ partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit
     let spentMs := place.spentMs + entry.elapsedMs
     let next? := replayer?.map (·.next)
     let question? := match next? with
-      | some (.waits frame) => (stack.find? (·.frame == frame)).bind (questionOfCall? ·.tool)
+      | some (.waits frame) => (stack.find? (·.frame == frame)).bind (questionOfCall? ·.call)
       | _ => none
     let visit : Visit := {
       hash, entry, position := place.position, config?, asked?, next?, question?, stack, agent?, spentMs

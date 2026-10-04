@@ -103,15 +103,16 @@ def eventSummary : Event Agent → String
       | none, none => "no status"
     s!"external {flatten command 50} in {flatten image 30} → {status}"
   | .answered .. => "answered"
-  | .opened _ tool =>
-    if tool.name == agentTool then
-      let name (field : String) := (tool.arguments.getObjVal? field >>= (·.getObjVal? "name") >>=
+  | .opened _ call =>
+    if call.name == agentRoutine then
+      let name (field : String) := (call.arguments.getObjVal? field >>= (·.getObjVal? "name") >>=
         Json.getStr?).toOption.getD "?"
       s!"open agent: {name "agent"}, {name "model"}"
-    else s!"open {tool.name} {(flatten (argumentsSummary tool.arguments) 60).quote}"
+    else s!"open {call.name} {(flatten (argumentsSummary call.arguments) 60).quote}"
   | .returned _ value => s!"return {valueSummary value}"
   | .failed _ error => s!"fail: {flatten error}"
   | .stopped reason => s!"stopped: {flatten reason}"
+  | .commented _ text => s!"# {flatten text}"
 
 /-- How a run whose agent is over stands, in a line: how the agent ended, and the verdict once
 the run is graded — `done: fail 352/464`, `stopped: pass 2/2` — or what the agent gave, or why
@@ -138,11 +139,12 @@ def nextSummary (question? : Option Question) (agent? : Option AgentEnd) : Next 
     | none, none => if frame.isEmpty then "waits for a workspace" else s!"waits for a notice in {frame.render}"
   | .ask call => s!"next: {call.op.describe}"
   | .hears frame _ => s!"next: a read of the inbox in {frame.render}"
-  | .opens _ tool => s!"next: open {tool.name}"
+  | .opens _ call => s!"next: open {call.name}"
   | .returns frame _ => s!"next: the return of {frame.render}"
   | .fails frame _ => s!"next: the failure of {frame.render}"
   | .mismatch position => s!"broken: the event at {position} is no trace of the program"
   | .unguarded frame => s!"broken: a loop in {frame.render} reads no event"
+  | .comments frame _ => s!"next: a comment in {frame.render}"
 
 /-- An entry as the commands that append print it: its full name, its position, its frame, and
 its event. -/
@@ -160,6 +162,8 @@ structure Row where
   status? : Option String := none
   /-- On a root: the agent, the model, and the task, once the log has them. -/
   title? : Option String := none
+  /-- Whether the entry is a comment. -/
+  comment : Bool := false
   deriving Inhabited
 
 /-- Every entry of the forest, as the tree shows it: what each log does next at its end, and on
@@ -172,6 +176,7 @@ def rows (store : Store) (forest : Forest) : Result (Array Row) := do
       | none => some "the run cannot be read"
     pure (rows.push { hash := visit.hash, parent? := visit.entry.parent?, position := visit.position
                       summary := eventSummary visit.entry.event, status?
+                      comment := visit.entry.event matches .commented ..
                       title? := if visit.position == 1 then visit.config?.map fun config =>
                         let name (json : Json) := (json.getObjVal? "name" >>= Json.getStr?).toOption.getD "?"
                         s!"{name config.agent}, {name config.model}" else none })
@@ -186,31 +191,44 @@ def rows (store : Store) (forest : Forest) : Result (Array Row) := do
 /-- The forest as a tree of branches: a root and its run, then every stretch of entries with no
 fork in it as one line — where it starts and ends, how many entries, the last event, and, at
 the end of a log, what the run does next — and the stretches that fork from its end indented
-under it. -/
+under it. A comment that nothing follows, beside another continuation of its entry, is no
+branch: it is a line under the stretch its entry is in. -/
 partial def treeLines (rows : Array Row) : Array String := Id.run do
   let byHash : Std.HashMap Hash Row := rows.foldl (init := {}) fun m row => m.insert row.hash row
   let children : Std.HashMap Hash (Array Hash) := rows.foldl (init := {}) fun m row =>
     match row.parent? with
     | some parent => m.insert parent ((m.getD parent #[]).push row.hash)
     | none => m
-  let kids (hash : Hash) := children.getD hash #[]
-  -- The stretch from `hash` on, until a fork or an end.
-  let rec stretch (hash : Hash) (length : Nat) : Hash × Nat :=
+  let all (hash : Hash) := children.getD hash #[]
+  let lone (hash : Hash) := (byHash.getD hash default).comment && (all hash).isEmpty
+  let annotation (hash : Hash) : Bool :=
+    lone hash && match (byHash.getD hash default).parent? with
+      | some parent => (all parent).any (!lone ·)
+      | none => false
+  let kids (hash : Hash) := (all hash).filter (!annotation ·)
+  let noted (indent : String) (hash : Hash) : Array String := (all hash).filter annotation |>.map fun note =>
+    let row := byHash.getD note default
+    s!"{indent}  {short note}  {row.position}  {row.summary}"
+  -- The stretch from `hash` on, until a fork or an end, and the annotations of its entries.
+  let rec stretch (indent : String) (hash : Hash) (length : Nat) (notes : Array String) :
+      Hash × Nat × Array String :=
+    let notes := notes ++ noted indent hash
     match (kids hash).toList with
-    | [only] => stretch only (length + 1)
-    | _ => (hash, length)
+    | [only] => stretch indent only (length + 1) notes
+    | _ => (hash, length, notes)
   let rec lines (hash : Hash) (indent : String) : Array String :=
-    let (last, length) := stretch hash 1
+    let (last, length, notes) := stretch indent hash 1 #[]
     let first := byHash.getD hash default
     let end' := byHash.getD last default
     let status := end'.status?.map (s!"  [{·}]") |>.getD ""
     let span := if length == 1 then short hash else s!"{short hash}..{short last}"
     let line := s!"{indent}{span}  {first.position}-{end'.position}  {end'.summary}{status}"
-    (kids last).foldl (init := #[line]) fun out child => out ++ lines child (indent ++ "  ")
+    (kids last).foldl (init := #[line] ++ notes) fun out child => out ++ lines child (indent ++ "  ")
   let mut out := #[]
   for row in rows do
     if row.parent?.isNone then
       out := out.push s!"{short row.hash}  root  {row.title?.getD row.summary}"
+      out := out ++ noted "" row.hash
       for child in kids row.hash do
         out := out ++ lines child "  "
   return out

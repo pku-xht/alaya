@@ -154,7 +154,7 @@ for line in sys.stdin:
 Alaya snapshots the trusted benchmark when `grade` assigns the grader, mounts that snapshot read-only at
 `/grader`, runs the grader image by digest, offline, as the agent's user, in a
 fresh checkout of the workspace the log has reached, at its workdir, and records
-all of it in the log: the grader's call, its answer, and the verdict
+all of it in the log: the grader assigned, its program's answer, and the verdict
 (`docs/log-schema.md` §4). The run's workspace is left as it was.
 
 The run's configuration fixes the mode and the trusted benchmark; the grader does not read

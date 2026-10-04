@@ -8,9 +8,9 @@ for a model's response, a command's output, the time, a person's reply. A run is
 those answers and of everything that arrived from outside, and replaying the program against
 the log tells what it does next. Alaya carries out each request and appends its answer,
 filesystem snapshots included. Every run is therefore complete data that can be analysed without
-running it again, the calls of its tools nested in the log as they were made, and any point
-of a run can start a controlled experiment: vary a single factor, such as a message, a file, or
-the model, or resample the continuation, and compare the outcomes.
+running it again, the calls of its tools, workflows and sub-agents nested in the log as they
+were made, and any point of a run can start a controlled experiment: vary a single factor, such
+as a message, a file, or the model, or resample the continuation, and compare the outcomes.
 
 **Agent-native operation.** Experiments with agents produce more data than a person can process
 by hand, and research itself is increasingly automated by AI. Alaya is designed to be operated
@@ -93,8 +93,9 @@ reads a log with its program to find what comes next; and the driver, which carr
 appends the answer. Every shared data structure, with diagrams.
 
 [`docs/agent-api.md`](docs/agent-api.md) — the agent API. A program over Alaya's operations —
-sample, run a command, time the run, run a grader — with failures, reads of the inbox, calls of
-tools by name in frames of their own, and loops; tools, agents, runs, questions and replies.
+sample, run a command, time the run, run a grader — with failures, reads of the inbox, loops,
+and calls of routines by name, each in a frame of its own: how an agent of tools, workflows and
+sub-agents is structured. Tools, agents, runs, questions and replies.
 
 [`docs/log-schema.md`](docs/log-schema.md) — the log and cache schema: the entry and the event as
 stored, how runs grow and fork, draws, what a person appends, grading a point of a run by

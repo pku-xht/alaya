@@ -146,12 +146,13 @@ def eventJson : Event Agent → Json
     .mkObj [("k", "external"), ("command", command), ("image", image), ("input", orNull input? (Json.str ·.hex)),
       ("exit", orNull e.exitCode? fun c => (c : Json)), ("stdout", e.stdout), ("stderr", e.stderr),
       ("checkout", e.checkout.hex), ("elapsed", e.elapsedMs), ("failure", orNull e.error? .str)]
-  | .opened _ tool =>
-    .mkObj [("k", "open"), ("tool", tool.name), ("arguments", tool.arguments),
-      ("summary", Render.argumentsSummary tool.arguments)]
+  | .opened _ call =>
+    .mkObj [("k", "open"), ("routine", call.name), ("arguments", call.arguments),
+      ("summary", Render.argumentsSummary call.arguments)]
   | .returned _ value => .mkObj [("k", "return"), ("value", value), ("summary", Render.valueSummary value)]
   | .failed _ error => .mkObj [("k", "fail"), ("error", error)]
   | .stopped reason => .mkObj [("k", "stop"), ("text", reason)]
+  | .commented _ text => .mkObj [("k", "comment"), ("text", text)]
 
 /-- What the walk keeps of the forest for the page. -/
 private structure Acc where

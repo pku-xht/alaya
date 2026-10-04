@@ -20,7 +20,7 @@ def converse (config : Config) (opening : String → Array Chat.Message) : Progr
   iter (round config) { items := (opening task).map .told, … }    -- mini's loop
 ```
 
-The agent is the program of the run's `agent` tool (`Agents.Catalog`). It waits for its task, the
+The agent is the program of the run's routine `agent` (`Agents.Catalog`). It waits for its task, the
 first thing a person says, and opens the conversation with mini's prompts for it; then it goes
 round `round` (§6) until it ends, returning `{status, submission}`: `Submitted`,
 `LimitsExceeded`, `ContextExceeded` or `RepeatedFormatError`. `ContextExceeded` has a `reason`

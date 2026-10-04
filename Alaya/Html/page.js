@@ -10,14 +10,21 @@ const entries = data.entries;
 const children = entries.map(() => []);
 entries.forEach((e, i) => { if (e.p !== null) children[e.p].push(i); });
 const roots = entries.map((e, i) => i).filter(i => entries[i].p === null);
-const isLeaf = i => children[i].length === 0;
+
+/* A comment that nothing follows, beside another continuation of its entry, is no branch: it is
+   an annotation on the entry, shown under it in every log through it. */
+const isLone = i => entries[i].e.k === 'comment' && children[i].length === 0;
+const isNote = i => isLone(i) && entries[i].p !== null && children[entries[i].p].some(c => !isLone(c));
+const kids = entries.map((e, i) => children[i].filter(c => !isNote(c)));
+const notes = entries.map((e, i) => children[i].filter(isNote));
+const isLeaf = i => kids[i].length === 0;
 
 /** The deepest entry under `i`: the end of its longest branch, which is what a switch to `i`
 shows. */
 const deepest = new Array(entries.length);
 for (let i = entries.length - 1; i >= 0; i--) {
   let best = i;
-  for (const c of children[i]) if (entries[deepest[c]].pos > entries[best].pos) best = deepest[c];
+  for (const c of kids[i]) if (entries[deepest[c]].pos > entries[best].pos) best = deepest[c];
   deepest[i] = best;
 }
 
@@ -86,14 +93,15 @@ function summary(i) {
       if (given(e.error)) return 'external failed: ' + flat(e.error, 70);
       return 'external ' + flat(e.command, 50) + ' → ' + (given(e.exit) ? 'exit ' + e.exit : flat(e.failure, 30));
     case 'open':
-      if (e.tool === 'agent') {
+      if (e.routine === 'agent') {
         const a = (e.arguments || {}).agent || {}, m = (e.arguments || {}).model || {};
         return 'open agent: ' + (a.name || '?') + ', ' + (m.name || '?');
       }
-      return 'open ' + e.tool + ' “' + flat(e.summary, 60) + '”';
+      return 'open ' + e.routine + ' “' + flat(e.summary, 60) + '”';
     case 'return': return 'return ' + (verdictOf(e.value) || flat(e.summary, 70));
     case 'fail': return 'fail: ' + flat(e.error, 70);
     case 'stop': return 'stopped: ' + flat(e.text, 70);
+    case 'comment': return '# ' + flat(e.text, 80);
     default: return e.k;
   }
 }
@@ -114,13 +122,14 @@ const GLYPHS = {
   return: '<path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/>',
   fail: '<path d="M3.2 3.2l7.6 7.6M10.8 3.2l-7.6 7.6" fill="none"/>',
   stop: '<rect x="3" y="3" width="8" height="8" rx="1" fill="none"/>',
+  comment: '<path d="M5.6 2.5l-1.2 9M9.6 2.5l-1.2 9M3 5.5h8.5M2.5 8.5H11" fill="none"/>',
   question: '<path d="M4.6 5.3a2.4 2.4 0 1 1 3.3 2.2c-.6.3-.9.7-.9 1.4" fill="none"/><circle cx="7" cy="11.2" r=".8" stroke="none"/>'
 };
 
 function glyphOf(i) {
   const e = entries[i].e;
   if (entries[i].p === null) return 'root';
-  if (e.k === 'open' && e.tool === 'ask_user') return 'question';
+  if (e.k === 'open' && e.routine === 'ask_user') return 'question';
   if (['sample', 'exec', 'time', 'external'].includes(e.k) && given(e.error)) return 'fail';
   return GLYPHS[e.k] ? e.k : 'open';
 }
@@ -194,7 +203,7 @@ function renderBranches() {
   const onPath = new Set(pathTo(leaf));
   const stretch = start => {
     let end = start;
-    while (children[end].length === 1) end = children[end][0];
+    while (kids[end].length === 1) end = kids[end][0];
     return end;
   };
   const place = (start, depth, label) => {
@@ -207,7 +216,7 @@ function renderBranches() {
     if (chip) row.append(chip);
     row.onclick = () => switchTo(start);
     box.append(row);
-    for (const c of children[end]) place(c, depth + 1);
+    for (const c of kids[end]) place(c, depth + 1);
   };
   for (const r of roots) {
     const title = runTitle(r);
@@ -244,16 +253,17 @@ function renderLog() {
   rows = new Map();
   order = pathTo(leaf);
   const depth = depths(order);
+  const kindOf = x => x.e.k === 'comment' ? 'comment' : x.f === null ? 'notice' : '';
   for (const i of order) {
     const x = entries[i];
-    const row = rowOf(String(x.pos), depth.get(i) || 0, i, x.f === null ? 'notice' : '');
+    const row = rowOf(String(x.pos), depth.get(i) || 0, i, kindOf(x));
     const text = el('span', 'sum');
     text.append(el('span', 'hash', short(x.h)), document.createTextNode(' ' + summary(i)));
     row.append(text);
     if (x.t >= 1000) row.append(el('span', 'took', duration(x.t)));
     // A switch to the other branches that fork here.
-    if (x.p !== null && children[x.p].length > 1) {
-      const siblings = children[x.p];
+    if (x.p !== null && kids[x.p].length > 1) {
+      const siblings = kids[x.p];
       const k = siblings.indexOf(i);
       const fork = el('span', 'fork');
       const back = el('button', null, '‹'), on = el('button', null, '›');
@@ -268,6 +278,16 @@ function renderLog() {
     row.onclick = () => select(i);
     rows.set(i, row);
     box.append(row);
+    // The annotations on the entry: comments beside its continuation.
+    for (const n of notes[i]) {
+      const note = rowOf(String(entries[n].pos), Math.max(1, depth.get(i) || 0), n, 'comment');
+      const said = el('span', 'sum');
+      said.append(el('span', 'hash', short(entries[n].h)), document.createTextNode(' ' + summary(n)));
+      note.append(said);
+      note.onclick = () => select(n);
+      rows.set(n, note);
+      box.append(note);
+    }
   }
 }
 
@@ -375,7 +395,7 @@ function titleOf(i) {
   if (x.p === null) return 'root';
   if (['sample', 'exec', 'time', 'external'].includes(e.k) && given(e.error)) return e.k + ' failed';
   return { said: 'said', changed: 'changed', replied: 'replied', assigned: 'assigned grader', heard: 'inbox',
-    open: 'open ' + e.tool, return: 'return', fail: 'fail', stop: 'stopped' }[e.k] || e.k;
+    open: 'open ' + e.routine, return: 'return', fail: 'fail', stop: 'stopped', comment: 'comment' }[e.k] || e.k;
 }
 
 /** Where an entry happened: the calls it is inside of, each a link to its opening; a notice and
@@ -387,7 +407,7 @@ function whereOf(i) {
   const inside = () => {
     calls.forEach((j, n) => {
       if (n) line.append(document.createTextNode(' › '));
-      line.append(link(j, entries[j].e.tool));
+      line.append(link(j, entries[j].e.routine));
     });
   };
   if (x.p === null) line.append(document.createTextNode('the workspace the run starts from'));
@@ -563,11 +583,12 @@ function renderEvent(parent, i) {
       break;
     case 'open':
       // The agent's arguments are the run's configuration, shown below.
-      if (e.tool !== 'agent') renderArguments(parent, '', e.arguments);
+      if (e.routine !== 'agent') renderArguments(parent, '', e.arguments);
       break;
     case 'return': renderValue(parent, e.value); break;
     case 'fail': block(parent, 'error', e.error, 'bad'); break;
     case 'stop': block(parent, 'reason', e.text, 'prose'); break;
+    case 'comment': block(parent, null, e.text, 'prose'); break;
   }
 }
 
@@ -582,7 +603,7 @@ function messagesOf(i) {
 
 function renderMessage(message, fresh, toolNames) {
   const box = el('div', 'msg' + (fresh ? ' new' : ''));
-  const tool = message.tool_call_id ? toolNames.get(message.tool_call_id) : null;
+  const tool = message.routine_call_id ? toolNames.get(message.routine_call_id) : null;
   box.append(el('div', 'role', message.role + (tool ? ' · ' + tool : '')));
   if (message.reasoning_content) block(box, 'reasoning', message.reasoning_content, 'prose quiet');
   if (given(message.content) && message.content !== '') {
@@ -595,7 +616,7 @@ function renderMessage(message, fresh, toolNames) {
     else block(box, null, typeof message.content === 'string' ? message.content : json(message.content),
       message.role === 'tool' ? '' : 'prose');
   }
-  for (const call of message.tool_calls || []) {
+  for (const call of message.routine_calls || []) {
     const fn = call.function || {};
     let args = fn.arguments;
     try { args = JSON.parse(args); } catch (error) { /* as sent */ }
@@ -724,7 +745,9 @@ function renderStanding(parent, i) {
 }
 
 function select(i) {
-  if (!pathTo(leaf).includes(i)) show(deepest[i]);
+  // An annotation is shown in the logs through its entry, and has no log of its own.
+  const anchor = isNote(i) ? entries[i].p : i;
+  if (!pathTo(leaf).includes(anchor)) show(deepest[anchor]);
   selected = i;
   location.hash = short(entries[i].h);
   markSelected();
@@ -738,8 +761,8 @@ function select(i) {
   name.title = x.h;
   head.append(icon(i), el('h1', null, titleOf(i)), el('span', 'at', 'position ' + x.pos), name);
   page.append(head, whereOf(i));
-  // Where a log ends: how it ends, and the question it waits on.
-  if (x.state) {
+  // Where a log ends: how it ends, and the question it waits on. An annotation ends no log.
+  if (x.state && !isNote(i)) {
     const note = el('div', 'ends ' + x.state);
     note.append(el('b', null, 'The log ends here'), document.createTextNode(' — ' + (x.next || x.state)));
     if (x.question && x.question.options.length)
@@ -764,7 +787,7 @@ function find(query, step) {
   if (!query) { hits = []; hitAt = -1; found.textContent = ''; return; }
   if (query !== lastQuery) {
     const needle = query.toLowerCase();
-    hits = order.filter(i => (short(entries[i].h) + ' ' + summary(i) + ' ' + JSON.stringify(entries[i].e))
+    hits = [...rows.keys()].filter(i => (short(entries[i].h) + ' ' + summary(i) + ' ' + JSON.stringify(entries[i].e))
       .toLowerCase().includes(needle));
     hitAt = -1;
     lastQuery = query;
@@ -787,7 +810,8 @@ document.onkeydown = event => {
   if (event.target.tagName === 'INPUT' || selected === null) return;
   if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
   event.preventDefault();
-  const next = order[order.indexOf(selected) + (event.key === 'ArrowDown' ? 1 : -1)];
+  const shown = [...rows.keys()];
+  const next = shown[shown.indexOf(selected) + (event.key === 'ArrowDown' ? 1 : -1)];
   if (next !== undefined) select(next);
 };
 
@@ -796,7 +820,7 @@ document.onkeydown = event => {
 if (entries.length) {
   const wanted = entries.findIndex(x => short(x.h) === location.hash.slice(1));
   const start = wanted >= 0 ? wanted : deepest[roots[0]];
-  leaf = deepest[start];
+  leaf = deepest[isNote(start) ? entries[start].p : start];
   renderBranches();
   renderLog();
   select(start);

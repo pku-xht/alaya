@@ -44,17 +44,19 @@ private def events : Array (Event Agent) := #[
     (.ok (.external { stdout := "", stderr := "", checkout := snapshot 'e', elapsedMs := 0, error? := some "timed out" })),
   .opened #[0, 1] ⟨"bash", .mkObj [("command", "ls")]⟩,
   .returned #[0, 1] (.mkObj [("output", "x")]),
-  .failed #[0, 1] "no tool named bash",
+  .failed #[0, 1] "no routine named bash",
   .stopped "to grade this point",
+  .commented none "a person's comment\non two lines",
+  .commented (some #[0, 1]) "a program's comment",
   assignment { command := "sh /grader/g.sh", image := "img@sha256:1", input? := some (snapshot 'd'), timeoutSeconds := 60 }]
 
 /-- A run with `program` as its agent, a tool `boom` that fails, and nothing after the agent. -/
 private def runOf (program : Program Agent Json) : Run Agent :=
-  { tools := fun name =>
-      if name == agentTool then some fun _ => program
+  { routines := fun name =>
+      if name == agentRoutine then some fun _ => program
       else if name == "boom" then some fun _ => throw "it broke"
       else none
-    call := ⟨agentTool, .null⟩
+    call := ⟨agentRoutine, .null⟩
     after := fun
       | .ok value => pure value
       | .error error => throw error }
@@ -80,9 +82,7 @@ def suite : Suite := Testing.suite "log" #[
       throw <| IO.userError "the parent is not part of the name"
     match Entry.fromJson one.toJson with
     | .ok again => if again.hash != one.hash || again.elapsedMs != 5 then throw <| IO.userError "no round trip"
-    | .error problem => throw <| IO.userError problem
-    if (Entry.fromJson (one.toJson.setObjVal! "v" 2)).toOption.isSome then
-      throw <| IO.userError "an entry of another schema is read",
+    | .error problem => throw <| IO.userError problem,
 
   iotest "the workspace of a log is the last version a command or a person left" do
     let log : Log Agent := #[events[0]!, events[11]!, .arrived (.changed (snapshot 'f') "edited"), events[7]!]
@@ -159,7 +159,7 @@ def suite : Suite := Testing.suite "log" #[
         .mkObj [("type", "answered"), ("frame", frame), ("op", .mkObj [("type", "teleport")]), ("answer", .null), ("error", .null)],
         .mkObj [("type", "answered"), ("frame", frame), ("op", .mkObj [("type", "time")]),
           ("answer", .mkObj [("output", "a command's answer")]), ("error", .null)],
-        .mkObj [("type", "opened"), ("frame", frame), ("tool", .mkObj [("arguments", .null)])]] do
+        .mkObj [("type", "opened"), ("frame", frame), ("routine", .mkObj [("arguments", .null)])]] do
       if (eventFromJson json).toOption.isSome then throw <| IO.userError s!"read as an event: {json.compress}",
 
   test "an answer to another operation, or a mark that differs, is no trace of the program" do
@@ -228,7 +228,7 @@ def suite : Suite := Testing.suite "log" #[
     check (called.any fun | .failed #[0, 0] "it broke" => true | _ => false) "the tool's call failed"
     check (called.any fun | .returned #[0] (.str "the tool said: it broke") => true | _ => false) "its caller went on"
     let missing := runOf (call "nowhere" .null)
-    check ((settle missing rootOnly).any fun | .failed #[0, 0] "no tool named nowhere" => true | _ => false)
+    check ((settle missing rootOnly).any fun | .failed #[0, 0] "no routine named nowhere" => true | _ => false)
       "a tool the run does not have fails its call"
     -- A loop that reads no event in a round would never end, and is found out.
     let spins := runOf (iter (fun (n : Nat) => (pure (Sum.inl (n + 1)) : Program Agent (Nat ⊕ Json))) 0)
@@ -236,8 +236,52 @@ def suite : Suite := Testing.suite "log" #[
     | .unguarded #[0] => pure ()
     | _ => fail "a loop that reads nothing is reported",
 
+  test "a comment is written where the driver reaches it, and replay passes over every one" do
+    let commenting : Program Agent Json := do
+      comment "starting"
+      let timing ← time
+      comment s!"the clock says {timing.spentMs}"
+      return "done"
+    let quiet : Program Agent Json := do
+      let _ ← time
+      return "done"
+    let run := runOf commenting
+    let over (label : String) (run : Run Agent) (log : Log Agent) : TestM Unit :=
+      check ((next run log) matches .done _) s!"{label}: the run is not over"
+    -- At the end of a log, the comment the program makes next is what comes next.
+    check ((next run (rootOnly.push (.opened #[0] run.call))) matches .comments #[0] "starting")
+      "the program's comment is next"
+    -- Settled as the driver settles it, the log holds each comment once, with the frame that made it.
+    let log := answer run (settle run rootOnly) (.timing { spentMs := 7 })
+    assertEqual "the comments" (log.filterMap fun | .commented frame? text => some (frame?, text) | _ => none)
+      #[(some #[0], "starting"), (some #[0], "the clock says 7")]
+    over "with its comments" run log
+    -- Replay needs none of them: without them, reworded, or with a person's among them, the log
+    -- is the same trace; and a program whose comments were taken out reads the old log.
+    over "without them" run (log.filter fun | .commented .. => false | _ => true)
+    over "reworded" run (log.map fun | .commented frame? _ => .commented frame? "reworded" | event => event)
+    for i in [1:log.size + 1] do
+      over s!"a person's at {i}" run ((log.extract 0 i).push (.commented none "by hand") ++ log.extract i log.size)
+    over "a program without comments" (runOf quiet) log
+    -- A comment the log holds in the program's place, but not the program's, is passed over, and
+    -- the program's is still to be written.
+    check ((next run ((rootOnly.push (.opened #[0] run.call)).push (.commented none "starting"))) matches
+      .comments #[0] "starting") "a person's comment is not the program's"
+    -- A comment takes a position like any event, so the positions a read marks count it.
+    match miniRun with
+    | .error problem => fail problem
+    | .ok mini =>
+      let early : Log Agent := #[.arrived (.changed default "p"), .commented none "before the agent",
+        .opened #[0] mini.call, .arrived (.said "the task"), .commented none "after the task"]
+      check ((next mini early) matches .hears #[0] #[3]) "the task is at 3, the comments around it"
+    -- A comment reads no event: a loop that only comments is as unguarded as one that does nothing.
+    let spins := runOf (iter (fun (n : Nat) => (do
+      comment s!"round {n}"
+      pure (Sum.inl (n + 1)) : Program Agent (Nat ⊕ Json))) 0)
+    check ((next spins (settle spins rootOnly)) matches .unguarded #[0]) "a loop that only comments is reported",
+
   test "what follows the agent waits for its grader, calls it once, and ends with its verdict" do
-    let grader (name : String) : Agents.Tools.Grade.Grader := { name, command := "true", image := "image" }
+    let grader (name : String) : Grader := { name, command := "true", image := "image" }
     let ran : External := { exitCode? := some 0, stdout := "1..1\nok 1\n", stderr := "", checkout := default, elapsedMs := 1 }
     match miniRun with
     | .error problem => fail problem
@@ -246,27 +290,30 @@ def suite : Suite := Testing.suite "log" #[
       let log := respond run (settle run (opening run)) (responseWith #[submitCall "s" "done"])
       check ((next run log) matches .waits #[]) "the run waits for a grader"
       check ((agentEnd? log) matches some (.returned _)) "the agent returned"
-      -- A grader: what follows the agent takes it, and calls it in the frame after the agent's.
+      -- A grader: what follows the agent takes it, and runs its program itself, in the run's own
+      -- frame. It is no routine: no call opens.
       let assigned := log.size
       let log := settle run (log.push (assignment (grader "one")))
       check (log.any fun | .heard #[] notices => notices == #[assigned] | _ => false) "the run's own frame takes the grader"
       let .ask first := next run log | fail "the grader's program is asked for"
-      assertEqual "its frame follows the agent's" first.frame #[1]
+      assertEqual "in the run's own frame" first.frame #[]
+      check (first.op matches .external "true" "image" none _) "the grader's program, as an external one"
+      check (!(log.extract assigned log.size).any fun | .opened .. => true | _ => false) "no call opens for a grader"
       -- Its verdict is the result of the run, which ends with it.
       let graded := answer run log (.external ran)
       check (graded.back? matches some (.returned #[] _)) "the run's own frame returns"
       match next run graded with
       | .done verdict => assertEqual "the verdict" (verdictStatus verdict) "pass"
       | _ => fail "the run is over, with its verdict"
-      -- A grader whose program could not be run fails its call, and the run with it.
+      -- A grader whose program could not be run fails the run.
       let broken := settle run (log.push (.answered first.frame first.op.key (.error "the image cannot start")))
-      check (broken.any fun | .failed #[1] "the image cannot start" => true | _ => false) "the grader's call failed"
+      check (broken.back? matches some (.failed #[] "the image cannot start")) "the run's own frame failed"
       match next run broken with
       | .raised error => assertEqual "the run's error" error "the image cannot start"
       | _ => fail "the run ends with the failure"
       -- Stopped before its agent is opened, a run comes to its grader all the same.
       let stopped := settle run ((rootOnly.push (.stopped "grade")).push (assignment (grader "one")))
-      check ((next run stopped) matches .ask { frame := #[1], op := .external .., .. }) "the grader runs on the root's workspace"
+      check ((next run stopped) matches .ask { frame := #[], op := .external .., .. }) "the grader runs on the root's workspace"
       check ((agentEnd? stopped) matches some (.stopped "grade")) "the agent was stopped",
 
   test "a run's configuration is read off the opening of its agent, or the log is refused" do
@@ -279,7 +326,7 @@ def suite : Suite := Testing.suite "log" #[
       unreadable "a notice in its place" (rootOnly.push (.arrived (.said "t")))
       unreadable "another tool" (rootOnly.push (.opened #[0] ⟨"bash", run.call.arguments⟩))
       unreadable "another frame" (rootOnly.push (.opened #[1] run.call))
-      unreadable "no configuration" (rootOnly.push (.opened #[0] ⟨agentTool, .mkObj [("agent", .null)]⟩))
+      unreadable "no configuration" (rootOnly.push (.opened #[0] ⟨agentRoutine, .mkObj [("agent", .null)]⟩))
       let config ← assertOk <| configOf (rootOnly.push (.opened #[0] run.call))
       assertEqual "the configuration" config.toJson.compress run.call.arguments.compress,
 

@@ -31,12 +31,13 @@ font-variant-numeric:tabular-nums}
 .row .sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .row .sum b{font-weight:600}
 .row.notice .sum{color:var(--violet)}
+.row.comment .sum{color:var(--mute)}
 .row .took{flex:none;margin-left:8px;color:var(--faint);font-size:11px;font-variant-numeric:tabular-nums}
 .hash{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
 .ic{flex:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;
 margin-right:6px}
 .i-root{color:#4a4f57}.i-sample{color:var(--blue)}.i-exec{color:#2b6f6f}.i-open{color:var(--mute)}
-.i-return{color:var(--green)}.i-fail,.i-stop{color:var(--red)}.i-heard,.i-time{color:var(--faint)}
+.i-return{color:var(--green)}.i-fail,.i-stop{color:var(--red)}.i-heard,.i-time,.i-comment{color:var(--faint)}
 .i-said,.i-changed,.i-replied,.i-assigned{color:var(--violet)}.i-external{color:#2b6f6f}
 .i-question{color:var(--amber)}
 .fork{flex:none;display:inline-flex;align-items:center;margin-left:8px;border:1px solid var(--line);

@@ -58,13 +58,13 @@ private def withRun (image workdir : String)
 
 /-- A grader that runs `command` in `image`, with `input?` its trusted files. -/
 private def grader (image command : String) (input? : Option Snapshot := none) (timeout : Nat := 900) :
-    Agents.Tools.Grade.Grader :=
+    Grader :=
   { command, image, input?, timeoutSeconds := timeout }
 
 /-- Grades the point `tip` of a run with `grader`: the agent stopped there, the grader assigned.
 Gives its verdict, and what its program left: the answer of the external operation. -/
 private def gradeAt (rt : Driver.Runtime) (run : Run Agent) (tip : Hash)
-    (grader : Agents.Tools.Grade.Grader) : TestM (Json × External) := do
+    (grader : Grader) : TestM (Json × External) := do
   let (graded, verdict) ← Scripted.grade rt run tip grader
   let log ← Scripted.logAt rt graded
   let some ran := log.findSome? fun | .answered _ _ (.ok (.external e)) => some e | _ => none

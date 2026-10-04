@@ -2,17 +2,17 @@ import Lean.Data.Json
 import Alaya.Hash
 import Alaya.Question
 
-/-! Programs and the log: an agent, and every tool it calls, is a program, a tree of the
+/-! Programs and the log: an agent, and every routine it calls, is a program, a tree of the
 operations it asks the world for; a run is the flat, append-only log of what happened. See
 `docs/architecture.md` and `docs/agent-api.md`.
 
 The design follows the sketch in `functional_agents/` and the papers it cites: a program is the
 free monad on a signature of operations (Hancock and Setzer 2000; Kiselyov and Ishii 2015), with
-a way to fail, a read of the inbox, a call of a tool by its name, and a loop. -/
+a way to fail, a read of the inbox, a call of a routine by its name, and a loop. -/
 
 namespace Alaya
 
-open Lean (Json)
+open Lean (Json ToJson FromJson toJson fromJson?)
 
 /-- A signature: the operations a program may perform, each with the type of its answer, and how
 the log keeps both. The log keeps an operation by a `Key`, enough to tell it from another: for
@@ -42,9 +42,9 @@ def Frame.render (frame : Frame) : String :=
 /-- Whether the frame is the agent's or inside it. -/
 def Frame.inAgent (frame : Frame) : Bool := frame[0]? == some 0
 
-/-- A call of a tool, by its name, with its arguments: what the log holds as the opening of the
-call. It holds no body, so it is data. -/
-structure ToolCall where
+/-- A call of a routine, by its name, with its arguments: what the log holds as the opening of
+the call. It holds no body, so it is data. -/
+structure RoutineCall where
   name : String
   arguments : Json
   deriving BEq, Inhabited
@@ -74,18 +74,20 @@ def Notice.addressed : Notice → Bool
 /-- A program: a tree of operations, each continued with its answer, or with the error when the
 world could not give one. A read of the inbox takes the notices not yet read that are addressed to no one; one that waits is
 for some notices only, which it says given the frame it is made in, and is made once one of them
-has arrived. A call names a tool and what it is called with: the interpreter answers it by
-running the tool the run has under that name, in a child frame, and it ends with the tool's value
-or its error. A loop goes round `step` from a state until a round gives a result; the state of a
-loop is data, where a continuation is not. -/
+has arrived. A call names a routine and what it is called with: the interpreter answers it by
+running the routine the run has under that name, in a child frame, and it ends with the
+routine's value or its error. A loop goes round `step` from a state until a round gives a result; the state of a
+loop is data, where a continuation is not. A comment says something to whoever reads the log,
+and to no one else: nothing depends on it. -/
 inductive Program (σ : Signature) : Type → Type 1 where
   | pure : α → Program σ α
   /-- Gives up, up to the call it is in, unless something catches it first. -/
   | fail : (error : String) → Program σ α
   | perform : (op : σ.Op) → (Except String (σ.Answer op) → Program σ α) → Program σ α
   | inbox : (wait : Option (Frame → Notice → Bool)) → (List Notice → Program σ α) → Program σ α
-  | call : ToolCall → (Except String Json → Program σ α) → Program σ α
+  | call : RoutineCall → (Except String Json → Program σ α) → Program σ α
   | iter : {S β : Type} → (S → Program σ (S ⊕ β)) → S → (β → Program σ α) → Program σ α
+  | comment : (text : String) → Program σ α → Program σ α
 
 namespace Program
 
@@ -96,20 +98,21 @@ def bind : Program σ α → (α → Program σ β) → Program σ β
   | .fail error, _ => .fail error
   | .perform op k, f => .perform op fun answer => (k answer).bind f
   | .inbox wait k, f => .inbox wait fun notices => (k notices).bind f
-  | .call tool k, f => .call tool fun result => (k result).bind f
+  | .call routine k, f => .call routine fun result => (k result).bind f
   | .iter step s k, f => .iter step s fun b => (k b).bind f
+  | .comment text k, f => .comment text (k.bind f)
 
 instance : Monad (Program σ) := { pure := .pure, bind := .bind }
 
 /-- A program made to give its value or its failure: what `try` and `catch` are. It does not
-reach into a tool that is called, whose failure the call has caught already, and nothing is
+reach into a routine that is called, whose failure the call has caught already, and nothing is
 logged for it. -/
 def attempt : Program σ α → Program σ (Except String α)
   | .pure a => .pure (.ok a)
   | .fail error => .pure (.error error)
   | .perform op k => .perform op fun answer => (k answer).attempt
   | .inbox wait k => .inbox wait fun notices => (k notices).attempt
-  | .call tool k => .call tool fun result => (k result).attempt
+  | .call routine k => .call routine fun result => (k result).attempt
   | .iter step s k =>
     .iter (fun s => (step s).attempt.bind fun
         | .ok (.inl s) => .pure (.inl s)
@@ -117,6 +120,7 @@ def attempt : Program σ α → Program σ (Except String α)
         | .error error => .pure (.inr (Except.error error))) s fun
       | .ok b => (k b).attempt
       | .error error => .pure (.error error)
+  | .comment text k => .comment text k.attempt
 
 instance : MonadExcept String (Program σ) where
   throw := .fail
@@ -142,22 +146,64 @@ def retry (attempts : Nat) (program : Program σ α) : Program σ α :=
   | 0 => program
   | attempts + 1 => try program catch _ => retry attempts program
 
-/-- Calls a tool by its name. Its failure is its caller's too, unless the caller catches it. -/
+/-- Calls a routine by its name. Its failure is its caller's too, unless the caller catches it. -/
 def call (name : String) (arguments : Json) : Program σ Json :=
   .call ⟨name, arguments⟩ fun | .ok value => .pure value | .error error => .fail error
+
+/-- Says `text` to whoever reads the log. It is written where the driver reaches it, and replay
+neither needs it nor minds it, so a program's comments can change without a log of it becoming
+no trace of it. -/
+def comment (text : String) : Program σ Unit := .comment text (.pure ())
 
 /-- Goes round `step` from `s` until a round gives a result. -/
 def iter (step : S → Program σ (S ⊕ α)) (s : S) : Program σ α := .iter step s .pure
 
-/-- The tools of a run, by name. -/
-abbrev Tools (σ : Signature) := String → Option (Json → Program σ Json)
+/-- The routines of a run, by name: every program a call can enter. A tool a model may ask for
+is one, and so is a sub-agent, and a step of a workflow. -/
+abbrev Routines (σ : Signature) := String → Option (Json → Program σ Json)
 
-/-- A run: the tools it has, the call of the agent among them, and what follows the agent. What
-follows is given what the agent returned, or the error when it failed or was stopped; if it
+/-- A routine as a table lists it: its name, and its body from a call's arguments to its result,
+both JSON. -/
+abbrev Routine.Entry (σ : Signature) := String × (Json → Program σ Json)
+
+/-- The table of these routines. -/
+def Routines.of (entries : Array (Routine.Entry σ)) : Routines σ :=
+  fun name => (entries.find? (·.1 == name)).map (·.2)
+
+/-- A routine: a named program from arguments to a result. A call is the only way into it, so it
+always runs in a frame of its own, and the log brackets it: its opening, with its name and its
+arguments, and its end, with its result or its failure. So the structure of an agent — its
+workflows, its sub-agents, its tools — is the nesting of its log.
+
+`entry` is what a run's table holds of it; `call` enters it by its name. Arguments and results
+cross the call as JSON, which is what makes them data in the log: a routine is given values,
+never a function. -/
+structure Routine (σ : Signature) (α β : Type) where
+  name : String
+  entry : Routine.Entry σ
+  call : α → Program σ β
+
+/-- The routine `name`, with `body`. Its arguments and its result are read back from JSON on the
+other side of the call; what cannot be read is a failure, of the routine or of its caller. -/
+def routine [ToJson α] [FromJson α] [ToJson β] [FromJson β] (name : String)
+    (body : α → Program σ β) : Routine σ α β where
+  name
+  entry := (name, fun arguments =>
+    match fromJson? arguments with
+    | .ok a => toJson <$> body a
+    | .error problem => .fail s!"{name}: its arguments cannot be read: {problem}")
+  call a := do
+    let result ← call name (toJson a)
+    match fromJson? result with
+    | .ok b => pure b
+    | .error problem => throw s!"{name}: its result cannot be read: {problem}"
+
+/-- A run: the routines it has, the call of the agent among them, and what follows the agent.
+What follows is given what the agent returned, or the error when it failed or was stopped; if it
 returns, that is the result of the run. -/
 structure Run (σ : Signature) where
-  tools : Tools σ
-  call : ToolCall
+  routines : Routines σ
+  call : RoutineCall
   after : Except String Json → Program σ Json
 
 /-- What the driver is asked to do: an operation, and the frame that asked. -/
@@ -170,22 +216,27 @@ is what the world gave an operation, with the frame that asked and the key of th
 is an error when the world could not give one. The others are marks of what the program did,
 logged so that the log can be read without the program: a read of the inbox, with the positions
 of the notices it took, and the opening of a call and how it ended, with a return or a failure.
-A stop comes from outside and ends every frame of the agent. -/
+A stop comes from outside and ends every frame of the agent. A comment is for a reader alone:
+replay passes over it wherever it stands. A program's comment has the frame that made it; a
+person's has none. -/
 inductive Event (σ : Signature) where
   | arrived (notice : Notice)
   | heard (frame : Frame) (notices : Array Nat)
   | answered (frame : Frame) (key : σ.Key) (answer : Except String σ.Stored)
-  | opened (frame : Frame) (tool : ToolCall)
+  | opened (frame : Frame) (call : RoutineCall)
   | returned (frame : Frame) (value : Json)
   | failed (frame : Frame) (error : String)
   | stopped (reason : String)
+  | commented (frame? : Option Frame) (text : String)
 
 instance : Inhabited (Event σ) := ⟨.stopped ""⟩
 
-/-- The frame an event is in; none for a notice or a stop, which come from outside. -/
+/-- The frame an event is in; none for a notice, a stop or a person's comment, which come from
+outside. -/
 def Event.frame? : Event σ → Option Frame
   | .heard frame _ | .answered frame .. | .opened frame _ | .returned frame _ | .failed frame _ =>
     some frame
+  | .commented frame? _ => frame?
   | .arrived _ | .stopped _ => none
 
 /-- A log: what happened, in order, from the workspace a run starts on. -/

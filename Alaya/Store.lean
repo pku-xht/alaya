@@ -36,17 +36,11 @@ def hashOf (parent? : Option Hash) (event : Event Agent) : Hash :=
 
 def hash (entry : Entry) : Hash := hashOf entry.parent? entry.event
 
-/-- The version of the stored form, so a reader can refuse what it does not understand. -/
-def schemaVersion : Nat := 4
-
 def toJson (entry : Entry) : Json :=
-  .mkObj [("v", schemaVersion), ("parent", entry.parent?.map (Json.str ·.hex) |>.getD .null),
+  .mkObj [("parent", entry.parent?.map (Json.str ·.hex) |>.getD .null),
     ("event", eventToJson entry.event), ("elapsed_ms", entry.elapsedMs)]
 
 def fromJson (json : Json) : Except String Entry := do
-  let version ← json.getObjVal? "v" >>= Json.getNat?
-  if version != schemaVersion then
-    throw s!"an entry of schema version {version}; this build reads version {schemaVersion}"
   let parent? ← match ← json.getObjVal? "parent" with
     | .null => pure none
     | .str hex => if Hash.valid hex then pure (some ⟨hex⟩) else throw s!"not a digest: {hex}"

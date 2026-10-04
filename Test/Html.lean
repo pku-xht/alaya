@@ -27,8 +27,10 @@ private def forest : TestM (Driver.Runtime × String) := do
     let event ← assertOk <| Result.fromExcept Error.input (replyTo log (next run log) .yes)
     let (replied, _) ← assertOk <| Driver.append rt.store run waiting event
     let _ ← assertOk <| Driver.drive rt run replied
-    let (told, _) ← assertOk <| Driver.append rt.store run waiting (.arrived (.said "never mind"))
-    let _ := told
+    let _ ← assertOk <| Driver.append rt.store run waiting (.arrived (.said "never mind"))
+    -- A comment on an entry that goes on, an annotation; and one that ends a log.
+    let _ ← assertOk <| Notices.comment rt.store waiting "why does it ask?"
+    let _ ← assertOk <| Notices.comment rt.store replied "answered by hand"
     let forest ← assertOk rt.store.forest
     pure (rt, ← assertOk <| Html.report rt.store rt.workspaces forest "a <test> report")
 

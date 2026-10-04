@@ -70,13 +70,15 @@ def suite : Suite := Testing.suite "render" #[
       (.answered #[1] (.external "sh" "img" none 1)
         (.ok (.external { stdout := "", stderr := "", checkout := snapshot 'e', elapsedMs := 3, error? := some "timed out after 1 seconds" })),
         "external sh in img → timed out after 1 seconds"),
-      (.opened #[0] ⟨agentTool, config.toJson⟩, "open agent: mini-swe, gpt-oss-120b"),
+      (.opened #[0] ⟨agentRoutine, config.toJson⟩, "open agent: mini-swe, gpt-oss-120b"),
       (.opened #[0, 1] ⟨"bash", .mkObj [("command", "ls")]⟩, "open bash \"ls\""),
       (.opened #[0, 1] ⟨"ask_user", (askCall "q" "Keep it?").arguments⟩, "open ask_user \"Keep it?\""),
       (.opened #[0, 1] ⟨"time_budget", .mkObj []⟩, "open time_budget \"{}\""),
       (.returned #[0] (json "{\"status\":\"Submitted\",\"submission\":\"done\"}"), "return Submitted: done"),
-      (.failed #[0, 1] "no tool named bash", "fail: no tool named bash"),
-      (.stopped "to grade this point", "stopped: to grade this point")]
+      (.failed #[0, 1] "no routine named bash", "fail: no routine named bash"),
+      (.stopped "to grade this point", "stopped: to grade this point"),
+      (.commented none "the parser goes wrong here\nsee 5.7", "# the parser goes wrong here see 5.7"),
+      (.commented (some #[0, 1]) "masking 3 old outputs", "# masking 3 old outputs")]
     for (event, line) in lines do
       assertEqual line (Render.eventSummary event) line
     assertEqual "an entry, as the commands that append print it"
@@ -103,7 +105,8 @@ def suite : Suite := Testing.suite "render" #[
       (none, .returns #[0, 1] .null, "next: the return of 0.1"),
       (none, .fails #[0, 1] "x", "next: the failure of 0.1"),
       (none, .mismatch 7, "broken: the event at 7 is no trace of the program"),
-      (none, .unguarded #[0], "broken: a loop in 0 reads no event")]
+      (none, .unguarded #[0], "broken: a loop in 0 reads no event"),
+      (none, .comments #[0, 1] "masking", "next: a comment in 0.1")]
     for (question?, next, line) in lines do
       assertEqual line (Render.nextSummary question? none next) line
     -- Once the agent is over, the run waits for a grader, and then ends with its verdict: how it
@@ -186,14 +189,27 @@ def suite : Suite := Testing.suite "render" #[
         s!"    {short path[at' + 1]!}..{short path.back!}  {at' + 1}-{path.size - 1}  " ++
           s!"return Submitted: {submission}  [done: Submitted: {submission}]"
       assertEqual "the branches, under it" ((lines.extract 2 4).qsort (· < ·))
-        (#[branch path "the first", branch ends "the other"].qsort (· < ·)),
+        (#[branch path "the first", branch ends "the other"].qsort (· < ·))
+      -- A comment on an entry that goes on is no branch: a line under the stretch its entry is in.
+      let (note, _) ← assertOk <| Notices.comment rt.store path[2]! "look here"
+      let forest ← assertOk rt.store.forest
+      let noted := Render.treeLines (← assertOk <| Render.rows rt.store forest)
+      assertEqual "one line more" noted.size 5
+      assertEqual "the same stretch" noted[1]! lines[1]!
+      assertEqual "the annotation, under it" noted[2]! s!"    {short note}  3  # look here"
+      -- At the end of a log, a comment is the end of that log, and the log stands as it stood.
+      let (last, _) ← assertOk <| Notices.comment rt.store first "all done"
+      let forest ← assertOk rt.store.forest
+      let ended := Render.treeLines (← assertOk <| Render.rows rt.store forest)
+      check (ended.any fun line => contains line s!"..{short last}" && contains line "# all done" &&
+        contains line "[done: Submitted: the first]") s!"the comment ends its log: {ended}",
 
   test "a log whose run cannot be built is still shown, and says so" do
     let store ← assertOk <| Store.create ((← scratch) / "entries")
     let unknown := testConfig (.mkObj [("name", "an-agent-of-another-build")])
     let mut forest ← assertOk store.forest
     let mut parent? : Option Hash := none
-    for event in #[.arrived (.changed (snapshot 'a') "the project"), .opened #[0] ⟨agentTool, unknown.toJson⟩,
+    for event in #[.arrived (.changed (snapshot 'a') "the project"), .opened #[0] ⟨agentRoutine, unknown.toJson⟩,
         (.arrived (.said "the task") : Event Agent)] do
       let (hash, grown) ← assertOk <| store.put forest { parent?, event }
       forest := grown

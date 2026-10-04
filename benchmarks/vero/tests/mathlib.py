@@ -55,7 +55,7 @@ created = json_lines(run(alaya, "new", source, "--task-file", output / "MINIVERO
                          "--model", "gpt-oss-120b", "--image", args.agent_image,
                          "--data", data, "--json").stdout)
 root, task = created[0], created[-1]["entry"]
-configuration = created[1]["event"]["tool"]["arguments"]
+configuration = created[1]["event"]["routine"]["arguments"]
 workspace = root["event"]["notice"]["workspace"]
 stats = json.loads(run("restic", "--repo", data / "restic", "--insecure-no-password",
                        "stats", workspace, "--mode", "restore-size", "--json").stdout)

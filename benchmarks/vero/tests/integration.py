@@ -111,7 +111,7 @@ def test_mode(args, mode):
         return rows
 
     def configuration(rows):
-        return rows[1]["event"]["tool"]["arguments"]
+        return rows[1]["event"]["routine"]["arguments"]
 
     vero = ["--grader", f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader",
             "--grader-input", FIXTURE, "--grader-image", args.grader_image]
@@ -194,7 +194,7 @@ def test_mode(args, mode):
     assert trace[2]["entry"] == task and trace[-1]["entry"] == final["entry"], trace
     # What the run was created with is recorded on its opening alone.
     assert [r["position"] for r in trace if r["event"]["type"] == "opened"
-            and r["event"]["tool"]["name"] == "agent"] == [1], trace
+            and r["event"]["routine"]["name"] == "agent"] == [1], trace
     ended = [i for i, r in enumerate(trace)
              if r["event"]["type"] == "returned" and r["frame"] == [0]]
     assert len(ended) == 1, trace

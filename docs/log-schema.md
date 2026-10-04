@@ -13,15 +13,15 @@ cache — and the invariants that hold of it. How the parts that write and read 
 An entry is one JSON object, compact, in a file of its own:
 
 ```json
-{"v": 4, "parent": "<64 hex, or null for a root>", "event": {…}, "elapsed_ms": 1840}
+{"parent": "<64 hex, or null for a root>", "event": {…}, "elapsed_ms": 1840}
 ```
 
 Its **name** is the SHA-256 of `{"parent": …, "event": …}`, compact with sorted keys: the time it
 took is no part of it, so the same event after the same entry is one entry, whenever it happened.
 A name therefore stands for the whole log from its root to that entry. `elapsed_ms` is how long
 the event took to happen as the driver saw it — an operation's time, or a mark's — and a run's
-time at an entry is the sum along its log. A reader refuses an entry of another schema version,
-and one whose content does not hash to its name.
+time at an entry is the sum along its log. A reader refuses an entry whose content does not hash
+to its name. The format has no version: a data directory is read by the Alaya that wrote it.
 
 An entry is referred to by its name, or any prefix of it no other name has, and `PREFIX:N` names
 the entry at position `N` of that entry's log, from 0, where the root is (`Forest.resolve`):
@@ -30,17 +30,19 @@ the entry at position `N` of that entry's log, from 0, where the root is (`Fores
 ## 2. Events
 
 Every event is an object with its kind under `type`, and a frame, where it has one, as an array of
-numbers: `[]` is the run's own frame, `[0]` the agent's, `[0, 2]` the third call the agent made.
+numbers: `[]` is the run's own frame, `[0]` the agent's, `[0, 2]` the third call the agent made,
+`[0, 2, 0]` the first call that call made.
 
 | `type` | Fields | What it is |
 | --- | --- | --- |
 | `arrived` | `notice` | something from outside, unasked: below |
 | `heard` | `frame`, `notices` | a read of the inbox in `frame`, with the positions of the notices it took |
 | `answered` | `frame`, `op`, `answer`, `error` | the world's answer to an operation `frame` asked for: `answer`, or `error` when it could not give one |
-| `opened` | `frame`, `tool` | a call opens: `tool` is `{name, arguments}`, and `frame` the frame it runs in |
+| `opened` | `frame`, `routine` | a call opens: `routine` is `{name, arguments}`, the routine called and what it was called with, and `frame` the frame it runs in |
 | `returned` | `frame`, `value` | the call in `frame` ended with its value |
 | `failed` | `frame`, `error` | the call in `frame` ended with its failure |
 | `stopped` | `reason` | from outside: every frame of the agent ends |
+| `commented` | `frame`, `text` | a comment, for whoever reads the log: replay passes over it. `frame` is the frame of the program that made it, or `null` for a person's |
 
 A **notice** is `{type, …}`:
 
@@ -72,27 +74,30 @@ does not.
 
 ```json
 {"type":"arrived","notice":{"type":"changed","workspace":"3f2a…","summary":"the workspace the run starts from"}}
-{"type":"opened","frame":[0],"tool":{"name":"agent","arguments":{"agent":{…},"model":{…},"environment":{…}}}}
+{"type":"opened","frame":[0],"routine":{"name":"agent","arguments":{"agent":{…},"model":{…},"environment":{…}}}}
 {"type":"arrived","notice":{"type":"said","message":"Implement the language in SPEC.md"}}
 {"type":"heard","frame":[0],"notices":[2]}
 {"type":"heard","frame":[0],"notices":[]}
 {"type":"answered","frame":[0],"op":{"type":"sample","request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
-{"type":"opened","frame":[0,0],"tool":{"name":"bash","arguments":{"command":"make"}}}
+{"type":"opened","frame":[0,0],"routine":{"name":"bash","arguments":{"command":"make"}}}
 {"type":"answered","frame":[0,0],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
 {"type":"returned","frame":[0,0],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
 …
 {"type":"returned","frame":[0],"value":{"status":"Submitted","submission":"…"}}
 {"type":"arrived","notice":{"type":"assigned","grader":{"name":"grader","command":"sh /grader/grade.sh","image":"…@sha256:…","input":"7e0f…","timeout_seconds":900}}}
 {"type":"heard","frame":[],"notices":[212]}
-{"type":"opened","frame":[1],"tool":{"name":"grade","arguments":{"name":"grader","command":"sh /grader/grade.sh","image":"…@sha256:…","input":"7e0f…","timeout_seconds":900}}}
-{"type":"answered","frame":[1],"op":{"type":"external",…},"answer":{"exit_code":0,"stdout":"1..2\nok 1\nok 2\n",…},"error":null}
-{"type":"returned","frame":[1],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],…}}
+{"type":"answered","frame":[],"op":{"type":"external",…},"answer":{"exit_code":0,"stdout":"1..2\nok 1\nok 2\n",…},"error":null}
 {"type":"returned","frame":[],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],…}}
 ```
 
 A run is **over** when its agent is — returned, failed, or stopped. It then waits for a grader,
-and once one is assigned it calls it and returns its verdict from its own frame, `[]`: a graded
-log is complete. A log has one grader; a point is graded again on a fork.
+and once one is assigned it runs the grader's program and returns its verdict, both in its own
+frame, `[]`: a graded log is complete. A log has one grader; a point is graded again on a fork.
+
+A call is the one thing that opens a frame: the agent, a tool its model called, a step of a
+workflow, a sub-agent are each a **routine** of the run, called by name (`docs/agent-api.md`),
+and the events between a call's opening and its end, in its frame or one under it, are what the
+call did. The grader is no routine, and nothing an agent calls reaches it.
 
 The second event is the opening of the agent's call, whose arguments are the run's
 **configuration**: the agent's complete configuration, the model's complete spec, the
@@ -128,6 +133,16 @@ that is for it: MiniSwe reads its inbox at the start of every round, so what is 
 run paused reaches its model in its next request. A reply and a grader are for one reader each,
 the call that asked and what follows the agent, and no other read takes them.
 
+**Comments.** A `commented` event says something to whoever reads the log, and changes nothing
+else: replay passes over it wherever it stands, so the run of a log with comments is the run of
+the log without them. A program writes one with `comment`, for its own debugging: the driver
+appends it where it reaches it, at the end of a log, and replay neither needs it nor minds
+another in its place, so the comments of an agent can change without its logs becoming no trace
+of it. A person writes one with `alaya comment ENTRY TEXT`, at any entry, with nothing checked.
+A comment is an entry like any other, so it takes a position, and one appended at an entry that
+already goes on is a child beside the continuation: `tree` and the report show such a comment,
+when nothing follows it, as an annotation on its entry, not as a branch.
+
 *A run, forked three ways: a new draw, a person's note, and a point graded as it stood.*
 
 ```
@@ -141,10 +156,10 @@ $ alaya tree
 
 ## 4. Grading
 
-A grader is a tool the run calls once its agent is over. What follows the agent in a run is
-three steps: it waits for a grader to be **assigned** — an `assigned` notice, which names it —
-calls the grader in the frame after the agent's, `[1]`, and returns the call's verdict, which is
-the result of the run. A grader is therefore no part of a run's configuration: `new` takes none,
+Grading is what a run does once its agent is over, in its own frame, `[]`: it waits for a grader
+to be **assigned** — an `assigned` notice, which names it — runs the grader's program on the
+workspace, an `external` operation, and returns the verdict, which is the result of the run. A
+grader is therefore no part of a run's configuration, and no routine of it: `new` takes none,
 and any point of any run is graded by any grader, at any time. A log has one grader, so grading
 a point again, with the same grader or a corrected one, is a fork there, beside the first.
 
@@ -168,8 +183,7 @@ A grader is `{name, command, image, input, timeout_seconds}`: a shell command ru
 run's, and a grader's tools, which the agent should not see, belong in an image of their own,
 best built on the agent's (two targets of one Dockerfile); the snapshot of its trusted input,
 taken when it is assigned, so it sees exactly what is recorded; and how long it may take. The
-notice holds all of that, its call opens with it, and its
-operation is `external`: the driver restores the workspace the log has reached into a fresh
+notice holds all of that, and the run's operation on it is `external`: the driver restores the workspace the log has reached into a fresh
 **checkout**, mounted read-write at the workdir, the input at `/grader`, runs the command as the
 user the agent's commands run as, and snapshots the checkout as it left it — its reports
 included — which `alaya ls` and `alaya cat` read at that entry. The run's workspace stays where it
@@ -204,7 +218,7 @@ esac
 ```
 
 
-A verdict, the value its call returns, is `{status, passed, total, reason, checks, exit_code,
+A verdict, the value the run returns, is `{status, passed, total, reason, checks, exit_code,
 elapsed_ms}`, `checks` one `{ok, name, directive}` per top-level test point; what the program
 printed is in the answer of its `external` operation. A grader that cannot be started is an
 `error` verdict. The verdict of a log is what its run returns; `run --json` and `grade --json`
@@ -351,6 +365,8 @@ between runs: an entry is only ever appended to.
   assigned yet, and only one that can be read.
 - A log has at most one grader. A graded log is complete: it ends with the return of the run's
   own frame, the verdict.
+- Comments are no part of a trace: a log with any of its comments taken out, or with others put
+  in, is a trace of the same program, with the same run. Only positions count them.
 - The version of the workspace a log has reached is the last one a command or a change from
   outside left, and every command runs on it; a grader's checkout is its own, and the run does
   not follow it.

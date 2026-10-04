@@ -8,6 +8,7 @@ import Test.Log
 import Test.Store
 import Test.Render
 import Test.Runs
+import Test.Routines
 import Test.MiniSwe
 import Test.MiniVero
 import Test.Workspaces
@@ -29,7 +30,7 @@ as it is built: `lake build alaya tests` builds it with the tests. -/
 
 def main (args : List String) : IO UInt32 := do
   let suites := #[LegacyTests.suite, Sha256Tests.suite, LockTests.suite, PrototypeTests.suite,
-    LogTests.suite, StoreTests.suite, RenderTests.suite, RunsTests.suite] ++ MiniSweTests.suites ++ CliTests.suites ++
+    LogTests.suite, StoreTests.suite, RenderTests.suite, RunsTests.suite, RoutinesTests.suite] ++ MiniSweTests.suites ++ CliTests.suites ++
     #[MiniVeroTests.suite, MiniVeroTests.timeSuite, WorkspacesTests.pathSuite, WorkspacesTests.suite,
       WorkspacesTests.resticSuite, WorkspacesTests.runSuite, ContextTests.suite, ResponsesTests.suite,
       AskUserTests.suite, PreviewTests.suite, DockerTests.suite, TapTests.specSuite,

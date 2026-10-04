@@ -158,10 +158,10 @@ def Frame.toJson (frame : Frame) : Json := .arr (frame.map fun (n : Nat) => (n :
 def Frame.fromJson (json : Json) : Except String Frame := do
   (← json.getArr?).mapM Json.getNat?
 
-def ToolCall.toJson (call : ToolCall) : Json :=
+def RoutineCall.toJson (call : RoutineCall) : Json :=
   .mkObj [("name", call.name), ("arguments", call.arguments)]
 
-def ToolCall.fromJson (json : Json) : Except String ToolCall := do
+def RoutineCall.fromJson (json : Json) : Except String RoutineCall := do
   pure { name := ← str json "name", arguments := ← json.getObjVal? "arguments" }
 
 /-- A reply as the log keeps it: its kind under `type`, which needs no question to read. -/
@@ -253,10 +253,12 @@ def eventToJson : Event Agent → Json
     .mkObj [("type", "answered"), ("frame", frame.toJson), ("op", key.toJson),
       ("answer", match answer with | .ok stored => Stored.toJson stored | .error _ => .null),
       ("error", match answer with | .ok _ => .null | .error error => .str error)]
-  | .opened frame tool => .mkObj [("type", "opened"), ("frame", frame.toJson), ("tool", tool.toJson)]
+  | .opened frame call => .mkObj [("type", "opened"), ("frame", frame.toJson), ("routine", call.toJson)]
   | .returned frame value => .mkObj [("type", "returned"), ("frame", frame.toJson), ("value", value)]
   | .failed frame error => .mkObj [("type", "failed"), ("frame", frame.toJson), ("error", error)]
   | .stopped reason => .mkObj [("type", "stopped"), ("reason", reason)]
+  | .commented frame? text =>
+    .mkObj [("type", "commented"), ("frame", orNull frame? Frame.toJson), ("text", text)]
 
 def eventFromJson (json : Json) : Except String (Event Agent) := do
   let frame : Except String Frame := json.getObjVal? "frame" >>= Frame.fromJson
@@ -269,10 +271,11 @@ def eventFromJson (json : Json) : Except String (Event Agent) := do
       | some error => pure (.error error)
       | none => .ok <$> (json.getObjVal? "answer" >>= Stored.fromJson key)
     pure (.answered (← frame) key answer)
-  | "opened" => pure (.opened (← frame) (← json.getObjVal? "tool" >>= ToolCall.fromJson))
+  | "opened" => pure (.opened (← frame) (← json.getObjVal? "routine" >>= RoutineCall.fromJson))
   | "returned" => pure (.returned (← frame) (← json.getObjVal? "value"))
   | "failed" => pure (.failed (← frame) (← str json "error"))
   | "stopped" => .stopped <$> str json "reason"
+  | "commented" => pure (.commented (← nullable json "frame" Frame.fromJson) (← str json "text"))
   | other => throw s!"unknown event: {other}"
 
 end Alaya

@@ -94,10 +94,6 @@ def suite : Suite := Testing.suite "store" #[
     IO.FS.writeFile file "{\"v\":3,"
     assertError "not JSON" (store.get forest made[1]!) storage
     let entry : Entry := { parent? := some made[0]!, event := said "a" }
-    IO.FS.writeFile file (entry.toJson.setObjVal! "v" 2).compress
-    assertError "another schema version" (store.get forest made[1]!) fun
-      | .storage message => (message.splitOn "schema version 2").length > 1
-      | _ => false
     for (field, value) in [("parent", Json.str "../../etc"), ("parent", (7 : Json)),
         ("event", .mkObj [("type", "arrived"), ("notice", .mkObj [("type", "shouted")])]),
         ("event", .mkObj [("type", "vanished")]),

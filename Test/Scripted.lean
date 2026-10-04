@@ -125,7 +125,7 @@ def logAt (rt : Driver.Runtime) (hash : Hash) : TestM (Log Agent) := do
 /-- Grades the point `tip` of a run with `grader`, as `alaya grade` does: stops the agent there
 if it is still running, assigns the grader, and drives the run to its end. Gives the entry the
 log ends at, and the verdict. -/
-def grade (rt : Driver.Runtime) (run : Run Agent) (tip : Hash) (grader : Agents.Tools.Grade.Grader) :
+def grade (rt : Driver.Runtime) (run : Run Agent) (tip : Hash) (grader : Grader) :
     TestM (Hash × Json) := do
   let mut tip := tip
   if Driver.running (next run (← logAt rt tip)) then
@@ -162,9 +162,10 @@ next, or how it ends: what the driver would log before its next operation, witho
 partial def settle (run : Run Agent) (log : Log Agent) : Log Agent :=
   match next run log with
   | .hears frame notices => settle run (log.push (.heard frame notices))
-  | .opens frame tool => settle run (log.push (.opened frame tool))
+  | .opens frame opened => settle run (log.push (.opened frame opened))
   | .returns frame value => settle run (log.push (.returned frame value))
   | .fails frame error => settle run (log.push (.failed frame error))
+  | .comments frame text => settle run (log.push (.commented (some frame) text))
   | _ => log
 
 /-- The log with the answer to what `run` asks next appended, and then its marks: what the world

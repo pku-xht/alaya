@@ -21,7 +21,7 @@ def txt : Json → String
 
 inductive Message where
   | system (text : String) | user (text : String)
-  | assistant (text : String) (calls : List ToolCall) | tool (result : String)
+  | assistant (text : String) (calls : List RoutineCall) | tool (result : String)
   deriving BEq
 abbrev Dialogue := List Message
 structure ModelConfig where
@@ -70,7 +70,7 @@ def render : Reply → String
   | .noneOfAbove => "none_of_above" | .text answer => answer | .unavailable => "unavailable"
 structure Response where
   text : String
-  toolCalls : List ToolCall := []
+  toolCalls : List RoutineCall := []
 structure Output where
   text : String
   workspace : Snapshot
@@ -166,7 +166,9 @@ def round (agent : AgentConfig) (model : ModelConfig) (listen : Bool) (dialogue 
   for asked in response.toolCalls do
     let result ←
       if agent.tools.contains asked.name then
-        try (txt <$> call asked.name asked.arguments) catch error => pure s!"error: {error}"
+        -- The sketch calls a routine a tool, and its interpreter says so of one that is missing.
+        try (txt <$> call asked.name asked.arguments)
+        catch error => pure s!"error: {error.replace "no routine named" "no tool named"}"
       else pure s!"error: {asked.name} is not a tool of this conversation"
     results := results ++ [Message.tool result]
   let heard ← if listen then inbox else pure []
@@ -197,7 +199,7 @@ def agent (config : Config) : Tool where
     .str <$> converse config.agent config.model ([.system config.system] ++ task.map (.user <| noticeText ·))
       (listen := true)
 
-def table (tools : List Tool) : Tools Agent :=
+def table (tools : List Tool) : Routines Agent :=
   fun name => (tools.find? (·.name == name)).map (·.run)
 
 def verdict (stdout : String) : String :=
@@ -215,7 +217,7 @@ def hiddenTests : Tool where
 def grading (_ : Except String Json) : Program Agent Json := call "hidden_tests" (.str "")
 
 def graded (config : Config) : Run Agent :=
-  { tools := table
+  { routines := table
       [agent config, bash, timeBudget, askUser, delegate config.model, commit, hiddenTests]
     call := ⟨"agent", config.json⟩
     after := grading }
@@ -355,6 +357,7 @@ def describe : Event Agent → String
   | .arrived (.changed workspace _) => s!"-  arrived: changed → {workspace.hex}"
   | .arrived (.replied to answer) => s!"-  arrived: replied to {to.toList}: {render answer}"
   | .arrived (.assigned _) => "-  arrived: assigned a grader"
+  | .commented _ text => s!"-  commented: {text}"
   | .answered frame (.external command image ..) (.ok (.external ran)) =>
     s!"{frame.toList}  answered: external {command}, in {image} → exit {ran.exit}, {ran.checkout.hex}"
   | .answered frame (.exec command) (.ok (.output output)) =>
@@ -364,7 +367,8 @@ def describe : Event Agent → String
     s!"{frame.toList}  answered: {op.describe}: failed: {error}"
   | .opened frame tool => s!"{frame.toList}  opened: {tool.name} \"{txt tool.arguments}\""
   | .returned frame value => s!"{frame.toList}  returned: {txt value}"
-  | .failed frame error => s!"{frame.toList}  failed: {error}"
+  | .failed frame error =>
+    s!"{frame.toList}  failed: {error.replace "no routine named" "no tool named"}"
   | .stopped reason => s!"-  stopped: {reason}"
   | .heard frame notices => s!"{frame.toList}  heard {notices.toList}"
 
@@ -381,10 +385,11 @@ def describeNext : Next Agent → String
     else s!"wait: {frame.toList} reads the inbox once something arrives"
   | .mismatch position => s!"mismatch at {position}"
   | .unguarded frame => s!"unguarded loop in {frame.toList}"
+  | .comments frame text => s!"comment in {frame.toList}: {text}"
 
 def withAgent (run : Run Agent) (program : Program Agent Json) : Run Agent :=
-  { run with tools := fun name =>
-      if name == "agent" then some fun _ => program else run.tools name }
+  { run with routines := fun name =>
+      if name == "agent" then some fun _ => program else run.routines name }
 
 def faithful (run : Run Agent) (log : Log') : Bool :=
   (List.range (log.size + 1)).all fun i =>
@@ -465,8 +470,8 @@ def transcript : Array String := Id.run do
   for (event, i) in thrice.zipIdx do
     if 17 ≤ i ∧ i ≤ 25 then out := out.push s!"  {i}  {describe event}"
   out := out.push s!"  and the run ends, after {thrice.size} events: {describeNext ended}"
-  let (missing, _) := drive world { run with tools := fun name =>
-    if name == "bash" then none else run.tools name } #[]
+  let (missing, _) := drive world { run with routines := fun name =>
+    if name == "bash" then none else run.routines name } #[]
   out := out.push "with a tool that the run does not have:"
   for (event, i) in missing.zipIdx do
     if 10 ≤ i ∧ i ≤ 14 then out := out.push s!"  {i}  {describe event}"

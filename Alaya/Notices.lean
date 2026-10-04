@@ -1,7 +1,7 @@
 import Alaya.Driver
 
 /-! What a person adds to a log: the run itself, from a workspace and a task, and later a
-message, a change to the workspace, a reply to a question, a stop, or a grader. Each is an event the
+message, a change to the workspace, a reply to a question, a stop, a grader, or a comment. Each is an event the
 driver did not ask for, appended after an entry, so a person acts at any point of any run, and
 acting at a point that already goes on is a fork. -/
 
@@ -25,7 +25,7 @@ def create (store : Store) (workspaces : Workspaces) (run : Run Agent)
   let mut made : Array (Hash × Entry) := #[]
   let root : Event Agent := .arrived (.changed workspace rootSummary)
   let opening : Event Agent ← match next run #[root] with
-    | .opens frame tool => pure (.opened frame tool)
+    | .opens frame call => pure (.opened frame call)
     | _ => throw <| .input "the run does not open its agent"
   for event in #[root, opening, .arrived (.said task)] do
     let entry : Entry := { parent?, event }
@@ -34,6 +34,14 @@ def create (store : Store) (workspaces : Workspaces) (run : Run Agent)
     parent? := some hash
     made := made.push (hash, entry)
   pure made
+
+/-- A person's comment after `tip`: for whoever reads the log, and nothing else. Replay passes
+over it, so it is appended at any entry of any log, with nothing to check. Gives the new entry. -/
+def comment (store : Store) (tip : Hash) (text : String) : Result (Hash × Entry) := do
+  let forest ← store.forest
+  let entry : Entry := { parent? := some tip, event := .commented none text }
+  let (hash, _) ← store.put forest entry
+  pure (hash, entry)
 
 /-- The changes from `before` to `after`, one line each: `M path`, `+ path`, `- path`. -/
 def changedLines (workspaces : Workspaces) (before after : Snapshot) : Result (Array String) := do

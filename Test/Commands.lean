@@ -89,7 +89,7 @@ def suite : Suite := Testing.suite "commands" #[
     assertEqual "each after the one before" (made.map (text · ["parent"]))
       #["null", text made[0]! ["entry"], text made[1]! ["entry"]]
     assertEqual "the task" (text made[2]! ["event", "notice", "message"]) "the task"
-    let config := field made[1]! ["event", "tool", "arguments"]
+    let config := field made[1]! ["event", "routine", "arguments"]
     assertEqual "the configuration is the agent's call" (text config ["agent", "name"], text config ["model", "name"],
       (field config ["agent", "step_limit"]).compress) ("mini-swe", "gpt-oss-120b", "7")
     check (has (text config ["environment", "image"]) "@sha256:") "the image is pinned by its digest"
@@ -106,7 +106,7 @@ def suite : Suite := Testing.suite "commands" #[
     check (plain[1]?.any (has · "0  open agent: mini-swe, gpt-oss-120b")) s!"the log in lines: {plain}"
     let shown ← records (← ok data "show" #[s!"{tip}:1", "--json"])
     assertEqual "an entry by its position" (text shown[0]! ["entry"]) (text made[1]! ["entry"])
-    assertEqual "the calls open at it" ((field shown[0]! ["calls"]).getArr?.toOption.map (·.map (text · ["tool", "name"])))
+    assertEqual "the calls open at it" ((field shown[0]! ["calls"]).getArr?.toOption.map (·.map (text · ["routine", "name"])))
       (some #["agent"])
     assertEqual "the workspace it stands on" (text shown[0]! ["workspace"]) (text made[0]! ["event", "notice", "workspace"])
     check (has (← ok data "show" #[tip, "--request"]) "request: none") "an entry that answers no sample has no request"
@@ -148,12 +148,13 @@ def suite : Suite := Testing.suite "commands" #[
     assertEqual "and before it" (← ok data "cat" #[tip, "a.txt"]) "one\n"
     -- Graded there: the agent is stopped, the grader assigned, and it runs, with no model.
     let ran ← records (← ok data "grade" (#[text changed ["entry"], "--json"] ++ grader))
-    assertEqual "a stop, the grader, its read, its call, its program, its verdict, and the run's end"
-      ((ran.extract 0 7).map fun record => text record ["event", "type"])
-      #["stopped", "arrived", "heard", "opened", "answered", "returned", "returned"]
+    assertEqual "a stop, the grader, its read, its program, and the run's end with its verdict"
+      ((ran.extract 0 5).map fun record => text record ["event", "type"])
+      #["stopped", "arrived", "heard", "answered", "returned"]
     assertEqual "the notice assigns the grader" (text ran[1]! ["event", "notice", "type"],
       has (text ran[1]! ["event", "notice", "grader", "image"]) "@sha256:") ("assigned", true)
-    assertEqual "the run ends with the verdict" (field ran[6]! ["frame"]).compress "[]"
+    assertEqual "the grader runs in the run's own frame, where the run ends" ((ran.extract 3 5).map fun record =>
+      (field record ["event", "frame"]).compress) #["[]", "[]"]
     let some status := ran.back? | fail "grade printed nothing"
     assertEqual "the agent was stopped" (text status ["status"], text status ["reason"]) ("stopped", "to grade this point")
     let verdictOf (status : Json) := (text status ["verdict", "status"],
@@ -201,6 +202,20 @@ def suite : Suite := Testing.suite "commands" #[
     -- What the driver logged before it needed the model is kept: the next `run` goes on from there.
     let tree := lines (← ok data "tree")
     check (tree.any (has · "[next: sample a request of 2 messages]")) s!"the tree: {tree}"
+    -- A comment: on an entry that goes on, an annotation and no branch; at the end of a log, its
+    -- last entry. Either way the run stands as it stood.
+    let noted ← appended data "comment" #[tip, "the task could say more"]
+    assertEqual "a comment" (text noted ["event", "type"], (field noted ["event", "frame"]).compress,
+      text noted ["event", "text"]) ("commented", "null", "the task could say more")
+    let tree := lines (← ok data "tree")
+    assertEqual "no branch for it" tree.size 3
+    check (tree.any (has · "# the task could say more")) s!"the annotation: {tree}"
+    let leaf := text ((← records (← ok data "tree" #["--json"])).filter fun row =>
+      text row ["status"] != "null" && text row ["entry"] != text noted ["entry"])[0]! ["entry"]
+    let last ← appended data "comment" #[leaf, "stopped for want of a provider"]
+    let log := lines (← ok data "log" #[text last ["entry"]])
+    check (log.any (has · "# stopped for want of a provider") &&
+      (log.back?.any (has · "next: sample a request of 2 messages"))) s!"the log, with its comment: {log}"
     let errors ← records (← refused 65 data "reply" #[tip, "yes", "--json"])
     assertEqual "a failure as JSON, on stderr" (text errors[0]! ["error"]) "input"
     -- A directory that holds no entries is no data directory, whatever else it holds.

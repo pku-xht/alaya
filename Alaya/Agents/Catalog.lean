@@ -17,11 +17,12 @@ namespace Alaya.Agents.Catalog
 open Lean (Json)
 open Alaya (Result Error Uname)
 
-/-- An agent built from its configuration: the complete configuration, the tools it offers, which
-the run has under their names, and its program, for a run of a model on a machine. -/
+/-- An agent built from its configuration: the complete configuration, its program, for a run of
+a model on a machine, and the routines it calls, which the run has under their names: the tools
+it offers a model, its sub-agents, the steps of its workflows. -/
 structure Built where
   config : Json
-  tools : Array Tool
+  routines : Array (Routine.Entry Agent)
   program : Models.Spec → Uname → Program Agent Json
 
 /-- An agent the command line can name, and how a configuration builds it. -/
@@ -34,14 +35,16 @@ structure Definition where
 def miniSwe : Definition := {
   name := "mini-swe"
   make := fun json => match MiniSwe.Config.fromJson json with
-    | .ok config => .ok { config := config.toJson, tools := config.offered, program := MiniSwe.program config }
+    | .ok config =>
+      .ok { config := config.toJson, routines := config.offered.map (·.entry), program := MiniSwe.program config }
     | .error problem => .error problem }
 
 def miniVero : Definition := {
   name := "mini-vero"
   make := fun json => match MiniVero.Config.fromJson json with
     | .ok config =>
-      .ok { config := config.toJson, tools := config.base.offered, program := MiniVero.program config }
+      .ok { config := config.toJson, routines := config.base.offered.map (·.entry)
+            program := MiniVero.program config }
     | .error problem => .error problem }
 
 def all : Array Definition := #[miniSwe, miniVero]

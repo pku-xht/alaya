@@ -1,12 +1,11 @@
 import Alaya.Agent
-import Alaya.Grader
 
 /-!
-The tools an agent can offer, each on its own, as a `Tool`: its definition for the model, what
-it adds to the prompt, what is wrong with a call's arguments, and the program that answers a
-call — a command run in the workspace, a question for a person, the time left, a grader's
-verdict. A tool is called by its name, so it runs in a frame of its own, and the log brackets
-it. Nothing here knows which agent offers a tool, what else it offers, or how it words a
+The tools an agent can offer, each on its own, as a `Tool`: a routine, and what a model needs to
+call it — its definition, what it adds to the prompt, what is wrong with a call's arguments. Its
+program answers a call: a command run in the workspace, a question for a person, the time left.
+A tool is called by its name, like any routine, so it runs in a frame of its own, and the log
+brackets it. Nothing here knows which agent offers a tool, what else it offers, or how it words a
 refusal; an agent holds a list of tools and decides the rest. `submit` is no tool that runs: an
 agent that offers it ends with its message.
 -/
@@ -29,6 +28,9 @@ structure Tool where
   run : Json → Program Agent Json
 
 def Tool.name (tool : Tool) : String := tool.definition.name
+
+/-- The tool as a run's table lists it: a routine like any other. -/
+def Tool.entry (tool : Tool) : Routine.Entry Agent := (tool.name, tool.run)
 
 namespace Tools
 
@@ -242,71 +244,6 @@ def tool : Tool := {
     return answer timing.spentMs timing.budgetMs? }
 
 end TimeBudget
-
-/-! ## grade: a grader's verdict
-
-A grader is a tool that no conversation offers its model: a run calls it once its agent is over,
-with the grader a person assigned to it (`Alaya.grading`). It is an external program, a command
-in a container of its own image on a checkout of the workspace with trusted files mounted at
-`/grader`, and a reading of the TAP it prints (`Alaya.Grader`). The call's arguments are the
-grader itself, so its opening puts the whole of it in the log. -/
-
-namespace Grade
-
-/-- A grader: a name for a reader, the command, the pinned image it runs in, the snapshot of its
-trusted input, and how long it may take; 0 is no limit. -/
-structure Grader where
-  name : String := "grader"
-  command : String
-  image : String
-  input? : Option Snapshot := none
-  timeoutSeconds : Nat := 900
-  deriving Inhabited
-
-def Grader.toJson (grader : Grader) : Json :=
-  .mkObj [("name", grader.name), ("command", grader.command), ("image", grader.image),
-    ("input", grader.input?.map (Json.str ·.hex) |>.getD .null),
-    ("timeout_seconds", grader.timeoutSeconds)]
-
-def Grader.fromJson (json : Json) : Except String Grader := do
-  let input? ← match json.getObjVal? "input" with
-    | .ok (.str hex) => if Hash.valid hex then pure (some ⟨hex⟩) else throw s!"not a snapshot: {hex}"
-    | .ok .null | .error _ => pure none
-    | .ok other => throw s!"a grader's input is a snapshot, not {other.compress}"
-  pure {
-    name := (json.getObjVal? "name" >>= Json.getStr?).toOption.getD "grader"
-    command := ← json.getObjVal? "command" >>= Json.getStr?
-    image := ← json.getObjVal? "image" >>= Json.getStr?
-    input?
-    timeoutSeconds := (json.getObjVal? "timeout_seconds" >>= Json.getNat?).toOption.getD 900 }
-
-def definition : Chat.ToolDefinition := {
-  name := "grade"
-  description := "Grade the workspace with the grader assigned to the run."
-  parameters := .object #[] }
-
-/-- A verdict as a grader's call gives it: the status, the score, why, and every check. -/
-def verdictJson (verdict : Alaya.Grader.Verdict) (ran : External) : Json :=
-  let (passed, total) := Alaya.Grader.Verdict.score verdict.checks
-  .mkObj [("status", verdict.status.toString), ("passed", passed), ("total", total),
-    ("reason", verdict.reason),
-    ("checks", .arr (verdict.checks.map fun check =>
-      .mkObj [("ok", check.ok), ("name", check.name), ("directive", check.directive)])),
-    ("exit_code", ran.exitCode?.map (fun c => (c : Json)) |>.getD .null),
-    ("elapsed_ms", ran.elapsedMs)]
-
-/-- Runs the grader its arguments describe, and gives its verdict. -/
-def tool : Tool := {
-  definition
-  check := fun arguments => (Grader.fromJson arguments).map fun _ => ()
-  run := fun arguments => do
-    let grader ← match Grader.fromJson arguments with
-      | .ok grader => pure grader
-      | .error problem => throw problem
-    let ran ← external grader.command grader.image grader.input? grader.timeoutSeconds
-    return verdictJson (Alaya.Grader.verdict ran.stdout ran.error?) ran }
-
-end Grade
 
 /-- The tools an agent's configuration can name, its commands run as `config` says. -/
 def all (config : Executor.Config := {}) : Array Tool :=

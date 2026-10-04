@@ -1,8 +1,11 @@
+import Lean.Data.Json
 import Alaya.Tap
+import Alaya.Hash
 
 /-!
-A grader's verdict, from the TAP it printed on stdout (`Alaya.Tap`, `docs/log-schema.md`
-§4). The grader's exit status is recorded but decides nothing: "the checks ran and some failed"
+A grader, and its verdict, from the TAP it printed on stdout (`Alaya.Tap`, `docs/log-schema.md`
+§4). A grader is an external program: a command in a container of its own image on a checkout of
+the workspace, with trusted files mounted at `/grader`. The grader's exit status is recorded but decides nothing: "the checks ran and some failed"
 and "the grader crashed" can share a status, and only an incomplete TAP stream tells them apart.
 
 - **error**: the grader did not finish (it timed out, or could not be started), or its TAP is
@@ -10,6 +13,39 @@ and "the grader crashed" can share a status, and only an incomplete TAP stream t
 - **fail**: otherwise, a test point failed, or a subtest did;
 - **pass**: otherwise.
 -/
+
+namespace Alaya
+
+open Lean (Json)
+
+/-- A grader: a name for a reader, the command, the pinned image it runs in, the snapshot of its
+trusted input, and how long it may take; 0 is no limit. -/
+structure Grader where
+  name : String := "grader"
+  command : String
+  image : String
+  input? : Option Snapshot := none
+  timeoutSeconds : Nat := 900
+  deriving Inhabited
+
+def Grader.toJson (grader : Grader) : Json :=
+  .mkObj [("name", grader.name), ("command", grader.command), ("image", grader.image),
+    ("input", grader.input?.map (Json.str ·.hex) |>.getD .null),
+    ("timeout_seconds", grader.timeoutSeconds)]
+
+def Grader.fromJson (json : Json) : Except String Grader := do
+  let input? ← match json.getObjVal? "input" with
+    | .ok (.str hex) => if Hash.valid hex then pure (some ⟨hex⟩) else throw s!"not a snapshot: {hex}"
+    | .ok .null | .error _ => pure none
+    | .ok other => throw s!"a grader's input is a snapshot, not {other.compress}"
+  pure {
+    name := (json.getObjVal? "name" >>= Json.getStr?).toOption.getD "grader"
+    command := ← json.getObjVal? "command" >>= Json.getStr?
+    image := ← json.getObjVal? "image" >>= Json.getStr?
+    input?
+    timeoutSeconds := (json.getObjVal? "timeout_seconds" >>= Json.getNat?).toOption.getD 900 }
+
+end Alaya
 
 namespace Alaya.Grader
 

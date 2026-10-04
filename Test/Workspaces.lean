@@ -283,7 +283,7 @@ def runSuite : Suite := Testing.suite "workspaces.run" #[
     writeSpec project baseSpec
     let input := (← scratch) / "input"
     writeSpec input #[("check.sh", "test -f tests/extra.txt && printf '1..1\\nok 1\\n'")]
-    let grader : Agents.Tools.Grade.Grader :=
+    let grader : Grader :=
       { command := "sh /grader/check.sh", image := ← testImage, input? := some (← assertOk <| workspaces.snapshot input) }
     let config : RunConfig := { Scripted.testConfig testAgent with
       environment := { image := ← testImage, workdir := recordedWorkdir, uname := Scripted.testUname } }
@@ -317,8 +317,8 @@ def runSuite : Suite := Testing.suite "workspaces.run" #[
         | fail "the grader's checkout is in the log"
       check (← assertOk <| workspaces.readFile? checkout "tests/extra.txt").isSome "the checkout holds the change"
       -- Removing from the change drops its snapshots and keeps the root's.
-      -- The change, the stop, the grader, its read, its call, answer and return, and the run's return.
-      assertEqual "removed" (← assertOk <| Notices.remove store workspaces changed) 8
+      -- The change, the stop, the grader, its read, its program's answer, and the run's return.
+      assertEqual "removed" (← assertOk <| Notices.remove store workspaces changed) 6
       let out := (← scratch) / "out"
       assertOk <| workspaces.materialize ((workspace? (log.extract 0 1)).getD default) out
       assertEqual "root intact" (← IO.FS.readFile (out / "README.md")) "readme"

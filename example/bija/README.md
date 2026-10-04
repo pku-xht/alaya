@@ -74,5 +74,5 @@ alaya grade "$end:200" "${grader[@]}"           # how far it was at position 200
 The image carries the suite's dependencies, so the agent can run the sample suite itself between
 turns with `uv run pytest`.
 The agent never sees the reference programs: the grader runs only once the agent is over, and copies
-them over a checkout that the run's workspace does not follow; the verdict is the return of the
-grader's call, in the log after the agent's.
+them over a checkout that the run's workspace does not follow; the verdict is what the run
+returns, in the log after the agent's end.

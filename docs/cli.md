@@ -24,6 +24,7 @@ alaya reply ENTRY (TEXT | --unavailable)       answer the question the log waits
 alaya grade ENTRY --grader CMD [--grader-input DIR] [--grader-image IMAGE] [--grader-timeout S]
                                                grade the run at ENTRY: stop the agent there, ask for the grader, run it
 alaya stop ENTRY [--reason TEXT]               stop the agent there
+alaya comment ENTRY TEXT                       append a comment: for whoever reads the log, ignored by everything else
 alaya waiting                                  every log that waits for a reply, with its question
 alaya tree                                     the forest: runs, their stretches of entries, their forks
 alaya log ENTRY                                the log that ends at ENTRY, an event a line, and what comes next
@@ -76,7 +77,7 @@ creates it, and every other command refuses a path that holds none. What it hold
 ## 3. Output
 
 A command prints text for a reader by default, and JSON with `--json`. Every command that appends
-— `new`, `run`, `grade`, `tell`, `commit`, `reply`, `stop` — prints each entry it appends on a line of its
+— `new`, `run`, `grade`, `tell`, `commit`, `reply`, `stop`, `comment` — prints each entry it appends on a line of its
 own: its full 64-hex name, its position in its log, its frame, and its event in a few words.
 
 ```
@@ -95,7 +96,7 @@ With `--json`, a command prints one JSON object per line:
 
 | Command | Object |
 | --- | --- |
-| `new`, `run`, `grade`, `tell`, `commit`, `reply`, `stop` | each entry it appends: `{entry, parent, position, frame, summary, event, elapsed_ms}` |
+| `new`, `run`, `grade`, `tell`, `commit`, `reply`, `stop`, `comment` | each entry it appends: `{entry, parent, position, frame, summary, event, elapsed_ms}` |
 | `run`, `grade` | then how it stopped: `{entry, status, …}`. Once the agent is over, `status` is how it ended — `done` with its `value`, `failed` with its `error`, `stopped` with the stop's `reason` — and `verdict` is the grader's verdict, or `null` while the log is not graded. Otherwise `waits` with `frame` and `question`, the one it waits on as `{text, form: {type, options}}`, or `null` when it waits for a task; or `paused` with `reason` |
 | `config` | with no flags, a line for each agent, model and provider: `{agent}`, `{model}`, `{provider: {name, base_url, base_url_var, key_var, any_model, routes}}`; with `--agent` or `--model`, the one object `{agent, model}` that `new` would record |
 | `tree` | every entry: `{entry, parent, position, summary, status}`, `status` how its log goes on, on an entry that ends one |
@@ -144,7 +145,7 @@ A failed `run` keeps every entry it appended; the operation it was carrying out 
 again by the next `run` from the entry it printed last.
 
 **One writer at a time.** A command that writes the data directory — `new`, `run`, `grade`,
-`tell`, `commit`, `reply`, `stop`, `rm` — holds its lock (`DATA/lock`, `Alaya.Lock`) from start to end. A
+`tell`, `commit`, `reply`, `stop`, `comment`, `rm` — holds its lock (`DATA/lock`, `Alaya.Lock`) from start to end. A
 second writer is refused at once, with status 75 and the holder's pid, rather than left waiting
 for as long as a `run` drives; the operating system drops the lock when its holder exits, however
 it exits, so none is ever left behind. Commands that only read — `tree`, `log`, `show`, `ls`, `cat`, `diff`, `waiting`, `html`, `checkout` — take no lock and run beside a
@@ -268,6 +269,17 @@ it. A message or a change is taken
 by the agent at its next read of its inbox, which MiniSwe makes at the start of every round. A
 reply is taken by the `ask_user` call that waits for it, and by nothing else. A stop is not read
 at all: it ends the agent where it is.
+
+### `comment`
+
+`comment ENTRY TEXT` appends a comment after `ENTRY`: a line for whoever reads the log, shown as
+`# TEXT`. Nothing else reads it. Replay passes over it, so it is taken at any entry of any log —
+while the agent runs, once the run is over, on a log that is no longer a trace of its run — and
+a `run` from a comment goes on as if it were not there. A comment on an entry that already goes
+on is a child of that entry beside its continuation; while nothing follows it, `tree` and the
+report show it as an annotation on the entry, not as a branch. An agent writes comments of its
+own, for debugging, with `comment` (`docs/agent-api.md`): they are in the log with the frame of
+the program that made them.
 
 ### `tree`, `log` and `show`
 
