@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import shutil
 
-from _harness import FIXTURE, ROOT, run, state_hash
+from _harness import FIXTURE, ROOT, entry, grader_answer, json_lines, run
 
 
 def fill(path, key, body, prefix="benchmark"):
@@ -44,25 +44,30 @@ def main():
         return directory / "source"
 
     def grade(name, source, mode, status, passed, total, benchmark=FIXTURE, command=None):
-        root = state_hash(run(alaya, "root", source, "--task", name,
-                              "--agent", "mini-vero", "--set", f"agent.mode={mode}",
-                              "--model", "gpt-oss-120b",
-                              "--image", args.agent_image, "--data", data).stdout)
+        """A run on the source, graded by this grader where its task arrives."""
         command = command or f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader"
-        result = run(alaya, "eval", root, "--input", benchmark,
-                     "--grader-image", args.grader_image, "--grader", command,
-                     "--timeout", "60", "--data", data,
-                     codes=({"pass": 0, "fail": 1, "error": 2}[status],))
-        evaluation = state_hash(result.stdout)
-        record = json.loads((data / "states" / f"{evaluation}.json").read_text())["evaluation"]
+        task = entry(run(alaya, "new", source, "--task", name,
+                         "--agent", "mini-vero", "--set", f"agent.mode={mode}",
+                         "--model", "gpt-oss-120b", "--image", args.agent_image,
+                         "--data", data).stdout)
+        final = json_lines(run(alaya, "grade", task, "--grader", command,
+                               "--grader-input", benchmark, "--grader-image", args.grader_image,
+                               "--grader-timeout", "60", "--json", "--data", data,
+                               codes=(0, 1, 2)).stdout)[-1]
+        assert final["status"] == "stopped", final
+        record = final["verdict"]
         assert record["status"] == status, record
         assert sum(c["ok"] for c in record["checks"]) == passed, record
         assert len(record["checks"]) == total, record
+        log = json_lines(run(alaya, "log", final["entry"], "--json", "--data", data).stdout)
+        answer = grader_answer(log)["entry"]
         report = None
         if status != "error":
-            report = json.loads(run(alaya, "cat", evaluation, ".vero/report.json",
+            # The report is in the checkout as the grader left it, read at its answer's entry.
+            report = json.loads(run(alaya, "cat", answer, ".vero/report.json",
                                     "--data", data).stdout)
-        results.append({"name": name, "evaluation": evaluation, "record": record, "report": report})
+        results.append({"name": name, "entry": final["entry"], "answer": answer,
+                        "record": record, "report": report})
         print(f"{name}: {status}, {passed}/{total} TAP checks", flush=True)
         return report
 

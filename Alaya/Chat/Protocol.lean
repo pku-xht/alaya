@@ -187,6 +187,10 @@ structure Response where
   /-- The Responses API's reasoning items, opaque (see `Message.assistant`). -/
   reasoningItems : Array Lean.Json := #[]
   structuredOutput : StructuredOutput := .native
+  /-- How long the model took to give it, where that was measured: by the cache, which keeps it
+  beside the draw, so a draw costs the time it took whenever it is read. No part of the response
+  as stored: a log keeps it as the time of the sample's entry. -/
+  elapsedMs? : Option Nat := none
   deriving Inhabited
 
 namespace Response

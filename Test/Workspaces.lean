@@ -1,9 +1,10 @@
 import Test.Framework
 import Test.DirectoryWorkspaces
 import Test.Container
+import Test.Scripted
 import Alaya
 
-/-! The `Workspaces` contract — what the trajectory relies on, and the filesystem cases a
+/-! The `Workspaces` contract — what the log's snapshots rely on, and the filesystem cases a
 snapshot store has to get right — run against restic, and against the directory copies that
 stand in for it in the other tests, so that those test against something faithful. -/
 
@@ -11,7 +12,6 @@ namespace WorkspacesTests
 
 open Testing Alaya
 open Alaya.Workspaces (Change ChangeKind)
-open Alaya.Trajectory (createRoot commit diffLines evaluate getState removeSubtree)
 
 private structure Backend where
   name : String
@@ -255,57 +255,79 @@ def pathSuite : Suite := Testing.suite "workspaces.paths" #[
 def resticSuite : Suite := Testing.suite "workspaces.restic" #[
   test "the run's own storage is refused as a checkout target and as a snapshot source" do
     let data := (← scratch) / "data"
-    let store ← assertOk <| Trajectory.Store.create (data / "states")
+    let store ← assertOk <| Store.create (data / "entries")
     let workspaces ← assertOk <| Workspaces.Restic.open (data / "restic") (data / "restic-scratch") (keep := #[store.dir])
     let project ← source
     writeSpec project baseSpec
-    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t") (agent := testAgent) (model := testModel)
-    let id := (← assertOk <| getState store root).workspace
+    let id ← assertOk <| workspaces.snapshot project
     let refused (label : String) (action : Result Unit) : TestM Unit :=
       assertError label action fun | .input _ => true | _ => false
-    -- `restore --delete` into any of these would delete the states or the repository.
-    for target in [data, (← scratch), data / "states", data / "restic", data / "restic" / "inside"] do
+    -- `restore --delete` into any of these would delete the entries or the repository.
+    for target in [data, (← scratch), data / "entries", data / "restic", data / "restic" / "inside"] do
       refused s!"checkout into {target}" (workspaces.materialize id target)
     check (!(← (data / "restic" / "inside").pathExists)) "a refused target was created"
     refused "snapshot of the data directory" (discard <| workspaces.snapshot data)
     refused "snapshot of a project holding it" (discard <| workspaces.snapshot (← scratch))
     -- Nothing was touched, and a directory beside the storage is still fine.
-    assertEqual "the state survives" (← assertOk <| Trajectory.allStates store) #[root]
+    check (← (data / "entries").isDir) "the entries survive"
     assertOk <| workspaces.materialize id (data / "work")
     assertEqual "checked out" (← readSpec (data / "work")) (← readSpec project)
 ]
 
-/-- The trajectory's own operations over a real repository, where the other suites use copies. -/
-def trajectorySuite : Suite := Testing.suite "workspaces.trajectory" #[
-  test "a root, a commit, its diff, an evaluation and a removal, over restic" do
-    let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
+/-- A run's own operations over a real repository, where the other suites use copies. -/
+def runSuite : Suite := Testing.suite "workspaces.run" #[
+  test "a run, a person's change, a grader, and a removal, over restic" do
+    let store ← assertOk <| Store.create ((← scratch) / "entries")
     let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic") ((← scratch) / "restic-scratch")
     let project ← source
     writeSpec project baseSpec
-    let root ← assertOk <| createRoot store workspaces #[] project (← testImage) (some "t") (agent := testAgent) (model := testModel)
-    IO.FS.writeFile (project / "README.md") "readme, by hand"
-    writeSpec project #[("tests/extra.txt", "extra")]
-    let child ← assertOk <| commit store workspaces root project (some "by hand")
-    assertEqual "diff" (← assertOk <| diffLines store workspaces root child) #["M README.md", "+ tests"]
-    assertEqual "notice" ((← assertOk <| getState store child).intervention?.map (·.changed))
-      (some #["M README.md", "+ tests"])
     let input := (← scratch) / "input"
     writeSpec input #[("check.sh", "test -f tests/extra.txt && printf '1..1\\nok 1\\n'")]
-    let verdict ← assertOk <| evaluate store workspaces ((← scratch) / "eval") child
-      "sh /grader/check.sh" (← testUser?) (input? := some input)
-    let evaluation? := (← assertOk <| getState store verdict).evaluation?
-    assertEqual "passed" (evaluation?.map (·.status)) (some .pass)
-    let some evidence := evaluation?.bind (·.input?) | fail "the grader's input was not kept"
-    assertEqual "input" ((← assertOk <| workspaces.readFile? evidence "check.sh").isSome) true
-    -- Removing the commit's subtree drops its snapshots and keeps the root's.
-    assertEqual "removed" (← assertOk <| removeSubtree store workspaces child) 2
-    let out := (← scratch) / "out"
-    assertOk <| workspaces.materialize (← assertOk <| getState store root).workspace out
-    assertEqual "root intact" (← IO.FS.readFile (out / "README.md")) "readme"
-    -- The evaluation's input snapshot went with it.
-    assertError "dropped" (workspaces.materialize evidence out) fun
-      | .storage _ => true
-      | _ => false
+    let grader : Grader :=
+      { command := "sh /grader/check.sh", image := ← testImage, input? := some (← assertOk <| workspaces.snapshot input) }
+    let config : RunConfig := { Scripted.testConfig testAgent with
+      environment := { image := ← testImage, workdir := recordedWorkdir, uname := Scripted.testUname } }
+    match config.run Scripted.testModelSpec with
+    | .error problem => fail problem
+    | .ok run =>
+      let work := (← scratch) / "work"
+      IO.FS.createDirAll work
+      let base ← scratch
+      let graderUser? ← testUser?
+      let rt : Driver.Runtime := {
+        store, workspaces, workDir := work, outputsDir := base / "outputs", scratch := base / "external"
+        executor := noCommands, workdir := recordedWorkdir, graderUser? }
+      let made ← assertOk <| Notices.create store workspaces run project "t"
+      let tip := made.back!.1
+      IO.FS.writeFile (project / "README.md") "readme, by hand"
+      writeSpec project #[("tests/extra.txt", "extra")]
+      let event ← assertOk <| Notices.changed store workspaces tip project "by hand"
+      let .arrived (.changed after summary) := event | fail "a change is a notice"
+      assertEqual "what changed" summary "  M README.md\n  + tests\nby hand"
+      let (changed, _) ← assertOk <| Driver.append store run tip event
+      -- Graded there: the agent is stopped, and the grader reads the person's files, in a checkout.
+      let (graded, verdict) ← Scripted.grade rt run changed grader
+      assertEqual "the verdict" (verdictStatus verdict) "pass"
+      -- The point before the change, graded by the same grader, where the file is not there: the
+      -- script prints nothing, which is an error.
+      let (_, verdict) ← Scripted.grade rt run tip grader
+      assertEqual "graded without the person's file" (verdictStatus verdict) "error"
+      let log ← assertOk <| store.log (← assertOk store.forest) graded
+      let some checkout := log.findSome? fun | .answered _ _ (.ok (.external e)) => some e.checkout | _ => none
+        | fail "the grader's checkout is in the log"
+      check (← assertOk <| workspaces.readFile? checkout "tests/extra.txt").isSome "the checkout holds the change"
+      -- Removing from the change drops its snapshots and keeps the root's.
+      -- The change, the stop, the grader, its read, its program's answer, and the run's return.
+      assertEqual "removed" (← assertOk <| Notices.remove store workspaces changed) 6
+      let out := (← scratch) / "out"
+      assertOk <| workspaces.materialize ((workspace? (log.extract 0 1)).getD default) out
+      assertEqual "root intact" (← IO.FS.readFile (out / "README.md")) "readme"
+      assertError "dropped" (workspaces.materialize after out) fun
+        | .storage _ => true
+        | _ => false
+      -- The grader's input is kept: the other branch still names it.
+      assertOk <| workspaces.materialize grader.input?.get! out
+      check (← (out / "check.sh").pathExists) "the input is still in the repository"
 ]
 
 end WorkspacesTests

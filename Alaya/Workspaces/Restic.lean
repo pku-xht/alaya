@@ -11,7 +11,7 @@ A workspace identifier is a restic snapshot ID. It covers the time of the snapsh
 metadata of every file, so two snapshots of equal directories have different identifiers.
 
 Every operation is one `restic` process. The repository is unencrypted-by-password
-(`--insecure-no-password`): it sits beside the states, which are not encrypted either.
+(`--insecure-no-password`): it sits beside the entries, which are not encrypted either.
 -/
 
 namespace Alaya.Workspaces.Restic
@@ -31,8 +31,8 @@ private structure Finished where
   stdout : ByteArray
   stderr : String
 
-/-- Runs `restic` with the repository's flags. Standard output is kept as bytes — `dump` writes
-a file's content there — and standard error is drained concurrently so neither pipe can fill. -/
+/-- Runs `restic` with the repository's flags. Standard output is kept as bytes, which
+`jsonLines` decodes, and standard error is drained concurrently so neither pipe can fill. -/
 private def run (settings : Settings) (args : Array String)
     (cwd? : Option System.FilePath := none) : Result Finished :=
   Result.fromIO Error.storage do
@@ -61,7 +61,7 @@ private def jsonLines (bytes : ByteArray) : Array Lean.Json :=
 private def stringField? (json : Lean.Json) (name : String) : Option String :=
   (json.getObjVal? name >>= Lean.Json.getStr?).toOption
 
-private def idOf (what : String) (hex : String) : Result Hash :=
+private def idOf (what : String) (hex : String) : Result Snapshot :=
   if Hash.valid hex then pure ⟨hex⟩
   else throw <| .storage s!"restic {what} reported an unusable snapshot id: {hex}"
 
@@ -73,7 +73,7 @@ def init (settings : Settings) : Result Unit := do
 /-- Snapshots `directory` from inside it, as `.`, so that paths in the snapshot are relative to
 it whichever directory it was. A snapshot that could not read every file is a failure, not a
 smaller snapshot. -/
-def snapshot (settings : Settings) (directory : System.FilePath) : Result Hash := do
+def snapshot (settings : Settings) (directory : System.FilePath) : Result Snapshot := do
   refuseOverlap "snapshot" directory settings.kept
   let finished ← run settings
     #["backup", ".", "--json", "--quiet", "--no-scan", "--host", "alaya"] (cwd? := some directory)
@@ -87,7 +87,7 @@ def snapshot (settings : Settings) (directory : System.FilePath) : Result Hash :
 
 /-- Restores in place: files whose content differs are rewritten, and what the snapshot does
 not hold is deleted. -/
-def materialize (settings : Settings) (id : Hash) (directory : System.FilePath) : Result Unit := do
+def materialize (settings : Settings) (id : Snapshot) (directory : System.FilePath) : Result Unit := do
   refuseOverlap "check out into" directory settings.kept
   Result.fromIO Error.storage (IO.FS.createDirAll directory)
   makeWritable directory
@@ -102,7 +102,7 @@ private def relative (path : String) : String × Bool :=
   ((path.dropWhile (· == '/')).toString, directory)
 
 /-- Which of `paths` are directories in the snapshot. -/
-private def directoriesAmong (settings : Settings) (id : Hash) (paths : Array String) :
+private def directoriesAmong (settings : Settings) (id : Snapshot) (paths : Array String) :
     Result (Array String) := do
   if paths.isEmpty then return #[]
   let finished ← succeed "ls" (← run settings
@@ -115,7 +115,7 @@ lists every path under an added or removed directory; those are dropped, the dir
 for them. A path that was a directory and is a file, or the reverse, restic reports as one type
 change and nothing beneath it; here it is the removal of the one and the addition of the
 other. A file that became a link, or the reverse, is a modification. -/
-def diff (settings : Settings) (before after : Hash) : Result (Array Change) := do
+def diff (settings : Settings) (before after : Snapshot) : Result (Array Change) := do
   let finished ← succeed "diff" (← run settings #["diff", before.hex, after.hex, "--json"])
   let mut changes : Array Change := #[]
   -- Type changes whose new side is not a directory: the old side may have been one.
@@ -153,7 +153,7 @@ private def literalPattern (path : String) : String :=
 
 /-- Lists one directory using only snapshot metadata. Passing the directory explicitly keeps
 `restic ls` nonrecursive, even at the root; dependencies are not restored merely to browse. -/
-def listEntries (settings : Settings) (id : Hash) (path : String) : Result (Array Entry) := do
+def listEntries (settings : Settings) (id : Snapshot) (path : String) : Result (Array Entry) := do
   if !safeSnapshotPath path then
     throw <| .input "snapshot path must be a clean relative path"
   let finished ← succeed "ls" (← run settings #["ls", id.hex, "--json", "/" ++ path])
@@ -176,13 +176,13 @@ def listEntries (settings : Settings) (id : Hash) (path : String) : Result (Arra
   pure (entries.qsort fun a b => a.path < b.path)
 
 /-- Numbers this process's read directories. A clock alone is not enough: reads run
-concurrently (the HTML report reads several states at once), two can see the same tick, and
+concurrently (the HTML report reads several snapshots at once), two can see the same tick, and
 the first to finish would remove the directory the other is reading from. -/
 private initialize readCounter : IO.Ref Nat ← IO.mkRef 0
 
 /-- One `restore` of just these paths into a scratch directory, read back from there: a process
 per file would spend most of a second each on deriving the repository key. -/
-def readFiles (settings : Settings) (id : Hash) (paths : Array String) :
+def readFiles (settings : Settings) (id : Snapshot) (paths : Array String) :
     Result (Array (Option ByteArray)) := do
   let wanted := paths.filter safeRelativePath
   if wanted.isEmpty then return paths.map fun _ => none
@@ -207,7 +207,7 @@ def readFiles (settings : Settings) (id : Hash) (paths : Array String) :
     makeWritable scratch
     Result.fromIO Error.storage (IO.FS.removeDirAll scratch)
 
-def retainOnly (settings : Settings) (keep : Array Hash) : Result Unit := do
+def retainOnly (settings : Settings) (keep : Array Snapshot) : Result Unit := do
   let finished ← succeed "snapshots" (← run settings #["snapshots", "--json"])
   let listed := match jsonLines finished.stdout with
     | #[.arr snapshots] => snapshots.filterMap (stringField? · "id")

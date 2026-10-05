@@ -3,8 +3,7 @@ import Alaya
 
 /-! A `Workspaces` for tests of everything above it: a snapshot is a copy of the directory. It
 keeps the contract `Test/Workspaces.lean` checks, costs no `restic` process — each of which
-spends most of a second deriving the repository key — and so keeps trajectory tests about
-the trajectory. -/
+spends most of a second deriving the repository key — and so keeps tests of runs about runs. -/
 
 namespace Testing
 
@@ -101,36 +100,8 @@ def directoryWorkspaces (root : System.FilePath) : Workspaces where
         let _ ← IO.Process.output { cmd := "chmod", args := #["-R", "u+w", entry.path.toString] }
         IO.FS.removeDirAll entry.path
 
-/-- One turn from `hash`: a continuation allowed one turn, as `alaya resume --turns 1` is. -/
-def step (rt : Trajectory.Runtime) (hash : Hash) : Result (Hash × Trajectory.Halt) :=
-  Trajectory.resume rt hash (fun _ => pure ()) (turns? := some 1)
-
-/-- The state a step reached, when no time budget stopped it: the tests that step give none. -/
-def stepped (result : Result (Hash × Trajectory.Halt)) : TestM Hash := do
-  let (state, halt) ← assertOk result
-  if halt == .outOfTime then fail "the step was stopped by a time budget"
-  pure state
-
 /-- The test's own snapshot store, the same one however often it is asked for. -/
 def workspaces : TestM Workspaces := do
   pure (directoryWorkspaces ((← scratch) / "snapshots"))
-
-/-- Drives `agent` as production runs do — a root of `log` over an empty project on the test's
-directory workspaces and in its working directory, grown by `resume` — until the run ends,
-asks, or reaches a limit. Each call has a store of its own. Returns the runtime, the state it stopped at, and why. -/
-def drive (agent : Agent.Agent) (executor : Executor) (model : Model) (log : Agent.Log) :
-    TestM (Trajectory.Runtime × Hash × Trajectory.Halt) := do
-  let base := (← scratch) / s!"drive-{← IO.monoNanosNow}"
-  IO.FS.createDirAll (base / "project")
-  -- The test's own working directory, which the tests that check files read.
-  let work := (← scratch) / "work"
-  IO.FS.createDirAll work
-  let store ← assertOk <| Trajectory.Store.create (base / "states")
-  let workspaces ← workspaces
-  let root ← assertOk <| Trajectory.createRoot store workspaces log (base / "project") recordedImage
-    (agent := testAgent) (model := testModel)
-  let rt : Trajectory.Runtime := { store, workspaces, workDir := work, outputsDir := work.withFileName "outputs", executor, model, agent }
-  let (state, halt) ← assertOk <| Trajectory.resume rt root (fun _ => pure ())
-  pure (rt, state, halt)
 
 end Testing

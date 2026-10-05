@@ -7,17 +7,18 @@
 
 usage: grade.py
 
-`alaya eval` runs it in the Bija image (`Dockerfile`), in a checkout of the attempt, with this
-directory as the grader's trusted input at /grader. From the repository root:
+`alaya grade` runs it on a point of a run, in the Bija image (`Dockerfile`), in a checkout of
+the attempt, with this directory as the grader's trusted input at /grader. From the repository
+root:
 
-    alaya eval HASH --input example/bija --grader /grader/grade.py --timeout 1800
+    alaya grade ENTRY --grader 'python3 /grader/grade.py' --grader-input example/bija --grader-timeout 1800
 
 It replaces the checkout's `tests/` with the reference's 232 programs, runs the suite with the
 attempt's own project, and prints TAP on stdout: one check per program run through the command
 line (`program AREA/NAME`), then one per program compiled with `bija build` and run under a bare
 interpreter (`standalone AREA/NAME`). A suite that did not run bails out. The pass counts by
 area go to stderr, and the suite's output and JUnit report stay in the checkout under `.grade/`,
-where `alaya cat HASH .grade/pytest.txt` reads them.
+where `alaya cat ENTRY .grade/pytest.txt` reads them, ENTRY the entry of the grader's answer.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 /-!
 A pure, in-process SHA-256 (FIPS 180-4).
 
-A state is named by the hash of its bytes, so hashing must not cost a process spawn per state
+An entry is named by the hash of its event, so hashing must not cost a process spawn per entry
 the way shelling out to `sha256sum` does.
 -/
 

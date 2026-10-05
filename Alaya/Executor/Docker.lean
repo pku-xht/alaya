@@ -2,7 +2,7 @@ import Alaya.Executor
 import Alaya.Cli
 
 /-! The container executor: every command of a run in one container, with the working directory
-bind-mounted at the trajectory's workdir, `/workspace` unless the root chose another, so the
+bind-mounted at the run's workdir, `/workspace` unless the run chose another, so the
 store still snapshots a host directory. The command runs
 through a `/bin/sh` trampoline that merges stderr into stdout, with the environment overrides
 applied to the command rather than to the docker client. `runOnce` runs a single command in a
@@ -12,7 +12,7 @@ namespace Alaya.Executor.Docker
 
 open Alaya (Result Error Output Uname Executor)
 
-/-- Where the working directory is mounted inside the container, unless a root chooses another. -/
+/-- Where the working directory is mounted inside the container, unless a run chooses another. -/
 def defaultWorkdir : String := "/workspace"
 
 /-- A workdir is an absolute, clean path other than the root, and neither in nor around one of
@@ -40,7 +40,7 @@ private def volumes (mounts : Array Mount) : IO (Array String) :=
     pure (args ++ #["--volume", s!"{host}:{m.container}{if m.readOnly then ":ro" else ""}"])
 
 /-- How the container is created. `image` is a runnable reference; once `pin`ned it is one that
-names exact bits, which is what a trajectory records. -/
+names exact bits, which is what a run records. -/
 structure Settings where
   image : String
   /-- `uid:gid` to run as. Files the agent creates land in the bind-mounted workspace, so on
@@ -84,8 +84,8 @@ private def inspect? (reference format : String) : IO (Option String) := do
 /-! ## Pinning the image -/
 
 /-- Replaces the image reference with one that names exact bits: its repo digest, or its image
-id when it was built locally and has none. Both are runnable, so a trajectory can record one and
-a later `resume` can start from it without consulting a tag that may have moved. Pulls once if
+id when it was built locally and has none. Both are runnable, so a run can record one and a
+later `run` can start from it without consulting a tag that may have moved. Pulls once if
 the image is not present locally. -/
 def Settings.pin (settings : Settings) : Result Settings := do
   let reference := settings.image
@@ -101,7 +101,7 @@ def Settings.pin (settings : Settings) : Result Settings := do
     | some pinned => pure { settings with image := pinned }
     | none => throw <| .environment s!"image {reference} is not available after pulling it"
 
-/-- Makes sure a recorded image is available locally, so a resumed trajectory fails with a clear
+/-- Makes sure a recorded image is available locally, so a run driven on fails with a clear
 message rather than a container that cannot start. A registry digest names bits anyone can
 fetch, so a missing one is pulled; a bare image ID is a local build's, which nothing can pull. -/
 def Settings.ensurePresent (settings : Settings) : Result Unit := do
@@ -110,7 +110,7 @@ def Settings.ensurePresent (settings : Settings) : Result Unit := do
   if ← present then return
   if (settings.image.splitOn "@sha256:").length != 2 then
     throw <| .environment <|
-      s!"image {settings.image} is recorded in this trajectory but is not available locally, " ++
+      s!"image {settings.image} is recorded in this run but is not available locally, " ++
       "and it is a local build's ID, which cannot be pulled: rebuild the image, or `docker load` it"
   let _ ← docker #["pull", settings.image] s!"docker pull {settings.image}"
   if !(← present) then
@@ -135,7 +135,7 @@ private def runArgs (settings : Settings) : Array String :=
     ++ #["--env", "HOME=/tmp"]
 
 /-- `uname` inside the image, for a prompt that describes the machine. Read with a throwaway
-container, since it is needed at `root` time, before any run has started. -/
+container, since it is needed when a run is created, before any command of it has run. -/
 def uname (settings : Settings) : Result Uname := do
   let script := "uname -s; uname -r; uname -v; uname -m"
   let out ← docker (#["run", "--rm", "--entrypoint", "/bin/sh"] ++ runArgs settings ++
@@ -156,8 +156,8 @@ private structure Container where
 /-- Starts the run's container with the working directory bind-mounted.
 
 The mount is bound to that directory's inode, and a full (non-incremental) materialize replaces
-it — `Store.materialize` removes the destination and recreates it. A trajectory closes the
-executor before every checkout, so the next command starts a container on the new directory. -/
+it — `Workspaces.materialize` removes the destination and recreates it. The driver closes the
+executor before every restore, so the next command starts a container on the new directory. -/
 private def start (settings : Settings) (workDir : System.FilePath) : IO Container := do
   let host ← IO.FS.realPath workDir
   let args := #["run", "--detach", "--rm", "--init", "--entrypoint", "/bin/sh"]
@@ -178,7 +178,7 @@ private def remove (id : String) : IO Unit := do
 
 /-- Copies the contents of `path` in the image into `destination`, which must already exist.
 The container is created but never started, so nothing in the image runs — this seeds a
-trajectory from an image that already carries the project, the way task images usually do. -/
+run from an image that already carries the project, the way task images usually do. -/
 def copyOut (settings : Settings) (path : String) (destination : System.FilePath) : Result Unit := do
   let host ← Result.fromIO Error.storage (IO.FS.realPath destination)
   let id ← docker #["create", "--entrypoint", "/bin/sh", settings.image, "-c", "true"]
@@ -278,12 +278,12 @@ private def execIn (ref : IO.Ref (Option Container)) (settings : Settings) (conf
     pure (failed (toString e))
 
 /-- An executor that runs every command of a run in one container, with the working directory
-bind-mounted. `settings.image` should already be pinned, since it is what the trajectory
-records. -/
-def executor (settings : Settings) (config : Config) : Result Executor := do
+bind-mounted, each as its own configuration says. `settings.image` should already be pinned,
+since it is what the run records. -/
+def executor (settings : Settings) : Result Executor := do
   let ref ← Result.fromIO Error.storage (IO.mkRef (none : Option Container))
   pure {
-    exec := execIn ref settings config
+    exec := execIn ref settings
     uname := (uname settings).toUserIO
     close := do
       match ← ref.get with
@@ -359,7 +359,7 @@ def RunOptions.cli : Cli.Spec RunOptions :=
       "the user commands run as; by default the host user on Linux, the image's own on macOS"
     <*> Cli.flagD "network" (.string "NAME") "none" "the docker network, e.g. bridge; none is no network"
 
-/-- Settings for a trajectory's image and workdir, run as `options` say. -/
+/-- Settings for a run's image and workdir, run as `options` say. -/
 def settingsOf (options : RunOptions) (image : String) (workdir : String := defaultWorkdir) :
     Result Settings := do
   let user? ← match options.user? with

@@ -1,6 +1,7 @@
 import Test.Framework
 import Test.DirectoryWorkspaces
 import Test.Container
+import Test.Scripted
 import Alaya
 
 /-! Command-line parsing and the DGX Spark endpoint syntax. -/
@@ -45,12 +46,15 @@ def taskSuite : Suite := suite "cli.task" #[
     IO.FS.writeFile path contents
     let task ← assertOk (← task ["--task-file", path.toString])
     assertEqual "verbatim, trailing newline included" task contents
-    let uname : Uname := { system := "Linux", release := "test", version := "test", machine := "test" }
-    let logs := #[Agent.MiniSwe.initialLog {} task uname,
-      Agent.MiniVero.initialLog { mode := .proof } task uname,
-      Agent.MiniVero.initialLog { mode := .codeproof } task uname]
-    for log in logs do
-      let request : Chat.Request := { messages := Agent.MiniSwe.view {} log, tools := Agent.MiniSwe.tools {} }
+    -- What each agent asks first, given the task as the notice it waits for.
+    for agent in [Lean.Json.mkObj [("name", "mini-swe")], .mkObj [("name", "mini-vero"), ("mode", "proof")],
+        .mkObj [("name", "mini-vero"), ("mode", "codeproof")]] do
+      let request? : Option Chat.Request := match (Scripted.testConfig agent).run Scripted.testModelSpec with
+        | .ok run => match next run (Scripted.settle run (Scripted.opening run task)) with
+          | .ask { op := .sample request, .. } => some request
+          | _ => none
+        | .error _ => none
+      let some request := request? | fail s!"{agent.compress} does not sample first"
       let json := request.toJson .native
       let .ok messages := json.getObjValAs? (Array Lean.Json) "messages"
         | fail "serialized request is missing messages"
@@ -199,16 +203,16 @@ private def compressed (json : Lean.Json) : String := json.compress
 
 def agentsSuite : Suite := suite "cli.agents" #[
   test "an agent's name alone is its complete defaults, and they read back as themselves" do
-    for definition in Agent.Catalog.all do
-      let defaults ← assertOk <| Agent.Catalog.resolve definition.name #[]
-      assertEqual s!"{definition.name} names itself" (defaults.config.getObjValAs? String "name").toOption
+    for definition in Agents.Catalog.all do
+      let defaults ← assertOk <| Agents.Catalog.resolve definition.name #[]
+      assertEqual s!"{definition.name} names itself" (defaults.getObjValAs? String "name").toOption
         (some definition.name)
-      let again ← assertOk <| Agent.Catalog.fromJson defaults.config
-      assertEqual s!"{definition.name} round-trips" (compressed again.config) (compressed defaults.config),
+      let again ← assertOk <| Agents.Catalog.complete defaults
+      assertEqual s!"{definition.name} round-trips" (compressed again) (compressed defaults),
 
   test "a configuration may leave fields out, but not misname or mistype one" do
     let refused (label : String) (json : Lean.Json) (expected : String) : TestM Unit :=
-      assertError label (Agent.Catalog.fromJson json) fun
+      assertError label (Agents.Catalog.complete json) fun
         | .input m => (m.splitOn expected).length > 1
         | _ => false
     refused "no name" (.mkObj [("step_limit", 1)]) "needs a \"name\""
@@ -217,41 +221,49 @@ def agentsSuite : Suite := suite "cli.agents" #[
     refused "type" (.mkObj [("name", "mini-swe"), ("recover_output", "yes")]) "must be true or false"
     refused "mode" (.mkObj [("name", "mini-vero"), ("mode", "both")]) "unknown mode"
     refused "nested" (.mkObj [("name", "mini-swe"), ("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
-    refused "own field, misnamed" (.mkObj [("name", "mini-vero"), ("stepp", 1)]) "mode, time_budget"
-    let built ← assertOk <| Agent.Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
-    assertEqual "tools follow the settings" (built.tools.map (·.name)) #["bash", "submit", "time_budget"]
-    assertEqual "a nested setting" ((← assertOk <| Agent.Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]).executorConfig.timeoutSeconds) 5
-    assertError "the name is not a setting" (Agent.Catalog.resolve "mini-swe" #[agentSet ["name"] "mini-vero"]) fun
+    refused "own field, misnamed" (.mkObj [("name", "mini-vero"), ("stepp", 1)]) "mask_observations, mode"
+    let built ← assertOk <| Agents.Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
+    assertEqual "tools follow the settings" ((built.getObjVal? "tools").toOption.map (·.compress))
+      (some "[\"bash\",\"submit\",\"time_budget\"]")
+    -- How commands run is in each command the agent asks for.
+    let nested ← assertOk <| Agents.Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]
+    let timeout? : Option Nat := match (Scripted.testConfig nested).run Scripted.testModelSpec with
+      | .ok run =>
+        let asked := Scripted.respond run (Scripted.settle run (Scripted.opening run))
+          { toolCalls := #[{ id := "c", name := "bash", arguments := .mkObj [("command", "ls")] }] }
+        match next run asked with
+        | .ask { op := .exec _ config, .. } => some config.timeoutSeconds
+        | _ => none
+      | .error _ => none
+    assertEqual "a nested setting" timeout? (some 5)
+    assertError "the name is not a setting" (Agents.Catalog.resolve "mini-swe" #[agentSet ["name"] "mini-vero"]) fun
       | .input m => (m.splitOn "--agent NAME").length > 1
       | _ => false,
 
-  test "a root records its agent, and every state of the run finds it there" do
-    let store ← assertOk <| Trajectory.Store.create ((← scratch) / "states")
-    let workspaces ← Testing.workspaces
-    let project := (← scratch) / "proj"
-    IO.FS.createDirAll project
-    let built ← assertOk <| Agent.Catalog.fromJson (.mkObj [("name", "mini-swe"), ("step_limit", 7)])
-    let root ← assertOk <| Trajectory.createRoot store workspaces #[] project (← testImage) (some "t")
-      (agent := built.config) (model := testModel)
-    let child ← assertOk <| Trajectory.tell store root "hello"
-    assertEqual "root" (compressed (← assertOk <| Trajectory.agentOf store root)) (compressed built.config)
-    assertEqual "child" (compressed (← assertOk <| Trajectory.agentOf store child)) (compressed built.config)
-    check (← assertOk <| Trajectory.getState store child).agent?.isNone "a child carries no record itself"
-    let lines ← assertOk <| Trajectory.showLines store root
-    check (lines.any fun l => l.startsWith "agent    " && (l.splitOn "\"step_limit\":7").length > 1) "show prints it"
-    let tree ← assertOk <| Trajectory.treeLines store
-    check (tree.any fun l => (l.splitOn "root  [mini-swe, gpt-oss-120b]").length > 1) s!"tree names the agent: {tree}"
+  test "a run's configuration is the opening of its agent's call, and the tree names it" do
+    let agent ← assertOk <| Agents.Catalog.complete (.mkObj [("name", "mini-swe"), ("step_limit", 7)])
+    match (Scripted.testConfig agent).run Scripted.testModelSpec with
+    | .error problem => fail problem
+    | .ok run =>
+      let rt ← Scripted.runtime noCommands none
+      let tip ← Scripted.start rt run "t"
+      let (told, _) ← assertOk <| Driver.append rt.store run tip (.arrived (.said "hello"))
+      let log ← Scripted.logAt rt told
+      assertEqual "the configuration" (compressed (← assertOk <| configOf log).agent) (compressed agent)
+      let forest ← assertOk rt.store.forest
+      let tree := Render.treeLines (← assertOk <| Render.rows rt.store forest)
+      check (tree.any fun l => (l.splitOn "root  mini-swe, gpt-oss-120b").length > 1) s!"tree names the agent: {tree}"
 ]
 
 private def view : Cli.Spec (Bool × String) :=
-  Prod.mk <$> Cli.switch "view" "show the view" <*> Cli.arg "HASH" .string "the state"
+  Prod.mk <$> Cli.switch "view" "show the view" <*> Cli.arg "ENTRY" .string "the entry"
 
 private def sample : Cli.Command where
   name := "sample"
   summary := "A command for the tests."
   examples := #["alaya sample abc --count 3"]
   spec := (fun (_ : String × Nat × Option String) (_ : Cli.Out) => (pure 0 : Result UInt32))
-    <$> (Prod.mk <$> Cli.arg "HASH" .string "the state"
+    <$> (Prod.mk <$> Cli.arg "ENTRY" .string "the entry"
       <*> (Prod.mk <$> Cli.flag "count" .nat "how many" <*> Cli.flag? "note" .string "a note"))
 
 private def app : Cli.App := { name := "alaya", summary := "Tests.", commands := #[sample] }
@@ -301,7 +313,7 @@ def specSuite : Suite := suite "cli.spec" #[
     assertEqual "extra" (← problemsOf "extra" (two.parse ["a", "b", "c"])) #["unexpected argument 'c'"],
 
   test "after -- everything is positional, empty strings and flag-like tokens included" do
-    let reply := Prod.mk <$> Cli.arg "HASH" .string "" <*> Cli.arg "TEXT" .string ""
+    let reply := Prod.mk <$> Cli.arg "ENTRY" .string "" <*> Cli.arg "TEXT" .string ""
     for answer in ["", "--data", "-m", "--", "--json", "  answer\n--data other\n原文  "] do
       assertEqual s!"answer {answer}" (← parsed "reply" (reply.parse ["--", "q", answer])) ("q", answer),
 
@@ -319,7 +331,7 @@ def specSuite : Suite := suite "cli.spec" #[
 
   test "every failure has a class, and each class one exit status above every outcome" do
     let cases : List (Error × String × UInt32) := [
-      (.input "no state matches x", "input", 65), (.environment "cannot run docker", "environment", 69),
+      (.input "no entry matches x", "input", 65), (.environment "cannot run docker", "environment", 69),
       (.transport "timed out", "transient", 75), (.http 429 "slow down" (some 30000), "transient", 75),
       (.http 503 "down", "transient", 75), (.http 400 "bad request", "model", 76),
       (.http 401 "no key", "model", 76), (.protocol "not JSON", "model", 76),
@@ -332,8 +344,8 @@ def specSuite : Suite := suite "cli.spec" #[
     assertEqual "usage" Cli.exitUsage 64
     assertEqual "an http failure's JSON" (Cli.errorJson (.http 429 "slow down" (some 30000))).compress
       "{\"error\":\"transient\",\"message\":\"http 429: slow down\",\"retry_after_ms\":30000,\"status\":429}"
-    assertEqual "an input failure's JSON" (Cli.errorJson (.input "no state matches x")).compress
-      "{\"error\":\"input\",\"message\":\"no state matches x\"}",
+    assertEqual "an input failure's JSON" (Cli.errorJson (.input "no entry matches x")).compress
+      "{\"error\":\"input\",\"message\":\"no entry matches x\"}",
 
   test "every problem is reported at once" do
     let spec := Prod.mk <$> Cli.flag "count" .nat "how many" <*> Cli.flag "model" (.string "P:M") "the model"
@@ -360,15 +372,15 @@ def specSuite : Suite := suite "cli.spec" #[
     let .ok (_, json) := sample.parse ["abc", "--count", "3", "--json"]
       | fail "sample did not parse"
     check json "--json is seen"
-    assertEqual "usage" (sample.usage app) "alaya sample HASH --count N [OPTIONS]"
+    assertEqual "usage" (sample.usage app) "alaya sample ENTRY --count N [OPTIONS]"
     let help := sample.help app
-    for line in ["usage: alaya sample HASH --count N [OPTIONS]", "  --count N    how many (required)",
+    for line in ["usage: alaya sample ENTRY --count N [OPTIONS]", "  --count N    how many (required)",
         "  --note TEXT  a note", "  alaya sample abc --count 3"] do
       check ((help.splitOn line).length > 1) s!"help lacks '{line}':\n{help}"
     let .ok commands := app.describe.getObjValAs? (Array Lean.Json) "commands" | fail "no commands"
     let .ok items := commands[0]!.getObjValAs? (Array Lean.Json) "items" | fail "no items"
     let names := items.filterMap fun i => (i.getObjValAs? String "name").toOption
-    assertEqual "described" names #["HASH", "count", "note", "json", "help"]
+    assertEqual "described" names #["ENTRY", "count", "note", "json", "help"]
 ]
 
 def suites : Array Suite := #[taskSuite, specSuite, endpointSuite, agentsSuite]

@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from _harness import ROOT, run, state_hash
+from _harness import ROOT, grader_answer, json_lines, run
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument("--benchmark", type=Path, required=True)
@@ -49,12 +49,16 @@ assert packages and all(p.is_symlink() and str(p.readlink()).startswith("/opt/ve
                         for p in packages)
 alaya = ROOT / ".lake/build/bin/alaya"
 data = output / "audit"
-root = state_hash(run(alaya, "root", source, "--task-file", output / "MINIVERO_TASK.md",
-                      "--agent", "mini-vero", "--set", "agent.mode=proof", "--model", "gpt-oss-120b", "--image",
-                      args.agent_image, "--data", data).stdout)
-state = json.loads((data / "states" / f"{root}.json").read_text())
+# The run is created with no grader; the benchmark is snapshotted when `grade` assigns one.
+created = json_lines(run(alaya, "new", source, "--task-file", output / "MINIVERO_TASK.md",
+                         "--agent", "mini-vero", "--set", "agent.mode=proof",
+                         "--model", "gpt-oss-120b", "--image", args.agent_image,
+                         "--data", data, "--json").stdout)
+root, task = created[0], created[-1]["entry"]
+configuration = created[1]["event"]["routine"]["arguments"]
+workspace = root["event"]["notice"]["workspace"]
 stats = json.loads(run("restic", "--repo", data / "restic", "--insecure-no-password",
-                       "stats", state["workspace"], "--mode", "restore-size", "--json").stdout)
+                       "stats", workspace, "--mode", "restore-size", "--json").stdout)
 # A source-only snapshot is small; compiled packages would be gigabytes.
 assert stats["total_size"] < 10_000_000, stats
 cached = run(*base, "lake", "build", "@mathlib/Mathlib", "@proofwidgets/widgetPackageLock")
@@ -70,21 +74,26 @@ spec_total = sum(
     for package in json.loads((benchmark / "manifest.json").read_text())["packages"]
     for module in package.get("modules", [])
 )
-grading = run(alaya, "eval", root, "--timeout", "5400",
-              "--grader-image", args.grader_image, "--input", benchmark,
-              "--grader", "python /opt/alaya-vero/grade.py --mode proof --benchmark /grader",
-              "--data", data, codes=(1,))
-evaluation = state_hash(grading.stdout)
-record = json.loads((data / "states" / f"{evaluation}.json").read_text())["evaluation"]
+# Grade the untouched source where the task arrives: `grade` stops a fork there and runs the
+# grader, exiting 1 for the fail this is.
+final = json_lines(run(alaya, "grade", task,
+                       "--grader", "python /opt/alaya-vero/grade.py --mode proof --benchmark /grader",
+                       "--grader-input", benchmark, "--grader-image", args.grader_image,
+                       "--grader-timeout", "5400", "--json", "--data", data, codes=(1,)).stdout)[-1]
+assert final["status"] == "stopped", final
+record = final["verdict"]
+answer = grader_answer(json_lines(run(alaya, "log", final["entry"], "--json",
+                                      "--data", data).stdout))["entry"]
 assert record["status"] == "fail", record
 assert len(record["checks"]) == spec_total, (len(record["checks"]), spec_total)
 assert not any(check["ok"] for check in record["checks"]), record
-report = json.loads(run(alaya, "cat", evaluation, ".vero/report.json", "--data", data).stdout)
+report = json.loads(run(alaya, "cat", answer, ".vero/report.json", "--data", data).stdout)
 assert report["summary"]["total_specs"] == spec_total, report["summary"]
-result = {"root": root, "image": state["image"], "snapshot_stats": stats,
+result = {"root": root["entry"], "task": task, "image": configuration["environment"]["image"],
+          "snapshot_stats": stats,
           "package_symlinks": {p.name: str(p.readlink()) for p in packages},
           "uid_gid": uid, "network": "none", "build_exit": build.returncode,
-          "grading": {"state": evaluation, "status": record["status"],
+          "grading": {"entry": final["entry"], "answer": answer, "status": record["status"],
                       "checks": len(record["checks"]),
                       "passed_specs": report["summary"]["passed_specs"]},
           "rejects_host_packages": True, "rejects_changed_lock": True,

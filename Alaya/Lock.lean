@@ -4,7 +4,7 @@ import Alaya.Error
 One writer at a time in a directory: an exclusive `flock` on `DIR/lock`, held while a command
 writes and released when it ends. The operating system drops the lock when the process exits,
 however it exits, so a crash or a kill leaves none behind. A second writer is refused at once,
-not made to wait: a command that would block for as long as another `resume` runs is better told
+not made to wait: a command that would block for as long as another `run` drives is better told
 so. Readers take no lock.
 -/
 

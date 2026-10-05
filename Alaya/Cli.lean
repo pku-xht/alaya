@@ -12,8 +12,8 @@ Specs compose applicatively. A module that owns some settings owns their flags t
 takes:
 
 ```
-ContinueArgs.mk <$> dataDir <*> arg "HASH" .string "the state to continue from"
-  <*> flag "provider" providerName "…" <*> Docker.RunOptions.cli <*> flagD "time-budget" .nat 0 "…"
+RunArgs.mk <$> dataDir <*> arg "ENTRY" .string "the entry to go on from"
+  <*> flag? "provider" providerName "…" <*> Docker.RunOptions.cli <*> flagD "time-budget" .nat 0 "…"
 ```
 
 A command line is `COMMAND` followed by positionals and flags in any order. A valued flag takes
@@ -416,7 +416,7 @@ private def Item.token (item : Item) : String :=
   | .valued metavar repeatable => s!"--{item.name} {metavar}" ++ (if repeatable then " …" else "")
   | .argument _ => item.name
 
-/-- `alaya resume HASH --provider NAME [OPTIONS]`: the arguments and what is required, with
+/-- `alaya run ENTRY [OPTIONS]`: the arguments and what is required, with
 alternatives grouped; help lists the options. -/
 def Command.usage (app : App) (c : Command) : String := Id.run do
   let items := c.full.items

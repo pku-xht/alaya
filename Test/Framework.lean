@@ -46,18 +46,15 @@ def suite (name : String) (cases : Array Case) : Suite :=
 def scratch : TestM System.FilePath :=
   return (← read).scratch
 
-/-- The image of states a test builds by hand. Nothing runs in them, so it names no real image;
-a test that runs a command uses the pinned test image (`Test/Container.lean`). -/
+/-- The image of runs a test makes when nothing of the run's runs in it, so it names no real
+image; a test that runs a command uses the pinned test image (`Test/Container.lean`). -/
 def recordedImage : String := "alaya.test/image@sha256:0"
 
-/-- The workdir of states a test builds by hand. -/
+/-- The workdir of the runs a test makes. -/
 def recordedWorkdir : String := "/workspace"
 
-/-- The agent a root records when the test does not care which: MiniSwe with its defaults. -/
+/-- The agent of a run when the test does not care which: MiniSwe with its defaults. -/
 def testAgent : Lean.Json := .mkObj [("name", "mini-swe")]
-
-/-- The model a root records when the test does not care which. -/
-def testModel : Lean.Json := .mkObj [("name", "gpt-oss-120b")]
 
 def fail (message : String) : TestM alpha := do
   throw <| IO.userError s!"{(← read).name}: {message}"

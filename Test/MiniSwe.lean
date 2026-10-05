@@ -7,19 +7,18 @@ import Alaya
 
 /-! Tests of the mini-SWE-agent port. The prompt fixtures (`Test/MiniSweFixtures.lean`) are
 rendered by mini's own jinja templates, so the prompts are checked against upstream to the byte,
-except where the port names its `submit` tool in place of mini's output sentinel. End-to-end cases
-drive the real agent over a snapshotted workspace with a scripted model. The trajectory tree it
-drives is tested in `Test/Trajectory.lean`. -/
+except where the port names its `submit` tool in place of mini's output sentinel, and requires a
+tool call where mini requires a bash call. End-to-end cases
+drive the real agent through the driver, over a snapshotted workspace, with a scripted model. -/
 
 namespace MiniSweTests
 
 open Testing
 open Scripted
 open Alaya
-open Alaya.Agent (Dialogue Outcome Event Log)
-open Alaya.Agent.MiniSwe
-open Alaya.Agent.Tools.Bash (observation)
-open Alaya.Trajectory
+open Alaya.Agents.MiniSwe
+open Alaya.Agents.Tools.Bash (observation)
+open Lean (Json)
 
 /-- Mini's instruction for ending a run, as it appears twice in its instance prompt with two
 different continuation indents; the port names the `submit` tool there instead. -/
@@ -27,11 +26,13 @@ private def miniSubmitInstruction (indent : String) : String :=
   "Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n" ++
   indent ++ "Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>"
 
-/-- A fixture rendered by mini's templates, with the sentences that name the submission sentinel
-replaced by the port's, which name the `submit` tool. Everything else must match to the byte. -/
+/-- A fixture rendered by mini's templates, with the port's two changes: the sentences that name
+the submission sentinel name the `submit` tool, and the one that requires a bash call requires
+a tool call. Everything else must match to the byte. -/
 private def portOf (miniText : String) : String :=
   let step1 := miniText.replace (miniSubmitInstruction "   ") (submitInstruction "   ")
-  step1.replace (miniSubmitInstruction "  ") (submitInstruction "  ")
+  let step2 := step1.replace (miniSubmitInstruction "  ") (submitInstruction "  ")
+  step2.replace "MUST include AT LEAST ONE bash tool call" "MUST include AT LEAST ONE tool call"
 
 /-! ## Golden template fidelity -/
 
@@ -40,7 +41,7 @@ def goldenSuite : Suite := suite "mini-swe.golden" #[
     if systemMessage != "You are a helpful assistant that can interact with a computer." then
       throw <| IO.userError "system message drift",
 
-  test "instance message (Darwin) is mini's, with the submit tool in place of the sentinel" do
+  test "instance message (Darwin) is mini's, with the submit tool and a tool call in place of bash's" do
     assertStringEq "instance"
       (instanceMessage "Fix the bug in foo.py" "Darwin" "23.5.0" "Darwin Kernel Version 23.5.0" "arm64")
       (portOf MiniSweFixtures.instanceDarwin)
@@ -48,7 +49,9 @@ def goldenSuite : Suite := suite "mini-swe.golden" #[
     check (contains MiniSweFixtures.instanceDarwin "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
       "the fixture names the sentinel"
     check (!contains (instanceMessage "t" "Linux" "r" "v" "m") "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
-      "the prompt does not",
+      "the prompt does not"
+    check (contains MiniSweFixtures.instanceDarwin "AT LEAST ONE bash tool call") "the fixture requires bash"
+    check (!contains (instanceMessage "t" "Linux" "r" "v" "m") "AT LEAST ONE bash tool call") "the prompt requires a tool call",
 
 
   iotest "an observation is the recorded output as JSON, cut when long" do
@@ -92,12 +95,23 @@ def goldenSuite : Suite := suite "mini-swe.golden" #[
 
 /-! ## Parsing and the tool schema -/
 
+/-- The calls a response makes, by id and name, when it parses. -/
+private def callsOf (response : Chat.Response) (config : Config := {}) : Option (Array (String × String)) :=
+  match parseActions response config with
+  | .calls calls => some (calls.map fun call => (call.id, call.name))
+  | .formatError _ => none
 
-private def actionSummary : Action -> String × String
-  | .bash id command => (id, command)
-  | .ask id question => (id, "ask_user:" ++ question.render)
-  | .timeBudget id => (id, "time_budget")
-  | .submit id message => (id, "submit:" ++ message)
+/-- The opening task message of a conversation. -/
+private def openingText (config : Config) : String :=
+  match (openingMessages config "t" testUname)[1]? with
+  | some (Chat.Message.user text) => text
+  | _ => ""
+
+/-- A history of one turn: a `bash` call whose command printed `output`, kept whole in `file?`. -/
+private def oneTurn (output : String) (file? : Option String) : History :=
+  { items := #[.turn (responseWith #[call "call_7" "bash" "make"])
+      #[(call "call_7" "bash" "make", Agents.Tools.Bash.result
+        { output := { output, exitCode? := some 0 }, workspace := default, file? })]] }
 
 def parseSuite : Suite := suite "mini-swe.parse" #[
   test "recovery changes only a long output's warning" do
@@ -105,44 +119,59 @@ def parseSuite : Suite := suite "mini-swe.parse" #[
     let on : Config := { recoverOutput := true }
     assertEqual "tools off" ((tools off).map (·.name)) #["bash", "submit"]
     assertEqual "tools on" ((tools on).map (·.name)) #["bash", "submit"]
-    let opening (config : Config) : String :=
-      match (initialLog config "t" testUname)[1]? with
-      | some (Event.message (Chat.Message.user text)) => text
-      | _ => ""
-    assertStringEq "opening off" (opening off)
+    assertStringEq "opening off" (openingText off)
       (instanceMessage "t" testUname.system testUname.release testUname.version testUname.machine)
-    assertStringEq "opening on is unchanged" (opening on) (opening off)
+    assertStringEq "opening on is unchanged" (openingText on) (openingText off)
     assertStringEq "repair on is unchanged" (formatErrorMessage "e" true (some "stop") on)
       (formatErrorMessage "e" true (some "stop"))
-    assertStringEq "repair off is unchanged" (formatErrorMessage "e" true (some "stop") {})
-      (formatErrorMessage "e" true (some "stop"))
     -- On, a long output's warning names the file holding it; off, it is mini's.
-    let long := Output.toJson { output := String.ofList (List.replicate 20000 'x'), exitCode? := some 0 }
+    let long := oneTurn (String.ofList (List.replicate 20000 'x')) (some "/alaya/outputs/7.txt")
     let warning (config : Config) : String :=
-      match (view config #[.observation "call_7" long]).back? with
+      match (view config long).back? with
       | some (Chat.Message.tool _ (.str shown)) =>
-        match Lean.Json.parse shown with
-        | .ok json => (json.getObjVal? "warning" >>= Lean.Json.getStr?).toOption.getD ""
+        match Json.parse shown with
+        | .ok json => (json.getObjVal? "warning" >>= Json.getStr?).toOption.getD ""
         | .error _ => ""
       | _ => ""
     assertStringEq "warning off" (warning off) "Output too long."
-    assertStringEq "warning on" (warning on) "[output truncated; full output: /alaya/outputs/0-call_7.txt]"
+    assertStringEq "warning on" (warning on) "[output truncated; full output: /alaya/outputs/7.txt]"
+    -- A command run without its outputs kept has no file to name, even with recovery on.
+    let unkept := oneTurn (String.ofList (List.replicate 20000 'x')) none
+    match (view on unkept).back? with
+    | some (Chat.Message.tool _ (.str shown)) => check (contains shown "Output too long.") "mini's warning"
+    | _ => fail "expected the observation"
     -- The tool is gone: unknown, as any other unlisted tool is.
     match parseActions (responseWith #[call "r" "read_output" "x"]) on with
     | .formatError message => check (contains message "Unknown tool 'read_output'") "unknown"
-    | .actions _ => fail "read_output should be unknown",
+    | .calls _ => fail "read_output should be unknown",
+
+  test "masking omits the outputs of old turns, naming their files" do
+    let config : Config := { masking? := some { keepTurns := 1, block := 1 } }
+    let turn (id : String) : Item :=
+      .turn (responseWith #[call id "bash" "cat big"])
+        #[(call id "bash" "cat big", Agents.Tools.Bash.result
+          { output := { output := String.ofList (List.replicate 500 'y'), exitCode? := some 0 }
+            workspace := default, file? := some s!"/alaya/outputs/{id}.txt" })]
+    let history : History := { items := #[.told (.system "s"), turn "a", turn "b", turn "c"] }
+    let shown := (view config history).filterMap fun
+      | Chat.Message.tool id (.str text) => some (id, text)
+      | _ => none
+    assertEqual "three results" shown.size 3
+    check (contains shown[0]!.2 "[output omitted; full output: /alaya/outputs/a.txt]") "the oldest is omitted"
+    check (contains shown[1]!.2 "[output omitted") "so is the next"
+    check (contains shown[2]!.2 "yyyy") "the last turn is whole",
 
   test "every prompt piece is in mini.yaml, byte for byte, and is the file on disk" do
     -- The templates are block scalars indented four spaces; dedented, each piece is a substring.
-    let yaml ← IO.FS.readFile ("Alaya" / "Agent" / "MiniSwe" / "mini.yaml")
+    let yaml ← IO.FS.readFile ("Alaya" / "Agents" / "MiniSwe" / "mini.yaml")
     let dedented := "\n".intercalate ((yaml.splitOn "\n").map fun line =>
       if line.startsWith "    " then (line.drop 4).toString else line)
     for (file, piece) in pieces do
       check (!piece.isEmpty) s!"{file} is empty"
       check (contains dedented piece) s!"{file} is not a piece of mini.yaml"
       -- Lake does not rebuild a module when a file it takes with `include_str` changes.
-      let onDisk ← IO.FS.readFile ("Alaya" / "Agent" / "MiniSwe" / file)
-      check (onDisk == piece) s!"{file} changed after Alaya.Agent.MiniSwe was built: touch the module and rebuild"
+      let onDisk ← IO.FS.readFile ("Alaya" / "Agents" / "MiniSwe" / file)
+      check (onDisk == piece) s!"{file} changed after Alaya.Agents.MiniSwe was built: touch the module and rebuild"
     -- The pieces are cut where jinja substitutes, so the placeholders are exactly at the cuts.
     check (!contains rules "{{") "the rules piece should hold no placeholder"
     check (contains formatErrorTemplate "{{error}}") "the format-error piece keeps its placeholder",
@@ -151,80 +180,90 @@ def parseSuite : Suite := suite "mini-swe.parse" #[
     -- mini's BASH_TOOL plus the `additionalProperties: false` every strict object carries
     -- (Json.compress emits keys in sorted order).
     let expected := "{\"function\":{\"description\":\"Execute a bash command\",\"name\":\"bash\",\"parameters\":{\"additionalProperties\":false,\"properties\":{\"command\":{\"description\":\"The bash command to execute\",\"type\":\"string\"}},\"required\":[\"command\"],\"type\":\"object\"}},\"type\":\"function\"}"
-    if Alaya.Agent.Tools.Bash.definition.toJson.compress != expected then
-      throw <| IO.userError s!"tool schema drift:\n{Alaya.Agent.Tools.Bash.definition.toJson.compress}",
+    if Agents.Tools.Bash.definition.toJson.compress != expected then
+      throw <| IO.userError s!"tool schema drift:\n{Agents.Tools.Bash.definition.toJson.compress}",
 
   test "no tool calls is a format error" do
     match parseActions { content? := some "just prose", finishReason? := some "stop" } with
     | .formatError msg => check (contains msg "No tool calls found") "expected no-toolcall error"
-    | .actions _ => fail "expected a format error",
+    | .calls _ => fail "expected a format error",
 
   test "unknown tool and missing command" do
     match parseActions (responseWith #[call "c1" "python" "x"]) with
     | .formatError msg => check (contains msg "Unknown tool 'python'.") "unknown tool text"
-    | .actions _ => fail "expected format error for unknown tool"
+    | .calls _ => fail "expected format error for unknown tool"
     match parseActions (responseWith #[{ id := "c1", name := "bash", arguments := .mkObj [] }]) with
     | .formatError msg => check (contains msg "Missing 'command'") "missing command text"
-    | .actions _ => fail "expected format error for missing command",
+    | .calls _ => fail "expected format error for missing command",
 
-  test "valid single and multiple calls parse in order" do
-    match parseActions (responseWith #[call "a" "bash" "ls", call "b" "bash" "pwd"]) with
-    | .actions cs => assertEqual "actions" (cs.map actionSummary) #[("a", "ls"), ("b", "pwd")]
-    | .formatError _ => fail "expected actions",
-
-  test "a submit call parses as a submit action carrying its message" do
-    match parseActions (responseWith #[call "a" "bash" "ls", submitCall "s" "all done"]) with
-    | .actions cs =>
-      assertEqual "actions" (cs.map actionSummary) #[("a", "ls"), ("s", "submit:all done")]
-    | .formatError _ => fail "expected actions"
-    match parseActions (responseWith #[{ id := "s", name := "submit", arguments := .mkObj [] }]) with
-    | .actions cs => assertEqual "bare submit" (cs.map actionSummary) #[("s", "submit:")]
-    | .formatError _ => fail "a submit without a message is still a submit",
+  test "valid single and multiple calls parse in order, a submit among them" do
+    assertEqual "calls" (callsOf (responseWith #[call "a" "bash" "ls", call "b" "bash" "pwd"]))
+      (some #[("a", "bash"), ("b", "bash")])
+    assertEqual "with submit" (callsOf (responseWith #[call "a" "bash" "ls", submitCall "s" "all done"]))
+      (some #[("a", "bash"), ("s", "submit")])
+    assertEqual "a bare submit" (callsOf (responseWith #[{ id := "s", name := "submit", arguments := .mkObj [] }]))
+      (some #[("s", "submit")])
+    assertEqual "its message" (Agents.Tools.Submit.message (submitCall "s" "all done").arguments) "all done",
 
   test "invalid arguments JSON is a recoverable format error" do
     let bad : Chat.ToolCall := { id := "c1", name := "bash", arguments := .null,
                                  invalidArguments? := some "{\"command\": \"ls" }
     match parseActions (responseWith #[bad]) with
     | .formatError msg => check (contains msg "Error parsing tool call arguments: ") "parse error text"
-    | .actions _ => fail "expected a format error"
+    | .calls _ => fail "expected a format error"
     -- when the provider reports a length cut-off, the truncation notice renders instead
     match parseActions { toolCalls := #[bad], finishReason? := some "length" } with
     | .formatError msg =>
       check (contains msg "output token limit (finish_reason=length)") "truncation notice"
-    | .actions _ => fail "expected a format error",
+    | .calls _ => fail "expected a format error",
 
   test "a non-string command is a format error" do
     let numeric : Chat.ToolCall :=
-      { id := "c1", name := "bash", arguments := .mkObj [("command", (42 : Lean.Json))] }
+      { id := "c1", name := "bash", arguments := .mkObj [("command", (42 : Json))] }
     match parseActions (responseWith #[numeric]) with
     | .formatError msg => check (contains msg "must be a string") "the message says what is wrong"
-    | .actions _ => fail "expected a format error"
+    | .calls _ => fail "expected a format error",
+
+  test "an added tool is offered, only appends to the prompt, and checks its calls" do
+    let plain : Config := {}
+    let config : Config := { tools := #["bash", "submit", "ask_user"] }
+    assertEqual "offered" ((tools config).map (·.name)) #["bash", "submit", "ask_user"]
+    assertStringEq "appended" (openingText config)
+      (openingText plain ++ "\n\n" ++ Agents.Tools.AskUser.instruction)
+    match parseActions (responseWith #[askCall "q" "Keep it?"]) plain with
+    | .formatError message => check (contains message "Unknown tool 'ask_user'") "unknown where not offered"
+    | .calls _ => fail "a tool not offered is unknown"
+    match parseActions (responseWith #[askCall "q" "Which?" "single_choice" #["only"]]) config with
+    | .formatError message => check (contains message "at least two candidates") "its own refusal"
+    | .calls _ => fail "a bad call is a format error"
+    match parseActions (responseWith #[askCall "q" "Keep it?", call "c" "bash" "ls"]) config with
+    | .formatError message => check (contains message "ask_user must be called alone") "alone"
+    | .calls _ => fail "ask_user is called alone"
 ]
 
 /-! ## End-to-end runs of the agent in a container -/
 
-
-/-- Runs the mini agent with a scripted model through the trajectory's loop, in a container.
-Returns the view of the final log, the final workspace, and the outcome. -/
+/-- Runs the mini agent with a scripted model through the driver, in a container. Returns what
+its model saw last and said, the workspace the log reached, and how the agent ended. -/
 private def runAgent (config : Config) (responses : Array Chat.Response) :
-    TestM (Dialogue × Hash × Outcome) := do
-  let model ← scriptedModel responses
-  let executor ← containerExecutor config.executor
-  let (rt, state, halt) ← try drive (agent config) executor model (initialLog config "t" testUname)
-    finally executor.close
-  let log ← assertOk <| Trajectory.logOf rt.store state
-  let env := (← assertOk <| Trajectory.getState rt.store state).workspace
-  match halt with
-  | .outcome outcome => pure (view config log, env, outcome)
-  | .question q => fail s!"unexpected question: {q.text}"
-  | _ => fail "the run neither ended nor asked"
+    TestM (Array Chat.Message × Hash × Json) := do
+  match miniRun config with
+  | .error problem => fail problem
+  | .ok run =>
+    let rt ← containerRuntime (some (← scriptedModel responses))
+    let (last, _) ← try assertOk <| Driver.drive rt run (← start rt run) finally rt.executor.close
+    let log ← logAt rt last
+    let some (.ok outcome) := agentResult log | fail s!"the agent did not return: {agentStatus log}"
+    pure (lastDialogue config run log, (workspace? log).getD default, outcome)
+
+private def status (outcome : Json) : String := (outcome.getObjVal? "status" >>= Json.getStr?).toOption.getD ""
 
 def runSuite : Suite := suite "mini-swe.run" #[
   test "a two-step run edits the workspace and submits" do
     let (dialogue, env, outcome) ← runAgent {} #[
       responseWith #[call "c1" "bash" "echo hello > a.txt"],
       responseWith #[submitCall "c2" "my patch\n"]]
-    assertEqual "outcome" outcome { status := "Submitted", submission := "my patch\n" }
+    assertEqual "outcome" outcome.compress (Agents.MiniSwe.outcome "Submitted" "my patch\n").compress
     -- Dialogue: system, instance, assistant#1, tool-obs#1, assistant#2 (no obs for the submit).
     assertEqual "dialogue length" dialogue.size 5
     match dialogue[3]? with
@@ -243,7 +282,7 @@ def runSuite : Suite := suite "mini-swe.run" #[
     let (dialogue, _, outcome) ← runAgent {} #[
       responseWith #[call "c1" "bash" "mkdir sub", call "c2" "bash" "echo x > sub/f.txt"],
       responseWith #[submitCall "c3"]]
-    assertEqual "submitted" outcome.status "Submitted"
+    assertEqual "submitted" (status outcome) "Submitted"
     -- system, instance, assistant#1, obs c1, obs c2, assistant#2
     assertEqual "dialogue length" dialogue.size 6
     assertEqual "nested file written" (← IO.FS.readFile ((← scratch) / "work" / "sub" / "f.txt")) "x\n",
@@ -252,7 +291,7 @@ def runSuite : Suite := suite "mini-swe.run" #[
     let (_, env, outcome) ← runAgent {} #[
       responseWith #[call "c1" "bash" "echo a > a.txt", submitCall "s" "done",
                      call "c2" "bash" "echo b > b.txt"]]
-    assertEqual "submitted" outcome.status "Submitted"
+    assertEqual "submitted" (status outcome) "Submitted"
     check (← assertOk ((← workspaces).readFile? env "a.txt")).isSome "the call before submit ran"
     check (← assertOk ((← workspaces).readFile? env "b.txt")).isNone "the call after submit did not",
 
@@ -260,7 +299,7 @@ def runSuite : Suite := suite "mini-swe.run" #[
     let (dialogue, _, outcome) ← runAgent {} #[
       { content? := some "I forgot to call a tool", finishReason? := some "stop" },
       responseWith #[submitCall "c1"]]
-    assertEqual "submitted after recovery" outcome.status "Submitted"
+    assertEqual "submitted after recovery" (status outcome) "Submitted"
     -- system, instance, user(format error), assistant(submit). The bad assistant turn is not kept.
     assertEqual "dialogue length" dialogue.size 4
     match dialogue[2]? with
@@ -271,7 +310,7 @@ def runSuite : Suite := suite "mini-swe.run" #[
     let bad : Chat.Response := { content? := some "no tool", finishReason? := some "stop" }
     let (dialogue, _, outcome) ← runAgent { maxConsecutiveFormatErrors := 3 }
       #[bad, bad, bad, bad]
-    assertEqual "exit status" outcome.status "RepeatedFormatError"
+    assertEqual "exit status" (status outcome) "RepeatedFormatError"
     -- system, instance, then three user error messages.
     assertEqual "dialogue length" dialogue.size 5,
 
@@ -279,7 +318,7 @@ def runSuite : Suite := suite "mini-swe.run" #[
     let loopCmd := responseWith #[call "c" "bash" "echo working"]
     let (_, _, outcome) ← runAgent { stepLimit := 2 }
       #[loopCmd, loopCmd, loopCmd, loopCmd]
-    assertEqual "exit status" outcome.status "LimitsExceeded",
+    assertEqual "exit status" (status outcome) "LimitsExceeded",
 
   test "a command timeout is reported as an exception observation" do
     let (dialogue, _, _) ← runAgent { executor := { defaultExecutor with timeoutSeconds := 1 } } #[
@@ -298,7 +337,7 @@ def runSuite : Suite := suite "mini-swe.run" #[
                        invalidArguments? := some "{\"command\": \"ls" }],
       finishReason? := some "length" }
     let (dialogue, _, outcome) ← runAgent {} #[bad, responseWith #[submitCall "c2"]]
-    assertEqual "submitted after recovery" outcome.status "Submitted"
+    assertEqual "submitted after recovery" (status outcome) "Submitted"
     -- system, instance, user(truncation notice), assistant(submit); the bad turn is dropped.
     assertEqual "dialogue length" dialogue.size 4
     match dialogue[2]? with
@@ -313,19 +352,29 @@ def runSuite : Suite := suite "mini-swe.run" #[
       responseWith #[submitCall "c2"]]
     match dialogue[3]? with
     | some (Chat.Message.tool "c1" (.str shown)) =>
-      match Lean.Json.parse shown with
-      | .ok json => assertEqual "elided" (json.getObjVal? "elided_chars" >>= Lean.Json.getNat?).toOption (some 2000)
+      match Json.parse shown with
+      | .ok json => assertEqual "elided" (json.getObjVal? "elided_chars" >>= Json.getNat?).toOption (some 2000)
       | .error e => fail s!"the observation should be JSON: {e}"
       check (shown.length < 11000) "the model is shown about 10000 characters"
-    | _ => fail "expected the truncated observation"
+    | _ => fail "expected the truncated observation",
+
+  test "with recovery on, a command finds the whole output of an earlier one" do
+    let long := String.ofList (List.replicate 12000 'q')
+    let (dialogue, _, _) ← runAgent { recoverOutput := true } #[
+      responseWith #[call "c1" "bash" s!"printf '%s' {long}"],
+      responseWith #[call "c2" "bash" "wc -c < $(ls /alaya/outputs/*.txt | head -n 1)"],
+      responseWith #[submitCall "c3"]]
+    match dialogue[5]? with
+    | some (Chat.Message.tool "c2" (.str shown)) => check (contains shown "12000") s!"the file holds it all: {shown}"
+    | _ => fail "expected the second observation"
 ]
 
 /-! ## Command execution fidelity -/
 
 /-- Runs `command` with mini's default settings in a container over `work`. -/
 private def runIn (work : System.FilePath) (command : String) : TestM Output := do
-  let executor ← containerExecutor defaultExecutor
-  try executor.bash work command finally executor.close
+  let executor ← containerExecutor
+  try executor.bash defaultExecutor work command finally executor.close
 
 /-- What the test image's own `/bin/sh -c command` prints on stdout and stderr, and its status. -/
 private def imageShell (command : String) : TestM (String × UInt32) := do

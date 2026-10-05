@@ -8,6 +8,9 @@ __pycache__/
 # reference checkouts and scratch space
 tmp/
 
+# the design sketch and the papers it draws on: kept locally
+functional_agents/
+
 # editor artifacts
 \#*#
 .#*

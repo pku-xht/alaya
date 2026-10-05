@@ -4,7 +4,7 @@ import Lean.Data.Json
 an error, not a silently ignored setting — and whose fields may be left out for their
 defaults. -/
 
-namespace Alaya.Agent.ConfigJson
+namespace Alaya.Agents.ConfigJson
 
 structure Object where
   fields : Array (String × Lean.Json)
@@ -48,4 +48,4 @@ def pairs (json : Lean.Json) : Except String (Array (String × String)) := do
     | .arr #[.str name, .str value] => pure (name, value)
     | other => throw s!"expected a [name, value] pair of strings, got {other.compress}"
 
-end Alaya.Agent.ConfigJson
+end Alaya.Agents.ConfigJson

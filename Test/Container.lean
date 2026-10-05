@@ -21,7 +21,7 @@ def testSettings : IO Executor.Docker.Settings := do
   let settings ← settings.pin.toUserIO
   pure { settings with extraRunArgs := #["--label", testLabel] }
 
-/-- The pinned test image, as a trajectory records it. -/
+/-- The pinned test image, as a run records it. -/
 def testImage : IO String := do
   pure (← testSettings).image
 
@@ -31,12 +31,12 @@ def testUser? : IO (Option String) := do
   pure (← testSettings).user?
 
 /-- A container executor for the test image. Its container starts at the first command. -/
-def containerExecutor (config : Executor.Config) : TestM Executor := do
-  assertOk (Executor.Docker.executor (← testSettings) config)
+def containerExecutor : TestM Executor := do
+  assertOk (Executor.Docker.executor (← testSettings))
 
 /-- An executor for tests that build an agent but must not run a command. -/
 def noCommands : Executor := {
-  exec := fun _ _ _ => throw (IO.userError "this test runs no commands")
+  exec := fun _ _ _ _ => throw (IO.userError "this test runs no commands")
   uname := pure default }
 
 /-- Why the tests cannot run here, or `none` when docker and the test image are available. -/

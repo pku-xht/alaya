@@ -73,57 +73,91 @@ lock and creates symlinks from the sandbox's Lake packages to
 error: render a fresh sandbox instead of copying a host cache into it. Restic
 preserves these symlinks without including the dependency trees.
 
-## Root and run
+## Create and run
 
 Both modes use MiniVero's defaults — `env: []`, `recover_output: false`, and
-`ask_user: false` — and set only the mode (`alaya config --agent mini-vero` prints the rest).
+`tools: ["bash", "submit", "time_budget"]` — and set only the mode (`alaya config --agent mini-vero` prints the rest).
+`new` takes no grader: the run is graded afterwards, with `grade` (below).
 
 ```sh
 MODE=codeproof    # or proof
-ROOT=$(.lake/build/bin/alaya root "$RUN/source" \
+last() { tail -n 1 | cut -d' ' -f1; }
+TASK=$(.lake/build/bin/alaya new "$RUN/source" \
   --task-file "$RUN/MINIVERO_TASK.md" --agent mini-vero --set agent.mode=$MODE \
-  --model MODEL --image "$AGENT" --data "$RUN/audit")
-.lake/build/bin/alaya resume "$ROOT" --provider PROVIDER --container-user "$(id -u):$(id -g)" \
+  --model MODEL --image "$AGENT" --data "$RUN/audit" | last)
+.lake/build/bin/alaya run "$TASK" --provider PROVIDER --container-user "$(id -u):$(id -g)" \
   --time-budget 60 --data "$RUN/audit" --json > "$RUN/first.jsonl"
 ```
 
-Exit 4 means the time budget was spent between turns; it is a checkpoint, not a
-failed or finished run. The last JSON row contains the state to resume:
+`new` prints three entries — the root, the agent's opening, and the task — and
+the run goes on from the last. Exit 4 means the time budget, the run's time
+summed along its log, was spent between turns; it is a checkpoint, not a failed
+or finished run. The last JSON row is the status, with the entry to go on from:
 
 ```sh
-STATE=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().splitlines()[-1])["state"])' "$RUN/first.jsonl")
-.lake/build/bin/alaya resume "$STATE" --provider PROVIDER \
+ENTRY=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().splitlines()[-1])["entry"])' "$RUN/first.jsonl")
+.lake/build/bin/alaya run "$ENTRY" --provider PROVIDER \
   --time-budget 600 --data "$RUN/audit" --json > "$RUN/continued.jsonl"
-STATE=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().splitlines()[-1])["state"])' "$RUN/continued.jsonl")
+END=$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().splitlines()[-1])["entry"])' "$RUN/continued.jsonl")
 ```
 
 For automation with `set -e`, handle exit 4 explicitly before reading the
-checkpoint. A submitted run exits 0. The model provider requires its usual
-credentials; the deterministic acceptance test below does not.
+checkpoint. A run whose agent is over exits 0, and its last row's `status` says
+how it ended; exit 1 means the agent failed, and 3 that the run waits for a
+person. The model
+provider requires its usual credentials; the deterministic acceptance test below
+does not.
 
 On Linux, Alaya defaults to the host UID:GID; the explicit `--container-user`
-above documents that choice. Every command of the run, and by default the grader,
-runs as that user. The root records the resolved image ID and the workdir (`/workspace`
-unless `root --workdir` says otherwise), and every step and evaluation inherits
-them.
+above documents that choice. Every command of the run, the grader's included,
+runs as that user. The run's opening records the resolved image ID, the workdir
+(`/workspace` unless `new --workdir` says otherwise), and the notice `grade`
+appends records the grader with its image's ID and the snapshot of its input.
 
 ## Grade and read reports
 
+`grade` grades a point of the run with Vero's grader, in the grader image, with
+the trusted benchmark as its input: it stops a fork there if the agent is still
+running, assigns the grader, and runs it. No provider is needed, and it exits
+0, 1 or 2 with a pass, a fail or an error.
+
 ```sh
-.lake/build/bin/alaya eval "$STATE" --data "$RUN/audit" \
-  --grader-image "$GRADER_IMAGE" --input "$BENCHMARK" \
-  --grader "python /opt/alaya-vero/grade.py --mode $MODE --benchmark /grader"
-# EVALUATION_HASH  fail 0/1  (… ms)
-.lake/build/bin/alaya ls EVALUATION_HASH .vero --data "$RUN/audit"
-.lake/build/bin/alaya cat EVALUATION_HASH .vero/report.md --data "$RUN/audit"
+GRADER=(--grader "python /opt/alaya-vero/grade.py --mode $MODE --benchmark /grader"
+        --grader-input "$BENCHMARK" --grader-image "$GRADER_IMAGE")
+.lake/build/bin/alaya grade "$END" "${GRADER[@]}" --data "$RUN/audit" --json > "$RUN/graded.jsonl"
+# the last row: {"entry": ..., "status": "done", "verdict": {"status": "pass", "passed": 1, "total": 1, ...}}
 ```
 
-Alaya snapshots the trusted benchmark, mounts that snapshot read-only at
-`/grader`, runs the grader image by digest, offline, as the agent's user, in a
-fresh checkout of the state at its workdir, and records all of it with the
-verdict (`docs/trajectory-schema.md` §4).
+Any other point is graded the same way. The untouched source, for one, at the
+entry `new` printed last:
 
-The command fixes the mode and the trusted benchmark; the grader does not read
+```sh
+.lake/build/bin/alaya grade "$TASK" "${GRADER[@]}" --data "$RUN/audit" --json > "$RUN/blank.jsonl"   # exits 1: a fail
+# the last row: {"entry": ..., "status": "stopped", "verdict": {"status": "fail", "passed": 0, "total": 1, ...}}
+```
+
+The grader's reports are in its checkout as it left it, read at the entry of the
+grader program's answer — the `answered` event whose operation is `external` in
+the run's log:
+
+```sh
+ANSWER=$(.lake/build/bin/alaya log "$END" --json --data "$RUN/audit" | python3 -c '
+import json, sys
+for line in sys.stdin:
+    event = json.loads(line).get("event") or {}
+    if event.get("type") == "answered" and event["op"]["type"] == "external":
+        print(json.loads(line)["entry"])')
+.lake/build/bin/alaya ls "$ANSWER" .vero --data "$RUN/audit"
+.lake/build/bin/alaya cat "$ANSWER" .vero/report.md --data "$RUN/audit"
+```
+
+Alaya snapshots the trusted benchmark when `grade` assigns the grader, mounts that snapshot read-only at
+`/grader`, runs the grader image by digest, offline, as the agent's user, in a
+fresh checkout of the workspace the log has reached, at its workdir, and records
+all of it in the log: the grader assigned, its program's answer, and the verdict
+(`docs/log-schema.md` §4). The run's workspace is left as it was.
+
+The run's configuration fixes the mode and the trusted benchmark; the grader does not read
 `MINIVERO_TASK.md` or anything else in the checkout to choose either. It
 extracts only the answer slots the mode permits — in proof mode, only the
 manifest-selected proof files, never an Impl slot — rebuilds from the trusted
@@ -139,8 +173,9 @@ specifications.
 The statuses a Vero report may contain are read from the pinned Vero, not
 written into the grader; a status outside them, a changed specification count,
 a compiler timeout or signal, or any exception is a `Bail out!`, and so an
-`error` verdict rather than a zero. The exit status of `eval` is 0 for pass,
-1 for fail, 2 for error.
+`error` verdict rather than a zero. The verdict's `status` — `pass`, `fail` or
+`error` — tells them apart, not the exit status of `run`, which is 0 once the
+grader has given any verdict.
 
 ## Reproduce acceptance checks
 
@@ -154,15 +189,17 @@ python3 benchmarks/vero/tests/regressions.py \
   --output /tmp/vero-grader-regressions-new
 ```
 
-Each output directory must not exist; it keeps the trajectories, the recorded
-evaluations and their reports. The integration test drives both modes through
-render, prepare, `root --workdir /testbed`, a budget stop and its continuation
-with a local scripted model (no credentials), and grading: a blank attempt fails
-0/1, a correct one passes 1/1, a forged task file or a mode downgrade fails, and
-in codeproof a symbolic link to the trusted implementation is rejected. It also
+Each output directory must not exist; it keeps the runs' logs, the graders'
+checkouts and their reports. The integration test drives both modes through
+render, prepare, `new --workdir /testbed`, a budget pause and its continuation
+with a local scripted model (no credentials), and grading: a blank attempt,
+graded at the task by a stop, fails 0/1; a correct one passes 1/1 when the agent
+ends, and again on a fork that grades the same point anew; a forged task file or
+a mode downgrade, committed by hand and graded by a stop, fails; and in
+codeproof a symbolic link to the trusted implementation is rejected. It also
 checks the grader's side of the contract: its workdir, read-only input, non-root
-user on Linux, a timeout that is an error and leaves no container, and a clean
-retry. The regression test covers the grader's adversarial cases: false
+user on Linux, the image it runs in, a timeout that is an error and leaves no
+container, and a clean retry. The regression test covers the grader's adversarial cases: false
 disproofs, frozen and deleted implementation files, symbolic links, joint claims,
 unknown Vero statuses, and injected compiler timeouts and signals.
 

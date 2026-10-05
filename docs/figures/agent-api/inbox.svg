@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 337" width="920" height="337">
+<title>Notices arrive from outside, and reads take them</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}</style>
+<rect width="920" height="337" fill="#fff"/>
+<text x="12" y="14" class="s">program</text>
+<text x="304" y="14" class="s">carried out by</text>
+<text x="447" y="14" class="s">log</text>
+<rect x="440.5" y="22.5" width="474" height="310" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
+<path fill="#fafbfc" d="M12.5,328.5V58.5Q12.5,52.5 18.5,52.5H291.5Q297.5,52.5 297.5,58.5V328.5H12.5Z"/><path class="bx" d="M12.5,328.5V58.5Q12.5,52.5 18.5,52.5H291.5Q297.5,52.5 297.5,58.5V328.5"/>
+<text x="460" y="42" class="f n" text-anchor="end">0</text>
+<text x="468" y="42" class="fr">-</text>
+<g transform="translate(527,31.5) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<text x="546" y="42.5">the workspace the run starts from</text>
+<text x="898" y="42" class="f" text-anchor="end">arrived</text>
+<text x="304" y="35.5" class="s">a person</text>
+<path class="a" d="M307,43.5H432"/><path fill="#a3abb5" d="M436,43.5l-5,-2.5v5z"/>
+<circle cx="307" cy="43.5" r="2.5" fill="#7556a3"/>
+<text x="460" y="66" class="f n" text-anchor="end">1</text>
+<text x="468" y="66" class="fr">0</text>
+<g transform="translate(527,55.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="546" y="66.5">open agent</text>
+<text x="898" y="66" class="f" text-anchor="end">opened</text>
+<text x="20.5" y="66" class="s b">agent · 0</text>
+<path class="a" d="M298.5,62.5H432"/><path fill="#a3abb5" d="M436,62.5l-5,-2.5v5z"/>
+<text x="460" y="90" class="f n" text-anchor="end">2</text>
+<text x="468" y="90" class="fr">-</text>
+<g transform="translate(527,79.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<text x="546" y="90.5" style="fill:#7556a3">said “fix the build”</text>
+<text x="898" y="90" class="f" text-anchor="end">arrived</text>
+<text x="304" y="83.5" class="s">a person</text>
+<path class="a" d="M307,91.5H432"/><path fill="#a3abb5" d="M436,91.5l-5,-2.5v5z"/>
+<circle cx="307" cy="91.5" r="2.5" fill="#7556a3"/>
+<text x="460" y="114" class="f n" text-anchor="end">3</text>
+<text x="468" y="114" class="fr">0</text>
+<g transform="translate(527,103.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="546" y="114.5">inbox: takes 2</text>
+<text x="898" y="114" class="f" text-anchor="end">heard</text>
+<rect x="21.0" y="101.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
+<text x="27" y="114" class="ch">await</text>
+<path class="a" d="M73.8,105.5H432"/><path fill="#a3abb5" d="M436,105.5l-5,-2.5v5z"/>
+<rect x="346.9" y="99.0" width="44.1" height="13" fill="#fff"/>
+<text x="369" y="109" class="s" text-anchor="middle">the log</text>
+<path class="a d" d="M436,115.5H77.8"/><path fill="#a3abb5" d="M73.8,115.5l5,-2.5v5z"/>
+<text x="20.5" y="130" class="s">waits until a notice it is for has arrived</text>
+<text x="460" y="153" class="f n" text-anchor="end">4</text>
+<text x="468" y="153" class="fr">0</text>
+<g transform="translate(527,142.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="546" y="153.5">sample → bash make</text>
+<text x="898" y="153" class="f" text-anchor="end">answered</text>
+<rect x="21.0" y="140.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
+<text x="27" y="153" class="ch">sample request</text>
+<path class="a" d="M139.1,144.5H432"/><path fill="#a3abb5" d="M436,144.5l-5,-2.5v5z"/>
+<rect x="348.9" y="138.0" width="40.2" height="13" fill="#fff"/>
+<text x="369" y="148" class="s" text-anchor="middle">model</text>
+<path class="a d" d="M436,154.5H143.1"/><path fill="#a3abb5" d="M139.1,154.5l5,-2.5v5z"/>
+<circle cx="456" cy="166" r="0.9" fill="#a3abb5"/>
+<circle cx="456" cy="170" r="0.9" fill="#a3abb5"/>
+<circle cx="456" cy="174" r="0.9" fill="#a3abb5"/>
+<text x="460" y="195" class="f n" text-anchor="end">9</text>
+<text x="468" y="195" class="fr">-</text>
+<g transform="translate(527,184.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<text x="546" y="195.5" style="fill:#7556a3">said “use ninja, not make”</text>
+<text x="898" y="195" class="f" text-anchor="end">arrived</text>
+<text x="304" y="188.5" class="s">a person · at any time</text>
+<path class="a" d="M307,196.5H432"/><path fill="#a3abb5" d="M436,196.5l-5,-2.5v5z"/>
+<circle cx="307" cy="196.5" r="2.5" fill="#7556a3"/>
+<circle cx="456" cy="208" r="0.9" fill="#a3abb5"/>
+<circle cx="456" cy="212" r="0.9" fill="#a3abb5"/>
+<circle cx="456" cy="216" r="0.9" fill="#a3abb5"/>
+<text x="460" y="237" class="f n" text-anchor="end">12</text>
+<text x="468" y="237" class="fr">0</text>
+<g transform="translate(527,226.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="546" y="237.5">inbox: takes 9</text>
+<text x="898" y="237" class="f" text-anchor="end">heard</text>
+<rect x="21.0" y="224.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
+<text x="27" y="237" class="ch">inbox</text>
+<path class="a" d="M73.8,228.5H432"/><path fill="#a3abb5" d="M436,228.5l-5,-2.5v5z"/>
+<rect x="346.9" y="222.0" width="44.1" height="13" fill="#fff"/>
+<text x="369" y="232" class="s" text-anchor="middle">the log</text>
+<path class="a d" d="M436,238.5H77.8"/><path fill="#a3abb5" d="M73.8,238.5l5,-2.5v5z"/>
+<text x="460" y="261" class="f n" text-anchor="end">13</text>
+<text x="468" y="261" class="fr">0</text>
+<g transform="translate(527,250.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="546" y="261.5">sample → bash ninja</text>
+<text x="898" y="261" class="f" text-anchor="end">answered</text>
+<rect x="21.0" y="248.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
+<text x="27" y="261" class="ch">sample request</text>
+<path class="a" d="M139.1,252.5H432"/><path fill="#a3abb5" d="M436,252.5l-5,-2.5v5z"/>
+<rect x="348.9" y="246.0" width="40.2" height="13" fill="#fff"/>
+<text x="369" y="256" class="s" text-anchor="middle">model</text>
+<path class="a d" d="M436,262.5H143.1"/><path fill="#a3abb5" d="M139.1,262.5l5,-2.5v5z"/>
+<circle cx="456" cy="274" r="0.9" fill="#a3abb5"/>
+<circle cx="456" cy="278" r="0.9" fill="#a3abb5"/>
+<circle cx="456" cy="282" r="0.9" fill="#a3abb5"/>
+<text x="460" y="303" class="f n" text-anchor="end">17</text>
+<text x="468" y="303" class="fr">0</text>
+<g transform="translate(527,292.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="546" y="303.5">inbox: nothing</text>
+<text x="898" y="303" class="f" text-anchor="end">heard</text>
+<rect x="21.0" y="290.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
+<text x="27" y="303" class="ch">inbox</text>
+<path class="a" d="M73.8,294.5H432"/><path fill="#a3abb5" d="M436,294.5l-5,-2.5v5z"/>
+<rect x="346.9" y="288.0" width="44.1" height="13" fill="#fff"/>
+<text x="369" y="298" class="s" text-anchor="middle">the log</text>
+<path class="a d" d="M436,304.5H77.8"/><path fill="#a3abb5" d="M73.8,304.5l5,-2.5v5z"/>
+<circle cx="456" cy="316" r="0.9" fill="#a3abb5"/>
+<circle cx="456" cy="320" r="0.9" fill="#a3abb5"/>
+<circle cx="456" cy="324" r="0.9" fill="#a3abb5"/>
+<path class="a" style="stroke:#7556a3" d="M901,110.0C914,110.0 914,86.0 904,86.0"/><path fill="#7556a3" d="M900,86.0l5,-2.5v5z"/>
+<path class="a" style="stroke:#7556a3" d="M901,233.0C914,233.0 914,191.0 904,191.0"/><path fill="#7556a3" d="M900,191.0l5,-2.5v5z"/>
+</svg>

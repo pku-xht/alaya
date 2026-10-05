@@ -1,12 +1,12 @@
-import Alaya.Agent.Config
+import Alaya.Agents.Config
 import Alaya.Error
 import Alaya.Settings
 
 /-!
 The models a run can use, independent of who serves them. A model is named by its ID as its
 creator publishes it (`gpt-oss-120b`, `deepseek-v4.1-flash`), and its defaults are in this
-table. A run names one (`root --model NAME`), overrides any field on the command line
-(`--set model.FIELD=VALUE`), and the root records the complete spec, from which every later
+table. A run names one (`new --model NAME`), overrides any field on the command line
+(`--set model.FIELD=VALUE`), and the run's configuration holds the complete spec, from which every later
 command builds the same model again, through whichever provider serves it (`Alaya.Provider`).
 -/
 
@@ -31,7 +31,7 @@ def Echo.all : List Echo := [.none, .text, .items]
 instance : ToString Echo where
   toString | .none => "none" | .text => "text" | .items => "items"
 
-/-- Which model, independent of who serves it: what a root records. -/
+/-- Which model, independent of who serves it: what a run records. -/
 structure Spec where
   /-- The model's ID as its creator publishes it, with no provider prefix. -/
   name : String
@@ -58,7 +58,7 @@ def Spec.toJson (spec : Spec) : Lean.Json :=
     ("echo_reasoning", toString spec.echoReasoning), ("context_tokens", orNull spec.contextTokens?),
     ("output_tokens", orNull spec.outputTokens?)]
 
-private def natOrNull (object : Agent.ConfigJson.Object) (key : String) (default : Option Nat) :
+private def natOrNull (object : Agents.ConfigJson.Object) (key : String) (default : Option Nat) :
     Except String (Option Nat) := do
   match ← object.field? key with
   | none => pure default
@@ -70,7 +70,7 @@ private def natOrNull (object : Agent.ConfigJson.Object) (key : String) (default
 /-- Reads a spec over `defaults`: a field left out is the default's, an unknown one is an error,
 and `params` must be an object with none of `protectedParams`. -/
 def Spec.fromJson (json : Lean.Json) (defaults : Spec) : Except String Spec := do
-  let object ← Agent.ConfigJson.object json #["name", "params", "echo_reasoning", "context_tokens", "output_tokens"]
+  let object ← Agents.ConfigJson.object json #["name", "params", "echo_reasoning", "context_tokens", "output_tokens"]
   let params ← match ← object.field? "params" with
     | none => pure defaults.params
     | some params@(.obj _) => pure params
@@ -108,15 +108,19 @@ def names : String := ", ".intercalate (all.map (·.name)).toList
 def named? (name : String) : Option Spec := all.find? (·.name == name)
 
 /-- The spec a recorded or given configuration describes, or what is wrong with it. -/
-def fromJson (json : Lean.Json) : Result Spec := do
+def read (json : Lean.Json) : Except String Spec := do
   let name ← match json.getObjVal? "name" with
     | .ok (.str name) => pure name
-    | _ => throw <| .input s!"a model needs a \"name\": one of {names}"
+    | _ => throw s!"a model needs a \"name\": one of {names}"
   let some defaults := named? name
-    | throw <| .input s!"unknown model: {name} (use {names})"
+    | throw s!"unknown model: {name} (use {names})"
   match Spec.fromJson json defaults with
   | .ok spec => pure spec
-  | .error message => throw <| .input s!"{name}: {message}"
+  | .error message => throw s!"{name}: {message}"
+
+/-- `read`, as a command reads a configuration: what is wrong with it is the caller's to fix. -/
+def fromJson (json : Lean.Json) : Result Spec :=
+  Result.fromExcept Error.input (read json)
 
 /-- The model `name` with the model's settings applied over its complete defaults. -/
 def resolve (name : String) (settings : Array Settings.Setting) : Result Spec := do

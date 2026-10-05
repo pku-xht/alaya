@@ -1,27 +1,27 @@
 # MiniVero
 
-`Alaya.Agent.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Its configuration is MiniSwe's with two more fields, `time_budget` (below) and `mode`: `proof` or `codeproof`, Vero's evaluation mode for the run (`alaya config --agent mini-vero` prints the defaults; a codeproof run is `--agent mini-vero --set agent.mode=codeproof`). The root records it, and every later command builds the agent from the record.
+`Alaya.Agents.MiniVero` is Alaya's small agent for Vero Lean implementation and proof tasks. Its configuration is MiniSwe's, with `time_budget` (below) among its default `tools`, and one more field, `mode`: `proof` or `codeproof`, Vero's evaluation mode for the run (`alaya config --agent mini-vero` prints the defaults; a codeproof run is `--agent mini-vero --set agent.mode=codeproof`). The run's configuration holds it, and every later command builds the agent from there.
 
 ## How it is built
 
-MiniVero is a specialization of the mini-SWE-agent port: it reuses the `bash` and `submit` tools (`Alaya.Agent.Tools`), MiniSwe's action parsing and format-error protocol, its executor, and its control loop, and replaces the two prompts and the identity. Alaya supplies the trajectory store, CAS snapshots, HTML reports, and external evaluation.
+MiniVero is a specialization of the mini-SWE-agent port: it reuses the `bash` and `submit` tools (`Alaya.Agents.Tools`), MiniSwe's action parsing and format-error protocol, its executor, and its loop (`MiniSwe.converse`), and replaces the two prompts and the identity. Alaya supplies the log, the workspace snapshots, the HTML report, and the graders.
 
 ## What the model is sent
 
-A run opens with two messages, frozen into the root state:
+A conversation opens with two messages, made from the task when it arrives:
 
 - a system message naming the agent, which also says that Vero's independent grader decides correctness;
 - one user message built by `MiniVero.taskMessage`, holding, in this order:
     1. Vero's own opening framing — the sandbox is the current working directory, and the grader reads the sandbox state after the agent stops;
-    2. the instance text given to `root` as `--task-file`, which is the `MINIVERO_TASK.md` written by `benchmarks/vero/render.py` for this benchmark and this mode;
+    2. the instance text given to `new` as `--task-file`, which is the `MINIVERO_TASK.md` written by `benchmarks/vero/render.py` for this benchmark and this mode;
     3. the rule sections, quoted from Vero's instruction templates;
     4. this agent's mechanics — repository-relative paths, no shell state between calls, one `submit` call — and the executor's `uname`.
 
-The rule sections are: `Marker grammar`, `Oracle commands`, the `Grading` section of the run's mode, `Done condition`, `Checkpointing` (adapted; with `time_budget` on), `Anti-cheating`, and the two scoring facts under `Scoring`. A run is sent the grading rules of its own mode only, as Vero's per-mode templates do: a `proof` run never reads about `unsat_`/`sat_` stubs or Part A, which its sandbox does not have.
+The rule sections are: `Marker grammar`, `Oracle commands`, the `Grading` section of the run's mode, `Done condition`, `Checkpointing` (adapted; with `time_budget` among the tools), `Anti-cheating`, and the two scoring facts under `Scoring`. A run is sent the grading rules of its own mode only, as Vero's per-mode templates do: a `proof` run never reads about `unsat_`/`sat_` stubs or Part A, which its sandbox does not have.
 
 ## Where Vero's text lives
 
-The quoted sections are not string literals. Each is a Markdown file in `Alaya/Agent/MiniVero/`, taken into the module with `include_str`, and holds one contiguous piece of Vero's templates (`templates/instruction/` at sunblaze-ucb/vero `0a7325d`) byte for byte, so it can be compared with the template by `diff`:
+The quoted sections are not string literals. Each is a Markdown file in `Alaya/Agents/MiniVero/`, taken into the module with `include_str`, and holds one contiguous piece of Vero's templates (`templates/instruction/` at sunblaze-ucb/vero `0a7325d`) byte for byte, so it can be compared with the template by `diff`:
 
 | File | From | Section |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ The quoted sections are not string literals. Each is a Markdown file in `Alaya/A
 
 The files are cut where Vero's templates branch (`{% if %}`, `{% block %}`), and the branching is done in Lean: `MiniVero.taskMessage` lists the sections of a run and joins them with blank lines, choosing `grading mode` by a `match` on `MiniVero.Mode`. Text that is conditional is thus a file of its own and a Lean expression that includes it or not; a section that may be absent would be an `Option String` in that list.
 
-Lake does not track `include_str`, so editing one of these files does not rebuild the module. The test `the compiled sections are the files in the source tree` fails when that has happened; touch `Alaya/Agent/MiniVero.lean` and rebuild.
+Lake does not track `include_str`, so editing one of these files does not rebuild the module. The test `the compiled sections are the files in the source tree` fails when that has happened; touch `Alaya/Agents/MiniVero.lean` and rebuild.
 
 ## `MINIVERO_TASK.md`: the instance
 
@@ -46,66 +46,70 @@ The contract is generated by `benchmarks/vero/render.py`, from Vero's trusted be
 - the mode's own section — `Your task in proof mode`, or `codeproof`'s Parts A/B/C — the sentences of Vero's template that state the artifact and the grader.
 - `Reference — original upstream source`, only when prefetched upstream material is shipped with the sandbox.
 
-Checkpointing and prior feedback are attempt state, not task facts. Keep them outside this opening task; use `alaya tell STATE TEXT` to append prior grading feedback before resuming.
+Checkpointing and prior feedback are attempt state, not task facts. Keep them outside this opening task; use `alaya tell ENTRY TEXT` to append prior grading feedback before the next `run`.
 
 Two consequences are worth knowing. The file lists are the sandbox's own, so they are what the agent will actually find; and because the contract is generated per mode, a file that Vero's single template lists generically is listed here as it really is — `Impl/*.lean` appears among the frozen files in proof mode, where the mode section freezes it, and among the editable ones in codeproof mode.
 
 The agent then inspects the Lean declarations and the compiler output, edits only marker interiors, and uses the libraries present in the rendered project. A submission ends the run; Vero's external grader decides whether the task passed.
 
-MiniVero defaults to 200 model turns and a 600-second shell-command timeout. Use `alaya resume --time-budget SECONDS` to bound an invocation.
+MiniVero defaults to 200 model turns and a 600-second shell-command timeout. Use `alaya run --time-budget SECONDS` to bound an invocation.
 
-Set `"ask_user": true` to offer [yes/no, single-choice, and open-ended questions](ask-user.md).
-This setting is inherited from MiniSwe and recorded in the root configuration.
+Add `ask_user` to `tools` to offer yes/no, single-choice and open-ended questions
+(`docs/agent-api.md` §7). The list replaces the default one, so it names the default tools too:
+`--set 'agent.tools=["bash","submit","time_budget","ask_user"]'`.
 
 ## Pacing: `time_budget`
 
-A Vero run may be given a time budget and checkpointed: `alaya resume STATE --time-budget
-SECONDS` stops before a step once the run has taken that long, and a later `resume` continues
-it from its last state (`docs/cli.md` §5). With `time_budget` on — the default —
+A Vero run may be given a time budget and checkpointed: `alaya run ENTRY --time-budget
+SECONDS` pauses once the run has taken that long, and a later `run` goes on from its last entry
+(`docs/cli.md` §5). With `time_budget` among its tools — the default —
 MiniVero is offered the **`time_budget`** tool and asked to pace itself by it:
 
-- **The tool** takes no arguments and records `{"seconds_left": N}`: the budget less the run's
-  time, which is the sum of its steps' recorded times from the root and the current step so
-  far, so it is right after a resume, when the clock since the start is not. Without a budget
-  it records `{"seconds_left": null, "note": "this run has no time limit"}`. It is answered by
-  `next` from the session (`docs/agent-api.md` §3): nothing runs and nothing is snapshotted.
+- **The tool** takes no arguments and gives `{"seconds_left": N}`: the budget less the run's
+  time, which is the sum of its entries' times along the log and the current invocation's so
+  far, so it is right after a pause, when the clock since the start is not. Without a budget
+  it gives `{"seconds_left": null, "note": "this run has no time limit"}`. Its program performs
+  `time` (`docs/agent-api.md` §3.1), whose answer, the run's time and the budget, the log keeps,
+  and computes what that leaves. Nothing runs and nothing is snapshotted.
 - **The prompt** carries Vero's `Checkpointing` section, after the Done condition and before
   Anti-cheating as in Vero's template, adapted in `MiniVero/checkpointing.md`. Vero's is for a
   chunk of a known number of minutes and says to check elapsed time with `date`; here the
-  budget is given per resume, after the prompt is frozen, so the section says the run has a time
+  budget is given per invocation, after the prompt is sent, so the section says the run has a time
   budget the `time_budget` tool reports, names that tool where Vero says `date`, and says why
-  not `date`: the run may resume from a checkpoint. Chunk is run throughout; the rest —
+  not `date`: the run may be paused and driven on later. Chunk is run throughout; the rest —
   keep the build green, one slot at a time, never leave a slot half-written, wind down before
   the end — is Vero's.
 
-The budget is checked between steps and never cuts one short, so a run can overrun it by a
-step. MiniSwe offers neither the tool nor the section, and its configuration has no such field.
+The budget is checked before every operation of the agent and never cuts one short, so a run
+can overrun it by one command or one response. MiniSwe does not offer the tool unless its `tools` name it (`docs/miniswe.md`), and has no such section.
 
 ## Context view
 
-MiniVero currently uses MiniSwe's linear history unchanged. Every earlier message remains in the model context, while the complete raw trajectory is also retained for reports, evaluation, and later analysis. This is the baseline used for experiments.
+MiniVero currently uses MiniSwe's linear history unchanged. Every earlier message remains in the model context, while the complete log is also retained for reports, grading, and later analysis. This is the baseline used for experiments.
 
-MiniSwe truncates a single tool output of at least 10,000 characters to its beginning and end before placing it in the model context. With `recover_output` set, the cut output names a read-only file holding the whole of it (`docs/miniswe.md` §9); without, nothing differs. MiniSwe's context management applies as it is (`docs/miniswe.md` §10): a run whose context is full ends with `ContextExceeded`, and `mask_observations`, off by default, omits old outputs. No summary is applied.
+MiniSwe truncates a single tool output of at least 10,000 characters to its beginning and end before placing it in the model context. With `recover_output` set, the cut output names a read-only file holding the whole of it (`docs/miniswe.md` §9); without, nothing differs. MiniSwe's context management applies as it is (`docs/miniswe.md` §10): an agent whose context is full ends with `ContextExceeded`, and `mask_observations`, off by default, omits old outputs. No summary is applied.
 
 ## Running
 
-Build with `lake build`. The image build, render, prepare, root, resume and
-evaluation commands are in [the Vero integration](../benchmarks/vero/README.md).
-An attempt is graded through alaya's TAP grading interface
-([`docs/trajectory-schema.md`](trajectory-schema.md) §4), in the Vero grader
-image, with the trusted benchmark as the grader's input:
+Build with `lake build`. The image build, render, prepare, run and grading
+commands are in [the Vero integration](../benchmarks/vero/README.md). An attempt
+is graded through alaya's TAP grading interface
+([`docs/log-schema.md`](log-schema.md) §4): `grade` runs Vero's grader on a point of
+the run, in the Vero grader image, with the trusted benchmark as its input:
 
 ```sh
-alaya eval STATE --grader-image alaya-vero-grader:0a7325d --input path/to/trusted/Benchmark \
-  --grader 'python /opt/alaya-vero/grade.py --mode codeproof --benchmark /grader'
-alaya cat EVALUATION_HASH .vero/report.md
+alaya new --task-file MINIVERO_TASK.md source --agent mini-vero --model MODEL --image alaya-vero-agent:0a7325d
+alaya run ENTRY --provider PROVIDER        # the agent
+alaya grade LAST --grader-image alaya-vero-grader:0a7325d --grader-input path/to/trusted/Benchmark \
+  --grader 'python /opt/alaya-vero/grade.py --mode proof --benchmark /grader'
+alaya cat GRADED:N .vero/report.md         # N: the position of the grader's answer in the log
 ```
 
 The mode is chosen in the experiment's trusted configuration, never from the
 agent's task file. Vero remains the source of the benchmark definitions, the
 trusted reconstruction, and the grading rules.
 
-The task contract is outside `source/` and enters the root through `--task-file`.
+The task contract is outside `source/` and enters the run through `--task-file`.
 The proof baseline is `--agent mini-vero`, MiniVero's defaults; codeproof is
 `--set agent.mode=codeproof` on top. Both use an empty executor environment list, with output
 recovery and questions disabled by default.

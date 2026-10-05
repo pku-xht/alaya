@@ -3,10 +3,12 @@
 
 usage: grade.py --mode (proof|codeproof) --benchmark /grader [--lake-timeout S]
 
-`alaya eval` runs it in the grader image (the Dockerfile's `grader` target), in a checkout of the
-attempt, with the trusted benchmark as its input at /grader:
+It is a run's grader, given at `alaya new`; alaya runs it when the agent ends, or at any point of
+the run that is stopped (`alaya stop ENTRY`, then `alaya run` on the stop), in the grader image
+(the Dockerfile's `grader` target), in a checkout of the attempt, with the trusted benchmark as
+its input at /grader:
 
-    alaya eval STATE --grader-image alaya-vero-grader:0a7325d --input BENCHMARK \
+    alaya grade ENTRY --grader-image alaya-vero-grader:0a7325d --grader-input BENCHMARK \
       --grader 'python /opt/alaya-vero/grade.py --mode codeproof --benchmark /grader'
 
 The mode and the benchmark are arguments; nothing is read from the checkout to choose them. It
