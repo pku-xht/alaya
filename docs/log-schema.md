@@ -308,7 +308,7 @@ default, so a command run from the wrong place cannot quietly begin a new one. `
 | `D/entries/<name>.<parent>.json` | one file an entry (§1). `<parent>` is the parent's name, or `root`, so one listing gives the shape of the whole forest |
 | `D/restic/` | a [restic](https://restic.net) repository with every snapshot |
 | `D/cache/<hash>.json` | the model cache (§6) |
-| `D/lock`, `D/lock.holder` | the lock a writing command holds, and its pid (`docs/cli.md` §4) |
+| `D/lock`, `D/lock.holder` | the lock a writing command holds, and its pid (`docs/cli.md` §3) |
 | `D/tmp/<id>/` | one command's scratch, removed when it ends |
 
 Everything but `tmp/` lasts. An entry is written once, as a finished temporary file renamed into

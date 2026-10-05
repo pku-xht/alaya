@@ -371,7 +371,7 @@ conversation. The spec's `echo_reasoning` says how, and a route must be able to 
 
 Every operation runs in `Result α := EIO Error α`. Each constructor of `Error` has a class,
 which says what a caller does about it; the command line exits with one status per class
-(`docs/cli.md` §4).
+(`docs/cli.md` §3).
 
 | Constructor | Means | Class |
 | --- | --- | --- |

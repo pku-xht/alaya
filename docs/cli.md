@@ -2,8 +2,8 @@
 
 `alaya` drives runs from a shell, a script, a UI, or an agent such as Claude Code. A run is a
 log, a point of a run is an **entry**, and every command takes the entry it acts at: it appends
-after it, or reads at it. There are no states, and acting at an entry that already goes on is a
-fork. What a log is and how it is kept are `docs/agent-api.md` and `docs/log-schema.md`.
+after it, or reads at it. Appending after an entry that already has a next entry creates a fork.
+`docs/agent-api.md` defines the log, and `docs/log-schema.md` how it is stored.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
@@ -11,14 +11,14 @@ flowchart TD
   classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
   classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
-  new("new<br/>create a run")
-  run("run<br/>drive it on")
+  new("<b>new</b><br/>create a run")
+  run("<b>run</b><br/>drive it on")
   over("the agent is over<br/>exit 0, or 1 if it failed"):::ok
   paused("paused at a limit<br/>exit 4"):::wait
   waits("waits for a person<br/>exit 3"):::wait
-  grade("grade<br/>stop if needed,<br/>assign a grader, run it")
-  tell("tell · commit<br/>say or change something")
-  reply("reply<br/>answer the question")
+  grade("<b>grade</b><br/>stop if needed,<br/>assign a grader, run it")
+  tell("<b>tell</b> · <b>commit</b><br/>say or change something")
+  reply("<b>reply</b><br/>answer the question")
   verdict("the verdict<br/>exit 0 pass · 1 fail · 2 error"):::ok
 
   new --> run
@@ -50,7 +50,7 @@ alaya reply ENTRY (TEXT | --unavailable)             answer the question the log
 alaya stop ENTRY [--reason TEXT]                     stop the agent there
 alaya grade ENTRY --grader CMD [--grader-input DIR] [--grader-image IMAGE] [--grader-timeout S]
                                                      grade the run at ENTRY
-alaya comment ENTRY TEXT                             append a comment, for a reader
+alaya comment ENTRY TEXT                             append a comment to the log
 alaya rm ENTRY                                       delete ENTRY and everything after it
 
 alaya tree                                           the forest: runs, stretches of entries, forks
@@ -73,7 +73,9 @@ alaya help [COMMAND]                                 what a command takes
 - **`--data DIR`** names the data directory, on every command but `config` and `help`. Without
   it a command reads `ALAYA_DATA`. There is no default, so a command run from the wrong place
   cannot quietly begin a new directory; `new` creates one.
-- **`--json`** and **`--help`** are taken by every command.
+- **`--json`** is taken by every command.
+- **`alaya help [COMMAND]`**, or `--help` on any command, prints what a command takes;
+  `alaya help --json` describes every command as data.
 
 A session in a script:
 
@@ -84,20 +86,9 @@ end=$(alaya run "$tip" --provider apiyi | tail -n 1 | cut -d' ' -f1)
 alaya grade "$end" --grader 'python3 /grader/grade.py' --grader-input ./hidden
 ```
 
-## 2. Reading a command line
+## 2. Output
 
-- The command comes first. Every command declares what it takes (`Alaya.Cli`).
-- An option a command does not take is refused, with the nearest one it does take.
-- A valued option takes the next token, or its value after `=` (`--task=--literal`), and is
-  given once unless it repeats (`--set`).
-- After `--` everything is an argument: this is how a text that begins with `-` is given.
-- Every problem of a command line is reported at once.
-- `alaya help`, `alaya help COMMAND` and `alaya COMMAND --help` print what a command accepts;
-  `alaya help --json` describes every command as data.
-
-## 3. Output
-
-A command prints text for a reader, and JSON with `--json`.
+A command prints human-readable text, or JSON with `--json`.
 
 A command that appends prints each entry it appends on a line of its own: the entry's full name,
 its position, its frame, and its event in a few words.
@@ -131,7 +122,7 @@ With `--json`, a command prints one object a line:
 | `html` | `{file, bytes}` |
 | `rm` | `{removed}` |
 
-## 4. Failures and exit status
+## 3. Failures and exit status
 
 Statuses 0 to 4 are outcomes. A failure has one of six statuses above them, the same for every
 command.
@@ -160,9 +151,9 @@ command.
   read take no lock, so a run can be watched while it grows. Work in parallel goes to several
   data directories, one for each worker or arm of an experiment.
 
-## 5. Commands that write
+## 4. Commands that write
 
-Each appends entries after `ENTRY` and prints them (§3). In the figures, a blue entry is one the
+Each appends entries after `ENTRY` and prints them (§2). In the figures, a blue entry is one the
 command appends.
 
 ### `new`
@@ -214,7 +205,9 @@ alaya run 4f2c8b --provider apiyi --samples 50 --time-budget 3600
   environment error (69), and nothing is logged.
 - **A log that is no trace of its run's program** is refused (65): one edited by hand, or
   written by another version of the agent.
-- **From an entry where a `grade` was interrupted**, `run` runs the grader that was assigned.
+- **An interrupted `grade`** is finished by `run`. `grade` records the grader in the log
+  before running it, so if it is interrupted in between, `run` at the last entry runs that
+  grader and records its verdict.
 
 ### `tell`
 
@@ -332,7 +325,7 @@ alaya rm 9a11c0
 
 Then it drops the snapshots that only the deleted entries named.
 
-## 6. Commands that read
+## 5. Commands that read
 
 They take no lock and change nothing.
 
@@ -358,7 +351,7 @@ alaya waiting --json              # the questions that wait, for a script or a p
       9a11c0de42f7..53be0f1a2c90  41-260  return pass 48/48  [done: pass 48/48]
   ```
 
-- **`log`** prints the lines of §3, with the run's time so far.
+- **`log`** prints the lines of §2, with the run's time so far.
 - **`show`** prints an entry's event, its time and the run's, the run's tokens so far, and the
   calls open there. `--request` adds the request a sample answered, as replay computes it.
 - **`waiting`** lists every log that waits for a reply, with its question.

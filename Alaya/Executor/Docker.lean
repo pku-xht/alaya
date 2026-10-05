@@ -47,7 +47,7 @@ structure Settings where
   Linux this must be the host user or the host can neither snapshot nor wipe them. Docker
   Desktop virtualizes ownership, so macOS leaves it unset. -/
   user? : Option String := none
-  /-- `docker run --network`; off by default, see `docs/cli.md` §5. -/
+  /-- `docker run --network`; off by default, see `docs/cli.md` §4. -/
   network? : Option String := some "none"
   /-- Where the working directory is mounted, and where commands run. -/
   workdir : String := defaultWorkdir
