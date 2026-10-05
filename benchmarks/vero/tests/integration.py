@@ -153,8 +153,8 @@ def test_mode(args, mode):
         assert "sha256:" in result["image"]
         assert result["input"]
         # The report is in the checkout as the grader left it, read at its answer's entry.
-        assert ".vero/report.md" in alaya("ls", result["answer"], ".vero").stdout
-        assert alaya("cat", result["answer"], ".vero/report.md").stdout.strip()
+        assert ".grade/report.md" in alaya("ls", result["answer"], ".grade").stdout
+        assert alaya("cat", result["answer"], ".grade/report.md").stdout.strip()
         return result
 
     rows = create()
@@ -200,7 +200,7 @@ def test_mode(args, mode):
     assert len(ended) == 1, trace
     assert trace[ended[0]]["event"]["value"]["status"] == "Submitted", trace[ended[0]]
     submitted, before_end = trace[ended[0]]["entry"], trace[ended[0] - 1]["entry"]
-    assert ".vero/report.md" in alaya("ls", correct["answer"], ".vero").stdout
+    assert ".grade/report.md" in alaya("ls", correct["answer"], ".grade").stdout
     # Every grading runs the grader again and records a new answer, on a fork.
     again = grade_at(submitted, "pass", 1)
     assert again["answer"] != correct["answer"] and again["entry"] != correct["entry"]

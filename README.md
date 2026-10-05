@@ -38,21 +38,24 @@ a model provider, `docker` for every command an agent or a grader runs, and
 [`restic`](https://restic.net) 0.17 or later for workspace snapshots. A running Docker daemon is
 required, for the tests too.
 
-A typical session, on the [Bija example benchmark](example/bija/README.md): implement a small
+A typical session, on the [Bija benchmark](benchmarks/bija/README.md): implement a small
 language from its specification, graded against programs the agent never sees.
 
 ```sh
-docker build -t alaya-bija example/bija
+docker build --platform linux/amd64 --target agent -t alaya-bija-agent benchmarks/bija
+docker build --platform linux/amd64 --target grader -t alaya-bija-grader benchmarks/bija
 export ALAYA_DATA=$PWD/runs    # the data directory; `new` creates it
 last() { tail -n 1 | cut -d' ' -f1; }
 
 # A run: the project, the agent's configuration, and the task.
-tip=$(alaya new --task-file example/bija/TASK.txt example/bija/skeleton --agent mini-swe \
-  --model gpt-6-luna --set model.params.reasoning_effort=high --image alaya-bija | last)
+tip=$(alaya new --task-file benchmarks/bija/TASK.txt benchmarks/bija/skeleton --agent mini-swe \
+  --model gpt-6-luna --set model.params.reasoning_effort=high --image alaya-bija-agent | last)
 end=$(alaya run "$tip" --provider apiyi | last)   # an entry a line; `alaya config` lists models, providers
 
 # Grade it: a grader is a command that prints TAP, run on a checkout of the workspace.
-grader=(--grader 'python3 /grader/grade.py' --grader-input example/bija)
+grader=(--grader 'python3 /opt/alaya-bija/grade.py --tests /grader'
+        --grader-input benchmarks/bija/reference/tests --grader-image alaya-bija-grader
+        --grader-timeout 1800)
 alaya grade "$end" "${grader[@]}"
 
 # Find where it went wrong, and see what the model was sent there.
@@ -77,12 +80,12 @@ verdicts compare the same run with and without the correction, and with the agen
 `alaya html report.html` writes all runs as one page, for reading: each branch's log, an entry a
 row, nested by the calls it happened in, with switches where branches fork, and an entry in full
 — its reasoning, its calls and output, the request the model was sent, its time and tokens, and
-the workspace changes. Below is the page for a gpt-6-luna run on [Bija](example/bija/README.md), graded 362 of 464,
+the workspace changes. Below is the page for a gpt-6-luna run on [Bija](benchmarks/bija/README.md), graded 362 of 464,
 with a second branch that starts mid-run, where a person sent the agent a note on how the suite
 checks diagnostics, graded 410 of 464, and a third that grades the point where the note went in
 as it stood, 362 of 464; the page shows a turn of the second.
 
-![The HTML report of a gpt-6-luna run on Bija](example/bija/report.png)
+![The HTML report of a gpt-6-luna run on Bija](docs/figures/bija-report.png)
 
 ## Documentation
 

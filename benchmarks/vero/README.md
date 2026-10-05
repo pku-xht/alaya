@@ -147,8 +147,8 @@ for line in sys.stdin:
     event = json.loads(line).get("event") or {}
     if event.get("type") == "answered" and event["op"]["type"] == "external":
         print(json.loads(line)["entry"])')
-.lake/build/bin/alaya ls "$ANSWER" .vero --data "$RUN/audit"
-.lake/build/bin/alaya cat "$ANSWER" .vero/report.md --data "$RUN/audit"
+.lake/build/bin/alaya ls "$ANSWER" .grade --data "$RUN/audit"
+.lake/build/bin/alaya cat "$ANSWER" .grade/report.md --data "$RUN/audit"
 ```
 
 Alaya snapshots the trusted benchmark when `grade` assigns the grader, mounts that snapshot read-only at
@@ -161,7 +161,7 @@ The run's configuration fixes the mode and the trusted benchmark; the grader doe
 `MINIVERO_TASK.md` or anything else in the checkout to choose either. It
 extracts only the answer slots the mode permits — in proof mode, only the
 manifest-selected proof files, never an Impl slot — rebuilds from the trusted
-benchmark in `/tmp`, writes Vero's `report.json` and `report.md` to `.vero/` in
+benchmark in `/tmp`, writes Vero's `report.json` and `report.md` to `.grade/` in
 the checkout, and prints TAP: one check per specification, named
 `Module.spec`, with the Vero status appended when it did not pass. An answer
 file that is a symbolic link fails every check as `anti-cheat`. An invalid

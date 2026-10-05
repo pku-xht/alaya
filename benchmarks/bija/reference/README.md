@@ -52,17 +52,16 @@ and `2` for a compile-time error (reported as `file:line:column: error: …`).
 
 ## Development
 
-The project targets `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` and has no runtime dependencies:
+The project targets `ghcr.io/astral-sh/uv:0.12.7-python3.12-trixie-slim` and has no runtime dependencies:
 
 ```sh
 docker run --rm -v "$PWD:/project" -w /project \
   -e UV_PROJECT_ENVIRONMENT=/tmp/venv -e UV_LINK_MODE=copy \
-  ghcr.io/astral-sh/uv:python3.12-bookworm-slim uv run pytest
+  ghcr.io/astral-sh/uv:0.12.7-python3.12-trixie-slim uv run pytest
 ```
 
 `UV_PROJECT_ENVIRONMENT` keeps the container's virtual environment out of the mounted tree, so
-running the suite in the container does not invalidate the one on the host. `docker build .`
-uses the same image if you would rather not mount anything.
+running the suite in the container does not invalidate the one on the host.
 
 Locally, `uv run pytest` does the same thing.
 

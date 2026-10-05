@@ -3,17 +3,15 @@
 
 usage: grade.py --mode (proof|codeproof) --benchmark /grader [--lake-timeout S]
 
-It is a run's grader, given at `alaya new`; alaya runs it when the agent ends, or at any point of
-the run that is stopped (`alaya stop ENTRY`, then `alaya run` on the stop), in the grader image
-(the Dockerfile's `grader` target), in a checkout of the attempt, with the trusted benchmark as
-its input at /grader:
+`alaya grade` runs it on a point of a run, in the grader image (the Dockerfile's `grader`
+target), in a checkout of the attempt, with the trusted benchmark as its input at /grader:
 
-    alaya grade ENTRY --grader-image alaya-vero-grader:0a7325d --grader-input BENCHMARK \
+    alaya grade ENTRY --grader-image ghcr.io/msv-lab/alaya-vero-grader:0a7325d --grader-input BENCHMARK \
       --grader 'python /opt/alaya-vero/grade.py --mode codeproof --benchmark /grader'
 
 The mode and the benchmark are arguments; nothing is read from the checkout to choose them. It
 extracts only the answer slots the mode permits, rebuilds from the trusted benchmark in /tmp,
-writes Vero's reports to `.vero/` in the checkout, and prints TAP on stdout: one check per
+writes Vero's reports to `.grade/` in the checkout, and prints TAP on stdout: one check per
 specification, plus a failing `acceptance: joint:...` check for an invalid joint claim. Anything
 unexpected — an unknown Vero status, a compiler timeout, an exception — is `Bail out!`.
 """
@@ -157,7 +155,7 @@ def grade(benchmark: Path, mode: str, lake_timeout: int) -> int:
     if total == 0:
         raise ValueError("benchmark has no specifications")
     print("TAP version 14", flush=True)
-    report_dir = workspace / ".vero"
+    report_dir = workspace / ".grade"
     if report_dir.is_symlink() or report_dir.is_file():
         report_dir.unlink()
     elif report_dir.exists():

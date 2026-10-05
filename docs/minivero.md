@@ -96,7 +96,7 @@ alaya new source --task-file MINIVERO_TASK.md --agent mini-vero --model MODEL --
 alaya run ENTRY --provider PROVIDER
 alaya grade LAST --grader-image alaya-vero-grader:0a7325d --grader-input path/to/trusted/Benchmark \
   --grader 'python /opt/alaya-vero/grade.py --mode proof --benchmark /grader'
-alaya cat GRADED:N .vero/report.md         # N: the position of the grader's answer in the log
+alaya cat GRADED:N .grade/report.md         # N: the position of the grader's answer in the log
 ```
 
 `grade` runs Vero's own grader on a point of the run, in the Vero grader image, with the

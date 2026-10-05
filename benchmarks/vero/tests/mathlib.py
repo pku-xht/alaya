@@ -87,7 +87,7 @@ answer = grader_answer(json_lines(run(alaya, "log", final["entry"], "--json",
 assert record["status"] == "fail", record
 assert len(record["checks"]) == spec_total, (len(record["checks"]), spec_total)
 assert not any(check["ok"] for check in record["checks"]), record
-report = json.loads(run(alaya, "cat", answer, ".vero/report.json", "--data", data).stdout)
+report = json.loads(run(alaya, "cat", answer, ".grade/report.json", "--data", data).stdout)
 assert report["summary"]["total_specs"] == spec_total, report["summary"]
 result = {"root": root["entry"], "task": task, "image": configuration["environment"]["image"],
           "snapshot_stats": stats,

@@ -47,7 +47,7 @@ fixture without Mathlib cannot establish that the dependency cache works.
 | A lock that differs from the image's | Refused instead of silently using the image's revision |
 | Offline build of a Mathlib benchmark | `lake build` exits 0 with `--network none`, non-root, through the package links |
 | Root snapshot of a Mathlib benchmark | Source files and symlinks only: no dependency trees |
-| Grading a blank, a correct, and a tampered attempt | `fail 0/N`, `pass N/N`, `fail`; Vero's reports in `.vero/` |
+| Grading a blank, a correct, and a tampered attempt | `fail 0/N`, `pass N/N`, `fail`; Vero's reports in `.grade/` |
 | An answer file that is a symbolic link | Every check fails as `anti-cheat` |
 | An invalid joint claim | A failing `acceptance: joint:...` check; the specifications keep their results |
 | An unknown Vero status, a compiler timeout or signal | `Bail out!`, an `error` verdict |
