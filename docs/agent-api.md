@@ -1,25 +1,22 @@
 # Agent API
 
-Alaya represents an agent as an effectful program in free-monad form and runs it by durable
-execution: replay against an append-only log of events. The logs form a forest, so any point of
-a run, with its workspace, can be forked and resampled.
-
-In Alaya's own terms there are three parts. The **program** is a value that says what to ask the
-world for next, and carries out nothing. The **log** is the flat, append-only list of what
-happened in a run. The **driver** reads the log with the program to find what the program asks
-next, carries that out, and appends the answer.
+Agent runs must survive crashes and remain available for analysis, so Alaya separates deciding
+from acting, in three parts. The **program** is a value that says what to ask the world for
+next. The **log** is the flat, append-only list of what happened in a
+run. The **driver** replays the program against the log to find what it asks next, carries that
+out, and appends the answer.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
 flowchart LR
   classDef notice stroke:#7556a3
 
-  program("program<br/>decides: asks,<br/>never acts")
-  log("log<br/>remembers: flat,<br/>append-only")
-  replay("replay<br/>next run log")
-  driver("driver<br/>acts")
-  world("the world<br/>model · executor<br/>clock · container")
-  person("a person"):::notice
+  program("<b>program</b><br/>decides: asks,<br/>does not act")
+  log("<b>log</b><br/>remembers: flat,<br/>append-only")
+  replay("<b>replay</b><br/>next run log")
+  driver("<b>driver</b><br/>acts")
+  world("<b>the world</b><br/>model · executor<br/>clock · container")
+  person("<b>a person</b>"):::notice
 
   program --> replay
   log -- "read from its root" --> replay
@@ -30,8 +27,6 @@ flowchart LR
   person -- "appends a notice<br/>or a stop" --> log
   linkStyle default stroke-width:1px
 ```
-
-This page is what an agent is written against, in the order one meets it:
 
 | § | What | Where |
 | --- | --- | --- |
@@ -46,21 +41,24 @@ This page is what an agent is written against, in the order one meets it:
 | 9 | a **run**: the agent, then its grading | `Alaya.Run` |
 | 10 | **driving** a run: the driver's own API | `Alaya.Driver` |
 
-How a log is stored is `docs/log-schema.md`, and the command line over all of this is
-`docs/cli.md`.
+`docs/log-schema.md` specifies how a log is stored; `docs/cli.md` is the command line.
 
 ## 1. A program
 
 ```lean
-inductive Program (σ : Signature) : Type → Type 1     -- Alaya.Program
-abbrev Agent : Signature                               -- Alaya.Agent: sample, exec, time, external
+inductive Program (σ : Signature) : Type → Type 1 where                  -- Alaya.Program
+  | pure    : α → Program σ α                                              -- a leaf: a value
+  | fail    : String → Program σ α                                         -- a leaf: a failure
+  | perform : (op : σ.Op) → (Except String (σ.Answer op) → Program σ α) → Program σ α
+  -- the other constructors (inbox, ask, call, iter, comment) are omitted here; see §3
+
+abbrev Agent : Signature            -- Alaya.Agent: its operations are sample, exec, time, external
 ```
 
 A program of Alaya has the type `Program Agent α`: it asks for operations of the signature
-`Agent`, and ends with an `α`. It is a tree. A leaf is a value or a failure. Any other node is
-one thing the program asks for, with the rest of the program under it, one subtree for each
-answer it can get. Such a tree is the free monad on its signature: an interactive program as a
-value, which something outside it executes (Hancock and Setzer 2000; Kiselyov and Ishii 2015).
+`Agent`, and ends with an `α`. It is represented as a tree whose leaves are values or failures,
+and whose inner nodes are requests, with a subtree for each possible answer. This representation
+is known as the free monad (Hancock and Setzer 2000; Kiselyov and Ishii 2015).
 
 ```lean
 def fix : Program Agent String := do
@@ -69,7 +67,10 @@ def fix : Program Agent String := do
   | none => return "nothing to do"
   | some command =>
     let ran ← exec command
-    if ran.output.exitCode? == some 0 then return "fixed" else throw "the command failed"
+    if ran.output.exitCode? == some 0 then
+      return "fixed"
+    else
+      throw "the command failed"
 ```
 
 *The program `fix` as a tree: an operation is a node, and each answer leads to the rest of the
@@ -92,7 +93,7 @@ flowchart TD
   linkStyle default stroke-width:1px
 ```
 
-A program is written in `do` notation, from eight things:
+A program is written in `do` notation, from eight constructs:
 
 | Written | Asks for | Goes on with |
 | --- | --- | --- |
@@ -106,8 +107,6 @@ A program is written in `do` notation, from eight things:
 | `comment text` | a line in the log, for a reader | nothing |
 
 `try … catch` catches a failure, and `retry n program` tries a program again while it fails.
-Since a program only asks, running it has no effect: the same program is run again and again
-against a longer and longer log (§4).
 
 ## 2. The log
 
@@ -135,8 +134,8 @@ event:
 | answer | `answered` | by the driver, after it carried out an operation |
 | mark | `heard`, `asked`, `opened`, `returned`, `failed`, a program's `commented` | by the driver, where the program did something that needs no world |
 
-A mark tells the program nothing it does not know. It is in the log so that the log can be read
-without the program: who read which notice, where each call began and how it ended.
+Marks make the log readable without the program: who read which notice, where each call began
+and how it ended.
 
 A **notice** is what arrives from outside:
 
@@ -148,13 +147,12 @@ inductive Notice where
   | assigned (grader : Json)                          -- the grader of the run
 ```
 
-A **frame** says which call an event happened in. It is the path of calls from the run, each
-call by its ordinal among its caller's calls: `#[]` is the run itself, `#[0]` the agent, `#[0, 2]`
-the agent's third call. It is written `0.2`, and `-` where there is none.
+A **frame** says which call of a routine (`call name arguments`, §3.3) an event happened in. It
+lists, from the outermost call inward, each call's ordinal among its caller's calls: `#[]` is
+the run itself, `#[0]` the agent, `#[0, 2]` the agent's third call. It is written `0.2`, and `-`
+where there is none.
 
-*The log of the four-line agent below. A row is a position, a frame and an event; at its end is
-the event's constructor. On the left is what the program did there, and in the middle who
-answered.*
+*The log of the agent below.*
 
 ![The log of a small agent, beside its program](figures/agent-api/log.svg)
 
@@ -166,14 +164,14 @@ def agent : Program Agent Json := do
   return "fixed"                                            -- 6
 ```
 
-Every log begins the same way. Position 0 is the **root**, `arrived (changed …)`: the workspace
-the run starts from. Position 1 is the opening of the agent's call, and its arguments are the
-run's configuration (§9).
+Every log begins the same way. Position 0 is the **root**, `arrived (changed …)`: the
+**workspace**, the filesystem directory the agent works in, as the run starts. Position 1 is the
+opening of the agent's call.
 
 ## 3. What each construct writes
 
-`return` and the sequencing of `do` write nothing. Each other construct writes one event when
-the driver reaches it. This section takes them one at a time.
+As the driver runs a program, it appends to the log what happened at each construct it reaches:
+the answer the world gave to an operation, or a mark of what the program did there.
 
 ### 3.1 Operations
 
@@ -189,7 +187,7 @@ external : String → String → Option Snapshot → Nat → Program Agent Exter
 3. The driver appends `answered frame key answer`: the frame that asked, the operation's key,
    and what the world gave.
 4. The program goes on with the answer. On every later replay the answer is read from the log:
-   an operation whose answer is logged is never carried out again.
+   an operation whose answer is logged is not carried out again.
 
 ![Three operations, each answered by its part of the world](figures/agent-api/perform.svg)
 
@@ -198,25 +196,24 @@ external : String → String → Option Snapshot → Nat → Program Agent Exter
 | `sample request` | the run's model | `Chat.Response` |
 | `exec command config` | the executor: `command` in the run's container, on the workspace, with `config`'s timeout and environment | `Execution`: the output, the version of the workspace it left, and with `config.outputs` the file that holds the whole output |
 | `time` | the driver: the run's time summed along its log | `Timing`: the time spent, and the budget of this invocation |
-| `external command image input? timeout` | a fresh container of `image` with no network, on a checkout of the workspace, `input?` at `/grader` | `External`: how it ended, its stdout and stderr, and the checkout as it left it |
-
-The log keeps an operation by its **key**: all of it, except that a sample is kept by the digest
-of its request, so the log does not hold the conversation again with every response. A response
-is a **draw** of its request, which the model cache keeps: a run that crashed takes the draw the
-cache kept, and running a point again takes a new one.
+| `external command image input? timeout` | a fresh container of `image` with no network, on a **checkout**, a fresh copy of the workspace, with `input?`, files that are not in the workspace, mounted read-only at `/grader` | `External`: how it ended, its stdout and stderr, and the checkout as it left it |
 
 A command that exits with an error, or runs out of time, is still an answer: its status is in
 the output. Only an answer the world could not give is a failure (§3.4).
 
-**The workspace is in the log.** A command runs on the version of the workspace the log has
-reached, and its answer names the version it left. A person's change is a notice that names a
-version too. So `workspace? log` is the last version a command or a change left, and any point
-of a run can be checked out, compared, or gone on from. `external` is the exception: it runs on
-a checkout, and the run's workspace stays where it is.
+The log records every version of the workspace, by the name of its snapshot. A command runs on
+the version of the workspace the log has reached, and its answer names the version it left. A
+person's change is a notice that names a version too. So the workspace at any point of a run is
+the last version a command or a change left before it, and that point can be checked out,
+compared, or continued. `external` is the exception: it runs on a copy of the workspace, and the
+run's workspace stays where it is.
 
 ![The versions of the workspace along a log](figures/agent-api/workspace.svg)
 
 ### 3.2 Notices: `inbox` and `await`
+
+`inbox` and `await` receive notices from outside: `inbox` takes whatever has arrived, possibly
+nothing, and `await` waits until the notices it is for arrive.
 
 ```lean
 inbox : Program σ (List Notice)                                   -- take what has arrived
@@ -235,10 +232,12 @@ await : (Frame → Notice → Bool) → Program σ (List Notice)         -- wait
 
 ![Notices arrive from outside, and reads take them](figures/agent-api/inbox.svg)
 
-A notice is read once, by one read, and the mark says by which. The root is no notice for the
-agent: no read takes it.
+A notice is read once, by one read, and the mark says by which. The root is not a notice for
+the agent: no read takes it.
 
 ### 3.3 Calls
+
+`call` runs a routine, a named program (§5), in a frame of its own, and gives back its result.
 
 ```lean
 call : (name : String) → (arguments : Json) → Program σ Json
@@ -247,27 +246,28 @@ call : (name : String) → (arguments : Json) → Program σ Json
 1. The program calls a routine by its name. The driver marks the call,
    `opened child ⟨name, arguments⟩`. The **child frame** is the caller's frame and the ordinal
    of the call among the caller's calls: `0.0`, then `0.1`.
-2. The routine the run has under that name runs in the child frame. What it asks for is asked
-   from there, and its own calls open frames under it.
+2. The routine the run has under that name runs in the child frame: its operations are
+   performed there, and its own calls open frames nested in it.
 3. The routine ends, and the driver marks how: `returned child value`, or `failed child error`.
 4. The caller goes on with the value. A failure is the caller's too, unless it catches it.
 
 ![Two calls of a routine, each a bracket in the log](figures/agent-api/call.svg)
 
-A call holds a name and no body, so it is data, and the log holds it whole. A routine is entered
-in no other way, so every scope of a log is a call: a frame with its sub-frames is one stretch
-of the log, from its opening to its end, notices apart. Nested scopes kept flat, between matched
-brackets, are scoped operations (Wu, Schrijvers and Hinze 2014; Piróg et al. 2018). A call of a
-name the run has no routine under fails in its own frame, with `no routine named …`.
+Because a call names its routine instead of holding its body, the log records it in full. Every
+routine is entered through a call, so a call and the calls nested in it occupy one contiguous
+stretch of the log, between its opening and its end, apart from notices that arrive meanwhile.
+This flat encoding of nested scopes follows scoped operations (Wu, Schrijvers and Hinze 2014;
+Piróg et al. 2018). A call of a name with no routine fails in its new frame, with
+`no routine named …`.
 
 ### 3.4 Failures
 
 - `throw error` gives up, up to the nearest `try … catch` in the same frame, or to the end of
   the frame.
-- An operation whose answer is an error fails where it was performed. The one such answer today
-  is a model's refusal of a request as too long for its context. Any other trouble with the
-  world — a provider that cannot be reached, a container that cannot be started, a full disk —
-  is no answer: the driver stops, nothing is logged, and the next `alaya run` asks again.
+- An operation whose answer is an error fails where it was performed. Currently, the only such
+  answer is a model's refusal of a request as too long for its context. Any other trouble with
+  the world — a provider that cannot be reached, a container that cannot be started, a full disk
+  — is not an answer: the driver stops, nothing is logged, and the next `alaya run` asks again.
 - A failure that reaches the end of its frame is marked, `failed frame error`, and becomes the
   failure of the call.
 - `try … catch` leaves no mark. Nothing is rolled back: what a failed routine did stays in the
@@ -291,9 +291,8 @@ iter : (S → Program σ (S ⊕ α)) → S → Program σ α
 
 ![A loop of three rounds: the log holds their events, flat](figures/agent-api/loop.svg)
 
-The state of a loop is data — a conversation, a counter — where the rest of a program is a
-function. So a round's request is computed from the state, and limits that count turns or
-measure the context read it too.
+A loop carries its state as an ordinary value, such as the conversation so far or a turn
+counter, from which each round computes its request and checks limits on turns or context size.
 
 Every round must read an event: an operation, a read of the inbox, or a call. A loop that goes
 round without one is `unguarded`, a broken run. This is what makes replay of a finite log end.
@@ -317,7 +316,7 @@ guard a loop. A person's comment (`alaya comment`) has no frame.
 
 ### 3.7 Stops
 
-A stop is no construct of a program. It comes from outside, `stopped reason`, appended by
+A stop is not a construct of a program. It comes from outside, `stopped reason`, appended by
 `alaya stop`, or by `alaya grade` at a point where the agent still runs.
 
 1. Every frame of the agent ends there, whatever the nesting, with no marks.
@@ -331,8 +330,22 @@ A stop is no construct of a program. It comes from outside, `stopped reason`, ap
 ```lean
 ask : Question → Program σ Reply
 
-structure Question where text : String ; form : Question.Form     -- yesNo | singleChoice options | openEnded
-inductive Reply where | yes | no | choice (number : Nat) | noneOfAbove | text (text : String) | unavailable
+structure Question where
+  text : String
+  form : Question.Form := .openEnded
+
+inductive Question.Form where
+  | yesNo
+  | openEnded
+  | singleChoice (options : Array String)     -- exactly one of the candidates, or none of them
+
+inductive Reply where
+  | yes
+  | no
+  | choice (number : Nat)                     -- the candidate chosen, numbered from 1
+  | noneOfAbove
+  | text (text : String)                      -- an answer in the person's own words
+  | unavailable                               -- the person cannot answer
 ```
 
 1. The program reaches `ask question`. A question that cannot be asked — a blank one, or a
@@ -343,7 +356,7 @@ inductive Reply where | yes | no | choice (number : Nat) | noneOfAbove | text (t
    that does not fit, is refused before it is appended.
 5. The read is marked like any other, and the program goes on with the reply.
 
-There are three kinds of question and six kinds of reply, and no others:
+There are three kinds of question and six kinds of reply:
 
 | Kind of question | A reply that fits |
 | --- | --- |
@@ -367,8 +380,6 @@ questionOf? : Next Agent → Option (Frame × Question)        -- the question a
 replyTo     : Next Agent → Reply → Except String (Event Agent)   -- the reply as an event, or why not
 ```
 
-The figure of §7 shows a question in a log.
-
 ## 4. Replay: from the log back to the program
 
 ```lean
@@ -384,8 +395,8 @@ crash (Koppel, Scherer and Solar-Lezama 2018; Burckhardt et al. 2021):
 - a mark is checked against the mark the program makes there;
 - an `arrived` notice is set aside until a read takes it.
 
-Where the log ends, the program has reached something the log does not hold. That is what the
-run does next, and the driver does it:
+At the end of the log, replay reaches a construct the log does not yet record. `next` returns
+it, and the driver acts on it as follows:
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
@@ -398,7 +409,7 @@ flowchart TD
   person("a person"):::notice -- "appends a notice" --> next("next run log")
   next -- "waits" --> waits("stop: wait for a person<br/>a task, a reply, a grader"):::wait
   next -- "done · raised" --> over("the run is over"):::ok
-  next -- "mismatch ·<br/>unguarded" --> refuse("refuse: the log<br/>is no trace of<br/>the program"):::bad
+  next -- "mismatch ·<br/>unguarded" --> refuse("refuse: the log<br/>is not a trace<br/>of the program"):::bad
   next -- "hears · questions<br/>opens · returns<br/>fails · comments" --> mark("append<br/>the mark")
   mark --> next
   next -- "ask" --> act("carry out<br/>the operation") --> answered("append answered")
@@ -479,43 +490,60 @@ flowchart TD
 An agent of several parts is routines calling routines:
 
 ```lean
-structure Task where goal : String  deriving ToJson, FromJson
-structure Plan where steps : Array String  deriving ToJson, FromJson
+structure Task where
+  goal : String
+  deriving ToJson, FromJson
+
+structure Plan where
+  steps : Array String
+  deriving ToJson, FromJson
+
+/-- One round of the planner's conversation: a sample, then the tools the model called. -/
+def planRound (messages : Array Chat.Message) : Program Agent (Array Chat.Message ⊕ String) := do
+  let response ← sample { messages, tools := #[lookupDefinition] }
+  if response.toolCalls.isEmpty then
+    return .inr (response.content?.getD "")
+  let mut messages := messages.push response.message
+  for asked in response.toolCalls do
+    -- the model's tool call is a call of a routine
+    let result ←
+      try call asked.name asked.arguments
+      catch error => pure (.str s!"error: {error}")
+    messages := messages.push (.tool asked.id result)
+  return .inl messages
 
 /-- A sub-agent: a conversation of its own, with the tool it offers its model. -/
 def planner : Routine Agent Task Plan := routine "planner" fun task => do
-  let answer ← iter (fun messages => do
-    let response ← sample { messages, tools := #[lookupDefinition] }
-    if response.toolCalls.isEmpty then return .inr (response.content?.getD "")
-    let mut messages := messages.push response.message
-    for asked in response.toolCalls do                  -- the model's call is a call of a routine
-      let result ← try call asked.name asked.arguments catch error => pure (.str s!"error: {error}")
-      messages := messages.push (.tool asked.id result)
-    return .inl messages) #[.system "You plan.", .user task.goal]
+  let opening := #[.system "You plan.", .user task.goal]
+  let answer ← iter planRound opening
   return { steps := (answer.splitOn "\n").toArray }
 
 /-- A step of the workflow: one command, and its exit status. -/
 def step : Routine Agent String Nat := routine "step" fun command => do
-  return (← exec command).output.exitCode?.map (·.toNat) |>.getD 1
+  let ran ← exec command
+  return (ran.output.exitCode?.map (·.toNat)).getD 1
 
 /-- The workflow: a plan from the planner, then each of its steps. -/
 def workflow : Routine Agent Task String := routine "workflow" fun task => do
   let plan ← planner.call task
   let mut failed := 0
   for command in plan.steps do
-    if (← step.call command) != 0 then failed := failed + 1
+    if (← step.call command) != 0 then
+      failed := failed + 1
   return s!"{plan.steps.size} steps, {failed} failed"
 
 /-- The agent: it waits for its task, and runs the workflow on it. -/
 def agent : Program Agent Json := do
   let notices ← await fun _ notice => notice matches .said _
-  let goal := match notices with | .said goal :: _ => goal | _ => ""
+  let goal := match notices with
+    | .said goal :: _ => goal
+    | _ => ""
   return toJson (← workflow.call { goal })
 
 def routines := #[lookup.entry, planner.entry, step.entry, workflow.entry]
 ```
 
-*The frames of a run of it: the tree of its calls.*
+*The calls made when this agent runs, as a tree of frames.*
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
@@ -533,9 +561,8 @@ its opening to its return.*
 
 ![The log of the workflow, its sub-agent and their tools](figures/agent-api/routines.svg)
 
-A routine names no model: a sample is a request, answered by the run's model. Not every helper
-is a routine. A function that builds a program, such as a loop's round, runs in its caller's
-frame and leaves no bracket; make a routine where the log should show one.
+Every sample in a routine is answered by the run's model. A helper that is not a routine, such
+as `planRound`, runs in its caller's frame and leaves no call in the log.
 
 ## 6. Tools
 
@@ -569,17 +596,16 @@ A model's tool call becomes a call of a routine in four steps:
 | `bash` | `command` | `exec command`, with the agent's executor settings | `output`, `exit_code`, `error`, `file` |
 | `time_budget` | none | `time` | `seconds_left`, or that the run has no limit |
 | `ask_user` | `question_type`, `question`, `options` | `ask` the question (§7) | the reply |
-| `submit` | `message` | never called: the agent that offers it ends with the message | |
+| `submit` | `message` | not called: the agent that offers it ends with the message | |
 
-`Agents.Tools.all` lists the tools an agent's configuration can name. A tool knows nothing of
-the agent that offers it. The agent decides which tools its model is offered, how a malformed
-call is worded, and how a result is shown: `bash` gives the whole output, and MiniSwe cuts what
-its model sees of it.
+`Agents.Tools.all` lists the tools an agent's configuration can name. A tool is independent of
+the agent that offers it: the agent chooses which tools to offer, how to report a malformed
+call, and how to show a result to its model.
 
 ## 7. `ask_user`: a model asks a person
 
-`ask_user` is a model's way to `ask` (§3.8). What a question is, which replies fit it, and how
-a person gives one belong to the core. The tool adds what a model needs, and nothing else:
+`ask_user` lets a model ask a person a question, through `ask` (§3.8). Questions and replies are
+defined by the core; the tool only adapts them to a model:
 
 | | The core: a question | The tool: `ask_user` |
 | --- | --- | --- |
@@ -605,12 +631,11 @@ a person gives one belong to the core. The tool adds what a model needs, and not
    ```
 
 4. **The call is checked.** A kind that is not allowed, a blank question, options on a question
-   that is no choice, or a candidate that says "none of the above" is a format error, and
+   that is not a choice, or a candidate that says "none of the above" is a format error, and
    nothing is asked.
 5. **The tool asks.** Its program reads the question from the arguments and performs `ask`: the
    question is marked in the log, and the run waits (§3.8).
-6. **A person replies**, with `alaya reply` (`docs/cli.md`) or the browser page in the
-   repository `msv-lab/vero-hci`.
+6. **A person replies**, with `alaya reply` (`docs/cli.md`).
 7. **The model is told.** The call returns the reply as the tool encodes it:
 
    | Reply | The call returns |
@@ -665,9 +690,9 @@ flowchart TD
   linkStyle default stroke-width:1px
 ```
 
-The state of the loop is the conversation as data: what the model was told, each turn with the
-results of its calls, each malformed response. The request of a round is a function of it. The
-agent ends by returning its outcome, a status and a submission, which is the value of its
+The state of the loop is the conversation so far: what the model was told, each turn with the
+results of its calls, and each malformed response. Each round builds its request from this
+state. The agent ends by returning its outcome, a status and a submission, as the value of its
 frame.
 
 The command line builds an agent from its configuration (`Agents.Catalog`):
@@ -718,14 +743,6 @@ assignment    : Grader → Event Agent                 -- the notice that assign
 7. **The run returns its verdict**: `returned - verdict`, the result of the run.
 
 ![A whole run: the agent in frame 0, then its grading in the run's own frame](figures/agent-api/run.svg)
-
-`Run.ofAgent` builds the table of routines, and refuses two routines of one name and a routine
-named `agent`. The grader is no routine, so nothing an agent calls reaches it. A grader is
-assigned only once the agent is over, and only where the log has none; a point is graded again
-on a fork (`docs/log-schema.md`).
-
-Programs live in `Type 1`, since the rest of a program is a function. So a `Run` is built by
-pure functions and passed to the driver; it is never returned through `IO`.
 
 ## 10. Driving a run
 
@@ -783,7 +800,7 @@ each is a log.
 - **Limits** are checked before an operation of the agent and before a read of its inbox, so a
   paused run stops where a message a person appends is heard at once. A limit writes nothing,
   and holds the agent only: a grader runs to its end.
-- **Failures.** A failure that is no answer (§3.4) stops `drive` with an error, and nothing is
+- **Failures.** A failure that is not an answer (§3.4) stops `drive` with an error, and nothing is
   logged for the operation; the next `drive` asks for it again. So a command happens at least
   once: what it does beyond the workspace may happen twice.
 
