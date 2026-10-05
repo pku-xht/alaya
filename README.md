@@ -6,8 +6,8 @@ Alaya is an agentic framework built on three principles:
 represents an agent as an effectful program in free-monad form and runs it by durable execution:
 replay against an append-only log of events. A run is therefore complete data, which can be
 analysed without re-execution. The logs form a forest, so the impact of an
-intervention, such as changing a message, a file or the model, is studied by forking a run at
-the point of the change.
+intervention, such as changing a message, a file or the agent's workflow, is studied by forking a
+run at the point of the change.
 
 **Agent-native operation.** Experiments with agents produce more data than a person can process
 by hand, and research itself is increasingly automated by AI. Alaya is designed to be operated
@@ -25,62 +25,38 @@ the Vero benchmark of verified Lean code.
 ## Getting started
 
 ```sh
-lake build              # the alaya executable, in .lake/build/bin/
-lake exe tests          # the test suite, which runs that executable too; pass a substring to run a subset
+lake build        # the alaya executable, in .lake/build/bin/
+lake exe tests    # the test suite
 ```
 
-Besides the Lean toolchain named in `lean-toolchain`, `alaya` calls `curl` for every request to
-a model provider, `docker` for every command an agent or a grader runs, and
-[`restic`](https://restic.net) 0.17 or later for workspace snapshots. A running Docker daemon is
-required, for the tests too.
+Alaya also needs `curl`, a running Docker daemon, and [`restic`](https://restic.net) 0.17 or later.
 
-A typical session, on the [Bija benchmark](benchmarks/bija/README.md): implement a small
-language from its specification, graded against programs the agent never sees.
+A session on the [Bija benchmark](benchmarks/bija/README.md): an agent is given a project with
+the specification of a small language and a few sample programs, implements the language, and is
+graded on programs it never sees.
 
 ```sh
-docker pull ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd
-docker pull ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
-export ALAYA_DATA=$PWD/runs    # the data directory; `new` creates it
-last() { tail -n 1 | cut -d' ' -f1; }
+last() { tail -n 1 | cut -d' ' -f1; }   # a command prints each entry it appends; keep the last
 
-# A run: the project, the agent's configuration, and the task.
-tip=$(alaya new --task-file benchmarks/bija/TASK.txt benchmarks/bija/skeleton --agent mini-swe \
-  --model gpt-6-luna --set model.params.reasoning_effort=high \
-  --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
-end=$(alaya run "$tip" --provider apiyi | last)   # an entry a line; `alaya config` lists models, providers
+# Create a run of MiniSwe on that project, and run it until the agent is over.
+tip=$(alaya new benchmarks/bija/skeleton --task-file benchmarks/bija/TASK.txt --agent mini-swe \
+  --model gpt-6-luna --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
+end=$(alaya run "$tip" --provider apiyi | last)
 
-# Grade it: a grader is a command that prints TAP, run on a checkout of the workspace.
+# Grade the run's end against the reference programs.
 grader=(--grader 'python3 /opt/alaya-bija/grade.py --tests /grader'
         --grader-image ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
         --grader-input benchmarks/bija/reference/tests --grader-timeout 1800)
 alaya grade "$end" "${grader[@]}"
 
-# Find where it went wrong, and see what the model was sent there.
-alaya tree
+# Read the log, fork it at position 140 with a hint, run the fork, and grade it.
 alaya log "$end"
-alaya show "$end:140" --request
-
-# Grade that point too: a fork stopped there, graded the same way.
-alaya grade "$end:140" "${grader[@]}"
-
-# Correct the workspace at that point by hand, and let the agent go on from the correction.
-alaya checkout "$end:140" fix              # its files, to edit by hand in fix/
-fixed=$(alaya commit "$end:140" fix --message "I corrected the parser by hand; go on from here." | last)
-fixed_end=$(alaya run "$fixed" --provider apiyi | last)
-alaya grade "$fixed_end" "${grader[@]}"
+hint=$(alaya tell "$end:140" 'Check the diagnostics against SPEC.md.' | last)
+alaya grade "$(alaya run "$hint" --provider apiyi | last)" "${grader[@]}"
 ```
 
-`ENTRY:N` names the entry at position `N` of a log, and every command that appends prints each
-entry it adds; `alaya tree` shows the whole forest. The first branch is untouched, so the
-verdicts compare the same run with and without the correction, and with the agent stopped early.
-
-`alaya html report.html` writes all runs as one page, for reading: each branch's log, an entry a
-row, nested by the calls it happened in, with switches where branches fork, and an entry in full
-— its reasoning, its calls and output, the request the model was sent, its time and tokens, and
-the workspace changes. Below is the page for a gpt-6-luna run on [Bija](benchmarks/bija/README.md), graded 362 of 464,
-with a second branch that starts mid-run, where a person sent the agent a note on how the suite
-checks diagnostics, graded 410 of 464, and a third that grades the point where the note went in
-as it stood, 362 of 464; the page shows a turn of the second.
+`alaya html report.html` writes the forest as one page for reading, here for a Bija run and a
+fork of it:
 
 ![The HTML report of a gpt-6-luna run on Bija](docs/figures/bija-report.png)
 
