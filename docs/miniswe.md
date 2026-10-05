@@ -18,6 +18,7 @@ defaults. A field left out is its default, and a misspelt one is an error.
 | `executor.timeout_seconds` | 30 | the time a command may take |
 | `executor.env` | mini's | environment overrides for every command: `PAGER=cat` and the like |
 | `tools` | `["bash", "submit"]` | the tools offered, in order. `bash` and `submit` are required; `ask_user` and `time_budget` may be added. The list replaces the default one |
+| `question_types` | `[]` | the kinds of question `ask_user` lets the model ask: any of `yes_no`, `single_choice`, `open_ended`. Required, and not empty, when `ask_user` is offered |
 | `recover_output` | false | name the file that holds the whole of a cut output (§5) |
 | `context_reserve` | 8000 | tokens kept free for the next response (§5) |
 | `mask_observations` | null | `{keep_turns, block}`: leave old outputs out of the view (§5) |
@@ -128,4 +129,5 @@ are omitted, and the choice depends on turn positions alone, never on the model.
 - **A full context ends the agent** (§5), where mini sends the request.
 - **No cost accounting**: mini's `cost_limit` is not enforced.
 - **A person can speak to it**: what a person says or changes reaches the model at the start of
-  its next round, and with `ask_user` among its tools it can ask (`docs/agent-api.md` §7).
+  its next round, and with `ask_user` among its tools it can ask, in the kinds of question its
+  configuration allows (`docs/agent-api.md` §7).

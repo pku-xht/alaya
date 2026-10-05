@@ -127,7 +127,7 @@ def suite : Suite := Testing.suite "routines" #[
       let log := settle run #[.arrived (.changed default "p")]
       check (log.any fun | .failed #[0, 0] error => contains error "step: its arguments cannot be read" | _ => false)
         "the routine failed, in its own frame"
-      check ((next run log) matches .waits #[]) "and the agent went on, to its end"
+      check ((next run log) matches .waits #[] _) "and the agent went on, to its end"
     -- A handle that expects another result than the routine gives fails where the result is read.
     let mistaken : Routine Agent String String := routine "step" fun _ => pure ""
     withRun (toJson <$> mistaken.call "make") fun run => do
@@ -149,7 +149,7 @@ def suite : Suite := Testing.suite "routines" #[
     check ((build (routines.push step.entry)).any (contains · "two routines are named step")) "a name twice"
     check ((build #[(agentRoutine, fun _ => pure .null)]).any (contains · "cannot be named agent")) "the agent's name"
     -- The agents the command line can name declare the tools they offer, and nothing else.
-    match miniRun { tools := #["bash", "submit", "ask_user"] } with
+    match miniRun { tools := #["bash", "submit", "ask_user"], questionTypes := Question.Kind.all } with
     | .error problem => fail problem
     | .ok run =>
       assertEqual "what a run of MiniSwe has" (#["agent", "bash", "submit", "ask_user", "time_budget", "grade"].filter

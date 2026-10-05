@@ -81,6 +81,7 @@ function summary(i) {
     case 'replied': return 'replied to ' + e.to.join('.') + ': ' + flat(e.text, 60);
     case 'assigned': return 'assigned grader “' + flat(e.summary, 60) + '”';
     case 'heard': return e.notices.length ? 'inbox: takes ' + e.notices.join(', ') : 'inbox: nothing';
+    case 'asked': return 'ask “' + flat(e.text, 70) + '”';
     case 'sample':
       if (given(e.error)) return 'sample failed: ' + flat(e.error, 70);
       if (e.calls.length) return 'sample → ' + e.calls.map(c => c.name + ' ' + flat(c.summary, 50)).join('; ');
@@ -129,7 +130,7 @@ const GLYPHS = {
 function glyphOf(i) {
   const e = entries[i].e;
   if (entries[i].p === null) return 'root';
-  if (e.k === 'open' && e.routine === 'ask_user') return 'question';
+  if (e.k === 'asked') return 'question';
   if (['sample', 'exec', 'time', 'external'].includes(e.k) && given(e.error)) return 'fail';
   return GLYPHS[e.k] ? e.k : 'open';
 }
@@ -395,6 +396,7 @@ function titleOf(i) {
   if (x.p === null) return 'root';
   if (['sample', 'exec', 'time', 'external'].includes(e.k) && given(e.error)) return e.k + ' failed';
   return { said: 'said', changed: 'changed', replied: 'replied', assigned: 'assigned grader', heard: 'inbox',
+    asked: 'ask',
     open: 'open ' + e.routine, return: 'return', fail: 'fail', stop: 'stopped', comment: 'comment' }[e.k] || e.k;
 }
 
@@ -528,6 +530,10 @@ function renderEvent(parent, i) {
       if (x.p !== null) block(parent, 'what changed', e.text);
       break;
     case 'replied': block(parent, 'reply', e.text); break;
+    case 'asked':
+      block(parent, 'question', e.text, 'prose');
+      facts(parent, [['kind', e.form]].concat(e.options.map((o, k) => [String(k + 1), o])));
+      break;
     case 'assigned': {
       const g = e.grader || {};
       block(parent, 'command', g.command || '');

@@ -55,7 +55,9 @@ def suite : Suite := Testing.suite "render" #[
       (.arrived (.said "the task\nwith a second line"), "said \"the task with a second line\""),
       (.arrived (.changed (snapshot 'a') "  M a.txt\nfixed"), "changed → aaaaaaaaaaaa:   M a.txt fixed"),
       (.arrived (.replied #[0, 3] (.choice 2)), "replied to 0.3: 2"),
-      (.arrived (.replied #[0, 3] .unavailable), "replied to 0.3: {\"status\":\"unavailable\"}"),
+      (.arrived (.replied #[0, 3] .unavailable), "replied to 0.3: unavailable"),
+      (.arrived (.replied #[0, 3] .yes), "replied to 0.3: yes"),
+      (.asked #[0, 3] { text := "Keep the old API?", form := .yesNo }, "ask \"Keep the old API?\""),
       (assignment { command := "python3 /grader/grade.py", image := "img" }, "assigned grader \"python3 /grader/grade.py\""),
       (.heard #[0] #[], "inbox: nothing"),
       (.heard #[0] #[2, 5], "inbox: takes [2, 5]"),
@@ -99,9 +101,9 @@ def suite : Suite := Testing.suite "render" #[
     let lines : Array (Option Question × Next Agent × String) := #[
       (none, .done (json "{\"status\":\"Submitted\",\"submission\":\"\"}"), "done: Submitted"),
       (none, .raised "it broke", "failed: it broke"),
-      (some question, .waits #[0, 0], "waits for a reply: Keep the old API?"),
-      (none, .waits #[0], "waits for a notice in 0"),
-      (none, .waits #[], "waits for a workspace"),
+      (some question, .waits #[0, 0] (some question), "waits for a reply: Keep the old API?"),
+      (none, .waits #[0] none, "waits for a notice in 0"),
+      (none, .waits #[] none, "waits for a workspace"),
       (none, .ask { frame := #[0], op := .sample request }, "next: sample a request of 2 messages"),
       (none, .ask { frame := #[0, 1], op := .exec "make" {} }, "next: run make"),
       (none, .ask { frame := #[0, 1], op := .time }, "next: time the run"),
@@ -121,11 +123,11 @@ def suite : Suite := Testing.suite "render" #[
     let fail := json "{\"status\":\"fail\",\"passed\":352,\"total\":464,\"checks\":[]}"
     let pass := json "{\"status\":\"pass\",\"passed\":2,\"total\":2,\"checks\":[]}"
     let standings : Array (AgentEnd × Next Agent × String) := #[
-      (.returned outcome, .waits #[], "done: Submitted: all done"),
+      (.returned outcome, .waits #[] none, "done: Submitted: all done"),
       (.returned outcome, .done fail, "done: fail 352/464"),
-      (.stopped "to grade this point", .waits #[], "stopped: to grade this point"),
+      (.stopped "to grade this point", .waits #[] none, "stopped: to grade this point"),
       (.stopped "to grade this point", .done pass, "stopped: pass 2/2"),
-      (.failed "it broke", .waits #[], "failed: it broke"),
+      (.failed "it broke", .waits #[] none, "failed: it broke"),
       (.failed "it broke", .done fail, "failed: fail 352/464")]
     for (agent, next, line) in standings do
       assertEqual line (Render.nextSummary none (some agent) next) line,

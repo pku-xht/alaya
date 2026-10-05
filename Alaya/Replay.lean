@@ -52,7 +52,7 @@ of the inbox, or nothing more; or what it says there, a comment, which it does n
 inductive Demand (σ : Signature) where
   | ask (call : Call σ) (resume : Except String (σ.Answer call.op) → Machine σ)
   | mark (expected : Event σ) (resume : Machine σ)
-  | read (frame : Frame) (wait : Option (Frame → Notice → Bool)) (resume : List Notice → Machine σ)
+  | read (frame : Frame) (wait : Option Wait) (resume : List Notice → Machine σ)
   | comment (frame : Frame) (text : String) (resume : Machine σ)
   | finished (result : Except String Json)
   | unguarded (frame : Frame)
@@ -95,6 +95,15 @@ partial def advance (routines : Routines σ) (m : Machine σ) : Demand σ :=
     .ask { frame, op } fun answer => ⟨α, k answer, stack, frame, opened, read + 1, none⟩
   | ⟨α, .inbox wait k, stack, frame, opened, read, _⟩ =>
     .read frame wait fun notices => ⟨α, k notices, stack, frame, opened, read + 1, none⟩
+  -- A question is a mark, the question itself, and then a read that waits for its reply.
+  | ⟨α, .ask question k, stack, frame, opened, read, _⟩ =>
+    let wait : Wait := { question? := some question, accepts := fun asking notice => match notice with
+      | .replied to reply => to == asking && question.accepts reply
+      | _ => false }
+    let answered : List Notice → Program σ α
+      | .replied _ reply :: _ => k reply
+      | _ => .fail "the wait for a reply ended without one"
+    .mark (.asked frame question) ⟨α, .inbox (some wait) answered, stack, frame, opened, read + 1, none⟩
   | ⟨_, .call routine k, stack, frame, opened, read, _⟩ =>
     let child := frame.push opened
     let body : Program σ Json := match routines routine.name with
@@ -143,8 +152,11 @@ inductive Next (σ : Signature) where
   | ask (call : Call σ)
   /-- The first read of the inbox not yet marked, with the positions of what it takes. -/
   | hears (frame : Frame) (notices : Array Nat)
-  /-- A read that waits, and nothing it takes has arrived; `#[]` when the log has no root. -/
-  | waits (frame : Frame)
+  /-- A read that waits, and nothing it takes has arrived: for the reply to `question?`, when it
+  is a question's. In `#[]` with no question when the log has no root. -/
+  | waits (frame : Frame) (question? : Option Question)
+  /-- The program asks a person a question: a mark, after which it waits for the reply. -/
+  | questions (frame : Frame) (question : Question)
   | opens (frame : Frame) (call : RoutineCall)
   | returns (frame : Frame) (value : Json)
   | fails (frame : Frame) (error : String)
@@ -178,21 +190,22 @@ def start (run : Run σ) : Replayer σ :=
 
 /-- What a read takes, and what it leaves unread. A read that waits takes the notices it is for,
 among those not yet read; any other takes all that are not yet read and addressed to no one. -/
-private def take (r : Replayer σ) (frame : Frame) (wait : Option (Frame → Notice → Bool)) :
+private def take (r : Replayer σ) (frame : Frame) (wait : Option Wait) :
     Array (Nat × Notice) × Array (Nat × Notice) :=
   match wait with
-  | some accepts => r.unread.partition fun (_, notice) => accepts frame notice
+  | some wait => r.unread.partition fun (_, notice) => wait.accepts frame notice
   | none => r.unread.partition fun (_, notice) => !notice.addressed
 
 /-- What to do next, when the log ends here. -/
 def next (r : Replayer σ) : Next σ :=
   if let some broken := r.broken? then broken else
-  if !r.rooted then .waits #[] else
+  if !r.rooted then .waits #[] none else
   match r.demand with
   | .finished (.ok value) => .done value
   | .finished (.error error) => .raised error
   | .unguarded frame => .unguarded frame
   | .ask call _ => .ask call
+  | .mark (.asked frame question) _ => .questions frame question
   | .mark (.opened frame call) _ => .opens frame call
   | .mark (.returned frame value) _ => .returns frame value
   | .mark (.failed frame error) _ => .fails frame error
@@ -200,7 +213,8 @@ def next (r : Replayer σ) : Next σ :=
   | .comment frame text _ => .comments frame text
   | .read frame wait _ =>
     let (taken, _) := r.take frame wait
-    if wait.isSome && taken.isEmpty then .waits frame else .hears frame (taken.map (·.1))
+    if wait.isSome && taken.isEmpty then .waits frame (wait.bind (·.question?))
+    else .hears frame (taken.map (·.1))
 
 /-- The replayer with the machine gone on to `machine`, the event at its position read. -/
 private def resume (r : Replayer σ) (machine : Machine σ) : Replayer σ :=
@@ -271,6 +285,8 @@ def feed (r : Replayer σ) (event : Event σ) : Replayer σ :=
             | some answer => r.resume (resume (.ok answer))
             | none => r.broken (.mismatch position)
         else r.broken (.mismatch position)
+      | .mark (.asked frame question) resume, .asked frame' question' =>
+        if frame == frame' && question == question' then r.resume resume else r.broken (.mismatch position)
       | .mark (.opened frame call) resume, .opened frame' call' =>
         if frame == frame' && call == call' then r.resume resume else r.broken (.mismatch position)
       | .mark (.returned frame value) resume, .returned frame' value' =>

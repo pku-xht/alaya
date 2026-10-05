@@ -136,49 +136,89 @@ def tool : Tool := {
 
 end Submit
 
-/-! ## ask_user: a typed question, answered outside the workspace -/
+/-! ## ask_user: a question a model asks a person
+
+The tool is a model's way to `ask` (`Alaya.Program`), and nothing more. What a question is,
+which replies fit it, and how a person gives one are not the tool's. The tool's are the words
+and the schema a model is given, which kinds of question it may ask, and how a reply is shown
+to it. -/
 
 namespace AskUser
 
-/-- How the tool works, and nothing of what to ask or how to treat the answer: that is the
-agent's, or the experiment's, to say. -/
-def instruction : String :=
+open Question (Kind)
+
+/-- `a`, `a or b`, `a, b, or c`. -/
+private def listed : List String → String
+  | [] => ""
+  | [a] => a
+  | [a, b] => s!"{a} or {b}"
+  | items => ", ".intercalate items.dropLast ++ ", or " ++ items.getLast!
+
+/-- The kinds, in the order questions are always named in. -/
+private def ordered (kinds : Array Kind) : List Kind :=
+  Kind.all.toList.filter kinds.contains
+
+/-- What the model is told of the tool beyond its definition, for the kinds it may ask: how the
+tool works, and nothing of what to ask or how to treat the answer, which is the agent's, or the
+experiment's, to say. -/
+def instruction (kinds : Array Kind) : String :=
+  let kinds := ordered kinds
+  let choose := listed <| kinds.map fun
+    | .yesNo => "yes_no for a yes/no answer"
+    | .singleChoice => "single_choice to select exactly one of at least two distinct candidates"
+    | .openEnded => "open_ended for a nonblank free-text answer"
+  let options :=
+    if !kinds.contains .singleChoice then ""
+    else if kinds.length == 1 then ""
+    else "Only single_choice takes options; otherwise pass an empty array. "
+  let yesNo := if kinds.contains .yesNo then "A yes_no answer returns the string yes or no. " else ""
+  let choice := if !kinds.contains .singleChoice then "" else
+    "A selected candidate returns its one-based option number (starting at 1), as a number. " ++
+    "The platform appends None of the above; never include that reserved label or none_of_above " ++
+    "in options. It returns the plain string none_of_above when all listed candidates are incorrect, " ++
+    "distinct from being unable to answer. "
   "You may ask a concrete question with ask_user instead of running a command. " ++
-  "Include the relevant context and choose question_type: yes_no for a yes/no answer, " ++
-  "single_choice to select exactly one of at least two distinct candidates, or open_ended " ++
-  "for a nonblank free-text answer. Only single_choice takes options; otherwise pass an empty array. " ++
-  "A yes_no answer returns the string yes or no. " ++
-  "A selected candidate returns its one-based option number (starting at 1), as a number. " ++
-  "The platform appends None of the above; never include that reserved label or none_of_above " ++
-  "in options. It returns the plain string none_of_above when all listed candidates are incorrect, " ++
-  "distinct from being unable to answer. Call ask_user alone, without any other tool. " ++
+  s!"Include the relevant context and choose question_type: {choose}. " ++
+  options ++ yesNo ++ choice ++
+  "Call ask_user alone, without any other tool. " ++
   "For every question type, the person may be unable to answer; this returns the JSON " ++
   "object {\"status\":\"unavailable\"} instead of an answer."
 
-def definition : Chat.ToolDefinition := {
-  name := "ask_user"
-  description := "Ask a yes/no, single-choice, or open-ended question and wait for an answer. " ++
+/-- The tool as a model is offered it, for the kinds of question it may ask: `question_type`
+names one of them, and `options` is there only when a choice is among them. -/
+def definition (kinds : Array Kind) : Chat.ToolDefinition :=
+  let kinds := ordered kinds
+  let asks := listed <| kinds.map fun
+    | .yesNo => "yes/no"
+    | .singleChoice => "single-choice"
+    | .openEnded => "open-ended"
+  let others := (kinds.filter (· != .singleChoice)).map (·.name)
+  let choice := if !kinds.contains .singleChoice then "" else
     "Single-choice answers return one candidate's one-based option number (starting at 1), " ++
     "or the platform's None of the above " ++
-    "answer (plain text none_of_above). Never include that reserved option yourself. " ++
-    "If the person cannot answer, the result is {\"status\":\"unavailable\"}. Call this tool alone."
-  parameters := .object #[
-    ("question_type", .string (description? := some "The form of the answer requested")
-      (enum := #["yes_no", "single_choice", "open_ended"])),
-    ("question", .string (description? := some "The question and enough context to answer it")),
-    ("options", .array (.string) (description? := some (
-      "For single_choice, at least two distinct, nonempty actual candidates. " ++
-      "Do not include None of the above or none_of_above; the platform adds it. " ++
-      "For yes_no and open_ended, an empty array.")))]
-}
+    "answer (plain text none_of_above). Never include that reserved option yourself. "
+  { name := "ask_user"
+    description := s!"Ask a {asks} question and wait for an answer. " ++ choice ++
+      "If the person cannot answer, the result is {\"status\":\"unavailable\"}. Call this tool alone."
+    parameters := .object (#[
+      ("question_type", .string (description? := some "The form of the answer requested")
+        (enum := (kinds.map (·.name)).toArray)),
+      ("question", .string (description? := some "The question and enough context to answer it"))] ++
+      (if !kinds.contains .singleChoice then #[] else #[
+      ("options", .array (.string) (description? := some (
+        "For single_choice, at least two distinct, nonempty actual candidates. " ++
+        "Do not include None of the above or none_of_above; the platform adds it." ++
+        (if others.isEmpty then "" else s!" For {" and ".intercalate others}, an empty array."))))])) }
 
-/-- Reads the question a call asks, or says what is wrong with it: the arguments name a form,
-only a choice has options, and the question is one that can be asked (`Question.validate`). It
-does not judge whether a candidate is true. -/
-def question (arguments : Lean.Json) : Except String Question := do
-  definition.parameters.validate arguments
+/-- Reads the question a call asks, or says what is wrong with it: the arguments name a kind the
+tool allows, only a choice has options, and the question is one that can be asked
+(`Question.validate`). It does not judge whether a candidate is true. -/
+def question (kinds : Array Kind) (arguments : Lean.Json) : Except String Question := do
+  (definition kinds).parameters.validate arguments
   let text ← arguments.getObjVal? "question" >>= Lean.Json.getStr?
-  let options ← (arguments.getObjVal? "options" >>= Lean.Json.getArr?) >>= (·.mapM Lean.Json.getStr?)
+  let options ← match arguments.getObjVal? "options" with
+    | .ok options => options.getArr? >>= (·.mapM Lean.Json.getStr?)
+    | .error _ => pure #[]
   let noOptions : Except String Unit :=
     if options.isEmpty then pure ()
     else throw "Question options must be empty for yes_no and open_ended questions."
@@ -191,26 +231,30 @@ def question (arguments : Lean.Json) : Except String Question := do
   question.validate
   pure question
 
-/-- Asks a person, and waits; alone in its turn. The question is the argument, so the opening of
-the call puts it in the log. The tool then waits for a reply to this call, of the form the
-question asks for: no other notice ends the wait or is taken for the answer. The model is shown
-the reply as `Reply.toJson` gives it. -/
-def tool : Tool := {
-  definition
+/-- What a call gives for a reply, and so what the model is shown as its result: `"yes"` or
+`"no"`, the candidate's number, `"none_of_above"`, the person's text, or the object
+`{"status": "unavailable"}`. -/
+def result : Reply → Lean.Json
+  | .yes => "yes"
+  | .no => "no"
+  | .choice number => (number : Lean.Json)
+  | .noneOfAbove => "none_of_above"
+  | .text words => .str words
+  | .unavailable => .mkObj [("status", "unavailable")]
+
+/-- Asks a person, and waits; alone in its turn. `kinds` are the kinds of question the model may
+ask, chosen by whoever configures the agent: the tool is offered with at least one, and a call
+that asks another kind is refused before anything is asked. -/
+def tool (kinds : Array Kind) : Tool := {
+  definition := definition kinds
   alone := true
-  instruction? := some instruction
-  check := fun arguments => (question arguments).map fun _ => ()
+  instruction? := some (instruction kinds)
+  check := fun arguments => (question kinds arguments).map fun _ => ()
   run := fun arguments => do
-    let question ← match question arguments with
+    let question ← match question kinds arguments with
       | .ok question => pure question
       | .error problem => throw problem
-    let replies ← await fun frame notice =>
-      match notice with
-      | .replied to reply => to == frame && question.accepts reply
-      | _ => false
-    match replies with
-    | .replied _ reply :: _ => return reply.toJson
-    | _ => throw "the wait for a reply ended without one" }
+    return result (← ask question) }
 
 end AskUser
 
@@ -245,14 +289,21 @@ def tool : Tool := {
 
 end TimeBudget
 
-/-- The tools an agent's configuration can name, its commands run as `config` says. -/
-def all (config : Executor.Config := {}) : Array Tool :=
-  #[Bash.tool config, Submit.tool, AskUser.tool, TimeBudget.tool]
+/-- What an agent's configuration says of the tools it offers. -/
+structure Options where
+  /-- How `bash` runs a command. -/
+  commands : Executor.Config := {}
+  /-- The kinds of question `ask_user` lets a model ask. -/
+  questions : Array Question.Kind := #[]
+
+/-- The tools an agent's configuration can name, as `options` say. -/
+def all (options : Options := {}) : Array Tool :=
+  #[Bash.tool options.commands, Submit.tool, AskUser.tool options.questions, TimeBudget.tool]
 
 def names : Array String := (all).map (·.name)
 
-def named? (name : String) (config : Executor.Config := {}) : Option Tool :=
-  (all config).find? (·.name == name)
+def named? (name : String) (options : Options := {}) : Option Tool :=
+  (all options).find? (·.name == name)
 
 end Tools
 

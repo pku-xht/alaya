@@ -13,7 +13,7 @@ open Lean (Json)
 /-- A forest of two branches: a run that asks a question, is answered, and submits, and a fork
 where a person said something instead. -/
 private def forest : TestM (Driver.Runtime × String) := do
-  match miniRun { tools := #["bash", "submit", "ask_user"] } with
+  match miniRun { tools := #["bash", "submit", "ask_user"], questionTypes := Question.Kind.all } with
   | .error problem => fail problem
   | .ok run =>
     let executor : Executor := { exec := fun _ _ _ _ => pure { output := "a\nb\n", exitCode? := some 0 }, uname := pure testUname }
@@ -24,7 +24,7 @@ private def forest : TestM (Driver.Runtime × String) := do
       responseWith #[submitCall "t" "other"]]))
     let (waiting, _) ← assertOk <| Driver.drive rt run (← start rt run "the task")
     let log ← logAt rt waiting
-    let event ← assertOk <| Result.fromExcept Error.input (replyTo log (next run log) .yes)
+    let event ← assertOk <| Result.fromExcept Error.input (replyTo (next run log) .yes)
     let (replied, _) ← assertOk <| Driver.append rt.store run waiting event
     let _ ← assertOk <| Driver.drive rt run replied
     let _ ← assertOk <| Driver.append rt.store run waiting (.arrived (.said "never mind"))

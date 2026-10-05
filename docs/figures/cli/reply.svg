@@ -6,27 +6,27 @@
 <circle cx="19" cy="36.5" r="0.9" fill="#a3abb5"/>
 <circle cx="23" cy="36.5" r="0.9" fill="#a3abb5"/>
 <path class="a" d="M26,36.5h12"/>
-<rect x="38.5" y="24.5" width="147" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
-<g transform="translate(46,30) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
-<text x="65" y="40.5" class="c">sample → ask_user</text>
-<path class="a" d="M186,36.5h12"/>
-<rect x="198.5" y="24.5" width="227" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
-<g transform="translate(206,30) scale(0.9286)" stroke="#a8690f" fill="#a8690f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 5.3a2.4 2.4 0 1 1 3.3 2.2c-.6.3-.9.7-.9 1.4" fill="none"/><circle cx="7" cy="11.2" r=".8" stroke="none"/></g>
-<text x="225" y="40.5" class="c">open ask_user “keep duplicates?”</text>
-<text x="312.5" y="15" class="s m" text-anchor="middle">ENTRY</text>
-<path class="a" d="M312.5,18V24"/>
-<path class="a" d="M426,36.5h12"/>
-<rect x="438.5" y="24.5" width="137" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
-<g transform="translate(446,30) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5L2.5 7 6 10.5" fill="none"/><path d="M2.5 7h5.5a3 3 0 0 1 3 3v1.5" fill="none"/></g>
-<text x="465" y="40.5" class="c">replied to 0.2: yes</text>
-<path class="a" d="M576,36.5h12"/>
-<rect x="588.5" y="24.5" width="115" height="24" rx="6" fill="#fff" stroke="#d3d9e0" stroke-dasharray="3 2"/>
-<g transform="translate(596,30) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
-<text x="615" y="40.5" class="c" style="fill:#6f7985">inbox: takes it</text>
-<path class="a" d="M704,36.5h12"/>
-<rect x="716.5" y="24.5" width="93" height="24" rx="6" fill="#fff" stroke="#d3d9e0" stroke-dasharray="3 2"/>
-<g transform="translate(724,30) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
-<text x="743" y="40.5" class="c" style="fill:#6f7985">return yes</text>
-<rect x="199" y="55" width="103" height="18" rx="9" fill="#fbe9cf"/><text x="250.5" y="68" class="s n" style="fill:#7a4a08" text-anchor="middle">waits for a reply</text>
-<text x="588" y="68.5" class="s">the next run goes on from the reply</text>
+<rect x="38.5" y="24.5" width="118" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(46,30) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="65" y="40.5" class="c">open ask_user</text>
+<path class="a" d="M157,36.5h12"/>
+<rect x="169.5" y="24.5" width="164" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(177,30) scale(0.9286)" stroke="#a8690f" fill="#a8690f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 5.3a2.4 2.4 0 1 1 3.3 2.2c-.6.3-.9.7-.9 1.4" fill="none"/><circle cx="7" cy="11.2" r=".8" stroke="none"/></g>
+<text x="196" y="40.5" class="c">ask “keep duplicates?”</text>
+<text x="251.5" y="15" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M251.5,18V24"/>
+<path class="a" d="M334,36.5h12"/>
+<rect x="346.5" y="24.5" width="137" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(354,30) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5L2.5 7 6 10.5" fill="none"/><path d="M2.5 7h5.5a3 3 0 0 1 3 3v1.5" fill="none"/></g>
+<text x="373" y="40.5" class="c">replied to 0.2: yes</text>
+<path class="a" d="M484,36.5h12"/>
+<rect x="496.5" y="24.5" width="115" height="24" rx="6" fill="#fff" stroke="#d3d9e0" stroke-dasharray="3 2"/>
+<g transform="translate(504,30) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="523" y="40.5" class="c" style="fill:#6f7985">inbox: takes it</text>
+<path class="a" d="M612,36.5h12"/>
+<rect x="624.5" y="24.5" width="93" height="24" rx="6" fill="#fff" stroke="#d3d9e0" stroke-dasharray="3 2"/>
+<g transform="translate(632,30) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="651" y="40.5" class="c" style="fill:#6f7985">return yes</text>
+<rect x="170" y="55" width="103" height="18" rx="9" fill="#fbe9cf"/><text x="221.5" y="68" class="s n" style="fill:#7a4a08" text-anchor="middle">waits for a reply</text>
+<text x="496" y="68.5" class="s">the next run goes on from the reply</text>
 </svg>

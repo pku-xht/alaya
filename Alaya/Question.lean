@@ -1,11 +1,36 @@
 import Lean
 
-/-! Questions an agent asks a person, and the answers a person gives: shared by agents, the
-log that records them, and whatever collects the answers. -/
+/-! Questions a program asks a person, and the answers a person gives: what `ask` takes and
+gives (`Alaya.Program`), what the log records of both, and what whatever collects the answers
+reads. There are three kinds of question and six kinds of reply, and no others: a tool that lets
+a model ask chooses among them, and adds none. -/
 
 namespace Alaya
 
-/-- The form of answer a question asks for. -/
+/-- The kinds of question there are. -/
+inductive Question.Kind where
+  | yesNo
+  | singleChoice
+  | openEnded
+  deriving BEq, Repr, Inhabited
+
+namespace Question.Kind
+
+def all : Array Kind := #[.yesNo, .singleChoice, .openEnded]
+
+/-- The kind's name, wherever a kind is written: in a log, a configuration, a command's output. -/
+def name : Kind -> String
+  | .yesNo => "yes_no"
+  | .singleChoice => "single_choice"
+  | .openEnded => "open_ended"
+
+def ofName? (name : String) : Option Kind := all.find? (·.name == name)
+
+def names : String := ", ".intercalate (all.map (·.name)).toList
+
+end Question.Kind
+
+/-- The form of answer a question asks for: its kind, and a choice's candidates. -/
 inductive Question.Form where
   | yesNo
   | openEnded
@@ -15,11 +40,13 @@ inductive Question.Form where
 
 namespace Question.Form
 
-/-- The form's name: a tool's `question_type`, and how a command's output gives it. -/
-def name : Form -> String
-  | .yesNo => "yes_no"
-  | .openEnded => "open_ended"
-  | .singleChoice _ => "single_choice"
+def kind : Form -> Kind
+  | .yesNo => .yesNo
+  | .openEnded => .openEnded
+  | .singleChoice _ => .singleChoice
+
+/-- The form's name: its kind's. -/
+def name (form : Form) : String := form.kind.name
 
 /-- The candidates of a choice; none for the other forms. -/
 def options : Form -> Array String
@@ -48,18 +75,17 @@ inductive Reply where
   | unavailable
   deriving BEq, Repr, Inhabited
 
-/-- What the asking call gives, and so what the model is shown as its result: `"yes"` or `"no"`,
-the candidate's number, `"none_of_above"`, the person's text, or the object
-`{"status": "unavailable"}`. The log keeps a reply by its kind instead (`Reply.toStored`), since
-this form needs the question to read: the text `none_of_above` answers an open question in the
-person's own words, and a choice with none of its candidates. -/
-def Reply.toJson : Reply -> Lean.Json
+/-- A reply in a line, for a reader of the log: what a person would type to give it
+(`Question.parseReply`), or `unavailable`. It needs the question to read back, which is why the
+log keeps a reply by its kind instead (`Reply.toStored`): the text `none_of_above` answers an
+open question in the person's own words, and a choice with none of its candidates. -/
+def Reply.line : Reply -> String
   | .yes => "yes"
   | .no => "no"
-  | .choice number => (number : Lean.Json)
+  | .choice number => toString number
   | .noneOfAbove => "none_of_above"
-  | .text words => .str words
-  | .unavailable => .mkObj [("status", "unavailable")]
+  | .text words => words
+  | .unavailable => "unavailable"
 
 namespace Question
 
@@ -128,6 +154,18 @@ def toJson (question : Question) : Lean.Json :=
     match question.form with
     | .singleChoice options => [("options", .arr (options.map Lean.Json.str))]
     | _ => []))]
+
+def fromJson (json : Lean.Json) : Except String Question := do
+  let text ← json.getObjVal? "text" >>= Lean.Json.getStr?
+  let form ← json.getObjVal? "form"
+  let name ← form.getObjVal? "type" >>= Lean.Json.getStr?
+  let form ← match Kind.ofName? name with
+    | some .yesNo => pure Form.yesNo
+    | some .openEnded => pure Form.openEnded
+    | some .singleChoice =>
+      Form.singleChoice <$> ((form.getObjVal? "options" >>= Lean.Json.getArr?) >>= (·.mapM Lean.Json.getStr?))
+    | none => throw s!"unknown kind of question: {name} (the kinds are {Kind.names})"
+  pure { text, form }
 
 /-- The question as a terminal or a plain report shows it, with how to answer it there. A
 graphical collector lays out `text` and the form itself. -/

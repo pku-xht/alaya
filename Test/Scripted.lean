@@ -162,6 +162,7 @@ next, or how it ends: what the driver would log before its next operation, witho
 partial def settle (run : Run Agent) (log : Log Agent) : Log Agent :=
   match next run log with
   | .hears frame notices => settle run (log.push (.heard frame notices))
+  | .questions frame question => settle run (log.push (.asked frame question))
   | .opens frame opened => settle run (log.push (.opened frame opened))
   | .returns frame value => settle run (log.push (.returned frame value))
   | .fails frame error => settle run (log.push (.failed frame error))

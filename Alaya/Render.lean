@@ -139,7 +139,7 @@ def seconds (ms : Nat) : String := s!"{ms / 1000}.{(ms % 1000) / 100} s"
 def noticeSummary : Notice → String
   | .said message => s!"said {(flatten message 70).quote}"
   | .changed workspace summary => s!"changed → {short workspace}: {flatten summary 60}"
-  | .replied to reply => s!"replied to {to.render}: {flatten reply.toJson.compress 60}"
+  | .replied to reply => s!"replied to {to.render}: {flatten reply.line 60}"
   | .assigned grader => s!"assigned grader {(flatten (argumentsSummary grader) 60).quote}"
 
 /-- An event in a line. -/
@@ -147,6 +147,7 @@ def eventSummary : Event Agent → String
   | .arrived notice => noticeSummary notice
   | .heard _ notices =>
     if notices.isEmpty then "inbox: nothing" else s!"inbox: takes {notices.toList}"
+  | .asked _ question => s!"ask {(flatten question.text 70).quote}"
   | .answered _ _ (.error error) => s!"failed: {flatten error}"
   | .answered _ (.sample _) (.ok (.response response)) =>
     if response.toolCalls.isEmpty then s!"sample → says {(flatten (response.content?.getD "") 60).quote}"
@@ -197,13 +198,14 @@ def nextSummary (question? : Option Question) (agent? : Option AgentEnd) : Next 
     | some agent => endingSummary agent (some value)
     | none => s!"done: {valueSummary value}"
   | .raised error => s!"failed: {flatten error}"
-  | .waits frame =>
+  | .waits frame _ =>
     match question?, agent? with
     | some question, _ => s!"waits for a reply: {flatten question.text 70}"
     | none, some agent => if frame.isEmpty then endingSummary agent none else s!"waits for a notice in {frame.render}"
     | none, none => if frame.isEmpty then "waits for a workspace" else s!"waits for a notice in {frame.render}"
   | .ask call => s!"next: {call.op.describe}"
   | .hears frame _ => s!"next: a read of the inbox in {frame.render}"
+  | .questions frame _ => s!"next: a question in {frame.render}"
   | .opens _ call => s!"next: open {call.name}"
   | .returns frame _ => s!"next: the return of {frame.render}"
   | .fails frame _ => s!"next: the failure of {frame.render}"

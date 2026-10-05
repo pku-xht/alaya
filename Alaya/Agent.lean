@@ -249,6 +249,8 @@ def eventToJson : Event Agent → Json
   | .arrived notice => .mkObj [("type", "arrived"), ("notice", notice.toJson)]
   | .heard frame notices =>
     .mkObj [("type", "heard"), ("frame", frame.toJson), ("notices", .arr (notices.map fun (n : Nat) => (n : Json)))]
+  | .asked frame question =>
+    .mkObj [("type", "asked"), ("frame", frame.toJson), ("question", question.toJson)]
   | .answered frame key answer =>
     .mkObj [("type", "answered"), ("frame", frame.toJson), ("op", key.toJson),
       ("answer", match answer with | .ok stored => Stored.toJson stored | .error _ => .null),
@@ -265,6 +267,7 @@ def eventFromJson (json : Json) : Except String (Event Agent) := do
   match ← str json "type" with
   | "arrived" => .arrived <$> (json.getObjVal? "notice" >>= Notice.fromJson)
   | "heard" => pure (.heard (← frame) (← (← json.getObjVal? "notices" >>= Json.getArr?).mapM Json.getNat?))
+  | "asked" => pure (.asked (← frame) (← json.getObjVal? "question" >>= Question.fromJson))
   | "answered" =>
     let key ← json.getObjVal? "op" >>= Op.Key.fromJson
     let answer ← match ← nullable json "error" Json.getStr? with

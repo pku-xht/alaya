@@ -403,12 +403,12 @@ private def replyRun (data : System.FilePath) (reference : String) (answer? : Op
     (out : Cli.Out) : Result UInt32 :=
   withData data (write := true) fun data =>
     appendTo data reference out fun log next => do
-      let some (_, question) := questionOf? log next
+      let some (_, question) := questionOf? next
         | throw <| .input s!"no question waits for a reply at {reference}"
       let reply ← match answer? with
         | some text => Result.fromExcept Error.input (question.parseReply text)
         | none => pure .unavailable
-      Result.fromExcept Error.input (replyTo log next reply)
+      Result.fromExcept Error.input (replyTo next reply)
 
 /-- Appends a person's comment after an entry. Nothing reads it, so nothing is checked: the log
 need not even be one its run can still be built from. -/
@@ -442,7 +442,7 @@ private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 
     let forest ← data.store.forest
     walk data.store forest () fun _ visit => do
       let leaf := (forest.childrenOf visit.hash).isEmpty
-      if let (true, some (.waits frame), some question) := (leaf, visit.next?, visit.question?) then
+      if let (true, some (.waits frame _), some question) := (leaf, visit.next?, visit.question?) then
         out.record (.mkObj [("entry", visit.hash.hex), ("frame", frame.toJson), ("question", question.text),
             ("question_type", question.form.name),
             ("options", .arr (question.form.options.map Json.str))])
@@ -466,7 +466,7 @@ private def logRun (data : System.FilePath) (reference : String) (out : Cli.Out)
       | some (config, model) => pure <| match config.run model with
         | .ok run =>
           let next := next run log
-          Render.nextSummary ((questionOf? log next).map (·.2)) (agentEnd? log) next
+          Render.nextSummary ((questionOf? next).map (·.2)) (agentEnd? log) next
         | .error problem => s!"the run cannot be built: {problem}"
     out.record (.mkObj [("next", status)]) status
     pure 0
@@ -504,7 +504,7 @@ private def showRun (data : System.FilePath) (reference : String) (request : Boo
             | .ask { op := .sample request, .. }, .answered .. => some request
             | _, _ => none
           let after := (before.feed entry.event).next
-          (asked?, Render.nextSummary ((questionOf? log after).map (·.2)) (agentEnd? log) after)
+          (asked?, Render.nextSummary ((questionOf? after).map (·.2)) (agentEnd? log) after)
         | .error problem => (none, s!"the run cannot be built: {problem}")
     let requestJson := if request then (asked?.map (·.toJson)).getD .null else .null
     if out.json then

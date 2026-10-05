@@ -67,6 +67,7 @@ with its kind under `type`, and its frame, where it has one, as an array of numb
 | --- | --- |
 | `arrived` | `notice` |
 | `heard` | `frame`, `notices`: the positions of the notices the read took |
+| `asked` | `frame`, `question`: `{text, form: {type, options}}`, `type` one of `yes_no`, `single_choice`, `open_ended`, and `options` for a choice |
 | `answered` | `frame`, `op`, and `answer` or `error`, the other `null` |
 | `opened` | `frame`, `routine`: `{name, arguments}` |
 | `returned` | `frame`, `value` |
@@ -78,7 +79,7 @@ with its kind under `type`, and its frame, where it has one, as an array of numb
 | --- | --- |
 | `said` | `message` |
 | `changed` | `workspace`: a snapshot; `summary` |
-| `replied` | `to`: the frame of the call that asked; `reply`: `{type}` of `yes`, `no`, `none_of_above`, `unavailable`, or `{type: "choice", number}`, `{type: "text", text}` |
+| `replied` | `to`: the frame that asked; `reply`: `{type}` of `yes`, `no`, `none_of_above`, `unavailable`, or `{type: "choice", number}`, `{type: "text", text}` |
 | `assigned` | `grader` (§4) |
 
 | `op.type` | Fields of `op` | `answer` |

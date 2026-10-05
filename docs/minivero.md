@@ -19,7 +19,11 @@ prints them all.
 | `tools` | `["bash", "submit", "time_budget"]` | MiniSwe's has no `time_budget` |
 
 A codeproof run is `--agent mini-vero --set agent.mode=codeproof`. To let the agent ask
-questions, name every tool: `--set 'agent.tools=["bash","submit","time_budget","ask_user"]'`.
+questions, name every tool and the kinds of question it may ask (`docs/agent-api.md` §7):
+
+```sh
+--set 'agent.tools=["bash","submit","time_budget","ask_user"]' --set 'agent.question_types=["yes_no"]'
+```
 
 ## 2. What the model is sent
 
