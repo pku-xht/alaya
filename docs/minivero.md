@@ -92,11 +92,11 @@ The image build, render, prepare, run and grading commands are in
 [the Vero integration](../benchmarks/vero/README.md). In outline:
 
 ```sh
-alaya new source --task-file MINIVERO_TASK.md --agent mini-vero --model MODEL --image alaya-vero-agent:0a7325d
+alaya new source --task-file MINIVERO_TASK.md --agent mini-vero --model MODEL --image ghcr.io/msv-lab/alaya-vero-agent:0a7325d
 alaya run ENTRY --provider PROVIDER
-alaya grade LAST --grader-image alaya-vero-grader:0a7325d --grader-input path/to/trusted/Benchmark \
+alaya grade LAST --grader-image ghcr.io/msv-lab/alaya-vero-grader:0a7325d --grader-input path/to/trusted/Benchmark \
   --grader 'python /opt/alaya-vero/grade.py --mode proof --benchmark /grader'
-alaya cat GRADED:N .vero/report.md         # N: the position of the grader's answer in the log
+alaya cat GRADED:N .grade/report.md         # N: the position of the grader's answer in the log
 ```
 
 `grade` runs Vero's own grader on a point of the run, in the Vero grader image, with the

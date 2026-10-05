@@ -64,7 +64,7 @@ def main():
         report = None
         if status != "error":
             # The report is in the checkout as the grader left it, read at its answer's entry.
-            report = json.loads(run(alaya, "cat", answer, ".vero/report.json",
+            report = json.loads(run(alaya, "cat", answer, ".grade/report.json",
                                     "--data", data).stdout)
         results.append({"name": name, "entry": final["entry"], "answer": answer,
                         "record": record, "report": report})

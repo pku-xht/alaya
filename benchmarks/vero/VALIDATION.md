@@ -9,15 +9,15 @@ passes the same checks.
 ## Run the checks
 
 Run from the Alaya repository on Linux with Docker and restic available. Build
-the executable with `lake build` and build the images using the commands in
+the executable with `lake build` and pull or build the images using the commands in
 [README.md](README.md). Each test output directory must be new.
 
 ```sh
 lake build
 lake exe tests
 
-AGENT=alaya-vero-agent:0a7325d
-GRADER_IMAGE=alaya-vero-grader:0a7325d
+AGENT=ghcr.io/msv-lab/alaya-vero-agent:0a7325d
+GRADER_IMAGE=ghcr.io/msv-lab/alaya-vero-grader:0a7325d
 
 python3 benchmarks/vero/tests/integration.py \
   --agent-image "$AGENT" --grader-image "$GRADER_IMAGE" --output /tmp/vero-acceptance-new
@@ -47,7 +47,7 @@ fixture without Mathlib cannot establish that the dependency cache works.
 | A lock that differs from the image's | Refused instead of silently using the image's revision |
 | Offline build of a Mathlib benchmark | `lake build` exits 0 with `--network none`, non-root, through the package links |
 | Root snapshot of a Mathlib benchmark | Source files and symlinks only: no dependency trees |
-| Grading a blank, a correct, and a tampered attempt | `fail 0/N`, `pass N/N`, `fail`; Vero's reports in `.vero/` |
+| Grading a blank, a correct, and a tampered attempt | `fail 0/N`, `pass N/N`, `fail`; Vero's reports in `.grade/` |
 | An answer file that is a symbolic link | Every check fails as `anti-cheat` |
 | An invalid joint claim | A failing `acceptance: joint:...` check; the specifications keep their results |
 | An unknown Vero status, a compiler timeout or signal | `Bail out!`, an `error` verdict |

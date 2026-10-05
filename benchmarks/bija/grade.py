@@ -5,13 +5,15 @@
 # ///
 """Grade a Bija attempt against the reference acceptance suite, as an alaya grader.
 
-usage: grade.py
+usage: grade.py --tests /grader
 
-`alaya grade` runs it on a point of a run, in the Bija image (`Dockerfile`), in a checkout of
-the attempt, with this directory as the grader's trusted input at /grader. From the repository
-root:
+`alaya grade` runs it on a point of a run, in the grader image (the Dockerfile's `grader`
+target), in a checkout of the attempt, with the reference's `tests/` as its trusted input at
+/grader. From the repository root, TAG the image's tag in README.md:
 
-    alaya grade ENTRY --grader 'python3 /grader/grade.py' --grader-input example/bija --grader-timeout 1800
+    alaya grade ENTRY --grader-image ghcr.io/msv-lab/alaya-bija-grader:TAG \
+      --grader-input benchmarks/bija/reference/tests \
+      --grader 'python3 /opt/alaya-bija/grade.py --tests /grader' --grader-timeout 1800
 
 It replaces the checkout's `tests/` with the reference's 232 programs, runs the suite with the
 attempt's own project, and prints TAP on stdout: one check per program run through the command
@@ -23,6 +25,7 @@ where `alaya cat ENTRY .grade/pytest.txt` reads them, ENTRY the entry of the gra
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -30,17 +33,15 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-REFERENCE_TESTS = HERE / "reference" / "tests"
 KINDS = {"test_program": "program", "test_generated_python_is_standalone": "standalone"}
 
 
-def run_suite(checkout: Path, reports: Path) -> int:
+def run_suite(checkout: Path, reference: Path, reports: Path) -> int:
     """Runs pytest over the checkout; its output and JUnit report go to REPORTS."""
     tests = checkout / "tests"
     if tests.exists():
         shutil.rmtree(tests)
-    shutil.copytree(REFERENCE_TESTS, tests, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(reference, tests, ignore=shutil.ignore_patterns("__pycache__"))
     # A fresh environment outside the checkout, so the attempt's own .venv is neither trusted nor
     # modified.
     env = {**os.environ, "UV_PROJECT_ENVIRONMENT": "/tmp/grader-venv"}
@@ -69,10 +70,13 @@ def escape(name: str) -> str:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tests", type=Path, required=True, help="the reference's tests/")
+    args = parser.parse_args()
     checkout = Path.cwd()
     reports = checkout / ".grade"
     reports.mkdir(exist_ok=True)
-    status = run_suite(checkout, reports)
+    status = run_suite(checkout, args.tests.resolve(), reports)
     junit = reports / "junit.xml"
     if not junit.exists():
         sys.stderr.write((reports / "pytest.txt").read_text(encoding="utf-8", errors="replace"))

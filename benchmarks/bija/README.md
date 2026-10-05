@@ -20,15 +20,15 @@ task is to implement its compiler from a written specification.
   An implementation shaped like a conventional language passes the arithmetic and fails these.
 * **Progress is a number at every moment.** The suite is whole programs against exact output,
   so a partial implementation scores a fraction rather than an opinion.
-* **The grader is bigger than the sample.** The skeleton ships twelve programs, one per area;
-  the reference has 232 of the same shape. Running the reference's suite against an agent's
+* **The grader is bigger than the sample.** The skeleton ships twelve programs from nine of
+  the eleven areas; the reference has 232 of the same shape, in all eleven. Running the reference's suite against an agent's
   implementation measures generalisation from the specification rather than fitting to the
   visible tests.
 
 ## Running it
 
 Both directories are self-contained uv projects with no runtime dependencies, targeting
-`ghcr.io/astral-sh/uv:python3.12-bookworm-slim`:
+`ghcr.io/astral-sh/uv:0.12.7-python3.12-trixie-slim`:
 
 ```sh
 cd reference && uv run pytest        # 464 tests, all passing
@@ -38,8 +38,9 @@ cd skeleton  && uv run pytest        # 24 tests, all failing, until the work is 
 ## The grader
 
 `grade.py` grades an attempt as an alaya grader: `alaya grade --grader` runs it on a point of a
-run, once the agent is over or stopped there, in the Bija image, in a checkout of the attempt, with this directory as its trusted input at `/grader`. It replaces the
-attempt's `tests/` with the reference's 232 programs, runs the suite, and prints TAP: one check
+run, once the agent is over or stopped there, in the grader image, in a checkout of the attempt,
+with the reference's `tests/` as its trusted input at `/grader`. It replaces the attempt's
+`tests/` with the reference's 232 programs, runs the suite, and prints TAP: one check
 per program run through the command line (`program AREA/NAME`), then one per program compiled
 with `bija build` and run under a bare interpreter (`standalone AREA/NAME`), 464 in all. The pass
 counts by section of the specification go to stderr, and the suite's output and JUnit report
@@ -49,20 +50,35 @@ stay in the grader's checkout, under `.grade/`.
 
 The skeleton is a project directory, so a run starts from it directly; `TASK.txt` is the task
 statement, kept here so every run is given the same one. The agent and the grader run in the
-Bija image, built from `Dockerfile`: Python, `uv`, and the suite's dependencies, which containers
-cannot download, since they run without network. From the repository root:
+two amd64 images `Dockerfile` builds from a pinned base: Python, `uv`, and the suite's dependencies,
+which containers cannot download, since they run without network; the grader's adds `grade.py`.
+Neither holds the reference programs: only the grader is given them, as its input. They are
+published on the GitHub registry, tagged with the commit they were built from, and that commit's
+`Dockerfile` rebuilds them:
 
 ```sh
-docker build -t alaya-bija example/bija
+docker build --platform linux/amd64 --target agent \
+  -t ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd benchmarks/bija
+docker build --platform linux/amd64 --target grader \
+  -t ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd benchmarks/bija
+```
+
+From the repository root:
+
+```sh
+docker pull ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd
+docker pull ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
 
 export ALAYA_DATA=$PWD/bija-runs   # created by new; every command below uses it
 last() { tail -n 1 | cut -d' ' -f1; }
-tip=$(alaya new --task-file example/bija/TASK.txt example/bija/skeleton --agent mini-swe \
-  --model gpt-oss-120b --image alaya-bija | last)
+tip=$(alaya new --task-file benchmarks/bija/TASK.txt benchmarks/bija/skeleton --agent mini-swe \
+  --model gpt-oss-120b --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
 end=$(alaya run "$tip" --provider dgx | last)
 # done: Submitted: …
 
-grader=(--grader 'python3 /grader/grade.py' --grader-input example/bija --grader-timeout 1800)
+grader=(--grader 'python3 /opt/alaya-bija/grade.py --tests /grader'
+        --grader-image ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
+        --grader-input benchmarks/bija/reference/tests --grader-timeout 1800)
 graded=$(alaya grade "$end" "${grader[@]}" | last)   # exits 1 for a fail
 # done: fail N/464
 
@@ -70,6 +86,9 @@ alaya log --json "$graded" | grep '"external"'  # the grader's answer: its entry
 alaya cat ANSWER .grade/pytest.txt              # ANSWER: that entry; the suite's own output
 alaya grade "$end:200" "${grader[@]}"           # how far it was at position 200
 ```
+
+Alaya snapshots the whole grader input, so keep `reference/tests/` clean: no `__pycache__/` left
+by a local `uv run pytest`.
 
 The image carries the suite's dependencies, so the agent can run the sample suite itself between
 turns with `uv run pytest`.

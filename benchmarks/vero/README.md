@@ -7,13 +7,22 @@ and Alaya built (`lake build`). The agent image contains Lean and cached Lake
 packages; the grader image adds the pinned Vero installation, which renders a
 sandbox and grades an attempt. The agent image never inherits Vero's layers.
 
-## Build the two images
+## Pull or build the two images
+
+The images are published on the GitHub registry:
+
+```sh
+docker pull ghcr.io/msv-lab/alaya-vero-agent:0a7325d
+docker pull ghcr.io/msv-lab/alaya-vero-grader:0a7325d
+```
+
+They are built, and can be rebuilt, from the repository root:
 
 ```sh
 docker build --platform linux/amd64 --target agent -f benchmarks/vero/Dockerfile \
-  -t alaya-vero-agent:0a7325d .
+  -t ghcr.io/msv-lab/alaya-vero-agent:0a7325d .
 docker build --platform linux/amd64 --target grader -f benchmarks/vero/Dockerfile \
-  -t alaya-vero-grader:0a7325d .
+  -t ghcr.io/msv-lab/alaya-vero-grader:0a7325d .
 ```
 
 The image build resolves the existing `lake-manifest.json` with
@@ -43,8 +52,8 @@ configuration.
 BENCHMARK="$(pwd)/benchmarks/vero/tests/fixtures/tiny_trivial"
 RUN="$(mktemp -d)"
 MODE=codeproof
-AGENT=alaya-vero-agent:0a7325d
-GRADER_IMAGE=alaya-vero-grader:0a7325d
+AGENT=ghcr.io/msv-lab/alaya-vero-agent:0a7325d
+GRADER_IMAGE=ghcr.io/msv-lab/alaya-vero-grader:0a7325d
 
 docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$BENCHMARK:/benchmark:ro" -v "$RUN:/rendered" "$GRADER_IMAGE" \
@@ -147,8 +156,8 @@ for line in sys.stdin:
     event = json.loads(line).get("event") or {}
     if event.get("type") == "answered" and event["op"]["type"] == "external":
         print(json.loads(line)["entry"])')
-.lake/build/bin/alaya ls "$ANSWER" .vero --data "$RUN/audit"
-.lake/build/bin/alaya cat "$ANSWER" .vero/report.md --data "$RUN/audit"
+.lake/build/bin/alaya ls "$ANSWER" .grade --data "$RUN/audit"
+.lake/build/bin/alaya cat "$ANSWER" .grade/report.md --data "$RUN/audit"
 ```
 
 Alaya snapshots the trusted benchmark when `grade` assigns the grader, mounts that snapshot read-only at
@@ -161,7 +170,7 @@ The run's configuration fixes the mode and the trusted benchmark; the grader doe
 `MINIVERO_TASK.md` or anything else in the checkout to choose either. It
 extracts only the answer slots the mode permits — in proof mode, only the
 manifest-selected proof files, never an Impl slot — rebuilds from the trusted
-benchmark in `/tmp`, writes Vero's `report.json` and `report.md` to `.vero/` in
+benchmark in `/tmp`, writes Vero's `report.json` and `report.md` to `.grade/` in
 the checkout, and prints TAP: one check per specification, named
 `Module.spec`, with the Vero status appended when it did not pass. An answer
 file that is a symbolic link fails every check as `anti-cheat`. An invalid

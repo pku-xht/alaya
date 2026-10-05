@@ -5,7 +5,7 @@ diagrams look the same. The report is where the style comes from, and `Alaya/Htm
 `Alaya/Html/page.js` hold its values; §1–§7 describe what is there, and §8 and §9 say how a page
 of prose and a diagram take it up.
 
-![The HTML report of a gpt-6-luna run on Bija](../example/bija/report.png)
+![The HTML report of a gpt-6-luna run on Bija](figures/bija-report.png)
 
 ## 1. Character
 

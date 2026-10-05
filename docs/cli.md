@@ -391,7 +391,7 @@ needs nothing beside it.
 alaya html report.html --hide .venv,__pycache__
 ```
 
-![The report: the branches and the log on the left, the chosen entry on the right](../example/bija/report.png)
+![The report: the branches and the log on the left, the chosen entry on the right](figures/bija-report.png)
 
 - **On the left**: the branches of each run, then the log of the chosen branch, an entry a row,
   indented by its frame, with a switch wherever branches fork. The box above finds text in it.
