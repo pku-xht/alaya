@@ -62,23 +62,21 @@ fork of it:
 
 ## Documentation
 
-[`docs/agent-api.md`](docs/agent-api.md) — the agent API, step by step: a program, the log and
-its events, and what each construct of a program writes in the log — an operation, a read of
-the inbox, a call, a failure, a loop, a comment — each with a figure. Then replay, routines,
-tools, `ask_user`, an agent, a run, and the driver that drives it.
+[`docs/agent-api.md`](docs/agent-api.md) — the agent API: a program, the log of events it
+writes, and what each construct writes there (an operation, a read of the inbox, a call, a
+failure, a loop, a comment); then replay, routines, tools, `ask_user`, an agent, a run, and the
+driver.
 
 [`docs/log-schema.md`](docs/log-schema.md) — the log schema: an entry, the events as JSON, the
 forest of logs and its forks, the grader's protocol and its verdict, the data directory with its
 workspace snapshots, and the model cache entry.
 
-[`docs/llm-api.md`](docs/llm-api.md) — the LLM API, step by step: a request and a response as
-typed values, structured output, a model as the draws of a request, the layers a model is built
-from — retry, batching, sharing of draws, a persistent cache — and models and the providers
-that serve them.
+[`docs/llm-api.md`](docs/llm-api.md) — the LLM API: requests and responses as typed values,
+structured output, a model as the draws of a request, the layers a model is built from (retry,
+batching, sharing of draws, a persistent cache), and the providers that serve models.
 
-[`docs/cli.md`](docs/cli.md) — the `alaya` command line, for scripts, UIs and agents: how a
-command line is read, text and JSON output, one exit status per class of failure, and every
-command with an example and a figure of what it does to the forest.
+[`docs/cli.md`](docs/cli.md) — the `alaya` command line: how a command line is read, text and
+JSON output, the exit statuses, and what each command does to the forest.
 
 [`docs/miniswe.md`](docs/miniswe.md) — MiniSwe, the port of mini-SWE-agent: its options, what
 the model is sent, how it ends, how a command runs, long outputs and a full context, and how it
