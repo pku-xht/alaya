@@ -223,58 +223,62 @@ private def envArgs (config : Config) : Array String :=
   config.env.foldl (fun args (key, value) => args ++ #["--env", s!"{key}={value}"]) #[]
 
 /-- Runs one command in the run's container, starting it on first use and after a timeout had to
-take it down. Every failure is an observation, as an execution problem must never end a run. -/
+take it down.
+
+What a command does is an observation, whatever it does: it exits with an error, it runs out of
+time, or it leaves docker unable to run it, as a command that kills its own container does. What
+the machine cannot do is no observation, and is thrown: a container that cannot be started — a
+missing image, a user or a network docker does not know — or a docker that cannot be run. An
+agent can do nothing about those, so they are not told to it as its command's result. -/
 private def execIn (ref : IO.Ref (Option Container)) (settings : Settings) (config : Config)
     (workDir : System.FilePath) (argv : Array String) (display : String) : IO Output := do
-  try
-    let container ← match ← ref.get with
-      | some container => pure container
-      | none =>
-        let container ← start settings workDir
-        ref.set (some container)
-        pure container
-    let child ← IO.Process.spawn {
-      cmd := "docker"
-      args := #["exec", "--interactive", "--workdir", settings.workdir] ++ envArgs config
-        ++ #[container.id, "/bin/sh", "-c", script config container.hasTimeout, "sh"] ++ argv
-      stdin := .inherit, stdout := .piped, stderr := .piped }
-    let outReader ← IO.asTask (prio := .dedicated) child.stdout.readBinToEnd
-    let errReader ← IO.asTask (prio := .dedicated) child.stderr.readBinToEnd
-    let readAll : IO String := do
-      pure (lossyDecodeUtf8 ((← IO.wait outReader).toOption.getD ByteArray.empty))
-    let start ← IO.monoMsNow
-    -- With an in-container `timeout` the host deadline is only a backstop, so it allows for the
-    -- kill grace; without one it is the whole mechanism.
-    let graceMs := if container.hasTimeout then 5000 else 0
-    let deadline? := if config.timeoutSeconds == 0 then none
-      else some (start + config.timeoutSeconds * 1000 + graceMs)
-    let (code?, output) ← poll child readAll deadline?
-    let elapsedMs := (← IO.monoMsNow) - start
-    match code? with
+  let container ← match ← ref.get with
+    | some container => pure container
     | none =>
-      -- The client is gone but the command is still running inside; the container has to go.
-      let _ ← client #["kill", container.id]
-      remove container.id
-      ref.set none
-      pure (timedOut output display config.timeoutSeconds)
-    | some code =>
-      let stderr := lossyDecodeUtf8 ((← IO.wait errReader).toOption.getD ByteArray.empty)
-      match clientFailure? code stderr.trimAscii.toString with
-      | some message =>
-        -- A container that died under us should not poison every later command.
-        if (message.splitOn "is not running").length > 1 then ref.set none
-        pure (failed message)
-      | none =>
-        -- How a killed command reports depends on the `timeout` in the image: GNU exits 124,
-        -- busybox passes the signal status through (143 for TERM, 137 once `-k` sends KILL). A
-        -- command can return any of those on its own, so a run that did not reach the limit is
-        -- taken at its word.
-        if (code == 124 || code == 137 || code == 143) && config.timeoutSeconds > 0 &&
-            elapsedMs >= config.timeoutSeconds * 1000 then
-          pure (timedOut output display config.timeoutSeconds)
-        else pure { output, exitCode? := some code }
-  catch e =>
-    pure (failed (toString e))
+      let container ← start settings workDir
+      ref.set (some container)
+      pure container
+  -- A command reads nothing from whoever runs alaya: its script is an argument.
+  let child ← IO.Process.spawn {
+    cmd := "docker"
+    args := #["exec", "--workdir", settings.workdir] ++ envArgs config
+      ++ #[container.id, "/bin/sh", "-c", script config container.hasTimeout, "sh"] ++ argv
+    stdin := .null, stdout := .piped, stderr := .piped }
+  let outReader ← IO.asTask (prio := .dedicated) child.stdout.readBinToEnd
+  let errReader ← IO.asTask (prio := .dedicated) child.stderr.readBinToEnd
+  let readAll : IO String := do
+    pure (lossyDecodeUtf8 ((← IO.wait outReader).toOption.getD ByteArray.empty))
+  let start ← IO.monoMsNow
+  -- With an in-container `timeout` the host deadline is only a backstop, so it allows for the
+  -- kill grace; without one it is the whole mechanism.
+  let graceMs := if container.hasTimeout then 5000 else 0
+  let deadline? := if config.timeoutSeconds == 0 then none
+    else some (start + config.timeoutSeconds * 1000 + graceMs)
+  let (code?, output) ← poll child readAll deadline?
+  let elapsedMs := (← IO.monoMsNow) - start
+  match code? with
+  | none =>
+    -- The client is gone but the command is still running inside; the container has to go.
+    let _ ← client #["kill", container.id]
+    remove container.id
+    ref.set none
+    pure (timedOut output display config.timeoutSeconds)
+  | some code =>
+    let stderr := lossyDecodeUtf8 ((← IO.wait errReader).toOption.getD ByteArray.empty)
+    match clientFailure? code stderr.trimAscii.toString with
+    | some message =>
+      -- A container that died under us should not poison every later command.
+      if (message.splitOn "is not running").length > 1 then ref.set none
+      pure (failed message)
+    | none =>
+      -- How a killed command reports depends on the `timeout` in the image: GNU exits 124,
+      -- busybox passes the signal status through (143 for TERM, 137 once `-k` sends KILL). A
+      -- command can return any of those on its own, so a run that did not reach the limit is
+      -- taken at its word.
+      if (code == 124 || code == 137 || code == 143) && config.timeoutSeconds > 0 &&
+          elapsedMs >= config.timeoutSeconds * 1000 then
+        pure (timedOut output display config.timeoutSeconds)
+      else pure { output, exitCode? := some code }
 
 /-- An executor that runs every command of a run in one container, with the working directory
 bind-mounted, each as its own configuration says. `settings.image` should already be pinned,

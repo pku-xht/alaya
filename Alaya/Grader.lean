@@ -18,10 +18,9 @@ namespace Alaya
 
 open Lean (Json)
 
-/-- A grader: a name for a reader, the command, the pinned image it runs in, the snapshot of its
-trusted input, and how long it may take; 0 is no limit. -/
+/-- A grader: the command, the pinned image it runs in, the snapshot of its trusted input, and
+how long it may take; 0 is no limit. -/
 structure Grader where
-  name : String := "grader"
   command : String
   image : String
   input? : Option Snapshot := none
@@ -29,7 +28,7 @@ structure Grader where
   deriving Inhabited
 
 def Grader.toJson (grader : Grader) : Json :=
-  .mkObj [("name", grader.name), ("command", grader.command), ("image", grader.image),
+  .mkObj [("command", grader.command), ("image", grader.image),
     ("input", grader.input?.map (Json.str ·.hex) |>.getD .null),
     ("timeout_seconds", grader.timeoutSeconds)]
 
@@ -39,7 +38,6 @@ def Grader.fromJson (json : Json) : Except String Grader := do
     | .ok .null | .error _ => pure none
     | .ok other => throw s!"a grader's input is a snapshot, not {other.compress}"
   pure {
-    name := (json.getObjVal? "name" >>= Json.getStr?).toOption.getD "grader"
     command := ← json.getObjVal? "command" >>= Json.getStr?
     image := ← json.getObjVal? "image" >>= Json.getStr?
     input?

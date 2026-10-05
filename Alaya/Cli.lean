@@ -370,7 +370,8 @@ def errorJson (error : Error) : Lean.Json :=
 structure Out where
   json : Bool
 
-private def emit (line : String) : Result Unit := Result.fromIO Error.storage (IO.println line)
+/-- Prints a line on stdout. -/
+def emit (line : String) : Result Unit := Result.fromIO Error.storage (IO.println line)
 
 /-- One record: its JSON with `--json`, else `pretty`. -/
 def Out.record (out : Out) (json : Lean.Json) (pretty : String) : Result Unit :=

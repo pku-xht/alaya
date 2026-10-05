@@ -227,7 +227,7 @@ def suite : Suite := Testing.suite "runs" #[
         pure { output := "ok", exitCode? := some 0 } }
       let rt ← runtime flaky (some (← scriptedModel script))
       assertError "the command could not be run" (Driver.drive rt run (← start rt run)) fun
-        | .storage message => contains message "the daemon is gone"
+        | .environment message => contains message "the daemon is gone"
         | _ => false
       let forest ← assertOk rt.store.forest
       assertEqual "one log" forest.leaves.size 1
