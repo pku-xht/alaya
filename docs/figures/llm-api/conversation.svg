@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 257" width="920" height="257">
+<title>A request, its response, and the next request, which adds the call and its result</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.r{font-size:11px;font-weight:600;fill:#6f7985;letter-spacing:.04em}</style>
+<rect width="920" height="257" fill="#fff"/>
+<text x="12" y="14" class="s">request</text>
+<text x="322" y="14" class="s">response</text>
+<text x="652" y="14" class="s">the next request</text>
+<text x="12" y="40" class="s">tools</text>
+<text x="52.6" y="40" class="s n" style="fill:#1c1e21">bash</text>
+<text x="26" y="63" class="r">SYSTEM</text>
+<rect x="26.5" y="72.5" width="185" height="35" rx="6" fill="#fff" stroke="#e3e6ea"/>
+<text x="37" y="94">You can run bash.</text>
+<rect x="12" y="52" width="2" height="56" fill="#e3e6ea"/>
+<text x="26" y="129" class="r">USER</text>
+<rect x="26.5" y="138.5" width="185" height="35" rx="6" fill="#fff" stroke="#e3e6ea"/>
+<text x="37" y="160">List the files.</text>
+<rect x="12" y="118" width="2" height="56" fill="#e3e6ea"/>
+<text x="336" y="63" class="r">ASSISTANT</text>
+<rect x="336.5" y="72.5" width="205" height="35" rx="6" fill="#fff" stroke="#e3e6ea"/>
+<text x="347" y="94">Listing.</text>
+<text x="336" y="125" class="s">calls bash · command</text>
+<rect x="336.5" y="134.5" width="205" height="32" rx="6" fill="#f6f7f9" stroke="#e3e6ea"/>
+<text x="347" y="154" class="ch">ls</text>
+<rect x="322" y="52" width="2" height="115" fill="#3567a0"/>
+<text x="322" y="188" class="s">finish reason</text>
+<text x="405.2" y="188" class="s n" style="fill:#1c1e21">tool_calls</text>
+<text x="322" y="204" class="s">usage</text>
+<text x="405.2" y="204" class="s n" style="fill:#1c1e21">in 212 · out 18</text>
+<text x="652" y="40" class="s">2 earlier messages, as in the request before</text>
+<text x="666" y="63" class="r">ASSISTANT</text>
+<rect x="666.5" y="72.5" width="241" height="35" rx="6" fill="#fff" stroke="#e3e6ea"/>
+<text x="677" y="94">Listing.</text>
+<text x="666" y="125" class="s">calls bash · command</text>
+<rect x="666.5" y="134.5" width="241" height="32" rx="6" fill="#f6f7f9" stroke="#e3e6ea"/>
+<text x="677" y="154" class="ch">ls</text>
+<rect x="652" y="52" width="2" height="115" fill="#3567a0"/>
+<text x="666" y="188" class="r">TOOL · <tspan class="m">c1</tspan></text>
+<rect x="666.5" y="197.5" width="241" height="49" rx="6" fill="#f6f7f9" stroke="#e3e6ea"/>
+<text x="677" y="217" class="ch">a.txt</text>
+<text x="677" y="234" class="ch">b.txt</text>
+<rect x="652" y="177" width="2" height="70" fill="#3567a0"/>
+<path class="a" d="M222,110.5H308"/><path fill="#a3abb5" d="M312,110.5l-5,-2.5v5z"/>
+<text x="265" y="103" class="s" text-anchor="middle">sample</text>
+<path class="a" d="M552,110.5H638"/><path fill="#a3abb5" d="M642,110.5l-5,-2.5v5z"/>
+<text x="595" y="89" class="s" text-anchor="middle">the tool’s</text>
+<text x="595" y="103" class="s" text-anchor="middle">result is added</text>
+</svg>

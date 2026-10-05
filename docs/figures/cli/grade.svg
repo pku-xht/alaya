@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 136" width="920" height="136">
+<title>grade: a grader is assigned after the given entry and run, after a stop on a fork when the agent still runs</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
+<rect width="920" height="136" fill="#fff"/>
+<circle cx="15" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="19" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="23" cy="36.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M26,36.5h12"/>
+<rect x="38.5" y="24.5" width="173" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(46,30) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="65" y="40.5" class="c">exec make test → exit 1</text>
+<text x="125.5" y="15" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M125.5,18V24"/>
+<path class="a" d="M212,36.5h12"/>
+<circle cx="227" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="231" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="235" cy="36.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M238,36.5h12"/>
+<rect x="250.5" y="24.5" width="165" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(258,30) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="277" y="40.5" class="c">return Submitted: done</text>
+<path class="a" d="M52.5,49V67.5Q52.5,73.5 58.5,73.5H66"/>
+<rect x="66.5" y="61.5" width="190" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(74,67) scale(0.9286)" stroke="#b3261e" fill="#b3261e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1" fill="none"/></g>
+<text x="93" y="77.5" class="c">stopped: to grade this point</text>
+<path class="a" d="M257,73.5h12"/>
+<rect x="269.5" y="61.5" width="126" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(277,67) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
+<text x="296" y="77.5" class="c">assigned grader</text>
+<path class="a" d="M396,73.5h12"/>
+<rect x="408.5" y="61.5" width="66" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(416,67) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="435" y="77.5" class="c">inbox</text>
+<path class="a" d="M475,73.5h12"/>
+<rect x="487.5" y="61.5" width="147" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(495,67) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="10" height="8" rx="1" fill="none"/><path d="M4.5 3.5V2h5v1.5" fill="none"/></g>
+<text x="514" y="77.5" class="c">external … → exit 1</text>
+<path class="a" d="M635,73.5h12"/>
+<rect x="647.5" y="61.5" width="128" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(655,67) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="674" y="77.5" class="c">return fail 12/48</text>
+<rect x="786.6" y="64" width="46.4" height="18" rx="9" fill="#f8dfdd"/><text x="809.8" y="77" class="s n" style="fill:#8a2a25" text-anchor="middle">exit 1</text>
+<text x="66" y="101" class="s">the agent still runs here: a stop first, on a fork</text>
+<text x="12" y="127" class="s">at an entry where the agent is over: no stop, and no fork unless the log is graded already</text>
+</svg>

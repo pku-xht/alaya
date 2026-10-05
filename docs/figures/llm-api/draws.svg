@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 286" width="920" height="286">
+<title>Which draws of a request two callers get, from a repeatable model and from an independent one</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.r{font-size:11px;font-weight:600;fill:#6f7985;letter-spacing:.04em}</style>
+<rect width="920" height="286" fill="#fff"/>
+<text x="12" y="36" class="ch">Model.repeatable</text>
+<text x="12" y="56" class="s">every stream reads the sequence from its start:</text>
+<text x="12" y="70" class="s">the same question gets the same answers</text>
+<text x="350" y="36" class="s">caller A</text>
+<text x="350" y="72" class="s">the draws of the request</text>
+<text x="350" y="108" class="s">caller B</text>
+<rect x="510.5" y="58.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="530" y="72" class="ch" text-anchor="middle">d0</text>
+<rect x="586.5" y="58.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="606" y="72" class="ch" text-anchor="middle">d1</text>
+<rect x="662.5" y="58.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="682" y="72" class="ch" text-anchor="middle">d2</text>
+<rect x="738.5" y="58.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="758" y="72" class="ch" text-anchor="middle">d3</text>
+<text x="806" y="72" class="f">…</text>
+<path class="a" d="M530.0,42V58"/>
+<rect x="510.5" y="22.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="530" y="36" class="ch" text-anchor="middle">d0</text>
+<text x="530" y="17" class="f" text-anchor="middle">1st</text>
+<path class="a" d="M606.0,42V58"/>
+<rect x="586.5" y="22.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="606" y="36" class="ch" text-anchor="middle">d1</text>
+<text x="606" y="17" class="f" text-anchor="middle">2nd</text>
+<path class="a" d="M530.0,78V94"/>
+<rect x="510.5" y="94.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="530" y="108" class="ch" text-anchor="middle">d0</text>
+<text x="530" y="126" class="f" text-anchor="middle">1st</text>
+<path class="a" d="M606.0,78V94"/>
+<rect x="586.5" y="94.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="606" y="108" class="ch" text-anchor="middle">d1</text>
+<text x="606" y="126" class="f" text-anchor="middle">2nd</text>
+<path stroke="#e3e6ea" d="M12,143.5H908"/>
+<text x="12" y="182" class="ch">Model.independent</text>
+<text x="12" y="202" class="s">all streams share one position:</text>
+<text x="12" y="216" class="s">no two callers get the same draw</text>
+<text x="350" y="182" class="s">caller A</text>
+<text x="350" y="218" class="s">the draws of the request</text>
+<text x="350" y="254" class="s">caller B</text>
+<rect x="510.5" y="204.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="530" y="218" class="ch" text-anchor="middle">d0</text>
+<rect x="586.5" y="204.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="606" y="218" class="ch" text-anchor="middle">d1</text>
+<rect x="662.5" y="204.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="682" y="218" class="ch" text-anchor="middle">d2</text>
+<rect x="738.5" y="204.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="758" y="218" class="ch" text-anchor="middle">d3</text>
+<text x="806" y="218" class="f">…</text>
+<path class="a" d="M530.0,188V204"/>
+<rect x="510.5" y="168.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="530" y="182" class="ch" text-anchor="middle">d0</text>
+<text x="530" y="163" class="f" text-anchor="middle">1st</text>
+<path class="a" d="M682.0,188V204"/>
+<rect x="662.5" y="168.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="682" y="182" class="ch" text-anchor="middle">d2</text>
+<text x="682" y="163" class="f" text-anchor="middle">2nd</text>
+<path class="a" d="M606.0,224V240"/>
+<rect x="586.5" y="240.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="606" y="254" class="ch" text-anchor="middle">d1</text>
+<text x="606" y="272" class="f" text-anchor="middle">1st</text>
+<path class="a" d="M758.0,224V240"/>
+<rect x="738.5" y="240.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="758" y="254" class="ch" text-anchor="middle">d3</text>
+<text x="758" y="272" class="f" text-anchor="middle">2nd</text>
+</svg>

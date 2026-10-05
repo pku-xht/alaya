@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 180" width="920" height="180">
+<title>ls, cat, checkout and diff: the workspace at an entry is the last version left at or before it</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
+<rect width="920" height="180" fill="#fff"/>
+<rect x="12.5" y="24.5" width="120" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(20,30) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<text x="39" y="40.5" class="c">the workspace</text>
+<path class="a" d="M133,36.5h12"/>
+<rect x="145.5" y="24.5" width="97" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(153,30) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="172" y="40.5" class="c">exec make</text>
+<path class="a" d="M243,36.5h12"/>
+<rect x="255.5" y="24.5" width="220" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(263,30) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1.6L12.4 7 7 12.4 1.6 7z" fill="none"/></g>
+<text x="282" y="40.5" class="c">workspace changed: M Makefile</text>
+<path class="a" d="M476,36.5h12"/>
+<rect x="488.5" y="24.5" width="182" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(496,30) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="515" y="40.5" class="c">sample → bash make test</text>
+<text x="579.5" y="15" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M579.5,18V24"/>
+<path class="a" d="M671,36.5h12"/>
+<rect x="683.5" y="24.5" width="123" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(691,30) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="710" y="40.5" class="c">exec make test</text>
+<path class="a" d="M72.5,64.5H745.5"/>
+<circle cx="72.5" cy="64.5" r="3.5" fill="#fff" stroke="#6f7985"/>
+<text x="72.5" y="81.5" class="s m" text-anchor="middle">w0</text>
+<circle cx="194.5" cy="64.5" r="3.5" fill="#fff" stroke="#6f7985"/>
+<text x="194.5" y="81.5" class="s m" text-anchor="middle">w1</text>
+<circle cx="365.5" cy="64.5" r="3.5" fill="#fff" stroke="#6f7985"/>
+<text x="365.5" y="81.5" class="s m" text-anchor="middle">w2</text>
+<circle cx="745.5" cy="64.5" r="3.5" fill="#fff" stroke="#6f7985"/>
+<text x="745.5" y="81.5" class="s m" text-anchor="middle">w3</text>
+<path class="a" style="stroke:#6f7985" d="M579.5,49V58.5Q579.5,64.5 573.5,64.5H374.5"/>
+<path fill="#6f7985" d="M370.0,64.5l5,-2.5v5z"/>
+<text x="381.5" y="81.5" class="s">the workspace at <tspan class="m">ENTRY</tspan>: the last version left at or before it</text>
+<path class="a" d="M194.5,88.5v4H745.5v-4"/>
+<text x="194.5" y="105.5" class="s m" text-anchor="middle">A</text>
+<text x="745.5" y="105.5" class="s m" text-anchor="middle">B</text>
+<text x="12" y="134.5" class="c"><tspan class="m">ls ENTRY src</tspan>, <tspan class="m">cat ENTRY src/a.py</tspan></text>
+<text x="252.3" y="134.5" class="s">read from the snapshot, without restoring it</text>
+<text x="12" y="152.5" class="c"><tspan class="m">checkout ENTRY ./dir</tspan></text>
+<text x="252.3" y="152.5" class="s">writes the files into a directory</text>
+<text x="12" y="170.5" class="c"><tspan class="m">diff A B</tspan></text>
+<text x="252.3" y="170.5" class="s">the paths that differ between two entries’ versions</text>
+</svg>

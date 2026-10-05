@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 232" width="920" height="232">
+<title>tree, log, show and waiting: what each reads of the forest</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
+<rect width="920" height="232" fill="#fff"/>
+<path stroke="#e3e6ea" d="M12,112.5H908"/>
+<text x="12" y="16" class="ch">tree</text>
+<text x="53" y="16" class="s">the whole forest: runs, stretches, forks</text>
+<rect x="12.5" y="44.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(20,50) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<path class="a" d="M41,56.5h12"/>
+<rect x="53.5" y="44.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(61,50) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<path class="a" d="M82,56.5h12"/>
+<rect x="94.5" y="44.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(102,50) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<path class="a" d="M123,56.5h12"/>
+<rect x="135.5" y="44.5" width="76" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(143,50) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="162" y="60.5" class="c">sample</text>
+<path class="a" d="M212,56.5h12"/>
+<circle cx="227" cy="56.5" r="0.9" fill="#a3abb5"/>
+<circle cx="231" cy="56.5" r="0.9" fill="#a3abb5"/>
+<circle cx="235" cy="56.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M238,56.5h12"/>
+<rect x="250.5" y="44.5" width="138" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(258,50) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="277" y="60.5" class="c">return pass 48/48</text>
+<path class="a" d="M149.5,69V85.5Q149.5,91.5 155.5,91.5H163"/>
+<rect x="163.5" y="79.5" width="149" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(171,85) scale(0.9286)" stroke="#a8690f" fill="#a8690f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 5.3a2.4 2.4 0 1 1 3.3 2.2c-.6.3-.9.7-.9 1.4" fill="none"/><circle cx="7" cy="11.2" r=".8" stroke="none"/></g>
+<text x="190" y="95.5" class="c">open ask_user “…?”</text>
+<text x="472" y="16" class="ch">log ENTRY</text>
+<text x="549.3" y="16" class="s">the path from the root to <tspan class="m">ENTRY</tspan></text>
+<rect x="472.5" y="44.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(480,50) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<path class="a" d="M501,56.5h12"/>
+<rect x="513.5" y="44.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(521,50) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<path class="a" d="M542,56.5h12"/>
+<rect x="554.5" y="44.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(562,50) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<path class="a" d="M583,56.5h12"/>
+<rect x="595.5" y="44.5" width="76" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(603,50) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="622" y="60.5" class="c">sample</text>
+<path class="a" d="M672,56.5h12"/>
+<circle cx="687" cy="56.5" r="0.9" fill="#a3abb5"/>
+<circle cx="691" cy="56.5" r="0.9" fill="#a3abb5"/>
+<circle cx="695" cy="56.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M698,56.5h12"/>
+<rect x="710.5" y="44.5" width="138" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(718,50) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="737" y="60.5" class="c">return pass 48/48</text>
+<text x="779.5" y="35" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M779.5,38V44"/>
+<path class="a" d="M609.5,69V85.5Q609.5,91.5 615.5,91.5H623"/>
+<rect x="623.5" y="79.5" width="149" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(631,85) scale(0.9286)" stroke="#a8690f" fill="#a8690f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 5.3a2.4 2.4 0 1 1 3.3 2.2c-.6.3-.9.7-.9 1.4" fill="none"/><circle cx="7" cy="11.2" r=".8" stroke="none"/></g>
+<text x="650" y="95.5" class="c">open ask_user “…?”</text>
+<text x="12" y="136" class="ch">show ENTRY</text>
+<text x="96.6" y="136" class="s">one entry in full; <tspan class="m">--request</tspan> adds the request it answered</text>
+<rect x="12.5" y="164.5" width="28" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(20,170) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<path class="a" d="M41,176.5h12"/>
+<rect x="53.5" y="164.5" width="28" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(61,170) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<path class="a" d="M82,176.5h12"/>
+<rect x="94.5" y="164.5" width="28" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(102,170) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<path class="a" d="M123,176.5h12"/>
+<rect x="135.5" y="164.5" width="76" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(143,170) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="162" y="180.5" class="c">sample</text>
+<text x="173.5" y="155" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M173.5,158V164"/>
+<path class="a" d="M212,176.5h12"/>
+<circle cx="227" cy="176.5" r="0.9" fill="#a3abb5"/>
+<circle cx="231" cy="176.5" r="0.9" fill="#a3abb5"/>
+<circle cx="235" cy="176.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M238,176.5h12"/>
+<rect x="250.5" y="164.5" width="138" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(258,170) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="277" y="180.5" class="c">return pass 48/48</text>
+<path class="a" d="M149.5,189V205.5Q149.5,211.5 155.5,211.5H163"/>
+<rect x="163.5" y="199.5" width="149" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(171,205) scale(0.9286)" stroke="#a8690f" fill="#a8690f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 5.3a2.4 2.4 0 1 1 3.3 2.2c-.6.3-.9.7-.9 1.4" fill="none"/><circle cx="7" cy="11.2" r=".8" stroke="none"/></g>
+<text x="190" y="215.5" class="c">open ask_user “…?”</text>
+<text x="472" y="136" class="ch">waiting</text>
+<text x="534.8" y="136" class="s">every entry where a question waits</text>
+<rect x="472.5" y="164.5" width="28" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(480,170) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<path class="a" d="M501,176.5h12"/>
+<rect x="513.5" y="164.5" width="28" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(521,170) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<path class="a" d="M542,176.5h12"/>
+<rect x="554.5" y="164.5" width="28" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(562,170) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<path class="a" d="M583,176.5h12"/>
+<rect x="595.5" y="164.5" width="76" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(603,170) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="622" y="180.5" class="c">sample</text>
+<path class="a" d="M672,176.5h12"/>
+<circle cx="687" cy="176.5" r="0.9" fill="#a3abb5"/>
+<circle cx="691" cy="176.5" r="0.9" fill="#a3abb5"/>
+<circle cx="695" cy="176.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M698,176.5h12"/>
+<rect x="710.5" y="164.5" width="138" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(718,170) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="737" y="180.5" class="c">return pass 48/48</text>
+<path class="a" d="M609.5,189V205.5Q609.5,211.5 615.5,211.5H623"/>
+<rect x="623.5" y="199.5" width="149" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(631,205) scale(0.9286)" stroke="#a8690f" fill="#a8690f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 5.3a2.4 2.4 0 1 1 3.3 2.2c-.6.3-.9.7-.9 1.4" fill="none"/><circle cx="7" cy="11.2" r=".8" stroke="none"/></g>
+<text x="650" y="215.5" class="c">open ask_user “…?”</text>
+</svg>

@@ -35,7 +35,7 @@ private def rateLimited : Error -> Bool
   | .http 429 _ _ => true
   | _ => false
 
-/-- Whether retrying is safe and likely useful; see `docs/llm-api.md` §3 for the policy. -/
+/-- Whether retrying is safe and likely useful; see `docs/llm-api.md` §5.1 for the policy. -/
 private def retryable (config : Config) : Error -> Bool
   | .http status _ _ => Error.retryableStatus status
   | .transport _ => config.retryUnknownDelivery

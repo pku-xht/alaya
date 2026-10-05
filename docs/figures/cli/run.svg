@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 78" width="920" height="78">
+<title>run: entries are appended after the given one until the agent is over, waits or is paused</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
+<rect width="920" height="78" fill="#fff"/>
+<circle cx="15" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="19" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="23" cy="36.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M26,36.5h12"/>
+<rect x="38.5" y="24.5" width="118" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(46,30) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<text x="65" y="40.5" class="c">said “the task”</text>
+<text x="97.5" y="15" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M97.5,18V24"/>
+<path class="a" d="M157,36.5h12"/>
+<rect x="169.5" y="24.5" width="66" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(177,30) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="196" y="40.5" class="c">inbox</text>
+<path class="a" d="M236,36.5h12"/>
+<rect x="248.5" y="24.5" width="76" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(256,30) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="275" y="40.5" class="c">sample</text>
+<path class="a" d="M325,36.5h12"/>
+<rect x="337.5" y="24.5" width="93" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(345,30) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="364" y="40.5" class="c">open bash</text>
+<path class="a" d="M431,36.5h12"/>
+<rect x="443.5" y="24.5" width="97" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(451,30) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="470" y="40.5" class="c">exec make</text>
+<path class="a" d="M541,36.5h12"/>
+<rect x="553.5" y="24.5" width="69" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(561,30) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="580" y="40.5" class="c">return</text>
+<path class="a" d="M623,36.5h12"/>
+<circle cx="638" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="642" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="646" cy="36.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M663.5,3.5H659.5V69.5H663.5"/>
+<rect x="670.1" y="3" width="105.4" height="18" rx="9" fill="#dcf1e2"/><text x="722.8" y="16" class="s n" style="fill:#1c5c33" text-anchor="middle">the agent is over</text>
+<text x="783.5" y="16.5" class="s">exit 0, or 1 if it failed</text>
+<rect x="669.6" y="27" width="112.9" height="18" rx="9" fill="#fbe9cf"/><text x="726.1" y="40" class="s n" style="fill:#7a4a08" text-anchor="middle">waits for a person</text>
+<text x="790.5" y="40.5" class="s">exit 3</text>
+<rect x="670.4" y="51" width="104.1" height="18" rx="9" fill="#eceef1"/><text x="722.4" y="64" class="s n" style="fill:#454b53" text-anchor="middle">paused at a limit</text>
+<text x="782.5" y="64.5" class="s">exit 4</text>
+</svg>

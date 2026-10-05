@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 106" width="920" height="106">
+<title>rm: the given entry and everything after it are deleted</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
+<rect width="920" height="106" fill="#fff"/>
+<circle cx="15" cy="18.5" r="0.9" fill="#a3abb5"/>
+<circle cx="19" cy="18.5" r="0.9" fill="#a3abb5"/>
+<circle cx="23" cy="18.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M26,18.5h12"/>
+<rect x="38.5" y="6.5" width="156" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(46,12) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="65" y="22.5" class="c">sample → bash make</text>
+<path class="a" d="M195,18.5h12"/>
+<circle cx="210" cy="18.5" r="0.9" fill="#a3abb5"/>
+<circle cx="214" cy="18.5" r="0.9" fill="#a3abb5"/>
+<circle cx="218" cy="18.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M221,18.5h12"/>
+<rect x="233.5" y="6.5" width="138" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(241,12) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="260" y="22.5" class="c">return pass 41/48</text>
+<path class="a" d="M52.5,31V63.5Q52.5,69.5 58.5,69.5H66"/>
+<rect x="66.5" y="57.5" width="106" height="24" rx="6" fill="#fff" stroke="#b3261e" stroke-dasharray="3 2"/>
+<g transform="translate(74,63) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<text x="93" y="73.5" class="c" style="fill:#a3abb5">said “a note”</text>
+<text x="119.5" y="48" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M119.5,51V57"/>
+<path class="a" d="M173,69.5h12"/>
+<circle cx="188" cy="69.5" r="0.9" fill="#a3abb5"/>
+<circle cx="192" cy="69.5" r="0.9" fill="#a3abb5"/>
+<circle cx="196" cy="69.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M199,69.5h12"/>
+<rect x="211.5" y="57.5" width="138" height="24" rx="6" fill="#fff" stroke="#b3261e" stroke-dasharray="3 2"/>
+<g transform="translate(219,63) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="238" y="73.5" class="c" style="fill:#a3abb5">return pass 45/48</text>
+<text x="66" y="97" class="s"><tspan class="m">ENTRY</tspan> and everything after it are deleted, then the snapshots only they named</text>
+</svg>

@@ -3,7 +3,7 @@ import Alaya.Error
 
 /-! Where shell commands run: in a container, with the working directory bind-mounted (see
 `Alaya.Executor.Docker`, the one implementation). Nothing an agent or a grader asks for runs on
-the host. The command semantics are described in `docs/miniswe.md` §7. -/
+the host. The command semantics are described in `docs/miniswe.md` §4. -/
 
 namespace Alaya
 

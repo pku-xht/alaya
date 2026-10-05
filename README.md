@@ -2,13 +2,13 @@
 
 Alaya is a framework for experimenting with coding agents, built on three principles:
 
-**Agents as programs over a log.** A run of an agent depends on random model responses and on
-files that change as it works, so it is hard to see why it went as it did, and it cannot be
-repeated with one thing changed. In Alaya an agent only asks — for a model's response, a
-command's output, a person's reply — and Alaya carries out each request and appends the answer
-to a log, with a snapshot of the files. The log alone determines what the agent does next. So a
-run is complete data, which can be analysed without running anything again, and any point of it
-can be continued in another way: change a message, a file or the model, or sample again, and
+**Agents as durable effectful programs.** Agent runs are hard to study: model responses are
+random and the agent modifies files as it works, so a run cannot be reproduced, or rerun with a
+single change to see what that change does. Alaya represents an agent as an effectful program in
+free-monad form and runs it by durable execution: replay against an append-only log of events.
+The logs form a forest, so any point of a run, with its workspace, can be forked and resampled.
+A run is therefore complete data, which can be analysed without running anything again, and a
+controlled experiment is a fork: change a message, a file or the model, or sample again, and
 compare the outcomes.
 
 **Agent-native operation.** Experiments with agents produce more data than a person can process
@@ -91,29 +91,26 @@ its events, and what each construct of a program writes in the log — an operat
 the inbox, a call, a failure, a loop, a comment — each with a figure. Then replay, routines,
 tools, `ask_user`, an agent, a run, and the driver that drives it.
 
-[`docs/log-schema.md`](docs/log-schema.md) — the log and cache schema: the entry and the event as
-stored, how runs grow and fork, draws, what a person appends, grading a point of a run by
-stopping a fork there, the data directory, the workspace snapshots kept in a restic repository,
-and the model cache entry.
+[`docs/log-schema.md`](docs/log-schema.md) — the log schema: an entry, the events as JSON, the
+forest of logs and its forks, the grader's protocol and its verdict, the data directory with its
+workspace snapshots, and the model cache entry.
 
-[`docs/llm-api.md`](docs/llm-api.md) — the LLM API. `Alaya.Chat` is the typed data of the
-chat-completions protocol: messages, tools, tool calls, structured output, requests, and
-responses. `Alaya.Model` is one interface for anything that answers a request, built by wrapping
-a provider transport in layers — retry, batching, sampling independence, a persistent response
-cache — each configured separately.
+[`docs/llm-api.md`](docs/llm-api.md) — the LLM API, step by step: a request and a response as
+typed values, structured output, a model as the draws of a request, the layers a model is built
+from — retry, batching, sharing of draws, a persistent cache — and models and the providers
+that serve them.
 
-[`docs/cli.md`](docs/cli.md) — the `alaya` command line, for scripts, UIs and agents: every
-command, how a command line is read, the data directory, text and JSON output, and one exit
-status per class of failure.
+[`docs/cli.md`](docs/cli.md) — the `alaya` command line, for scripts, UIs and agents: how a
+command line is read, text and JSON output, one exit status per class of failure, and every
+command with an example and a figure of what it does to the forest.
 
-[`docs/miniswe.md`](docs/miniswe.md) — the MiniSwe design. `Alaya.Agents.MiniSwe` is the port of
-mini-SWE-agent as a program: the original's prompts, cut from its `mini.yaml`, its `bash` tool,
-and protocol for reading a response and answering a malformed one, realized as a loop over the
-conversation, with Lean-native rendering, and commands run in a container.
+[`docs/miniswe.md`](docs/miniswe.md) — MiniSwe, the port of mini-SWE-agent: its options, what
+the model is sent, how it ends, how a command runs, long outputs and a full context, and how it
+differs from the original.
 
-[`docs/minivero.md`](docs/minivero.md) — MiniVero, the agent for Vero's Lean implementation and
-proof tasks: MiniSwe with its own prompts, a `proof` or `codeproof` mode, and a `time_budget`
-tool to pace a run by, graded by the Vero benchmark in `benchmarks/vero/`.
+[`docs/minivero.md`](docs/minivero.md) — MiniVero, MiniSwe with Vero's instructions for Lean
+implementation and proof tasks: its options, what the model is sent, how that differs from
+Vero's own instructions, and the `time_budget` tool a run is paced by.
 
 [`docs/style_guide.md`](docs/style_guide.md) — how Alaya looks: the colours, type, parts, icons
 and wording of the HTML report, and how the website and the diagrams take them up.

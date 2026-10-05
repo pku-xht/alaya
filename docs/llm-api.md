@@ -1,86 +1,109 @@
 # LLM API
 
-`Alaya.Model` gives every language model the same interface, and layers behaviour on top of it
-by wrapping: retry, batching, sampling independence, and a persistent response cache.
-
-## 1. The chat protocol
-
-`Alaya.Chat` is the data of the OpenAI chat-completions protocol. A conversation is a list of
-messages with roles; the model answers with a message that may carry tool calls; a tool's result goes back as a message of its own. The rest of the library works with these
-typed values; the provider's JSON is produced by `Chat.Request.toJson` and consumed by
-`Chat.Response.fromJson`.
-
-*One completion round trip: typed values in Lean, JSON on the wire.*
+A program of Alaya asks a model with `sample request` (`docs/agent-api.md` §3.1). This page is
+what stands behind that: the **request** and the **response** as typed values, and the
+**model** that turns one into the other. A model is a provider wrapped in layers, each with the
+same interface.
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
 flowchart TD
-  Messages["Message<br/>system · user · assistant · tool"]
-  Tools["ToolDefinition<br/>name · description · parameters"]
-  Request["Chat.Request"]
-  ReqJSON["JSON request<br/>messages · tools · tool_choice · response_format"]
-  Provider(("provider"))
-  RespJSON["JSON response<br/>choices[0].message · finish_reason · usage"]
-  Response["Chat.Response"]
-  Fields["content? · finishReason? · usage? · reasoning?"]
-  Calls["ToolCall, 0..n<br/>id · name · arguments · invalidArguments?"]
+  classDef sample stroke:#3567a0
 
-  Messages -- "1..n" --> Request
-  Tools -- "0..n" --> Request
-  Request -->|"Request.toJson"| ReqJSON
-  ReqJSON -->|"POST /chat/completions"| Provider
-  Provider --> RespJSON
-  RespJSON -->|"Response.fromJson"| Response
-  Response --> Fields
-  Response -- "0..n" --> Calls
+  caller("caller<br/>a sample of the agent")
+  subgraph layers["#160;#160;#160;each a Model: identity · structuredOutput · sample#160;#160;#160;"]
+    cache("Cache.persistent<br/>replays draws from disk")
+    batch("Model.batch<br/>how several draws are made")
+    retry("Model.retry<br/>repeats a transient failure")
+    transport("transport<br/>Chat Completions ·<br/>Responses API")
+  end
+  provider("provider<br/>apiyi · yunwu · xmcp · …"):::sample
+
+  caller -- "sample request" --> layers
+  cache -- "the missing draws" --> batch
+  batch --> retry
+  retry --> transport
+  transport -- "HTTP" --> provider
+  style layers color:#6f7985
+  linkStyle default stroke-width:1px
 ```
 
-### Messages
+| § | What | Where |
+| --- | --- | --- |
+| 1 | a **request**: messages, tools, and what the answer must be | `Alaya.Chat` |
+| 2 | a **response**: text, tool calls, usage, reasoning | `Alaya.Chat` |
+| 3 | **structured output**: an answer of a fixed JSON shape | `Alaya.Chat` |
+| 4 | a **model**: a request has a sequence of draws | `Alaya.Model` |
+| 5 | **layers**: retry, batch, sharing of draws, the persistent cache | `Alaya.Model`, `Alaya.Cache` |
+| 6 | **models and providers**: what is asked, and who serves it | `Alaya.Models`, `Alaya.Provider` |
+| 7 | **errors** | `Alaya.Error` |
+
+## 1. A request
 
 ```lean
+structure Request where
+  messages : Array Message
+  tools : Array ToolDefinition := #[]
+  toolChoice : ToolChoice := .auto           -- auto | none | required | function name
+  responseFormat : ResponseFormat := .text   -- text | jsonSchema name schema  (§3)
+
 inductive Message where
   | system (content : String)
   | user (content : String)
   | assistant (content? : Option String := none) (toolCalls : Array ToolCall := #[])
       (reasoning? : Option String := none) (reasoningItems : Array Lean.Json := #[])
   | tool (callId : String) (content : Lean.Json)
-```
 
-A **system** message sets the ground rules for the whole
-conversation. A **user** message is what the model is asked: the task at first, and later
-anything a person or the harness has to say. An **assistant** message is the model's turn — its
-text, the tool calls it decided to make, and the reasoning trace a thinking-mode provider
-returns. A **tool** message answers one call, named by its id, with whatever the tool produced.
-
-*The dialogue below, as an exchange.*
-
-```mermaid
-sequenceDiagram
-    participant H as harness
-    participant M as model
-    participant T as bash
-    Note over H,M: system: "You can run bash."
-    H->>M: user: "List the files."
-    M->>H: assistant: "Listing." + call c1 · bash {"command": "ls"}
-    H->>T: run ls
-    T->>H: "a.txt\nb.txt\n"
-    H->>M: tool c1: "a.txt\nb.txt\n"
-```
-
-```lean
-let dialogue : Array Chat.Message := #[
-  .system "You can run bash.",
-  .user "List the files.",
-  .assistant (some "Listing.") #[{ id := "c1", name := "bash", arguments := .mkObj [("command", "ls")] }],
-  .tool "c1" (.str "a.txt\nb.txt\n")]
-```
-
-### Tools and tool calls
-
-```lean
 structure ToolDefinition where
   name : String
   description : String
   parameters : JsonSchema
+```
+
+A request is a conversation and the tools the model may call. It is the data of the OpenAI
+chat-completions protocol, as typed values.
+
+| Message | Says |
+| --- | --- |
+| `system` | the ground rules of the conversation |
+| `user` | what the model is asked: the task, and later what a person or the agent has to say |
+| `assistant` | a turn of the model: its text, its tool calls, its reasoning |
+| `tool` | the result of one call, named by the call's id |
+
+A conversation grows by two messages a turn: the model's response, as an `assistant` message
+(`response.message`), and a `tool` message for each call it made.
+
+![A request, its response, and the next request](figures/llm-api/conversation.svg)
+
+```lean
+def bashTool : Chat.ToolDefinition := {
+  name := "bash", description := "Execute a bash command"
+  parameters := .object #[("command", .string (description? := some "The bash command to execute"))] }
+
+let request : Chat.Request := {
+  messages := #[.system "You can run bash.", .user "List the files."]
+  tools := #[bashTool] }
+```
+
+- **A tool's parameters are a `JsonSchema`** (§3), written with every property required and no
+  others allowed. The provider is not asked to enforce it, so an agent checks a call's
+  arguments itself (`Tool.check`, `docs/agent-api.md` §6).
+- **`toolChoice`** says what the model may do with the tools: `.auto` leaves it free,
+  `.required` makes it call one, `.function name` makes it call that one, `.none` forbids calls.
+- **A request has one serialization.** `Request.toJson` emits keys in sorted order, so equal
+  requests give equal strings. That is what lets a request name its draws (§4).
+
+## 2. A response
+
+```lean
+structure Response where
+  content? : Option String := none
+  toolCalls : Array ToolCall := #[]
+  finishReason? : Option String := none
+  usage? : Option TokenUsage := none          -- input?, output?, total?, cached?, reasoning?
+  reasoning? : Option String := none
+  reasoningItems : Array Lean.Json := #[]
+  elapsedMs? : Option Nat := none
 
 structure ToolCall where
   id : String
@@ -89,404 +112,298 @@ structure ToolCall where
   invalidArguments? : Option String := none
 ```
 
-A tool is declared with a `JsonSchema` for its parameters and offered to the model on every
-request. Schemas are always serialized in strict mode — every property required, no unspecified
-ones — so a tool's arguments are guaranteed to have exactly the declared keys.
+| Field | Holds |
+| --- | --- |
+| `content?` | the model's text |
+| `toolCalls` | the calls it decided to make, in order |
+| `finishReason?` | why it stopped: `stop`, `tool_calls`, or `length` when the provider cut it off |
+| `usage?` | the token counts the provider reports; each is optional, since providers differ |
+| `reasoning?`, `reasoningItems` | its reasoning, as text or as the provider's own items (§6) |
+| `elapsedMs?` | how long its draw took, where the cache measured it (§5.4) |
 
-A call's `arguments` come from the provider as a *string* the model wrote, and models do write
-strings that are not JSON, most often when a response is cut off by the output-token limit. The
-parser does not fail on that: `arguments` is `null` and `invalidArguments?` keeps the raw text.
+**Arguments that are not JSON.** A provider sends a call's arguments as a string the model
+wrote, and a model does write strings that are not JSON, most often when its response is cut
+off. Reading such a response does not fail: the call's `arguments` is `null`, and
+`invalidArguments?` keeps the text. What to do about it is the agent's to say; MiniSwe answers
+with a format error (`docs/miniswe.md`).
+
+## 3. Structured output
+
+Structured output asks the model for a JSON value of a shape fixed in advance, so that a program
+reads the answer.
 
 ```lean
-def bashTool : Chat.ToolDefinition := {
-  name := "bash", description := "Execute a bash command"
-  parameters := .object #[("command", .string (description? := some "The bash command to execute"))] }
-
-let request : Chat.Request := { messages := dialogue, tools := #[bashTool] }
+inductive JsonSchema where
+  | null | boolean                                     -- each with an optional description
+  | integer | number | string                          -- and an optional list of allowed values
+  | array (items : JsonSchema)
+  | object (properties : Array (String × JsonSchema))  -- all required, no others allowed
+  | anyOf (alternatives : Array JsonSchema)            -- a nullable value is anyOf #[schema, .null]
 ```
 
-### Structured output
+1. The request names the shape: `responseFormat := .jsonSchema name schema`.
+2. The model's `structuredOutput` mode says how the shape reaches the provider:
 
-Normally the model answers in prose. Structured output asks it to answer with a JSON value of a
-shape the caller fixes in advance, so the answer can be read by a program instead of parsed out
-of text.
+   | Mode | The schema is sent | The reply is |
+   | --- | --- | --- |
+   | `native` | as the request's `response_format` | constrained by the provider to the shape |
+   | `markdownCodeFence` | as an instruction at the end of the last user message | JSON inside a ` ```json ` fence, cut out of the text |
 
-The format is defined by a `JsonSchema`: `null`, `boolean`, `integer`,
-`number`, and `string`, each with an optional description and an optional list of allowed
-values; `array` of one schema; `object` with named properties, all of them required and no
-others allowed; and `anyOf` over alternatives (which is also how a nullable property is written,
-`anyOf #[schema, .null]`).
-
-How the shape is enforced depends on the provider, and `StructuredOutput` records which way a
-given `Model` does it:
-
-- **`native`.** The schema is sent as the request's `response_format`, and the provider
-  constrains generation so the reply *is* a value of that shape.
-- **`markdownCodeFence`.** For providers without that feature. The schema is appended to the
-  last user message as an instruction to reply with matching JSON inside a ` ```json ` fence,
-  and the reply is cut out of the fence.
-
-Either way, `Response.structured` parses the content and validates it against the schema, so the
-caller sees one behaviour: a `Json` value that is known to have the shape, or an
-`Error.structuredOutput` saying where it did not.
+3. `response.structured schema` parses the content and checks it against the schema. Either
+   way the caller gets a `Json` value known to have the shape, or `Error.structuredOutput`
+   saying where it did not.
 
 ```lean
 let verdict := JsonSchema.object #[
   ("passed", .boolean),
-  ("failing", .array (.string (description? := some "a test id"))),
-  ("summary", .string)]
+  ("failing", .array (.string (description? := some "a test id")))]
 
-let request : Chat.Request := {
-  messages := #[.user "Here is the pytest output. Did the suite pass?\n" ++ pytestOutput]
-  responseFormat := .jsonSchema "verdict" verdict }
-
-let response ← (← model.sample request).next
--- response.content? is the model's text, for example:
---   {"passed": false, "failing": ["test_program[errors/compile_bad_escape]"], "summary": "1 of 464 failed"}
--- or, under markdownCodeFence, the same JSON between ```json and ``` in prose
-
-match ← (response.structured verdict).toBaseIO with
-| .ok json =>
-  -- json is that object, validated: `passed` a Bool, `failing` an array of strings,
-  -- `summary` a string, no other keys
-  pure json
-| .error (.structuredOutput reason) =>
-  -- the content was prose, not JSON, or JSON of the wrong shape; `reason` says which and where:
-  --   "response content is not valid JSON"
-  --   "failing[1]: expected a string"
-  --   "missing required property `summary`"
-  --   "contains an unspecified property"
-  throw <| .structuredOutput reason
-| .error other => throw other   -- a transport or protocol failure, as for any sample
+let response ← (← model.sample { messages, responseFormat := .jsonSchema "verdict" verdict }).next
+let json ← response.structured verdict
+-- {"passed": false, "failing": ["test_program[errors/compile_bad_escape]"]}
+-- or an error: "failing[1]: expected a string", "missing required property `passed`"
 ```
 
-### Responses
-
-```lean
-structure Response where
-  content? : Option String := none
-  toolCalls : Array ToolCall := #[]
-  usage? : Option TokenUsage := none
-  finishReason? : Option String := none
-  reasoning? : Option String := none
-  reasoningItems : Array Lean.Json := #[]
-  elapsedMs? : Option Nat := none     -- how long its draw took, where the cache measured it
-```
-
-`fromJson` reads the first choice. `finishReason?` matters to agents: mini-SWE-agent
-distinguishes a response the provider truncated (`length`, or `tool_calls` with no calls) from a
-formatting mistake. `usage?` holds whichever token counts the provider reports; every field is
-optional because providers differ.
-
-### Requests
-
-```lean
-structure Request where
-  messages : Array Message
-  tools : Array ToolDefinition := #[]
-  toolChoice : ToolChoice := .auto
-  responseFormat : ResponseFormat := .text
-```
-
-`toolChoice` says what the model may do with the tools: `.auto` leaves it free, `.required`
-makes it call one, `.function name` makes it call that one, and `.none` forbids calls for this
-request. `Request.toJson` is deterministic: keys are emitted in sorted order, so equal requests produce
-equal strings, which is what makes the request usable as a cache key (§3). It takes the model's
-`StructuredOutput` mode, since that decides whether a schema travels as `response_format` or as
-an instruction in the last message.
-
-## 2. The model interface
-
-`Alaya.Model` is the interface for anything that answers a request: a provider, or a provider
-with retries, batching, or a cache added around it (§3).
+## 4. A model
 
 ```lean
 structure Model where
-  identity : Lean.Json                -- what is answering: the model's recorded spec
+  identity : Lean.Json                         -- what is answering
   structuredOutput : Chat.StructuredOutput := .native
-  sample : Chat.Request -> Result Model.Stream
+  sample : Chat.Request → Result Model.Stream
 
 structure Model.Stream where
-  next : Result Chat.Response          -- the next draw
-  -- (a private field holds a layer's own way to draw several at once, when it has one)
+  next : Result Chat.Response                  -- the next draw
 
-def Model.Stream.nextN : Stream -> Nat -> Result (Array Chat.Response)   -- the next n draws
+Model.Stream.nextN : Stream → Nat → Result (Array Chat.Response)    -- the next n draws
+Model.cacheKey      : Model → Chat.Request → String
+Model.requestDigest : Chat.Request → Hash
 ```
 
-**Stream.** Sampling is random: the same request asked twice gives two different answers. So a
-request does not have *an* answer; it has a sequence of draws, and `sample` returns that sequence
-as a `Stream`. `next` gives the next draw, `nextN` the next several.
+1. **A request has draws, not an answer.** Sampling is random: the same request asked twice
+   gives two responses. So `sample request` gives a `Stream`, the sequence of the request's
+   **draws**, and `next` takes the next one.
+2. **`nextN n` takes several.** By default it calls `next` `n` times. A layer that has a
+   cheaper way, such as a provider asked for `n` completions in one request, supplies its own.
+3. **`identity` says what is answering**: the model's spec (§6), and never the provider. So the
+   same model's answers are the same draws, whoever served them.
+4. **`cacheKey` names a sequence of draws**: the identity and the request, as one JSON string
+   with sorted keys. Two requests with the same key have the same draws.
 
-**Drawing several.** `nextN n` could simply call `next` n times, and by default it does. But a
-model may have a cheaper way: a provider can be asked for n completions in one request, and the
-concurrent batcher (§3) sends n requests at the same time. Such a model puts that way into the
-stream's private field, and `nextN` uses it when present.
+   ```json
+   {"model":{"context_tokens":null,"echo_reasoning":"none","name":"gpt-5.6-luna", …},
+    "request":{"messages":[…],"response_format":{"type":"text"},"tool_choice":"auto","tools":[…]},
+    "structured_output":"native"}
+   ```
 
-**Identity.** `identity` is a JSON value that says what is answering: for a provider's model,
-its spec (`Models.Spec`) — the model's name, its `params`, and whether its earlier reasoning is
-sent back — and never the provider, so the same model's answers are the same draws whoever
-served them.
+   The request is in its Chat Completions form, which has no field for reasoning items (§6).
+   When earlier assistant messages carry some, the key holds them in a field of its own, so two
+   requests that differ only in them have different draws.
 
-**The cache key.** `Model.cacheKey request` names a draw sequence as a string, so that the cache
-(§3) can store and find the draws of a request. It is the identity and the request together,
-serialized as one JSON object with sorted keys and no whitespace:
+5. **`requestDigest` names a request alone**, whichever model it goes to. It is what a log
+   keeps of the request a response answered (`docs/agent-api.md` §3.1).
 
-```json
-{"model":{"context_tokens":null,"echo_reasoning":"none","name":"gpt-5.6-luna","output_tokens":null,"params":{"temperature":0}},
- "request":{"messages":[{"content":"You can run bash.","role":"system"},{"content":"List the files.","role":"user"}],
-            "response_format":{"type":"text"},"tool_choice":"auto","tools":[...]},
- "structured_output":"native"}
-```
+## 5. Layers
 
-The request is its Chat Completions form, which has no field for the Responses API's reasoning
-items. So when earlier assistant messages carry some, the key adds a `reasoning_items` field of
-`[position, items]` pairs: two requests that differ only in them are different requests, and a
-request with none keys exactly as it would without the field.
-
-
-## 3. Layers
-
-A `Model` is built by wrapping. The provider transport is the innermost layer, and each adapter
-takes a `Model` and returns one with one more behaviour, so layers compose in any order and are
-configured separately. A typical stack is provider → retry → batch → cache.
-
-*The model stack: providers wrapped by retry, batch, and cache adapters, all sharing one interface.*
-
-```mermaid
-flowchart BT
-    subgraph Providers["Providers (Chat Completions, or the Responses API per route)"]
-        direction LR
-        yunwu["yunwu"]
-        closeai["closeai"]
-        xmcp["xmcp"]
-        apiyi["apiyi"]
-        dgx["dgx"]
-    end
-
-    Transport["ChatCompletions.model / Responses.model"]
-    Retry["Model.retry"]
-    Batch["Model.batch"]
-    Cache["Cache.persistent"]
-    Caller(["caller"])
-
-    Providers -- "POST baseUrl/chat/completions or baseUrl/responses" --> Transport
-    Transport -- "adds the provider's model name, params, n>1; parses Chat.Response" --> Retry
-    Retry -- "retries 408/409/425/429/5xx; bigger 429 budget, honors Retry-After" --> Batch
-    Batch -- "native / concurrent (semaphore) / sequential n draws" --> Cache
-    Cache -- "replays cache/hash(key).json; extends entry on miss" --> Caller
-
-    Iface["Model = { identity: Json, structuredOutput, sample: Request -> Stream }"]
-    Iface -.shared shape.-> Transport
-    Iface -.shared shape.-> Retry
-    Iface -.shared shape.-> Batch
-    Iface -.shared shape.-> Cache
-
-    Caller -- "model.sample request" --> Stream["Stream { next, nextN }"]
-```
-
-### Models and providers
-
-A model is named independently of who serves it, by its ID as its creator publishes it
-(`gpt-oss-120b`, `deepseek-v4.1-flash`), and its defaults are a row of the model table,
-`Alaya.Models`: a `Spec` of `params` — request fields sent as they are, such as `temperature`
-or `reasoning_effort` — whether its earlier reasoning is sent back, and the context
-and output sizes when known. A run's configuration holds the complete spec (`docs/cli.md` §5).
-
-A provider is who serves it, chosen per invocation (`run --provider NAME`). Providers are
-data, in `Alaya.Provider`:
-
-| Provider | Default endpoint | Key variable | Endpoint override | Serves |
-| --- | --- | --- | --- | --- |
-| `yunwu` | `https://yunwu.ai/v1` | `YUNWU_API_KEY` | `YUNWU_BASE_URL` | any model, under its own name |
-| `closeai` | `https://api.openai-proxy.org/v1` | `CLOSEAI_API_KEY` | — | any model, under its own name |
-| `xmcp` | `https://llm.xmcp.ltd` | `XMCP_API_KEY` | — | any model; `deepseek-v4.1-flash` as `ds/deepseek-v4-flash`, `gpt-5.6-luna` as `closeai/gpt-5.6-luna` |
-| `apiyi` | `https://api.apiyi.com/v1` | `APIYI_API_KEY` | `APIYI_BASE_URL` | any model, under its own name; `gpt-6-luna` through the Responses API |
-| `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `FIREWORKS_BASE_URL` | only `deepseek-v4.1-flash`, as `accounts/fireworks/models/deepseek-v4p1-flash` |
-| `dgx` | `http://10.42.0.1:8000/v1` | `DGX_API_KEY`, default `EMPTY` | `DGX_BASE_URL`, or `--url`/`--port` | any model, under its own name |
-
-How a provider serves one model is a **route**: the provider's name for it, the API it speaks
-(Chat Completions unless it says the Responses API), and what it declares it can do — whether it
-requires, accepts or rejects earlier reasoning sent back as text, and the largest context and
-response it takes. `Provider.serve provider spec` finds the route and checks the
-spec's requirements against it before any request is sent: a provider that cannot meet them is
-refused (`input`, exit 65), so changing providers either sends the model the same requests or
-fails loudly. The agent may behave differently with different models, but never with different
-providers. A missing key is an environment error, except for `dgx`, where `EMPTY` is the vLLM
-convention for a server that needs no credential. `--url` accepts anything from a bare host to a
-full URL and fills in `http`, port `8000`, and `/v1`; `--port` wins over a port inside `--url`.
-
-A route speaks one of two transports, which share their HTTP layer (`Provider.Http`).
-`Provider.ChatCompletions` serializes the request with
-`Request.toJson`, adds the route's model name, the spec's `params` and nothing else (and `n` for
-several draws), and POSTs it with `curl` to `<baseUrl>/chat/completions` under a connect timeout
-of 30 s and a total timeout of 10 minutes. HTTP failures become `Error.http status body
-retryAfterMs?`, with `Retry-After` parsed from the headers; curl failures become
-`Error.transport`. Its identity is the spec alone. A response's usage keeps, besides input and
-output tokens, the input tokens the provider served from its prompt cache
-(`prompt_tokens_details.cached_tokens`, or DeepSeek's `prompt_cache_hit_tokens`) and the
-reasoning tokens a model reports spending (`completion_tokens_details.reasoning_tokens`), so the
-cache's reuse and the cost of a reasoning level can be measured.
-
-`Provider.Responses` speaks OpenAI's Responses API, `POST <baseUrl>/responses`, from the same
-`Chat.Request` to the same `Chat.Response`. The system prompt and user turns become input
-messages, tool results `function_call_output` items, and an assistant turn its reasoning items,
-its text, and its `function_call` items, in the order the model produced them. Tools are sent in
-the flat function format, not strict, as with Chat Completions; structured output is
-`text.format`. A spec's `params` keep their Chat Completions names, and the transport renames the
-two the Responses API names otherwise, `reasoning_effort` to `reasoning.effort` and
-`max_tokens` to `max_output_tokens`, so a spec means the same through either API. Requests are
-stateless, `store: false`: the provider keeps nothing, and the log holds the whole conversation.
-`status` and `incomplete_details` are read as Chat Completions' finish reasons — `tool_calls`,
-`stop`, `length` — which agents read, and usage from `input_tokens`, its `cached_tokens`,
-`output_tokens` and its `reasoning_tokens`. The API has no `n`, so draws are separate requests.
+A layer takes a `Model` and gives a `Model` with one more behaviour. Layers are configured
+separately and stack in any order. The driver builds this stack for a run (`Driver.buildModel`):
 
 ```lean
-let spec ← Models.resolve "deepseek-v4.1-flash" #[]
-let some apiyi := Provider.named? "apiyi" | …
-let model ← Provider.serve apiyi spec
+let base  ← Provider.serve provider spec               -- the transport (§6)
+let model ← base.retry { retryUnknownDelivery := true }
+let model ← model.batch .sequential
+Cache.persistent model { directory := cacheDir }
 ```
 
-**Reasoning echo.** A thinking-mode model such as DeepSeek returns, with each assistant message,
-a `reasoning_content`: the trace it thought through before answering. The view keeps it, so the
-transport sends each recorded trace back with its message, as it was received. With tool calls,
-DeepSeek's API also rejects a request in which an earlier assistant message lacks the field, and
-a gateway that re-encodes the conversation for another vendor may need it on every reasoned turn
-to reconstruct it. So with `echo_reasoning` `text` in the model's spec — as `deepseek-v4.1-flash` has
-it — the transport gives every assistant message the field: its own recorded trace, or `""`
-where none was recorded, such as another model's turn or a person's, which the provider accepts
-as present. Otherwise no field is added; other models reject the unknown field.
+### 5.1 Retry
 
-An OpenAI reasoning model such as `gpt-6-luna` keeps its reasoning otherwise: the Responses API
-returns it as **reasoning items**, encrypted, which must be sent back for the model to continue
-its chain of thought across tool calls; Chat Completions has no field for them, so through it
-every turn reasons afresh. With `echo_reasoning` `items`, as `gpt-6-luna` has it, the transport
-asks for them (`include: ["reasoning.encrypted_content"]`, with `reasoning.summary` `auto` for a
-readable summary), the response records them as received, and every later request sends each
-turn's items back before its text and calls. The HTML report gives the summary, and of the
-encrypted items only how many there are; `show` prints the stored response whole, items
-included.
-
-`echo_reasoning` is thus `none`, `text` or `items`, and a route must honour it: `text` needs Chat
-Completions, `items` the Responses API, and a route that cannot is refused before any request.
-A run that records items can therefore be continued only through a provider that serves the
-model through the Responses API.
-
-Recorded reasoning, as text or as items, is never changed or dropped, so a message serializes
-the same on every later request and the provider can keep reusing the prefix it has cached. The cost is the earlier
-traces in input tokens. This is how the DeepSeek harness handles it too (its
-`dsh-llm-deepseek` adapter). Shortening the context, if requests grow too large, must keep the
-prefix stable in the same way: dropping old reasoning in large blocks, not a sliding window.
-
-### Retry
-
-`Model.retry config` repeats a failed draw when the failure is transient, with capped exponential
+`model.retry config` repeats a draw that failed in a way that may pass, with capped exponential
 backoff and jitter.
 
-| Failure | Retried? |
+| Failure | Retried |
 | --- | --- |
-| HTTP 408, 409, 425, 5xx | yes, up to `maxAttempts` (3) |
-| HTTP 429 | yes, on a separate larger budget (8), honouring the server's `Retry-After` |
-| transport (timeout, dropped connection) | only with `retryUnknownDelivery`: the provider may have processed the request before the line died |
-| structured-output mismatch, malformed response | only with `retryStructuredOutput` / `retryMalformedResponse`: another sample may satisfy the schema, but one the model cannot satisfy fails the same way every time |
-| input, environment, busy, provider, cache, storage | never |
+| HTTP 408, 409, 425, 5xx | up to `maxAttempts` (3) |
+| HTTP 429 | on a larger budget of its own (8), waiting as the server's `Retry-After` says |
+| transport: a timeout, a dropped connection | only with `retryUnknownDelivery`, since the provider may have answered already |
+| a malformed response, an answer of the wrong shape | only with `retryMalformedResponse`, `retryStructuredOutput` |
+| anything else | never |
 
-```lean
-let model ← model.retry { retryUnknownDelivery := true }
-```
+### 5.2 Batch
 
-### Batch
+`model.batch mode` says how `nextN n` is served.
 
-`Model.batch mode` decides how `nextN n` is served when a layer above asks for several draws.
-
-| Mode | Behaviour |
+| Mode | `n` draws are made |
 | --- | --- |
-| `.native` | pass `n` to the inner model in one call |
-| `.sequential` | one draw at a time, ignoring any native implementation below |
-| `.concurrent maxInFlight?` | all `n` requests in flight at once on dedicated threads, bounded by a semaphore shared across the model's streams so fan-out cannot rate-limit the provider |
+| `.native` | by the model inside, in one call |
+| `.sequential` | one at a time |
+| `.concurrent maxInFlight?` | all at once, each on a thread of its own, at most `maxInFlight?` in flight across all streams of the model |
+
+### 5.3 Sharing draws
+
+Two callers that send the same request either want the same answers or must not get them. Two
+layers say which, for the callers of one process:
+
+| Layer | Two streams over one request |
+| --- | --- |
+| `model.repeatable` | each reads the sequence from its start: the same question gets the same answers |
+| `model.independent` | share one position: no two callers get the same draw |
+
+![Which draws two callers get under each layer](figures/llm-api/draws.svg)
+
+Which samples of a workflow must be independent, and how a cache of responses keeps them so, is
+the subject of Dai et al. (2026), which this design follows.
+
+### 5.4 The persistent cache
+
+`Cache.persistent model { directory }` keeps every draw on disk, under its request's key.
+
+1. A stream over a request reads the request's entry from draw 0.
+2. A draw that is there is given back: no call to the provider.
+3. A draw that is missing is sampled from the model inside, timed, appended to the entry, and
+   saved atomically.
+4. Every response the cache gives carries the time its draw took (`elapsedMs?`), the same on
+   the miss and on every later hit.
+
+![The cache gives back the draws it has, and samples the one it lacks](figures/llm-api/cache.svg)
+
+- With `readOnly`, a missing draw is an error: a way to prove a replay called no provider.
+- One process writes a cache directory at a time; within it, streams take turns at an entry.
+- The entry's file is specified in `docs/log-schema.md` §6. Which draw a run takes at a point
+  of its log, and so how a fork samples again, is `docs/agent-api.md` §10.
+
+## 6. Models and providers
+
+A **model** is what is asked, and a **provider** is who serves it. A run records its model and
+never its provider: a provider is chosen each time a run is driven (`run --provider`,
+`docs/cli.md`).
 
 ```lean
-let model ← model.batch (.concurrent (some 8))
+structure Models.Spec where        -- a model: what a run records, and the Model's identity
+  name : String                    -- its ID as its creator publishes it: gpt-6-luna
+  params : Lean.Json               -- request fields sent as they are: temperature, reasoning_effort
+  echoReasoning : Echo             -- none | text | items: how its earlier reasoning is sent back
+  contextTokens? outputTokens? : Option Nat
+
+structure Provider where           -- who serves models
+  name baseUrl keyVar : String
+  routes : List (String × Route)   -- how it serves particular models
+  anyModel : Bool := true          -- whether it serves a model it has no route for, under its own name
+
+structure Route where              -- how a provider serves one model
+  name : String                    -- the provider's name for it
+  api : Api := .chatCompletions    -- or .responses
+  structuredOutput : Chat.StructuredOutput := .native
+  reasoningEcho : EchoSupport      -- required | accepted | rejected
+  contextTokens? outputTokens? : Option Nat
+
+Provider.serve : Provider → Models.Spec → Result Model
 ```
 
-### Sampling independence
-
-Two adapters state, in the type, how draws are shared between callers in one process.
-`Model.repeatable` memoizes draws per cache key, so two streams over the same request see the
-same sequence: the same question asked twice gets the same answers. `Model.independent` shares
-one stream per request key, so two callers split one sequence between them and never see the
-same draw: fan-out that must not duplicate. Which samples of a workflow must be independent, and
-how a cache of responses keeps them so, is the subject of Dai et al. (2026), which this design
-follows.
-
-```lean
-let shared ← model.independent
-```
-
-### Persistent cache
-
-`Cache.persistent config` replays recorded draws from disk and extends the entry on a miss. The
-entry for a key lives at `cache/<hash key>.json` (Lean's generic `hash` of the key string) and
-holds every draw recorded so far, each with the time the model took to give it. A stream over a
-request walks the entry from index 0; `nextN n` returns cached draws and asks the inner model
-only for the missing ones, timing the call, then saves atomically. Every response the cache gives
-carries its draw's time in `elapsedMs?`, the same on a miss and on every later hit, so what a
-response cost does not depend on when it is read.
-In `readOnly` mode a miss is an error, which is how a replay proves it never called a provider.
-Concurrent streams in one process serialize extensions of the same entry; a cache directory must
-not be written by two processes.
-
-```lean
-let model ← Cache.persistent model { directory := "runs/cache" }
-```
-
-*A cache lookup by draw index: replay on a hit, a provider call for the missing draws on a miss.*
+`Provider.serve provider spec` gives the innermost `Model`, the transport, after checking that
+the provider can serve the model as the run recorded it:
 
 ```mermaid
-sequenceDiagram
-    participant T as caller
-    participant C as Cache.persistent
-    participant M as Inner model (provider)
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
+flowchart TD
+  classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
+  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
 
-    Note over T: has used draws 0..n-1 of this request before
-    T->>C: sample(request).nextN(n+1)
-    C->>C: key = compress({model: identity, structured_output, request})
-    C->>C: load cache/hash(key).json -> responses[0..k)
-    alt k >= n+1
-        Note over C: replay - no provider call
-        C-->>T: responses[0..n]
-    else k < n+1
-        C->>M: nextN(n+1-k) for the missing draws
-        M-->>C: new responses
-        C->>C: append to entry
-        C->>C: save atomically (write temp, rename)
-        C-->>T: responses[0..n]
-    end
-    Note over T: uses responses[n], the first new draw
-    Note over T,M: recorded draws replay without a provider call
+  start("Provider.serve provider spec")
+  subgraph checks[" "]
+    serves("does the provider<br/>serve this model?")
+    echo("can its route send back<br/>reasoning as the spec asks?<br/>text needs Chat Completions ·<br/>items the Responses API")
+    sizes("does the route take the spec’s<br/>context and output sizes?")
+    key("is the provider’s key<br/>in the environment?")
+  end
+  model("a Model over the route’s API<br/>its identity is the spec alone"):::ok
+  r1("refused: input<br/>the provider does not serve it"):::bad
+  r2("refused: input<br/>the reasoning echo does not fit"):::bad
+  r3("refused: input<br/>the route is too small"):::bad
+  r4("refused: environment<br/>the key is not set"):::bad
+
+  start --> serves
+  serves -- "yes" --> echo
+  serves -- "no" --> r1
+  echo -- "yes" --> sizes
+  echo -- "no" --> r2
+  sizes -- "yes" --> key
+  sizes -- "no" --> r3
+  key -- "yes" --> model
+  key -- "no" --> r4
+  style checks fill:none,stroke:none
+  linkStyle default stroke-width:1px
 ```
 
-The same identity, the same request, and the same index always yield the same response.
+So changing providers either sends the model the same requests or fails before any is sent. An
+agent may behave differently with different models, but never with different providers.
 
-## 4. Errors
+| Provider | Default endpoint | Key variable | Serves |
+| --- | --- | --- | --- |
+| `yunwu` | `https://yunwu.ai/v1` | `YUNWU_API_KEY` | any model, under its own name |
+| `closeai` | `https://api.openai-proxy.org/v1` | `CLOSEAI_API_KEY` | any model, under its own name |
+| `xmcp` | `https://llm.xmcp.ltd` | `XMCP_API_KEY` | any model; `deepseek-v4.1-flash` as `ds/deepseek-v4-flash`, `gpt-5.6-luna` as `closeai/gpt-5.6-luna` |
+| `apiyi` | `https://api.apiyi.com/v1` | `APIYI_API_KEY` | any model; `gpt-6-luna` through the Responses API |
+| `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | only `deepseek-v4.1-flash`, as `accounts/fireworks/models/deepseek-v4p1-flash` |
+| `dgx` | `http://10.42.0.1:8000/v1` | `DGX_API_KEY`, default `EMPTY` | any model, under its own name |
 
-Every operation runs in `Result α := EIO Error α`. The constructors decide what is retryable, and
-each belongs to one `Error.Class` — what a caller does about it — which is how a front end
-reports it: the `alaya` command line exits with one status per class
+`yunwu`, `apiyi`, `fireworks` and `dgx` take another endpoint from `NAME_BASE_URL`; `dgx` also
+from `--url` and `--port`. `alaya config` lists the models and the providers.
+
+### The two transports
+
+A route speaks one of two APIs. Both take the same `Chat.Request` and give the same
+`Chat.Response`, so nothing above the transport knows which was used.
+
+| | Chat Completions | Responses API |
+| --- | --- | --- |
+| request | `POST <baseUrl>/chat/completions` | `POST <baseUrl>/responses`, stateless (`store: false`) |
+| the conversation | `messages`, as `Request.toJson` gives them | input items: messages, `function_call`, `function_call_output` and reasoning items, in the model's order |
+| the spec's `params` | sent as they are | the same names; `reasoning_effort` and `max_tokens` renamed to `reasoning.effort` and `max_output_tokens` |
+| structured output | `response_format` | `text.format` |
+| several draws | `n` in one request | a request each |
+| finish reason | as sent | read off `status` and `incomplete_details` as `stop`, `tool_calls`, `length` |
+
+Both send the request with `curl`, under a connect timeout of 30 s and a total of 10 minutes,
+and read the usage with its cached and reasoning tokens.
+
+### Reasoning sent back
+
+A reasoning model returns its reasoning with each turn, and may need it sent back with the
+conversation. The spec's `echo_reasoning` says how, and a route must be able to do it:
+
+| `echo_reasoning` | Sent back with each assistant message | Needs | Set for |
+| --- | --- | --- | --- |
+| `none` | nothing | | most models |
+| `text` | its `reasoning_content`; `""` where none was recorded | Chat Completions | `deepseek-v4.1-flash`, whose API rejects an earlier turn without it |
+| `items` | its encrypted reasoning items, before its text and calls | the Responses API | `gpt-6-luna`, which otherwise reasons afresh every turn |
+
+Recorded reasoning is never changed or dropped. So a message serializes the same in every later
+request, and the provider can reuse the prefix it has cached; the cost is the earlier reasoning
+in input tokens. A run that records items can be driven on only through a provider that serves
+its model through the Responses API.
+
+## 7. Errors
+
+Every operation runs in `Result α := EIO Error α`. Each constructor of `Error` has a class,
+which says what a caller does about it; the command line exits with one status per class
 (`docs/cli.md` §4).
 
-| Constructor | Meaning | Class |
+| Constructor | Means | Class |
 | --- | --- | --- |
-| `input` | the request names something that is not there, is in the wrong condition, or is malformed: an unknown entry, a reply where no question waits, a setting that names no field, a non-finite temperature | `input` |
-| `environment` | the machine lacks something: docker or its daemon, an image, restic, an API key | `environment` |
-| `busy` | another process is writing the data directory (`Alaya.Lock`) | `transient` |
+| `input` | the request names something not there, in the wrong condition, or malformed | `input` |
+| `environment` | the machine lacks something: docker, an image, restic, an API key | `environment` |
+| `busy` | another process is writing the data directory | `transient` |
 | `transport` | the request may or may not have arrived | `transient` |
-| `http status body retryAfterMs?` | the provider answered with a failure | `transient` for 408, 409, 425, 429 and 5xx, the statuses `Retry` retries; `model` otherwise |
-| `contextExceeded` | the provider refused the request as too long for the model's context: a 400, 413 or 422 whose error says so, in OpenAI's code `context_length_exceeded` or the usual words ("maximum context length", "context window", "prompt is too long"); the driver logs it as the sample's answer, the one failure of a provider it does not stop at, and MiniSwe ends with `ContextExceeded` (`docs/agent-api.md` §3.4) | `model` |
-| `provider` | a provider-specific failure that is none of the above | `model` |
+| `http status body retryAfterMs?` | the provider answered with a failure | `transient` for 408, 409, 425, 429 and 5xx; `model` otherwise |
+| `contextExceeded` | the provider refused the request as too long for the model's context: a 400, 413 or 422 whose error says so | `model` |
+| `provider` | a failure of the provider that is none of the above | `model` |
 | `protocol` | a payload that is not the chat protocol | `model` |
-| `structuredOutput` | the reply did not satisfy the requested schema | `model` |
-| `cache` | the response cache could not be read or extended | `storage` |
-| `storage` | reading or writing the entries, or a workspace snapshot, failed | `storage` |
+| `structuredOutput` | the reply is not of the requested shape | `model` |
+| `cache` | the cache could not be read or extended | `storage` |
+| `storage` | the entries or a workspace snapshot could not be read or written | `storage` |
+
+`contextExceeded` is the one failure of a provider that a run goes on from: the driver logs it
+as the sample's answer, and the agent deals with it (`docs/agent-api.md` §3.4).
 
 ## References
 

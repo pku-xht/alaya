@@ -1,8 +1,12 @@
 # Agent API
 
-An agent of Alaya is a **program**: a value that says what to ask the world for next, and
-carries out nothing. A **run** of it is a **log**: the flat, append-only list of what happened.
-Between them is the **driver**: it reads the log with the program to find what the program asks
+Alaya represents an agent as an effectful program in free-monad form and runs it by durable
+execution: replay against an append-only log of events. The logs form a forest, so any point of
+a run, with its workspace, can be forked and resampled.
+
+In Alaya's own terms there are three parts. The **program** is a value that says what to ask the
+world for next, and carries out nothing. The **log** is the flat, append-only list of what
+happened in a run. The **driver** reads the log with the program to find what the program asks
 next, carries that out, and appends the answer.
 
 ```mermaid

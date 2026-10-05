@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 283" width="920" height="283">
+<title>How a run is graded: what goes into the grader’s container, and what comes out of it</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}</style>
+<rect width="920" height="283" fill="#fff"/>
+<text x="12" y="14" class="s">what goes in</text>
+<text x="282" y="14" class="s">the grader runs</text>
+<text x="622" y="14" class="s">what comes out</text>
+<rect x="282.5" y="26.5" width="295" height="241" rx="6" fill="#fafbfc" stroke="#d3d9e0"/>
+<rect x="296.5" y="56.5" width="100.9" height="32" rx="6" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="307" y="76" class="ch">the workdir</text>
+<text x="296" y="103" class="s">the checkout, read-write</text>
+<path class="a" d="M244,73H286"/><path fill="#a3abb5" d="M290,73l-5,-2.5v5z"/>
+<rect x="296.5" y="132.5" width="100.9" height="32" rx="6" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="307" y="152" class="ch">/grader</text>
+<text x="296" y="179" class="s">the input, read-only</text>
+<path class="a" d="M244,149H286"/><path fill="#a3abb5" d="M290,149l-5,-2.5v5z"/>
+<rect x="296.5" y="208.5" width="158.9" height="32" rx="6" fill="#f6f7f9" stroke="#2b6f6f"/>
+<text x="307" y="228" class="ch">sh /grader/grade.sh</text>
+<text x="296" y="255" class="s">the grader’s command, with a time limit</text>
+<text x="296" y="44" class="s">a container of the grader’s image · no network</text>
+<rect x="12.5" y="56.5" width="225" height="32" rx="6" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="23" y="76" class="ch">a fresh checkout</text>
+<text x="12" y="51" class="s">the workspace at the graded entry</text>
+<text x="12" y="103" class="s">as the log had it there</text>
+<rect x="12.5" y="132.5" width="225" height="32" rx="6" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="23" y="152" class="ch">trusted files: hidden tests</text>
+<text x="12" y="127" class="s">the grader’s input</text>
+<text x="12" y="179" class="s">snapshotted when the grader is assigned</text>
+<rect x="622.5" y="56.5" width="149" height="83" rx="6" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="633" y="76" class="ch">1..3</text>
+<text x="633" y="93" class="ch">ok 1 - parses</text>
+<text x="633" y="110" class="ch">ok 2 - runs</text>
+<text x="633" y="127" class="ch">not ok 3 - errors</text>
+<text x="622" y="51" class="s">stdout: TAP</text>
+<path class="a" d="M584,98.5H612"/><path fill="#a3abb5" d="M616,98.5l-5,-2.5v5z"/>
+<path class="a" d="M778,98.5H843.7"/><path fill="#a3abb5" d="M847.7,98.5l-5,-2.5v5z"/>
+<rect x="853.7" y="89.5" width="54.3" height="18" rx="9" fill="#f8dfdd"/><text x="880.9" y="102.5" class="s n" style="fill:#8a2a25" text-anchor="middle">fail 2/3</text>
+<text x="810.9" y="92.5" class="s" text-anchor="middle">read as</text>
+<text x="908" y="122.5" class="s" text-anchor="end">the verdict:</text>
+<text x="908" y="136.5" class="s" text-anchor="end">the result of the run</text>
+<text x="622" y="158" class="s">stderr and the exit status are kept,</text>
+<text x="622" y="172" class="s">and decide nothing</text>
+<rect x="622.5" y="208.5" width="149" height="32" rx="6" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="633" y="228" class="ch">a snapshot</text>
+<text x="622" y="203" class="s">the checkout as the grader left it</text>
+<text x="622" y="255" class="s">kept with the verdict; the run’s</text>
+<text x="622" y="269" class="s">workspace does not move</text>
+<path class="a" d="M584,225H612"/><path fill="#a3abb5" d="M616,225l-5,-2.5v5z"/>
+</svg>

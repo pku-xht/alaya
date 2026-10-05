@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 165" width="920" height="165">
+<title>new: a project, an image and a task become the first three entries of a run</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
+<rect width="920" height="165" fill="#fff"/>
+<rect x="12.5" y="18.5" width="103" height="32" rx="6" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="23" y="38" class="ch">./project</text>
+<text x="12" y="13" class="s"><tspan class="m">PROJECT</tspan></text>
+<rect x="12.5" y="71.5" width="103" height="32" rx="6" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="23" y="91" class="ch">my-task:1</text>
+<text x="12" y="66" class="s"><tspan class="m">--image</tspan></text>
+<rect x="12.5" y="124.5" width="103" height="32" rx="6" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="23" y="144" class="ch">TASK.txt</text>
+<text x="12" y="119" class="s"><tspan class="m">--task-file</tspan></text>
+<path class="a" d="M120.5,18.5H124.5V156.5H120.5"/>
+<path class="a" d="M124.5,87.5H180"/><path fill="#a3abb5" d="M184,87.5l-5,-2.5v5z"/>
+<rect x="190.5" y="75.5" width="120" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(198,81) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<text x="217" y="91.5" class="c">the workspace</text>
+<path class="a" d="M311,87.5h36"/>
+<rect x="347.5" y="75.5" width="98" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(355,81) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="374" y="91.5" class="c">open agent</text>
+<path class="a" d="M446,87.5h76.2"/>
+<rect x="522.7" y="75.5" width="118" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(530.2,81) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<text x="549.2" y="91.5" class="c">said “the task”</text>
+<text x="190" y="115" class="s">a snapshot of <tspan class="m">PROJECT</tspan></text>
+<text x="347" y="115" class="s">its arguments: the agent, the</text>
+<text x="347" y="129" class="s">model, the image by digest</text>
+<text x="522.2" y="115" class="s">the task</text>
+</svg>

@@ -1,76 +1,96 @@
-# Log and cache schema
+# Log schema
 
-A run of Alaya is a log: a flat, append-only list of events, from the workspace the run starts on
-to the end of its agent, and then to the verdict of the grader assigned to it. Logs are kept as a forest of entries, each one event and the entry
-before it, so logs that share a prefix share its entries, and a fork is a second continuation of
-an entry. This page specifies the entry and the event as stored, how runs grow and fork, how a
-point of a run is graded, what is on disk — the entries, the workspace snapshots, the model
-cache — and the invariants that hold of it. The programs that write it, and the driver, are
-`docs/agent-api.md`; the command line over it is `docs/cli.md`.
+A run of Alaya is a log of events (`docs/agent-api.md` §2). This page is how logs are kept: the
+**entry**, the stored form of each event, how logs share entries and **fork**, how a run is
+**graded**, and what the data directory holds.
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
+flowchart LR
+  classDef sample stroke:#3567a0
+  classDef notice stroke:#7556a3
+
+  driver("the driver")
+  person("a person"):::notice
+  cache("D/cache<br/>the draws of<br/>each request,<br/>with their times"):::sample
+  entries("D/entries<br/>one file an entry:<br/>an event and<br/>its parent")
+  restic("D/restic<br/>every snapshot:<br/>a workspace,<br/>a grader’s input,<br/>a grader’s checkout")
+
+  driver -- "samples<br/>through" --> cache
+  driver -- "appends" --> entries
+  driver -- "snapshots<br/>after each<br/>command" --> restic
+  person -- "appends<br/>notices" --> entries
+  cache -- "a response<br/>is copied<br/>into its entry" --> entries
+  entries -- "an entry<br/>names<br/>snapshots" --> restic
+  linkStyle default stroke-width:1px
+```
+
+| § | What |
+| --- | --- |
+| 1 | an **entry**: one event and the entry before it, named by a hash |
+| 2 | **events** as JSON |
+| 3 | the **forest**: logs that share entries, and forks |
+| 4 | **grading**: the grader, its protocol, its verdict |
+| 5 | the **data directory**, and workspace snapshots |
+| 6 | the **model cache** entry |
+| 7 | invariants |
 
 ## 1. Entries
 
-An entry is one JSON object, compact, in a file of its own:
+An entry is one compact JSON object, in a file of its own:
 
 ```json
-{"parent": "<64 hex, or null for a root>", "event": {…}, "elapsed_ms": 1840}
+{"parent": "<the name of the entry before it, or null for a root>", "event": {…}, "elapsed_ms": 1840}
 ```
 
-Its **name** is the SHA-256 of `{"parent": …, "event": …}`, compact with sorted keys: the time it
-took is no part of it, so the same event after the same entry is one entry, whenever it happened.
-A name therefore stands for the whole log from its root to that entry. `elapsed_ms` is how long
-the event took to happen as the driver saw it — an operation's time, or a mark's — except that a
-response takes the time its draw took when it was made, which the model cache keeps with it
-(§6): a sample costs the same time whether the model answered it now or the cache did. A run's
-time at an entry is the sum along its log. A reader refuses an entry whose content does not hash
-to its name. The format has no version: a data directory is read by the Alaya that wrote it.
+![Entries, their names, and a fork](figures/log-schema/entries.svg)
 
-An entry is referred to by its name, or any prefix of it no other name has, and `PREFIX:N` names
-the entry at position `N` of that entry's log, from 0, where the root is (`Forest.resolve`):
-`4f2c8b:120` is the event at position 120 of the log that ends at `4f2c8b`.
+- **A log is a path.** An entry holds one event and names the entry before it, so the log of an
+  entry is the path to it from its root.
+- **The name** of an entry is the SHA-256 of `{"parent": …, "event": …}`, compact with sorted
+  keys. So a name stands for a whole log, and the same event after the same entry is the same
+  entry, whenever it happens. A reader refuses an entry whose content does not hash to its name.
+- **The time**, `elapsed_ms`, is how long the event took the driver, and is no part of the name.
+  A response has the time its draw took when it was made (§6). A run's time at an entry is the
+  sum along its log.
+- **Naming an entry.** A command takes a name, or any prefix of it that no other name has.
+  `PREFIX:N` is the entry at position `N` of that entry's log, from 0: `4f2c8b:120`.
+
+The format carries no version: a data directory is read by the Alaya that wrote it.
 
 ## 2. Events
 
-Every event is an object with its kind under `type`, and a frame, where it has one, as an array of
-numbers: `[]` is the run's own frame, `[0]` the agent's, `[0, 2]` the third call the agent made,
-`[0, 2, 0]` the first call that call made.
+What each event means is `docs/agent-api.md` §2 and §3. This is how each is stored: an object
+with its kind under `type`, and its frame, where it has one, as an array of numbers.
 
-| `type` | Fields | What it is |
+| `type` | Fields |
+| --- | --- |
+| `arrived` | `notice` |
+| `heard` | `frame`, `notices`: the positions of the notices the read took |
+| `answered` | `frame`, `op`, and `answer` or `error`, the other `null` |
+| `opened` | `frame`, `routine`: `{name, arguments}` |
+| `returned` | `frame`, `value` |
+| `failed` | `frame`, `error` |
+| `stopped` | `reason` |
+| `commented` | `frame`, or `null` for a person's; `text` |
+
+| Notice `type` | Fields |
+| --- | --- |
+| `said` | `message` |
+| `changed` | `workspace`: a snapshot; `summary` |
+| `replied` | `to`: the frame of the call that asked; `reply`: `{type}` of `yes`, `no`, `none_of_above`, `unavailable`, or `{type: "choice", number}`, `{type: "text", text}` |
+| `assigned` | `grader` (§4) |
+
+| `op.type` | Fields of `op` | `answer` |
 | --- | --- | --- |
-| `arrived` | `notice` | something from outside, unasked: below |
-| `heard` | `frame`, `notices` | a read of the inbox in `frame`, with the positions of the notices it took |
-| `answered` | `frame`, `op`, `answer`, `error` | the world's answer to an operation `frame` asked for: `answer`, or `error` when it could not give one |
-| `opened` | `frame`, `routine` | a call opens: `routine` is `{name, arguments}`, the routine called and what it was called with, and `frame` the frame it runs in |
-| `returned` | `frame`, `value` | the call in `frame` ended with its value |
-| `failed` | `frame`, `error` | the call in `frame` ended with its failure |
-| `stopped` | `reason` | from outside: every frame of the agent ends |
-| `commented` | `frame`, `text` | a comment, for whoever reads the log: replay passes over it. `frame` is the frame of the program that made it, or `null` for a person's |
-
-A **notice** is `{type, …}`:
-
-| `type` | Fields | What it is |
-| --- | --- | --- |
-| `said` | `message` | a person said something: the task, a message |
-| `changed` | `workspace`, `summary` | the workspace is now `workspace`; `summary` says how — the first event of every log is one |
-| `replied` | `to`, `reply` | a person answered the question of the call in frame `to` |
-| `assigned` | `grader` | a person assigned the run its grader, which grades it as it stands there, its agent over (§4) |
-
-A reply is `{type}` with `yes`, `no`, `none_of_above`, `unavailable`, `{type: "choice", number}`,
-or `{type: "text", text}`.
-
-An **operation**, under `op`, is kept by its key:
-
-| `op.type` | Fields | `answer` |
-| --- | --- | --- |
-| `sample` | `request`: the digest of the request (`Model.requestDigest`) | the response, as the cache stores it (`Alaya.Chat.Stored`) |
+| `sample` | `request`: the digest of the request | the response: `{content, tool_calls, reasoning, reasoning_items, finish_reason, usage}` |
 | `exec` | `command`, `config`: `{timeout_seconds, env, outputs}` | `{output: {output, exit_code, error}, workspace, file}` |
-| `time` | — | `{spent_ms, budget_ms}` |
+| `time` | | `{spent_ms, budget_ms}` |
 | `external` | `command`, `image`, `input`, `timeout_seconds` | `{exit_code, stdout, stderr, checkout, elapsed_ms, error}` |
 
-A sample is kept by the digest of its request, not the request: the request is a function of the
-log before it, and replay asks for exactly it, so the log does not hold the dialogue again with
-every response. The digest is what tells a program that still makes that request from one that
-does not.
+A sample is kept by the digest of its request, not the request: replay computes the request
+again from the log before it, so the log does not hold the conversation once more with every
+response.
 
 *The events of a run that is told its task, runs a command, and is graded.*
 
@@ -79,7 +99,6 @@ does not.
 {"type":"opened","frame":[0],"routine":{"name":"agent","arguments":{"agent":{…},"model":{…},"environment":{…}}}}
 {"type":"arrived","notice":{"type":"said","message":"Implement the language in SPEC.md"}}
 {"type":"heard","frame":[0],"notices":[2]}
-{"type":"heard","frame":[0],"notices":[]}
 {"type":"answered","frame":[0],"op":{"type":"sample","request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
 {"type":"opened","frame":[0,0],"routine":{"name":"bash","arguments":{"command":"make"}}}
 {"type":"answered","frame":[0,0],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
@@ -92,62 +111,19 @@ does not.
 {"type":"returned","frame":[],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],…}}
 ```
 
-A run is **over** when its agent is — returned, failed, or stopped. It then waits for a grader,
-and once one is assigned it runs the grader's program and returns its verdict, both in its own
-frame, `[]`: a graded log is complete. A log has one grader; a point is graded again on a fork.
+The second event is the opening of the agent's call. Its arguments are the run's
+**configuration**: the agent's complete configuration, the model's complete spec, and the
+environment — the pinned image, the workdir, the machine's `uname`. Every later command builds
+the run from there.
 
-A call is the one thing that opens a frame: the agent, a tool its model called, a step of a
-workflow, a sub-agent are each a **routine** of the run, called by name (`docs/agent-api.md`),
-and the events between a call's opening and its end, in its frame or one under it, are what the
-call did. The grader is no routine, and nothing an agent calls reaches it.
+## 3. The forest
 
-The second event is the opening of the agent's call, whose arguments are the run's
-**configuration**: the agent's complete configuration, the model's complete spec, the
-**environment** — the pinned image, the workdir, the machine's `uname`. Every later command
-builds the run from there (`configOf`). A grader is no part of it: it is named by the notice
-that assigns it.
+Entries that name the same parent are its continuations, so every entry kept forms a forest. A
+root is a run; an entry with two continuations is a **fork**; and a log is any path from a root.
+Nothing is rewritten: a log only grows, and two logs with the same beginning share its entries.
 
-## 3. Growing and forking
-
-**Driving.** `alaya run ENTRY` replays the log that ends at `ENTRY` and goes on from it, an entry
-per event. When `ENTRY` has continuations already, the new one is a fork beside them: the driver
-repeats any mark or command up to the next sample, and since an entry is its event and its
-parent, a mark that the earlier continuation made too is the same entry, so the fork departs
-only where its events differ.
-
-**Draws.** Every sample from an entry answers the same request, so the samples of an entry's
-continuations are draws 0, 1, 2, … of one sequence, which the model cache keeps. A new sample
-takes draw `n`, `n` the continuations of the entry that are responses; a refusal of the request
-as too long, the one failure of a sample a log holds, took no draw. So
-running a point again is a new draw, and a run that crashed after its model answered takes the
-response the cache kept, with the time it took.
-
-**People.** A person appends at any entry: `tell` a `said` notice, `commit` a `changed` notice with
-the snapshot of a directory and the lines of what changed, `reply` a `replied` notice — refused
-unless the log waits on a question that the reply fits — `stop` a stop, and `grade` an
-`assigned` notice that names a grader, after a stop where the agent was still running. A stop,
-a message, a change and a reply are refused once the agent is over, when there is nothing to
-stop and no one to read them; a grader is taken only then, and only where none is assigned yet.
-Appending
-at an entry that already goes on is a fork; appending at the end of a log lets the next `run` go
-on with it. A notice is taken by the first read of the inbox after it
-that is for it: MiniSwe reads its inbox at the start of every round, so what is appended where a
-run paused reaches its model in its next request. A reply and a grader are for one reader each,
-the call that asked and what follows the agent, and no other read takes them.
-
-**Comments.** A `commented` event says something to whoever reads the log, and changes nothing
-else: replay passes over it wherever it stands, so the run of a log with comments is the run of
-the log without them. A program writes one with `comment`, for its own debugging: the driver
-appends it where it reaches it, at the end of a log, and replay neither needs it nor minds
-another in its place, so the comments of an agent can change without its logs becoming no trace
-of it. A person writes one with `alaya comment ENTRY TEXT`, at any entry, with nothing checked.
-A comment is an entry like any other, so it takes a position, and one appended at an entry that
-already goes on is a child beside the continuation: `tree` and the report show such a comment,
-when nothing follows it, as an annotation on its entry, not as a branch.
-
-*Entries as a forest: an entry with two continuations is a fork. Here a run is driven again
-from the read at 3, which takes a new draw; a person adds a note at a later entry; and that
-entry is graded as it stood.*
+*A run driven again from the read at 3, which takes a new draw; a person's note at a later
+entry; and that entry graded as it stood.*
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
@@ -167,8 +143,7 @@ flowchart TD
   linkStyle default stroke-width:1px
 ```
 
-*The same forks, as `alaya tree` prints them: a new draw, a person's note, and a point graded as
-it stood.*
+*The same forest, as `alaya tree` prints it: a stretch of entries with no fork is one line.*
 
 ```
 $ alaya tree
@@ -179,170 +154,201 @@ $ alaya tree
     d9d628fe75d2..9cea64cdaa71  41-45  return fail 12/48  [stopped: fail 12/48]
 ```
 
+Every command that writes appends entries after the one it is given. Appending after an entry
+that already goes on is a fork; appending at the end of a log lets the next `run` go on with it.
+
+| Command | Appends |
+| --- | --- |
+| `new` | the root, the opening of the agent's call, and the task |
+| `run` | an entry for each event of the run, until it stops |
+| `tell` | a `said` notice |
+| `commit` | a `changed` notice: the snapshot of a directory, and the lines of what changed |
+| `reply` | a `replied` notice |
+| `stop` | a `stopped` event |
+| `grade` | a `stopped` event where the agent still runs, an `assigned` notice, then the grading's events (§4) |
+| `comment` | a `commented` event |
+
+`rm ENTRY` deletes an entry and everything after it. What each command takes and refuses is
+`docs/cli.md`; the rules themselves are `docs/agent-api.md` §10.
+
+**A fork shares all it can.** Driving again from an entry repeats the marks and commands up to
+the next sample. A mark the earlier continuation made too is the same event after the same
+entry, so it is the same entry: the fork departs only where its events differ. Which draw the
+new sample takes is `docs/agent-api.md` §10.
+
 ## 4. Grading
 
-Grading is what a run does once its agent is over, in its own frame, `[]`: it waits for a grader
-to be **assigned** — an `assigned` notice, which names it — runs the grader's program on the
-workspace, an `external` operation, and returns the verdict, which is the result of the run. A
-grader is therefore no part of a run's configuration, and no routine of it: `new` takes none,
-and any point of any run is graded by any grader, at any time. A log has one grader, so grading
-a point again, with the same grader or a corrected one, is a fork there, beside the first.
+Grading is how a run ends. Once its agent is over, a run waits for a **grader**, runs it, and
+returns its **verdict** (the events are in `docs/agent-api.md` §9). A grader is no part of a
+run's configuration, so any point of any run is graded, by any grader, at any time.
 
-`alaya grade ENTRY --grader CMD` grades a point: it stops a fork of the log there, if the agent
-is still running, appends the notice that assigns the grader, and drives the run to its verdict.
-Where the log at `ENTRY` has a grader already, it does so from the entry before that grader was
-assigned. A grader is assigned only where the agent is over, so the agent cannot go on after it,
-and never sees what a grader did; the grader runs on the workspace as the log had it there. A
-grader that reads only the workspace gives one verdict for a version of it, so the points worth
-grading are the entries where the workspace is at a new version: the answers of commands, and
-the changes from outside, in `alaya log`.
+A grader is an external program, described by what the notice that assigns it holds:
 
-> A grader runs in a fresh checkout of the workspace at the run's workdir, in its own pinned
-> image, with its trusted input read-only at `/grader` and no network. It can change anything in
-> the checkout; the result is kept as its answer's checkout. It prints TAP on stdout: a complete
-> plan with all results `ok` is a pass, any `not ok` is a fail, and anything incomplete is an
-> error.
+```json
+{"name": "grader", "command": "sh /grader/grade.sh", "image": "…@sha256:…", "input": "7e0f…", "timeout_seconds": 900}
+```
 
-A grader is `{name, command, image, input, timeout_seconds}`: a shell command run with
-`/bin/sh -c`; the image it runs in, resolved to a digest when it is assigned — by default the
-run's, and a grader's tools, which the agent should not see, belong in an image of their own,
-best built on the agent's (two targets of one Dockerfile); the snapshot of its trusted input,
-taken when it is assigned, so it sees exactly what is recorded; and how long it may take. The
-notice holds all of that, and the run's operation on it is `external`: the driver restores the workspace the log has reached into a fresh
-**checkout**, mounted read-write at the workdir, the input at `/grader`, runs the command as the
-user the agent's commands run as, and snapshots the checkout as it left it — its reports
-included — which `alaya ls` and `alaya cat` read at that entry. The run's workspace stays where it
-was.
+| Field | Holds |
+| --- | --- |
+| `command` | a shell command, run with `/bin/sh -c` |
+| `image` | the image it runs in, pinned to a digest when the grader is assigned; by default the run's |
+| `input` | the snapshot of its trusted files, taken when it is assigned, or `null` |
+| `timeout_seconds` | how long it may take: 900 unless given, 0 for no limit |
+
+### The protocol
+
+1. **A point is chosen.** `alaya grade ENTRY --grader CMD` grades the run as it stood at
+   `ENTRY`. Where the agent still runs there, it is stopped first, on a fork if the log goes on.
+2. **The grader is assigned.** The `assigned` notice records the grader whole: its image as a
+   digest and its input as a snapshot. So a log says exactly what graded it.
+3. **The workspace is checked out.** The driver restores the workspace as the log has it at
+   that point into a fresh directory, the **checkout**.
+4. **The command runs** in a new container of the grader's image, with no network and a time
+   limit. The checkout is mounted read-write at the run's workdir, and the input read-only at
+   `/grader`.
+5. **It reports in TAP** on stdout: a plan `1..N`, then an `ok` or `not ok` line for each check.
+6. **Alaya reads the verdict** off the TAP, and the run returns it as its result.
+7. **The checkout is kept**, as the grader left it, reports included: `alaya ls` and `alaya cat`
+   read it at that entry. The run's workspace stays where it was.
+
+![What goes into a grader's container, and what comes out](figures/log-schema/grader.svg)
 
 ### The verdict
 
-A grader reports through [TAP](https://testanything.org/tap-version-14-specification.html) on
-stdout: a plan `1..N` and one `ok` or `not ok` line per check (`Alaya.Tap`). Logs go to stderr,
-or in `#` comment lines, so they cannot be read as TAP. The status comes from the TAP alone
-(`Alaya.Grader`):
+Only the TAP decides. The exit status and stderr are recorded, and decide nothing: "the checks
+ran and some failed" and "the grader crashed" can exit alike, and only an incomplete TAP tells
+them apart.
 
-- **pass**: the plan is there, as many checks arrived as it announced, and none failed;
-- **fail**: the TAP is complete, and a check failed — a failing `TODO` or `SKIP` check does not
-  count, and a failing subtest does;
-- **error**: anything else — no plan, fewer or more checks than planned, a `Bail out!`, a
-  grader that timed out or could not start.
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
+flowchart TD
+  classDef exec stroke:#2b6f6f
+  classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
+  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
+  classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
-The exit status is recorded but decides nothing, so "the checks ran and some failed" and "the
-grader crashed" cannot be confused: a crash leaves the TAP incomplete, which is an error. A
-plain test command needs a few lines of wrapper, in which the grader's author, who knows the
-tool, says what its exit codes mean:
+  subgraph checks[" "]
+    start("the grader ran<br/>its stdout is read as TAP"):::exec
+    ran("did it start, and end<br/>within its time limit?")
+    complete("is the TAP complete?<br/>a plan 1..N, exactly N checks,<br/>no Bail out!")
+    failed("did a check fail?<br/>a failing TODO or SKIP check<br/>does not count")
+  end
+  kept("the exit status and stderr<br/>are kept, and decide nothing")
+  error("error<br/>the grader did not do its job"):::wait
+  fail("fail"):::bad
+  pass("pass"):::ok
 
-```sh
-echo 1..1
-pytest -q; code=$?
-case $code in
-  0) echo "ok 1 - tests" ;;
-  1) echo "not ok 1 - tests" ;;
-  *) echo "Bail out! pytest exited $code" ;;
-esac
+  start --> ran
+  start -.- kept
+  ran -- "yes" --> complete
+  ran -- "no" --> error
+  complete -- "yes" --> failed
+  complete -- "no" --> error
+  failed -- "yes" --> fail
+  failed -- "no" --> pass
+  style checks fill:none,stroke:none
+  linkStyle 1 stroke-width:1px,stroke-dasharray:3
+  linkStyle default stroke-width:1px
 ```
 
-
-A verdict, the value the run returns, is `{status, passed, total, reason, checks, exit_code,
-elapsed_ms}`, `checks` one `{ok, name, directive}` per top-level test point; what the program
-printed is in the answer of its `external` operation. A grader that cannot be started is an
-`error` verdict. The verdict of a log is what its run returns; `run --json` and `grade --json`
-give it with how the agent ended.
-
-## 5. On disk
-
-The data directory, `D`, holds everything one set of runs needs. Every command names it with
-`--data D`, or reads `ALAYA_DATA`; there is no default, so a command run from the wrong place
-cannot quietly begin a new one. `new` creates it, and every other command refuses a path that
-holds none.
-
-| Path | Contents |
+| Status | When |
 | --- | --- |
-| `D/entries/<name>.<parent>.json` | one file per entry (§1); `<parent>` is the parent's name, or `root`, so one listing gives the shape of the whole forest |
-| `D/restic/` | the [restic](https://restic.net) repository holding every workspace snapshot |
-| `D/cache/<hash>.json` | model response cache entries (§6) |
-| `D/lock`, `D/lock.holder` | the lock a writing command holds, and the pid of the command holding it (`docs/cli.md` §4) |
-| `D/tmp/<id>/` | one command's scratch, removed when it ends: `work/`, the work directory, restored whenever the log reaches another version; `outputs/`, the outputs a command may read; `external/`, a grader's checkout and input; `restic/`, where files read out of a snapshot land; `project/`, the image's workdir copied out, when `new` is given no `PROJECT` |
+| `pass` | the plan is there, as many checks arrived as it announced, and none failed |
+| `fail` | the TAP is complete, and a check failed; a failing `TODO` or `SKIP` check does not count, a failing subtest does |
+| `error` | anything else: no plan, fewer or more checks than planned, a `Bail out!`, a grader that ran out of time or could not start |
+
+The value the run returns:
+
+```json
+{"status": "fail", "passed": 2, "total": 3, "reason": "failed: errors",
+ "checks": [{"ok": true, "name": "parses", "directive": ""}, …], "exit_code": 1, "elapsed_ms": 5400}
+```
+
+`checks` has one item for each top-level check. What the program printed is in the answer of
+the `external` operation before it.
+
+### Writing a grader
+
+- **Print [TAP](https://testanything.org/tap-version-14-specification.html) on stdout, and
+  nothing else there.** Logs go to stderr, or into `#` comment lines.
+- **Say what an exit code means.** A plain test command needs a few lines of wrapper, in which
+  the grader's author, who knows the tool, turns its exit codes into TAP:
+
+  ```sh
+  echo 1..1
+  pytest -q; code=$?
+  case $code in
+    0) echo "ok 1 - tests" ;;
+    1) echo "not ok 1 - tests" ;;
+    *) echo "Bail out! pytest exited $code" ;;
+  esac
+  ```
+
+- **Keep what the agent must not see out of the workspace.** Hidden tests and reference outputs
+  go in the input directory (`--grader-input`). Tools the agent should not have go in an image
+  of the grader's own (`--grader-image`), best built on the agent's image.
+- **Change the checkout freely.** It is a copy: build in it, write reports in it.
+
+### Grading again
+
+A log has one grader. Grading a point again, with the same grader or a corrected one, is a fork
+from the entry before the first was assigned, and `alaya tree` shows both verdicts. A grader
+that reads only the workspace gives one verdict for each version of it, so the points worth
+grading are the entries that leave a new version: the answers of commands, and changes from
+outside.
+
+## 5. The data directory
+
+Every command names the data directory, `D`, with `--data D`, or reads `ALAYA_DATA`. There is no
+default, so a command run from the wrong place cannot quietly begin a new one. `new` creates it.
+
+| Path | Holds |
+| --- | --- |
+| `D/entries/<name>.<parent>.json` | one file an entry (§1). `<parent>` is the parent's name, or `root`, so one listing gives the shape of the whole forest |
+| `D/restic/` | a [restic](https://restic.net) repository with every snapshot |
+| `D/cache/<hash>.json` | the model cache (§6) |
+| `D/lock`, `D/lock.holder` | the lock a writing command holds, and its pid (`docs/cli.md` §4) |
+| `D/tmp/<id>/` | one command's scratch, removed when it ends |
 
 Everything but `tmp/` lasts. An entry is written once, as a finished temporary file renamed into
-place, and never changes; `rm` deletes files, and there is nothing else to collect.
+place, and never changes.
 
 ### Workspace snapshots
 
-A log names each version of the workspace by an identifier, and nothing else looks inside it. `Alaya.Workspaces` is the snapshot
-contract:
+A log names each version of the workspace by a **snapshot**: an identifier of 64 hexadecimal
+digits, which means something only to the store that issued it. `Alaya.Workspaces` is the
+contract, and `Workspaces.Restic` keeps it with restic 0.17 or later.
 
-```lean
-structure Workspaces where
-  snapshot : System.FilePath -> Result Snapshot              -- capture a directory as it is now
-  materialize : Snapshot -> System.FilePath -> Result Unit   -- make a directory hold exactly a snapshot
-  diff : Snapshot -> Snapshot -> Result (Array Change)           -- added, removed, modified paths
-  readFiles : Snapshot -> Array String -> Result (Array (Option ByteArray))  -- regular files of a snapshot
-  listEntries : Snapshot -> String -> Result (Array Entry)   -- immediate snapshot directory entries
-  retainOnly : Array Snapshot -> Result Unit                 -- drop every snapshot not listed
-```
+| Operation | Does | Used by | restic |
+| --- | --- | --- | --- |
+| `snapshot` | captures a directory as it is now | `new`, every command of an agent, `commit`, a grader's input and its checkout | `backup`, run inside the directory |
+| `materialize` | makes a directory hold exactly a snapshot | a command on another version than the work directory holds, a grader's checkout, `checkout` | `restore --delete --overwrite always` |
+| `diff` | lists the added, removed and modified paths | `commit`'s notice, `diff`, the report | `diff --json` |
+| `readFiles` | reads regular files of a snapshot | the report, `cat` | `restore --include`, into scratch |
+| `listEntries` | lists a directory of a snapshot | `ls`, `cat`'s check of a path | `ls --json` |
+| `retainOnly` | drops every snapshot not listed | `rm`, with the snapshots the remaining entries name | `forget`, then `prune` |
 
-| Operation | Used by |
-| --- | --- |
-| `snapshot` | `new`, after every command, `commit`, a grader's input when it is assigned and its checkout after it ran |
-| `materialize` | a command on another version than the work directory holds, a grader's checkout and input, `checkout` |
-| `diff` | the notice of a `commit`, `alaya diff`, the HTML report |
-| `readFiles` | the HTML report, `cat` and its previews |
-| `listEntries` | `ls`, and `cat`'s check of a path, using metadata before reading a file |
-| `retainOnly` | `rm`, with the snapshots the remaining entries name |
+What the contract requires (`Test/Workspaces.lean`):
 
-Restic implements `listEntries` without restoring the workspace. An entry records name,
-relative path, kind (directory/file/symlink/other), and optional byte size; the
-empty path names the root. `ls` and `cat` verify ancestor directories and never
-follow symbolic links.
+- A snapshot materializes as the directory it was taken of: contents, executable bits, symbolic
+  links, empty directories, and file names with any character.
+- An edit is captured even when it keeps a file's size and modification time, as archive
+  extraction and `cp -p` leave it.
+- In a diff, an added or removed directory is one change, standing for its subtree, and a file
+  that was only touched is no change.
+- Reads never follow symbolic links, and never leave the snapshot.
 
-An identifier is 64 hexadecimal digits and means something only to the store that issued it.
-**Equal directories need not get equal identifiers**, and nothing compares them: an entry's name
-covers the identifiers its event holds, which makes an entry immutable, not reproducible — a
-command run again leaves a new snapshot, so two runs of it are two entries. What the contract does require
-(`Test/Workspaces.lean`):
+**Equal directories need not get equal identifiers**, and nothing compares them. So an entry's
+name makes it immutable, not reproducible: a command run again leaves a new snapshot, and the
+two runs of it are two entries.
 
-- a snapshot materializes as the directory it was taken of: file contents, executable bits,
-  symbolic links, empty directories;
-- `materialize` replaces whatever the destination held, read-only directories included;
-- an edit is captured even when it keeps a file's size and modification time, as archive
-  extraction, `cp -p`, and package managers that normalize timestamps leave it;
-- a file name may hold any character, a newline included;
-- an added or removed directory is one change, standing for its subtree; a file replaced by a
-  directory, or the reverse, is a removal and an addition; a file that was only touched is not a
-  change;
-- a read is `none` for a directory, an absent path, and a path that leaves the snapshot.
+A snapshot or a checkout of a directory that overlaps `D` is refused before anything is touched.
 
-`Workspaces.Restic` keeps the contract with a restic repository (restic 0.17 or later). restic
-is a backup program: walking a directory, deciding what changed — by a file's change time and
-inode as well as its size and modification time — and writing a snapshot back out are its
-business, and a snapshot records what the filesystem holds: permissions, times, owners, hard
-links, extended attributes. The identifier is the restic snapshot ID.
-
-| Contract | restic |
-| --- | --- |
-| `snapshot` | `restic backup . --no-scan --host alaya`, run inside the directory so paths are relative to it; a snapshot that could not read every file is a failure |
-| `materialize` | `restic restore ID --target DIR --delete --overwrite always`: in place, comparing content, not times, after the directory is made writable |
-| `diff` | `restic diff A B --json` without `--metadata`, folded so that a directory stands for its subtree; for a type change whose new side is a file, one `restic ls` of the old side tells whether a directory was replaced |
-| `readFiles` | one `restic restore ID --include …` of just those paths into the command's scratch, read back from there |
-| `listEntries` | `restic ls ID --json /PATH`, immediate directory metadata only |
-| `retainOnly` | `restic forget` of the rest, then `restic prune` |
-
-A snapshot or a checkout of a directory that overlaps the run's own storage — the repository,
-`D/entries`, `D/cache` — is refused before anything is touched: the one would capture the
-storage, and the other deletes what the snapshot does not hold, which is the storage. So a
-checkout into the data directory, or a new run of a project that contains it, is an error that
-says to move one of the two.
-
-Every operation is one `restic` process with `--no-cache --insecure-no-password`: the repository
-sits beside the entries, which are not encrypted either. It is restic's own format, so `restic
-snapshots`, `restic mount` and the rest work on it directly; a crashed run can leave a stale
-lock, which `restic unlock` removes. `rm ENTRY` deletes an entry and everything after it, and keeps only
-the snapshots the remaining entries name, since a log can go back to any of them.
-
-A `restic` process spends about 0.8 s deriving the repository key before it does anything,
-which is why reads are batched and the report reads several snapshots at once. On a Lean
-project with Mathlib — 7.2 GB in 121,433 files, an Apple M5 Pro's internal volume, one run each:
+The repository is restic's own format, unencrypted like the entries beside it, so `restic
+snapshots` and `restic mount` work on it directly. A crashed run can leave a stale lock, which
+`restic unlock` removes. A `restic` process spends about 0.8 s before it does anything, which is
+why reads are batched. On a Lean project with Mathlib — 7.2 GB in 121,433 files, on an Apple M5
+Pro's internal volume, one run each:
 
 | | |
 | --- | ---: |
@@ -352,51 +358,43 @@ project with Mathlib — 7.2 GB in 121,433 files, an Apple M5 Pro's internal vol
 | diff of two versions | 1.6 s |
 | repository after three snapshots | 2.4 GB |
 
-
 ## 6. The model cache entry
 
-`D/cache/<hash>.json`, where `hash` is Lean's generic hash of the cache key:
+`D/cache/<hash>.json`, where `<hash>` is a hash of the cache key (`docs/llm-api.md` §4):
 
 ```json
-{
-  "key": "<compress {model: <identity>, structured_output: <mode>, request: <Request.toJson>}>",
-  "draws": [
-    {"response": {"content": …, "tool_calls": [call…], "reasoning": …, "reasoning_items": […], "finish_reason": …, "usage": {…}},
-     "elapsed_ms": 7600},
-    …
-  ]
-}
+{"key": "<the cache key: the model's identity and the request>",
+ "draws": [{"response": {"content": …, "tool_calls": […], "finish_reason": …, "usage": {…}, …},
+            "elapsed_ms": 7600}, …]}
 ```
 
-A response is stored as a `sample`'s answer stores it (`Alaya.Chat.Stored`), so a response reads
-the same in the cache and in the log. `draws[i]` is draw `i` of that request under that model
-identity, and its `elapsed_ms` how long the model took to give it, retries included: what the
-entry of a sample that takes the draw has as its time. It is beside the response, not in it,
-because a log keeps an event's time outside the event. The stored key is checked against the file name on load, and a corrupt entry reads as
-empty and is replaced on the next successful sample. The key contains the full request, so
-anything that changes what the model is sent — the view, the tool list, the model identity
-including options such as reasoning echo — changes the key. The directory is safe to keep
-between runs: an entry is only ever appended to.
+- `draws[i]` is draw `i` of that request under that model: the response as a log stores it, so
+  it reads the same in both.
+- `elapsed_ms` is how long the model took to give the draw, retries included. It is what the
+  entry of a sample that takes the draw has as its time.
+- The stored key is checked against the file's name on load. A corrupt entry reads as empty and
+  is replaced on the next sample.
+- An entry is only ever appended to, so the directory is safe to keep between runs.
+
+How the cache is used is `docs/llm-api.md` §5.4.
 
 ## 7. Invariants
 
-- An entry's name is the hash of its parent's name and its event; nothing under a name changes,
-  and a log only grows.
-- A log's first event is a `changed` notice, the workspace it starts on, and its second the
-  opening of the agent's call with the run's configuration.
-- Every log the driver writes is a trace of its run's program: replay agrees with it at every
-  prefix. A log that is not is refused, never driven on.
-- A sample from an entry with `n` sampled continuations is draw `n` of its request; a refusal is
-  no draw. A response's entry has the time of its draw, in every log that holds the draw.
-- A reply is appended only where its question waits, in the form it asks for; a stop, a message
-  and a change only while the agent runs; a grader only once the agent is over, where none is
-  assigned yet, and only one that can be read.
-- A log has at most one grader. A graded log is complete: it ends with the return of the run's
-  own frame, the verdict.
-- Comments are no part of a trace: a log with any of its comments taken out, or with others put
-  in, is a trace of the same program, with the same run. Only positions count them.
-- The version of the workspace a log has reached is the last one a command or a change from
-  outside left, and every command runs on it; a grader's checkout is its own, and the run does
-  not follow it.
-- Every snapshot an entry names is kept while the entry is: a version of the workspace, a
-  grader's checkout, and the input of the grader assigned, whether or not it has run.
+- **Names.** An entry's name is the hash of its parent's name and its event. Nothing under a
+  name changes, and a log only grows.
+- **Opening.** A log's first event is a `changed` notice, the workspace it starts on, and its
+  second the opening of the agent's call, with the run's configuration.
+- **Traces.** Every log the driver writes is a trace of its run's program: replay agrees with
+  it at every prefix. A log that is not is refused, never driven on. Comments are no part of a
+  trace: they can be taken out or put in, and only positions count them.
+- **Draws.** A sample from an entry with `n` sampled continuations is draw `n` of its request.
+  A response's entry has the time of its draw, in every log that holds the draw.
+- **From outside.** A reply is appended only where its question waits, in the form it asks for;
+  a stop, a message and a change only while the agent runs; a grader only once the agent is
+  over, and where none is assigned yet.
+- **One grader.** A log has at most one grader. A graded log is complete: it ends with the
+  return of the run's own frame, the verdict.
+- **Workspace.** The version a log has reached is the last one a command or a change from
+  outside left, and every command runs on it. A grader's checkout is its own.
+- **Snapshots.** Every snapshot an entry names is kept while the entry is: a version of the
+  workspace, a grader's checkout, and the input of the grader assigned.

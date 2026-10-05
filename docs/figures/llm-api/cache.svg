@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 118" width="920" height="118">
+<title>The cache of a request’s draws: three replayed, the fourth sampled and appended</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.r{font-size:11px;font-weight:600;fill:#6f7985;letter-spacing:.04em}</style>
+<rect width="920" height="118" fill="#fff"/>
+<text x="190" y="14" class="s">the cache entry of a request, on disk</text>
+<rect x="190.5" y="24.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="210" y="38" class="ch" text-anchor="middle">d0</text>
+<rect x="266.5" y="24.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="286" y="38" class="ch" text-anchor="middle">d1</text>
+<rect x="342.5" y="24.5" width="39" height="19" rx="4" fill="#f6f7f9" stroke="#3567a0"/><text x="362" y="38" class="ch" text-anchor="middle">d2</text>
+<rect x="418.5" y="24.5" width="39" height="19" rx="4" fill="#fff" stroke="#3567a0" stroke-dasharray="3 2"/><text x="438" y="38" class="ch" text-anchor="middle">d3</text>
+<text x="210" y="57" class="f n" text-anchor="middle">7.6 s</text>
+<text x="286" y="57" class="f n" text-anchor="middle">3.1 s</text>
+<text x="362" y="57" class="f n" text-anchor="middle">5.0 s</text>
+<text x="438" y="57" class="f n" text-anchor="middle">4.2 s</text>
+<rect x="12.5" y="25.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#d3d9e0"/>
+<text x="18.5" y="38" class="ch">stream.nextN 4</text>
+<path class="a" d="M132.1,34H180"/><path fill="#a3abb5" d="M184,34l-5,-2.5v5z"/>
+<rect x="785.3" y="21.0" width="122.2" height="26" rx="6" fill="#f6f7f9" stroke="#3567a0"/>
+<text x="796.3" y="38.5">the model inside</text>
+<path class="a" d="M779.3,34H468"/><path fill="#a3abb5" d="M464,34l5,-2.5v5z"/>
+<path class="a" d="M190.5,66v4H381.5v-4"/>
+<text x="190.5" y="84" class="s" style="fill:#2a7a4b">replayed: no call to the provider</text>
+<path class="a" d="M418.5,66v4H457.5v-4"/>
+<text x="418.5" y="84" class="s" style="fill:#3567a0">missing: sampled from the model inside, timed, appended</text>
+<text x="12" y="110" class="s">the same model, request and index always give the same response</text>
+</svg>
