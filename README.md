@@ -1,15 +1,13 @@
 # Alaya: LLM Agents as Effectful Programs with Durable Execution
 
-Alaya is a framework for experimenting with coding agents, built on three principles:
+Alaya is an agentic framework built on three principles:
 
-**Agents as durable effectful programs.** Agent runs are hard to study: model responses are
-random and the agent modifies files as it works, so a run cannot be reproduced, or rerun with a
-single change to see what that change does. Alaya represents an agent as an effectful program in
-free-monad form and runs it by durable execution: replay against an append-only log of events.
-The logs form a forest, so any point of a run, with its workspace, can be forked and resampled.
-A run is therefore complete data, which can be analysed without running anything again, and a
-controlled experiment is a fork: change a message, a file or the model, or sample again, and
-compare the outcomes.
+**Agents as durable effectful programs.** Agent runs are hard to study and reproduce. Alaya
+represents an agent as an effectful program in free-monad form and runs it by durable execution:
+replay against an append-only log of events. A run is therefore complete data, which can be
+analysed without re-execution. The logs form a forest, so the impact of an
+intervention, such as changing a message, a file or the model, is studied by forking a run at
+the point of the change.
 
 **Agent-native operation.** Experiments with agents produce more data than a person can process
 by hand, and research itself is increasingly automated by AI. Alaya is designed to be operated
@@ -19,12 +17,10 @@ ideas to evaluating them in experiments.
 
 **Reliable runs on realistic benchmarks.** Runs on realistic benchmarks are long and expensive,
 need non-trivial environments, and are graded in ways that differ from benchmark to benchmark.
-Alaya appends to a run's log as it goes and caches model responses, so an interrupted run
-continues where it stopped; runs every command in an isolated container of the benchmark's image;
-and grades any point of any run through one interface, a grader assigned to it once its agent is
-over, with an adapter for each benchmark. Alaya includes
-MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for the Vero benchmark of
-verified Lean code.
+Alaya continues an interrupted run from its log, runs every command in an isolated container of
+the benchmark's image, and grades any point of any run through one interface, with an adapter for
+each benchmark. Alaya includes MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for
+the Vero benchmark of verified Lean code.
 
 ## Getting started
 
