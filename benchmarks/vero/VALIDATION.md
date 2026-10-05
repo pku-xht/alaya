@@ -9,15 +9,15 @@ passes the same checks.
 ## Run the checks
 
 Run from the Alaya repository on Linux with Docker and restic available. Build
-the executable with `lake build` and build the images using the commands in
+the executable with `lake build` and pull or build the images using the commands in
 [README.md](README.md). Each test output directory must be new.
 
 ```sh
 lake build
 lake exe tests
 
-AGENT=alaya-vero-agent:0a7325d
-GRADER_IMAGE=alaya-vero-grader:0a7325d
+AGENT=ghcr.io/msv-lab/alaya-vero-agent:0a7325d
+GRADER_IMAGE=ghcr.io/msv-lab/alaya-vero-grader:0a7325d
 
 python3 benchmarks/vero/tests/integration.py \
   --agent-image "$AGENT" --grader-image "$GRADER_IMAGE" --output /tmp/vero-acceptance-new

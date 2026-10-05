@@ -52,23 +52,33 @@ The skeleton is a project directory, so a run starts from it directly; `TASK.txt
 statement, kept here so every run is given the same one. The agent and the grader run in the
 two amd64 images `Dockerfile` builds from a pinned base: Python, `uv`, and the suite's dependencies,
 which containers cannot download, since they run without network; the grader's adds `grade.py`.
-Neither holds the reference programs: only the grader is given them, as its input. From the
-repository root:
+Neither holds the reference programs: only the grader is given them, as its input. They are
+published on the GitHub registry, tagged with the commit they were built from, and that commit's
+`Dockerfile` rebuilds them:
 
 ```sh
-docker build --platform linux/amd64 --target agent -t alaya-bija-agent benchmarks/bija
-docker build --platform linux/amd64 --target grader -t alaya-bija-grader benchmarks/bija
+docker build --platform linux/amd64 --target agent \
+  -t ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd benchmarks/bija
+docker build --platform linux/amd64 --target grader \
+  -t ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd benchmarks/bija
+```
+
+From the repository root:
+
+```sh
+docker pull ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd
+docker pull ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
 
 export ALAYA_DATA=$PWD/bija-runs   # created by new; every command below uses it
 last() { tail -n 1 | cut -d' ' -f1; }
 tip=$(alaya new --task-file benchmarks/bija/TASK.txt benchmarks/bija/skeleton --agent mini-swe \
-  --model gpt-oss-120b --image alaya-bija-agent | last)
+  --model gpt-oss-120b --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
 end=$(alaya run "$tip" --provider dgx | last)
 # done: Submitted: …
 
 grader=(--grader 'python3 /opt/alaya-bija/grade.py --tests /grader'
-        --grader-input benchmarks/bija/reference/tests --grader-image alaya-bija-grader
-        --grader-timeout 1800)
+        --grader-image ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
+        --grader-input benchmarks/bija/reference/tests --grader-timeout 1800)
 graded=$(alaya grade "$end" "${grader[@]}" | last)   # exits 1 for a fail
 # done: fail N/464
 

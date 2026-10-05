@@ -42,20 +42,21 @@ A typical session, on the [Bija benchmark](benchmarks/bija/README.md): implement
 language from its specification, graded against programs the agent never sees.
 
 ```sh
-docker build --platform linux/amd64 --target agent -t alaya-bija-agent benchmarks/bija
-docker build --platform linux/amd64 --target grader -t alaya-bija-grader benchmarks/bija
+docker pull ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd
+docker pull ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
 export ALAYA_DATA=$PWD/runs    # the data directory; `new` creates it
 last() { tail -n 1 | cut -d' ' -f1; }
 
 # A run: the project, the agent's configuration, and the task.
 tip=$(alaya new --task-file benchmarks/bija/TASK.txt benchmarks/bija/skeleton --agent mini-swe \
-  --model gpt-6-luna --set model.params.reasoning_effort=high --image alaya-bija-agent | last)
+  --model gpt-6-luna --set model.params.reasoning_effort=high \
+  --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
 end=$(alaya run "$tip" --provider apiyi | last)   # an entry a line; `alaya config` lists models, providers
 
 # Grade it: a grader is a command that prints TAP, run on a checkout of the workspace.
 grader=(--grader 'python3 /opt/alaya-bija/grade.py --tests /grader'
-        --grader-input benchmarks/bija/reference/tests --grader-image alaya-bija-grader
-        --grader-timeout 1800)
+        --grader-image ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
+        --grader-input benchmarks/bija/reference/tests --grader-timeout 1800)
 alaya grade "$end" "${grader[@]}"
 
 # Find where it went wrong, and see what the model was sent there.

@@ -4,8 +4,8 @@
 # never snapshotted. The grader image adds grade.py; the reference programs are in neither image,
 # but are the grader's trusted input.
 #
-#   docker build --platform linux/amd64 --target agent -t alaya-bija-agent benchmarks/bija
-#   docker build --platform linux/amd64 --target grader -t alaya-bija-grader benchmarks/bija
+#   docker build --platform linux/amd64 --target agent -t ghcr.io/msv-lab/alaya-bija-agent:COMMIT benchmarks/bija
+#   docker build --platform linux/amd64 --target grader -t ghcr.io/msv-lab/alaya-bija-grader:COMMIT benchmarks/bija
 
 # The amd64 uv/Python image is pinned by its platform-specific manifest, the one Vero's image
 # starts from (use Docker emulation on an ARM host); the suite's dependencies are pinned by the

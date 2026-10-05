@@ -7,13 +7,22 @@ and Alaya built (`lake build`). The agent image contains Lean and cached Lake
 packages; the grader image adds the pinned Vero installation, which renders a
 sandbox and grades an attempt. The agent image never inherits Vero's layers.
 
-## Build the two images
+## Pull or build the two images
+
+The images are published on the GitHub registry:
+
+```sh
+docker pull ghcr.io/msv-lab/alaya-vero-agent:0a7325d
+docker pull ghcr.io/msv-lab/alaya-vero-grader:0a7325d
+```
+
+They are built, and can be rebuilt, from the repository root:
 
 ```sh
 docker build --platform linux/amd64 --target agent -f benchmarks/vero/Dockerfile \
-  -t alaya-vero-agent:0a7325d .
+  -t ghcr.io/msv-lab/alaya-vero-agent:0a7325d .
 docker build --platform linux/amd64 --target grader -f benchmarks/vero/Dockerfile \
-  -t alaya-vero-grader:0a7325d .
+  -t ghcr.io/msv-lab/alaya-vero-grader:0a7325d .
 ```
 
 The image build resolves the existing `lake-manifest.json` with
@@ -43,8 +52,8 @@ configuration.
 BENCHMARK="$(pwd)/benchmarks/vero/tests/fixtures/tiny_trivial"
 RUN="$(mktemp -d)"
 MODE=codeproof
-AGENT=alaya-vero-agent:0a7325d
-GRADER_IMAGE=alaya-vero-grader:0a7325d
+AGENT=ghcr.io/msv-lab/alaya-vero-agent:0a7325d
+GRADER_IMAGE=ghcr.io/msv-lab/alaya-vero-grader:0a7325d
 
 docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$BENCHMARK:/benchmark:ro" -v "$RUN:/rendered" "$GRADER_IMAGE" \
