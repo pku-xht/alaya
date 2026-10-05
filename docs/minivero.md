@@ -32,7 +32,7 @@ message, in this order:
 3. Vero's rule sections: `Marker grammar`, `Oracle commands`, `Grading` for the run's mode,
    `Done condition`, `Checkpointing`, `Anti-cheating`, and the two facts under `Scoring`.
 4. This agent's mechanics: repository-relative paths, no shell state between calls, one
-   `submit` call; and the machine's `uname`.
+   `submit` call; and the image's system and architecture.
 
 The rule sections are Vero's text byte for byte. Each is a file in `Alaya/Agents/MiniVero/`,
 cut from Vero's instruction templates (`templates/instruction/` at sunblaze-ucb/vero

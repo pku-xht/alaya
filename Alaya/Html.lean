@@ -135,7 +135,7 @@ def eventJson : Event Agent → Json
       | .exec command config => (command, config.timeoutSeconds)
       | _ => ("", 0)
     .mkObj [("k", "exec"), ("command", command), ("timeout", timeout), ("output", e.output.output),
-      ("exit", orNull e.output.exitCode? fun c => (c.toNat : Json)), ("failure", orNull e.output.error? .str),
+      ("exit", orNull e.output.exitCode? fun c => (c.toNat : Json)), ("failure", orNull e.output.failure? .str),
       ("workspace", e.workspace.hex), ("file", orNull e.file? .str)]
   | .answered _ _ (.ok (.timing t)) =>
     .mkObj [("k", "time"), ("spent", t.spentMs), ("budget", orNull t.budgetMs? fun n => (n : Json))]

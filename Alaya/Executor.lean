@@ -16,31 +16,44 @@ structure Output where
   /-- The exit status, or `none` when the command did not run to completion: it could not be
   started, or it was killed at the timeout. -/
   exitCode? : Option UInt32 := none
-  /-- Why there is no exit status, when there is none. -/
+  /-- Why there is no exit status, when there is none, in words an agent may be shown: they say
+  nothing of the machine the command ran on. -/
   error? : Option String := none
+  /-- What the machine said, when the command could not be run: for whoever reads the log, and
+  never shown to an agent. -/
+  detail? : Option String := none
   deriving Repr, Inhabited, BEq
 
 namespace Output
 
-/-- The observation a shell agent records. -/
+/-- Why there is no exit status, for whoever reads the log: the error, and what the machine
+said. -/
+def failure? (o : Output) : Option String :=
+  o.error?.map fun error => match o.detail? with
+    | some detail => s!"{error}: {detail}"
+    | none => error
+
+/-- An output as the log keeps it. `detail` is there only when the command could not be run. -/
 def toJson (o : Output) : Lean.Json :=
-  .mkObj [("output", o.output),
-          ("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null),
-          ("error", o.error?.map Lean.Json.str |>.getD .null)]
+  .mkObj ([("output", (o.output : Lean.Json)),
+           ("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null),
+           ("error", o.error?.map Lean.Json.str |>.getD .null)] ++
+          (o.detail?.map fun detail => ("detail", Lean.Json.str detail)).toList)
 
 def fromJson? (json : Lean.Json) : Option Output := do
   let output ← (json.getObjVal? "output" >>= Lean.Json.getStr?).toOption
   let exitCode? := (json.getObjVal? "exit_code" >>= Lean.Json.getNat?).toOption.map (·.toUInt32)
   let error? := (json.getObjVal? "error" >>= Lean.Json.getStr?).toOption
-  pure { output, exitCode?, error? }
+  let detail? := (json.getObjVal? "detail" >>= Lean.Json.getStr?).toOption
+  pure { output, exitCode?, error?, detail? }
 
 end Output
 
-/-- The `uname` fields of the machine commands run on. -/
+/-- What an agent may tell its model of where its commands run: the system and the
+architecture, which are the image's. The kernel's release and version are left out: a container
+has its host's kernel, so they would say which machine a run was created on. -/
 structure Uname where
   system : String
-  release : String
-  version : String
   machine : String
   deriving Repr, Inhabited, BEq
 
@@ -104,9 +117,14 @@ def lossyDecodeUtf8 (bytes : ByteArray) : String := Id.run do
 def timedOut (output display : String) (timeoutSeconds : Nat) : Output :=
   { output, error? := some s!"'{display}' timed out after {timeoutSeconds} seconds" }
 
-/-- The observation for a command that could not be run at all. -/
+/-- What an agent is told of a command that could not be run at all. -/
+def couldNotRun : String := "the command could not be run"
+
+/-- The observation for a command that could not be run at all. `message` is the machine's own
+— docker's, with its container, its image, its paths — and is kept as the detail: the agent is
+told only that the command could not be run. -/
 def failed (message : String) : Output :=
-  { output := "", error? := some message }
+  { output := "", error? := some couldNotRun, detail? := some message }
 
 /-- Runs one string command as a shell script. -/
 def bash (executor : Executor) (config : Config) (workDir : System.FilePath) (command : String) :

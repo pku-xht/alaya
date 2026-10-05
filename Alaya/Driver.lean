@@ -97,18 +97,22 @@ private def emptyDir (dir : System.FilePath) : Result Unit := do
     if ← dir.pathExists then IO.FS.removeDirAll dir
     IO.FS.createDirAll dir
 
-/-- The file of `outputsDir` that holds the output answered at `position` of a log. -/
-def outputFile (position : Nat) : String := s!"{position}.txt"
+/-- The file of `outputsDir` that holds `output`, named by its content alone: the first twelve
+hex digits of its SHA-256. An agent is shown the name, so it says nothing of where in a log the
+output is, or of anything else outside the agent: a comment or a notice earlier in the log
+does not change it, and the same output has the same name in every run. -/
+def outputFile (output : String) : String :=
+  s!"{((Hash.ofBytes output.toUTF8).hex.take 12).toString}.txt"
 
 /-- Makes the outputs directory hold the whole output of every command of `log` that was run
-so, each in its file, written once, since a log only grows. The directory itself stays, since a
-container's mount follows it. -/
+so, each in the file its answer names, written once, since a log only grows. The directory
+itself stays, since a container's mount follows it. -/
 private def prepareOutputs (rt : Runtime) (log : Log Agent) : Result Unit := io do
   IO.FS.createDirAll rt.outputsDir
-  for (event, position) in log.zipIdx do
+  for event in log do
     if let .answered _ _ (.ok (.execution execution)) := event then
-      if execution.file?.isSome then
-        let path := rt.outputsDir / outputFile position
+      if let some name := execution.file?.bind fun file => (System.FilePath.mk file).fileName then
+        let path := rt.outputsDir / name
         unless ← path.pathExists do IO.FS.writeFile path execution.output.output
 
 /-- Keeps the work directory at the version of the workspace the log has reached. -/
@@ -249,12 +253,12 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
           io rt.executor.close
           rt.workspaces.materialize version rt.workDir
           checkout := { version? := some version }
-        let file? := if config.outputs then some s!"{outputsDir}/{outputFile log.size}" else none
         if config.outputs then prepareOutputs rt log
         else io do
           IO.FS.createDirAll rt.outputsDir
           for entry in ← rt.outputsDir.readDir do IO.FS.removeFile entry.path
         let output ← io (rt.executor.bash config rt.workDir command)
+        let file? := if config.outputs then some s!"{outputsDir}/{outputFile output.output}" else none
         let left ← rt.workspaces.snapshot rt.workDir
         append (.answered call.frame (.exec command config)
             (.ok (.execution { output, workspace := left, file? })))

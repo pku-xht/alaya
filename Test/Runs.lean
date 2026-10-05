@@ -480,6 +480,7 @@ def suite : Suite := Testing.suite "runs" #[
             | _ => none
           | fail "a file is named"
         check (contains listed (firstFile.drop "/alaya/outputs/".length).toString) s!"{listed} lacks {firstFile}"
+        assertEqual "the file is named by its content" firstFile s!"/alaya/outputs/{Driver.outputFile long}"
         -- From the point after the first command: the second listing is the fork's own.
         let forest ← assertOk rt.store.forest
         let returnedAt := log.findIdx? (fun | .returned #[0, 0] _ => true | _ => false)
@@ -494,6 +495,28 @@ def suite : Suite := Testing.suite "runs" #[
         assertEqual "no output reaches the workspace"
           ((← assertOk <| rt.workspaces.listEntries reached "").map (·.name)) #[]
       finally rt.executor.close,
+
+  test "an output's file is named by its content, so a comment before the command changes no request" do
+    withMini { recoverOutput := true } fun run => do
+      let long := String.ofList (List.replicate 12000 'z')
+      let script := #[responseWith #[call "c1" "bash" "print"], responseWith #[submitCall "s"]]
+      let named (log : Log Agent) : Option String := log.findSome? fun
+        | .answered _ (.exec _ _) (.ok (.execution e)) => e.file?
+        | _ => none
+      let requests (log : Log Agent) : Array String :=
+        (samplesOf run log).map fun (request, _) => (Model.requestDigest request).hex
+      -- One run as it is, and one with a person's comment before everything the agent does.
+      let plain ← runtime (echoing long) (some (← scriptedModel script))
+      let (first, _) ← assertOk <| Driver.drive plain run (← start plain run)
+      let noted ← runtime (echoing long) (some (← scriptedModel script))
+      let (comment, _) ← assertOk <| Notices.comment noted.store (← start noted run) "a note"
+      let (second, _) ← assertOk <| Driver.drive noted run comment
+      let name := s!"/alaya/outputs/{Driver.outputFile long}"
+      assertEqual "the name is the content's" (named (← logAt plain first)) (some name)
+      assertEqual "and the same after a comment" (named (← logAt noted second)) (some name)
+      assertEqual "two samples each" (requests (← logAt plain first)).size 2
+      assertEqual "the model is sent the same requests" (requests (← logAt noted second))
+        (requests (← logAt plain first)),
 
   test "a command run without its outputs kept finds none, whatever was left there" do
     withMini {} fun run => do

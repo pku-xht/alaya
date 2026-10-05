@@ -28,7 +28,7 @@ def assertStringEq (label actual expected : String) : TestM Unit := do
 
 /-- A fixed `uname`, so prompts do not depend on the machine the tests run on. -/
 def testUname : Uname :=
-  { system := "Linux", release := "6.1.0", version := "#1 SMP", machine := "x86_64" }
+  { system := "Linux", machine := "x86_64" }
 
 def call (id name command : String) : Chat.ToolCall :=
   { id, name, arguments := .mkObj [("command", (command : Json))] }
