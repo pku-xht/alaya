@@ -414,7 +414,9 @@ Two adapters state, in the type, how draws are shared between callers in one pro
 `Model.repeatable` memoizes draws per cache key, so two streams over the same request see the
 same sequence: the same question asked twice gets the same answers. `Model.independent` shares
 one stream per request key, so two callers split one sequence between them and never see the
-same draw: fan-out that must not duplicate.
+same draw: fan-out that must not duplicate. Which samples of a workflow must be independent, and
+how a cache of responses keeps them so, is the subject of Dai et al. (2026), which this design
+follows.
 
 ```lean
 let shared ← model.independent
@@ -479,9 +481,14 @@ reports it: the `alaya` command line exits with one status per class
 | `busy` | another process is writing the data directory (`Alaya.Lock`) | `transient` |
 | `transport` | the request may or may not have arrived | `transient` |
 | `http status body retryAfterMs?` | the provider answered with a failure | `transient` for 408, 409, 425, 429 and 5xx, the statuses `Retry` retries; `model` otherwise |
-| `contextExceeded` | the provider refused the request as too long for the model's context: a 400, 413 or 422 whose error says so, in OpenAI's code `context_length_exceeded` or the usual words ("maximum context length", "context window", "prompt is too long"); the driver logs it as the sample's answer, the one failure of a provider it does not stop at, and MiniSwe ends with `ContextExceeded` (`docs/architecture.md` §6) | `model` |
+| `contextExceeded` | the provider refused the request as too long for the model's context: a 400, 413 or 422 whose error says so, in OpenAI's code `context_length_exceeded` or the usual words ("maximum context length", "context window", "prompt is too long"); the driver logs it as the sample's answer, the one failure of a provider it does not stop at, and MiniSwe ends with `ContextExceeded` (`docs/agent-api.md` §3.4) | `model` |
 | `provider` | a provider-specific failure that is none of the above | `model` |
 | `protocol` | a payload that is not the chat protocol | `model` |
 | `structuredOutput` | the reply did not satisfy the requested schema | `model` |
 | `cache` | the response cache could not be read or extended | `storage` |
 | `storage` | reading or writing the entries, or a workspace snapshot, failed | `storage` |
+
+## References
+
+- Y. Dai, D. S. Bouras, H. Jia, S. Mechtaev. Statistical independence aware caching for LLM
+  workflows. LLM4Code@ICSE 2026.

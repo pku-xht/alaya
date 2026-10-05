@@ -54,8 +54,9 @@ The agent then inspects the Lean declarations and the compiler output, edits onl
 
 MiniVero defaults to 200 model turns and a 600-second shell-command timeout. Use `alaya run --time-budget SECONDS` to bound an invocation.
 
-Add `ask_user` to `tools` to offer [yes/no, single-choice, and open-ended questions](ask-user.md):
-`"tools": ["bash", "submit", "time_budget", "ask_user"]`.
+Add `ask_user` to `tools` to offer yes/no, single-choice and open-ended questions
+(`docs/agent-api.md` §7). The list replaces the default one, so it names the default tools too:
+`--set 'agent.tools=["bash","submit","time_budget","ask_user"]'`.
 
 ## Pacing: `time_budget`
 
@@ -68,7 +69,7 @@ MiniVero is offered the **`time_budget`** tool and asked to pace itself by it:
   time, which is the sum of its entries' times along the log and the current invocation's so
   far, so it is right after a pause, when the clock since the start is not. Without a budget
   it gives `{"seconds_left": null, "note": "this run has no time limit"}`. Its program performs
-  `time` (`docs/agent-api.md` §2), whose answer, the run's time and the budget, the log keeps,
+  `time` (`docs/agent-api.md` §3.1), whose answer, the run's time and the budget, the log keeps,
   and computes what that leaves. Nothing runs and nothing is snapshotted.
 - **The prompt** carries Vero's `Checkpointing` section, after the Done condition and before
   Anti-cheating as in Vero's template, adapted in `MiniVero/checkpointing.md`. Vero's is for a

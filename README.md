@@ -2,15 +2,14 @@
 
 Alaya is a framework for experimenting with coding agents, built on three principles:
 
-**Agents as programs over a log.** Agent runs are random and depend on their environment, which
-makes them hard to analyse and experiment with. In Alaya, an agent is a program that only asks:
-for a model's response, a command's output, the time, a person's reply. A run is the log of
-those answers and of everything that arrived from outside, and replaying the program against
-the log tells what it does next. Alaya carries out each request and appends its answer,
-filesystem snapshots included. Every run is therefore complete data that can be analysed without
-running it again, the calls of its tools, workflows and sub-agents nested in the log as they
-were made, and any point of a run can start a controlled experiment: vary a single factor, such
-as a message, a file, or the model, or resample the continuation, and compare the outcomes.
+**Agents as programs over a log.** A run of an agent depends on random model responses and on
+files that change as it works, so it is hard to see why it went as it did, and it cannot be
+repeated with one thing changed. In Alaya an agent only asks — for a model's response, a
+command's output, a person's reply — and Alaya carries out each request and appends the answer
+to a log, with a snapshot of the files. The log alone determines what the agent does next. So a
+run is complete data, which can be analysed without running anything again, and any point of it
+can be continued in another way: change a message, a file or the model, or sample again, and
+compare the outcomes.
 
 **Agent-native operation.** Experiments with agents produce more data than a person can process
 by hand, and research itself is increasingly automated by AI. Alaya is designed to be operated
@@ -87,15 +86,10 @@ as it stood, 362 of 464; the page shows a turn of the second.
 
 ## Documentation
 
-[`docs/architecture.md`](docs/architecture.md) — how the parts fit: programs, which only ask;
-the log, flat and append-only, kept as a forest of entries named by their content; replay, which
-reads a log with its program to find what comes next; and the driver, which carries that out and
-appends the answer. Every shared data structure, with diagrams.
-
-[`docs/agent-api.md`](docs/agent-api.md) — the agent API. A program over Alaya's operations —
-sample, run a command, time the run, run a grader — with failures, reads of the inbox, loops,
-and calls of routines by name, each in a frame of its own: how an agent of tools, workflows and
-sub-agents is structured. Tools, agents, runs, questions and replies.
+[`docs/agent-api.md`](docs/agent-api.md) — the agent API, step by step: a program, the log and
+its events, and what each construct of a program writes in the log — an operation, a read of
+the inbox, a call, a failure, a loop, a comment — each with a figure. Then replay, routines,
+tools, `ask_user`, an agent, a run, and the driver that drives it.
 
 [`docs/log-schema.md`](docs/log-schema.md) — the log and cache schema: the entry and the event as
 stored, how runs grow and fork, draws, what a person appends, grading a point of a run by
@@ -121,9 +115,5 @@ conversation, with Lean-native rendering, and commands run in a container.
 proof tasks: MiniSwe with its own prompts, a `proof` or `codeproof` mode, and a `time_budget`
 tool to pace a run by, graded by the Vero benchmark in `benchmarks/vero/`.
 
-[`docs/ask-user.md`](docs/ask-user.md) — `ask_user`, the tool with which MiniSwe and MiniVero
-ask a person a question and wait: yes/no, single-choice and open-ended forms, answering with
-`alaya reply`, and a local page that serves the waiting questions.
-
-The design follows the sketch in `functional_agents/`, whose own test
-`Test/Prototype.lean` runs against Alaya's interpreter.
+[`docs/style_guide.md`](docs/style_guide.md) — how Alaya looks: the colours, type, parts, icons
+and wording of the HTML report, and how the website and the diagrams take them up.

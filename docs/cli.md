@@ -3,7 +3,7 @@
 `alaya` drives runs from a shell, a script, a UI, or an agent such as Claude Code. Each command
 is a thin layer over one operation of the driver (`Alaya.Driver`), of what a person appends
 (`Alaya.Notices`), or of a reader of the forest (`Alaya.Render`, `Alaya.Html`); how they fit is
-`docs/architecture.md`, and what they write is `docs/log-schema.md`. This page is the command
+`docs/agent-api.md`, and what they write is `docs/log-schema.md`. This page is the command
 line itself: the commands, how a command line is read, what a command prints, and how it fails.
 
 There are no states. A run is a log, a point of a run is an **entry** — one event and the entry
@@ -137,8 +137,8 @@ the caller does about them (`docs/llm-api.md` §4). A failure prints `error: MES
 with `--json` one object: `{"error": CLASS, "message": ...}`, with `status` and `retry_after_ms`
 for an HTTP failure, and `problems` and `usage` for `usage`. One failure of the provider is no
 failure of `run`: its refusal of a request as too long for the model's context is the answer the
-agent's sample gets, in the log, and MiniSwe ends with `ContextExceeded` (`docs/architecture.md`
-§6). Any other — a key it rejects, a request it rejects for another reason, a response it
+agent's sample gets, in the log, and MiniSwe ends with `ContextExceeded` (`docs/agent-api.md`
+§3.4). Any other — a key it rejects, a request it rejects for another reason, a response it
 garbles — stops `run` with its status, and nothing is logged for it.
 
 A failed `run` keeps every entry it appended; the operation it was carrying out is asked for
@@ -262,7 +262,7 @@ Each appends one event after `ENTRY` and prints the new entry. `tell` appends wh
 `commit` snapshots `DIR`, lists what changed from the workspace the log has reached — `M path`,
 `+ path`, `- path` — and appends the change with `--message` after the list, refusing a directory
 with no change; `checkout` writes the files to edit. `reply` answers the question the log waits
-on, read against its form (`docs/ask-user.md`), or with `--unavailable` that the person cannot,
+on, read against its form (below), or with `--unavailable` that the person cannot,
 and is refused where no question waits. `stop` ends every frame of the agent there, with
 `--reason`: the run is over at that point, as `grade` makes it before it assigns its grader.
 None of them appends once the agent is over, where there is nothing to stop and no one to read
@@ -270,6 +270,33 @@ it. A message or a change is taken
 by the agent at its next read of its inbox, which MiniSwe makes at the start of every round. A
 reply is taken by the `ask_user` call that waits for it, and by nothing else. A stop is not read
 at all: it ends the agent where it is.
+
+`reply` reads `TEXT` as an answer to the question the log waits on (`Question.parseReply`,
+`docs/agent-api.md` §7) before it appends anything:
+
+| Question | `TEXT` | The model is shown |
+| --- | --- | --- |
+| `yes_no` | exactly `yes` or `no` | `"yes"`, `"no"` |
+| `single_choice` | one candidate's number, from 1, or `none_of_above` | the number; `"none_of_above"` |
+| `open_ended` | any text that is not blank, kept verbatim | the text |
+| any | none: `--unavailable` | `{"status": "unavailable"}` |
+
+```bash
+alaya waiting --data DATA                          # every question that waits, with its entry
+alaya reply --data DATA -- QUESTION 2              # the second candidate of a choice
+alaya reply --data DATA -- QUESTION none_of_above  # no candidate is right: an answer
+alaya reply --data DATA --unavailable -- QUESTION  # the person cannot answer: not an answer
+alaya run REPLY --provider PROVIDER --data DATA    # go on from the entry `reply` printed
+```
+
+- Put the text after `--`, and the options before it, so that an open answer such as `--data`
+  is text.
+- A text that is no reply to the question is refused, and the question still waits.
+- A candidate's number is one reply however it is typed: `2` and ` 2 ` give the same entry.
+- Two replies to one question are two branches from the waiting entry, on the same workspace.
+  A second reply on one branch is refused: no question waits there.
+- A reply adds no time to the run: with `--time-budget`, time spent waiting for a person is
+  not the run's.
 
 ### `comment`
 

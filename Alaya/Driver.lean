@@ -10,7 +10,7 @@ live, asks it what is next after the log, and either carries out the operation i
 appends the answer, or appends the mark it makes, an entry at a time, until the agent is over and no grader is assigned,
 the run is graded, it waits for a person, or this invocation reaches a limit. "Execution is an external operation
 rather than a constant within type theory" (Hancock and Setzer 2000): this is the one loop that
-need not end. See `docs/architecture.md`.
+need not end. See `docs/agent-api.md` §10.
 
 Resuming after a crash is no different from going on: the operation that was being carried out
 when the driver stopped is asked for again. A command runs on the version of the workspace the

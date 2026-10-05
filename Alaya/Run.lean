@@ -7,7 +7,7 @@ on, and every later command builds the same run from the log alone: the agent an
 and the container its commands run in. A grader is no part of it: once the agent is over, the
 run waits for a person to assign one, a notice, runs its program, and ends with its verdict. So any
 point of any run can be graded, by any grader, at any time, and grading a point again is a fork
-there. See `docs/architecture.md`. -/
+there. See `docs/agent-api.md` §9. -/
 
 namespace Alaya
 

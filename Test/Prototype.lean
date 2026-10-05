@@ -1,10 +1,9 @@
 import Alaya.Replay
 import Test.Framework
 
-/-! The sketch of `functional_agents/` run on Alaya's interpreter: its signature, its programs,
-its scripted world and its driver, transliterated, must print what the sketch prints
-(`Test/Prototype/expected.txt`, the output of
-`cat {Stubs,Core,Programs,Replay,Driver,Grade,Test}.lean | lean --stdin`). Every way a log can
+/-! The sketch the design began as, run on Alaya's interpreter: its signature, its programs,
+its scripted world and its driver, transliterated, must print what the sketch printed
+(`Test/Prototype/expected.txt`). Every way a log can
 be read — a fork that is stopped, a question that waits, a failure that is caught, a log that is
 no trace of the program — is checked against the sketch, line for line. -/
 

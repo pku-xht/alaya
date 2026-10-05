@@ -48,7 +48,7 @@ is what `new --task` gives, the notice the agent waits for. The command line nam
 
 The tools are not this agent's. `Alaya.Agents.Tools` defines each as a `Tool` — its schema, whether
 it must be called alone, the instruction it adds to the prompt, what is wrong with a call's
-arguments, and the program that answers a call (`docs/agent-api.md` §3) — with no knowledge of
+arguments, and the program that answers a call (`docs/agent-api.md` §6) — with no knowledge of
 which agent offers it. MiniSwe offers the tools its configuration names, and owns the rest: which
 tool a call names, how a malformed call is worded, what the view shows. A tool never changes the
 agent's text, it only adds its instruction after it.
@@ -217,7 +217,12 @@ and is gone when a later `run` starts a new container.
 - With `mask_observations` set: old outputs are omitted from the view (§10).
 - Every response must hold a tool call, not a `bash` call: mini's three sentences that say
   `bash` say a tool (§2).
-- With `ask_user` among the tools: [yes/no, single-choice, and open-ended questions](ask-user.md), the run waiting for a person's reply.
+- With `ask_user` among the tools (`--set 'agent.tools=["bash","submit","ask_user"]'`: the list
+  replaces the default one, so it names `bash` and `submit` too): yes/no, single-choice and
+  open-ended questions, the run waiting for a person's reply (`docs/agent-api.md` §7). A
+  response that combines `ask_user` with another tool is a format error, before any tool runs.
+  The step and format-error limits still hold: when the question used the last allowed turn,
+  the agent ends with `LimitsExceeded` after the reply, without another sample.
 - What a person says or changes reaches the model at the start of the next round.
 
 ## 9. Reading a long output back

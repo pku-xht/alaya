@@ -5,8 +5,8 @@ to the end of its agent, and then to the verdict of the grader assigned to it. L
 before it, so logs that share a prefix share its entries, and a fork is a second continuation of
 an entry. This page specifies the entry and the event as stored, how runs grow and fork, how a
 point of a run is graded, what is on disk — the entries, the workspace snapshots, the model
-cache — and the invariants that hold of it. How the parts that write and read it fit is
-`docs/architecture.md`; the command line over it is `docs/cli.md`.
+cache — and the invariants that hold of it. The programs that write it, and the driver, are
+`docs/agent-api.md`; the command line over it is `docs/cli.md`.
 
 ## 1. Entries
 
@@ -145,7 +145,30 @@ A comment is an entry like any other, so it takes a position, and one appended a
 already goes on is a child beside the continuation: `tree` and the report show such a comment,
 when nothing follows it, as an annotation on its entry, not as a branch.
 
-*A run, forked three ways: a new draw, a person's note, and a point graded as it stood.*
+*Entries as a forest: an entry with two continuations is a fork. Here a run is driven again
+from the read at 3, which takes a new draw; a person adds a note at a later entry; and that
+entry is graded as it stood.*
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
+flowchart TD
+  classDef sample stroke:#3567a0
+  classDef notice stroke:#7556a3
+  classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
+  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
+
+  root("0 · the workspace the run starts from"):::notice --> opened("1 · open agent")
+  opened --> task("2 · said “the task”"):::notice --> heard("3 · inbox: takes 2")
+  heard --> first("4 · sample, draw 0 …"):::sample --> firstEnd("… return pass 41/48"):::ok
+  heard --> second("4 · sample, draw 1 …"):::sample --> secondEnd("… return pass 48/48"):::ok
+  first --> note("k · said “a note”"):::notice --> noteEnd("… return pass 45/48"):::ok
+  first --> stopped("k · stopped: to grade this point"):::bad
+  stopped --> assigned("k+1 · assigned grader"):::notice --> graded("… return fail 12/48"):::bad
+  linkStyle default stroke-width:1px
+```
+
+*The same forks, as `alaya tree` prints them: a new draw, a person's note, and a point graded as
+it stood.*
 
 ```
 $ alaya tree
