@@ -25,8 +25,7 @@ defaults. A field left out is its default, and a misspelt one is an error.
 ## 2. What the model is sent
 
 **The opening** is mini's two messages, rendered from its `mini.yaml`: the system message, and
-the task with a line describing the machine. The machine is the `uname` of the run's image, not
-of the host. Each offered tool's instruction is appended to the task message.
+the task with a line naming the machine: the system and the architecture of the run's image. Each offered tool's instruction is appended to the task message.
 
 **The view** is what each later request holds of the conversation:
 
@@ -71,8 +70,10 @@ A tool that fails does not end the agent: the model is shown the error as the ca
   on the host.
 - **Through `/bin/sh`, with stderr merged into stdout**, so the model sees output in the order
   a terminal would.
-- **A command that times out or cannot be run is an answer**, with no exit code and an `error`
-  saying why. A run does not die on a failed command.
+- **A command that times out or cannot be run is an answer**, with no exit code and an
+  `error`. A run does not die on a failed command. Of a command that could not be run, the
+  model is told only that: what docker said, with its paths and container, is kept in the log
+  as the answer's `detail`.
 - **Only the workspace is kept.** What a command installs elsewhere in the container lasts
   until a later `run` starts a new container.
 
@@ -82,12 +83,14 @@ A tool that fails does not end the agent: the model is shown the error as the ca
 holds the whole of it, which the agent reads with `bash`:
 
 ```
-[output truncated; full output: /alaya/outputs/17.txt]
+[output truncated; full output: /alaya/outputs/3f9a1c2b7d4e.txt]
 ```
 
-The driver writes each command's whole output to a file named by the position of its answer in
-the log, and mounts the files of the log's earlier commands read-only at `/alaya/outputs`. A
-fork sees its own log's files; no snapshot and no grader sees them.
+The driver writes each command's whole output to a file named by a hash of its content, and
+mounts the files of the log's earlier commands read-only at `/alaya/outputs`. The name is shown
+to the model, so it holds nothing of the log: the same output has the same name in every run,
+whatever comments or messages came before it. A fork sees its own log's files; no snapshot and
+no grader sees them.
 
 **A full context ends the agent.** When the model's `context_tokens` is known, the agent ends
 with `ContextExceeded` before a request that would not fit: one whose size reaches the context
@@ -99,7 +102,7 @@ since.
 turns out of the view. An omitted output keeps its exit code and names its file:
 
 ```json
-{"output": "[output omitted; full output: /alaya/outputs/12.txt]", "exit_code": 0}
+{"output": "[output omitted; full output: /alaya/outputs/8b21e0c47a19.txt]", "exit_code": 0}
 ```
 
 The boundary keeps the last `K` turns whole and moves `B` turns at a time. Between its moves
@@ -112,6 +115,9 @@ are omitted, and the choice depends on turn positions alone, never on the model.
   two prompt sentences and the last line of the format-error message say so.
 - **A response must hold a tool call, not a `bash` call.** Mini's three sentences that say
   `bash` say a tool, so that a tool added later is not contradicted.
+- **The machine line is the image's system and architecture**, such as `Linux x86_64`. Mini
+  gives the whole `uname`; in a container its kernel release and version are the host's, so
+  they would put the machine a run was created on into the prompt.
 - **Observations are Lean's JSON**: the fields are `output`, `exit_code` and `error`, where
   mini has `returncode` and `exception_info`, and non-ASCII text is not escaped.
 - **A format error names one problem**, where mini concatenates every problem found. A

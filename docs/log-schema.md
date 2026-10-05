@@ -84,7 +84,7 @@ with its kind under `type`, and its frame, where it has one, as an array of numb
 | `op.type` | Fields of `op` | `answer` |
 | --- | --- | --- |
 | `sample` | `request`: the digest of the request | the response: `{content, tool_calls, reasoning, reasoning_items, finish_reason, usage}` |
-| `exec` | `command`, `config`: `{timeout_seconds, env, outputs}` | `{output: {output, exit_code, error}, workspace, file}` |
+| `exec` | `command`, `config`: `{timeout_seconds, env, outputs}` | `{output: {output, exit_code, error}, workspace, file}`; `output` also has `detail`, what the machine said, when the command could not be run |
 | `time` | | `{spent_ms, budget_ms}` |
 | `external` | `command`, `image`, `input`, `timeout_seconds` | `{exit_code, stdout, stderr, checkout, elapsed_ms, error}` |
 
@@ -113,7 +113,7 @@ response.
 
 The second event is the opening of the agent's call. Its arguments are the run's
 **configuration**: the agent's complete configuration, the model's complete spec, and the
-environment — the pinned image, the workdir, the machine's `uname`. Every later command builds
+environment — the pinned image, the workdir, the image's system and architecture. Every later command builds
 the run from there.
 
 ## 3. The forest

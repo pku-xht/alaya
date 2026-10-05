@@ -31,13 +31,11 @@ structure RunConfig where
   deriving Inhabited
 
 def Uname.toJson (uname : Uname) : Json :=
-  .mkObj [("system", uname.system), ("release", uname.release), ("version", uname.version),
-    ("machine", uname.machine)]
+  .mkObj [("system", uname.system), ("machine", uname.machine)]
 
 def Uname.fromJson (json : Json) : Except String Uname := do
   let field (name : String) := json.getObjVal? name >>= Json.getStr?
-  pure { system := ← field "system", release := ← field "release", version := ← field "version"
-         machine := ← field "machine" }
+  pure { system := ← field "system", machine := ← field "machine" }
 
 def Environment.toJson (environment : Environment) : Json :=
   .mkObj [("image", environment.image), ("workdir", environment.workdir),

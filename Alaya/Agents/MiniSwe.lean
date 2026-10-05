@@ -40,7 +40,8 @@ structure Config where
   /-- How commands are run. -/
   executor : Executor.Config := defaultExecutor
   /-- Name, in a long output's warning, the file under `outputsDir` that holds the whole of it
-  (`Driver.outputFile`). Off, the agent is mini to the byte; on, only that warning differs. -/
+  (`Driver.outputFile`, named by the output's content). Off, the agent is mini to the byte; on,
+  only that warning differs. -/
   recoverOutput : Bool := false
   /-- The tools offered, by name, in order: `bash` and `submit`, and any others of `Tools.all`. -/
   tools : Array String := #["bash", "submit"]
@@ -134,8 +135,9 @@ SWE-agent/mini-swe-agent `04d809c`), cut where jinja substitutes or branches, by
 `Test/MiniSwe.lean` checks each against the vendored copy. Assembly does what jinja does: puts
 the task and the `uname` in, keeps the MacOS note when `system == "Darwin"` with the
 whitespace its `{%-`/`-%}` tags strip, and drops one trailing newline from a rendering. The
-one change of text is the port's: the sentences that name mini's submission sentinel say the
-`submit` tool (`sentinelToSubmit`). -/
+changes of text are the port's: the sentences that name mini's submission sentinel say the
+`submit` tool (`sentinelToSubmit`), those that require a `bash` call require a tool call
+(`toolNeutral`), and the machine line has no kernel release or version (`instanceMessage`). -/
 
 def systemTemplate : String := include_str "MiniSwe/system.md"
 def opening : String := include_str "MiniSwe/instance-opening.md"
@@ -192,12 +194,14 @@ def toolNeutral (text : String) : String :=
     "Every response needs at least one tool call."
   text.replace "exactly one bash tool call" "exactly one tool call"
 
-/-- The rendered instance (task) message. `system`/`release`/`version`/`machine` are the
-`uname` fields; the MacOS `sed` note is included exactly when `system == "Darwin"`. -/
-def instanceMessage (task system release version machine : String) : String :=
+/-- The rendered instance (task) message. Where mini's template has the whole `uname`, it has
+the `system` and the `machine` alone: under docker the kernel's release and version are the
+host's, and a prompt should not say which machine a run was created on. The MacOS `sed` note is
+included exactly when `system == "Darwin"`. -/
+def instanceMessage (task system machine : String) : String :=
   let note := if system == "Darwin" then darwinNote.trimAscii.toString else ""
   rendered <| toolNeutral <| sentinelToSubmit <|
-    opening ++ task ++ rules ++ system ++ " " ++ release ++ " " ++ version ++ " " ++ machine ++
+    opening ++ task ++ rules ++ system ++ " " ++ machine ++
     examples.trimAsciiEnd.toString ++ note ++ sedExamples.trimAsciiStart.toString
 
 /-- `text` with the instructions of the offered tools after it, a blank line before each: what
@@ -212,7 +216,7 @@ def withInstructions (config : Config) (text : String) : String :=
 def openingMessages (config : Config) (task : String) (uname : Uname) : Array Chat.Message :=
   #[.system systemMessage,
     .user (withInstructions config
-      (instanceMessage task uname.system uname.release uname.version uname.machine))]
+      (instanceMessage task uname.system uname.machine))]
 
 /-- The user turn a malformed response is answered with: mini's `format_error_template`. -/
 def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : Option String)

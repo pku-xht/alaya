@@ -113,7 +113,7 @@ def taskMessage (task : String) (mode : Mode) (uname : Uname) (pacing : Bool := 
     scoring,
     mechanics,
     "Environment: " ++
-      uname.system ++ " " ++ uname.release ++ " " ++ uname.version ++ " " ++ uname.machine]
+      uname.system ++ " " ++ uname.machine]
 
 /-- The opening of a conversation: the system message and the task. -/
 def openingMessages (config : Config) (task : String) (uname : Uname) : Array Chat.Message :=

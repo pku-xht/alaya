@@ -655,7 +655,7 @@ Run.ofAgent : Json → Program Agent Json → Array (String × (Json → Program
 structure RunConfig where
   agent : Json                       -- the agent's complete configuration
   model : Json                       -- the model's complete spec
-  environment : Environment          -- the pinned image, the workdir, the machine's uname
+  environment : Environment          -- the pinned image, the workdir, the system and architecture
 
 RunConfig.run : RunConfig → Models.Spec → Except String (Run Agent)
 configOf      : Log Agent → Result RunConfig         -- read off the opening of the agent's call

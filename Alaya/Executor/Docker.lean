@@ -137,13 +137,12 @@ private def runArgs (settings : Settings) : Array String :=
 /-- `uname` inside the image, for a prompt that describes the machine. Read with a throwaway
 container, since it is needed when a run is created, before any command of it has run. -/
 def uname (settings : Settings) : Result Uname := do
-  let script := "uname -s; uname -r; uname -v; uname -m"
+  let script := "uname -s; uname -m"
   let out ← docker (#["run", "--rm", "--entrypoint", "/bin/sh"] ++ runArgs settings ++
     #[settings.image, "-c", script]) s!"reading uname from {settings.image}"
   match out.splitOn "\n" with
-  | [system, release, version, machine] =>
-    pure { system := system.trimAscii.toString, release := release.trimAscii.toString
-           version := version.trimAscii.toString, machine := machine.trimAscii.toString }
+  | [system, machine] =>
+    pure { system := system.trimAscii.toString, machine := machine.trimAscii.toString }
   | _ => throw <| .environment s!"unexpected uname output from {settings.image}: {out}"
 
 /-- A running container, plus whether its image has `timeout(1)`, which kills the command's

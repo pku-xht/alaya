@@ -26,13 +26,15 @@ private def miniSubmitInstruction (indent : String) : String :=
   "Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n" ++
   indent ++ "Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>"
 
-/-- A fixture rendered by mini's templates, with the port's two changes: the sentences that name
-the submission sentinel name the `submit` tool, and the one that requires a bash call requires
-a tool call. Everything else must match to the byte. -/
+/-- A fixture rendered by mini's templates, with the port's three changes: the sentences that
+name the submission sentinel name the `submit` tool, the one that requires a bash call requires
+a tool call, and the machine line gives the system and the architecture, without the kernel's
+release and version. Everything else must match to the byte. -/
 private def portOf (miniText : String) : String :=
   let step1 := miniText.replace (miniSubmitInstruction "   ") (submitInstruction "   ")
   let step2 := step1.replace (miniSubmitInstruction "  ") (submitInstruction "  ")
-  step2.replace "MUST include AT LEAST ONE bash tool call" "MUST include AT LEAST ONE tool call"
+  let step3 := step2.replace "MUST include AT LEAST ONE bash tool call" "MUST include AT LEAST ONE tool call"
+  step3.replace "Darwin 23.5.0 Darwin Kernel Version 23.5.0 arm64" "Darwin arm64"
 
 /-! ## Golden template fidelity -/
 
@@ -43,15 +45,19 @@ def goldenSuite : Suite := suite "mini-swe.golden" #[
 
   test "instance message (Darwin) is mini's, with the submit tool and a tool call in place of bash's" do
     assertStringEq "instance"
-      (instanceMessage "Fix the bug in foo.py" "Darwin" "23.5.0" "Darwin Kernel Version 23.5.0" "arm64")
+      (instanceMessage "Fix the bug in foo.py" "Darwin" "arm64")
       (portOf MiniSweFixtures.instanceDarwin)
     -- The replacement is real: the fixture and the prompt differ exactly there.
     check (contains MiniSweFixtures.instanceDarwin "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
       "the fixture names the sentinel"
-    check (!contains (instanceMessage "t" "Linux" "r" "v" "m") "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
+    check (!contains (instanceMessage "t" "Linux" "m") "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
       "the prompt does not"
     check (contains MiniSweFixtures.instanceDarwin "AT LEAST ONE bash tool call") "the fixture requires bash"
-    check (!contains (instanceMessage "t" "Linux" "r" "v" "m") "AT LEAST ONE bash tool call") "the prompt requires a tool call",
+    check (!contains (instanceMessage "t" "Linux" "m") "AT LEAST ONE bash tool call") "the prompt requires a tool call"
+    -- The machine line: the fixture has the whole uname, the prompt the system and architecture.
+    check (contains MiniSweFixtures.instanceDarwin "Darwin 23.5.0 Darwin Kernel Version 23.5.0 arm64")
+      "the fixture names the kernel"
+    check (!contains (instanceMessage "t" "Darwin" "arm64") "Kernel") "the prompt does not",
 
 
   iotest "an observation is the recorded output as JSON, cut when long" do
@@ -120,7 +126,7 @@ def parseSuite : Suite := suite "mini-swe.parse" #[
     assertEqual "tools off" ((tools off).map (·.name)) #["bash", "submit"]
     assertEqual "tools on" ((tools on).map (·.name)) #["bash", "submit"]
     assertStringEq "opening off" (openingText off)
-      (instanceMessage "t" testUname.system testUname.release testUname.version testUname.machine)
+      (instanceMessage "t" testUname.system testUname.machine)
     assertStringEq "opening on is unchanged" (openingText on) (openingText off)
     assertStringEq "repair on is unchanged" (formatErrorMessage "e" true (some "stop") on)
       (formatErrorMessage "e" true (some "stop"))
@@ -416,11 +422,16 @@ def execSuite : Suite := suite "mini-swe.exec" #[
     assertEqual "replaced output" out.output "a�b"
     assertEqual "exit code" out.exitCode? (some 0),
 
-  test "a command that cannot run is an error observation, not an aborted run" do
+  test "a command that cannot run is an error observation, which tells the agent nothing of the machine" do
     let missing := (← scratch) / "missing"
     let out ← runIn missing "echo hi"
     assertEqual "no exit code" out.exitCode? none
-    check (((out.error?.getD "").splitOn missing.toString).length > 1) "the error names the directory"
+    assertEqual "what the agent is told" out.error? (some Executor.couldNotRun)
+    check (contains (out.detail?.getD "") missing.toString) "the detail, for a reader of the log, names the directory"
+    -- What a model is shown of it, cut or whole, holds nothing of the host.
+    let shown := (observation out outputLimit).compress
+    check (!contains shown missing.toString) s!"the observation names the host's directory: {shown}"
+    check (contains shown Executor.couldNotRun) "and says the command could not be run"
 ]
 def suites : Array Suite := #[goldenSuite, parseSuite, runSuite, execSuite]
 

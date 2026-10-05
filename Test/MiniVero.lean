@@ -17,7 +17,7 @@ private def config : MiniVero.Config := {}
 private def contains (text needle : String) : Bool :=
   (text.splitOn needle).length > 1
 
-private def machine : Uname := { system := "Linux", release := "", version := "", machine := "x86_64" }
+private def machine : Uname := { system := "Linux", machine := "x86_64" }
 
 private def openingText (task : String) (mode : MiniVero.Mode := .codeproof) : TestM String := do
   match (MiniVero.openingMessages { config with mode } task machine)[1]? with

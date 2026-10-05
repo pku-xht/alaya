@@ -152,7 +152,7 @@ def eventSummary : Event Agent → String
     if response.toolCalls.isEmpty then s!"sample → says {(flatten (response.content?.getD "") 60).quote}"
     else s!"sample → " ++ "; ".intercalate (response.toolCalls.map callSummary).toList
   | .answered _ (.exec command _) (.ok (.execution e)) =>
-    let status := match e.output.exitCode?, e.output.error? with
+    let status := match e.output.exitCode?, e.output.failure? with
       | some code, _ => s!"exit {code}"
       | none, some error => flatten error 40
       | none, none => "no status"
