@@ -1,4 +1,4 @@
-# Alaya
+# Alaya: LLM Agents as Effectful Programs with Durable Execution
 
 Alaya is a framework for experimenting with coding agents, built on three principles:
 
