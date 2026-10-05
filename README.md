@@ -86,4 +86,5 @@ implementation and proof tasks: its options, what the model is sent, how that di
 Vero's own instructions, and the `time_budget` tool a run is paced by.
 
 [`docs/style_guide.md`](docs/style_guide.md) — how Alaya looks: the colours, type, parts, icons
-and wording of the HTML report, and how the website and the diagrams take them up.
+and wording of the HTML report, and how the website and the diagrams take them up. It is a
+reference for AI agents that write Alaya's pages and figures, not reading for users.
