@@ -71,8 +71,8 @@ writes, and what each construct writes there (an operation, a read of the inbox,
 failure, a loop, a comment); then replay, routines, tools, `ask_user`, an agent, a run, and the
 driver.
 
-[`docs/cli.md`](docs/cli.md) — the `alaya` command line: text and JSON output, the exit
-statuses, and what each command does to the forest.
+[`docs/cli.md`](docs/cli.md) — the `alaya` command line: its commands for creating, running,
+grading and inspecting runs, their text and JSON output, and their exit statuses.
 
 [`docs/log-schema.md`](docs/log-schema.md) — the log schema: an entry, the events as JSON, the
 forest of logs and its forks, the grader's protocol and its verdict, the data directory with its
