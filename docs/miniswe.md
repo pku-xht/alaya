@@ -18,9 +18,9 @@ defaults. A field left out is its default, and a misspelt one is an error.
 | `executor.env` | mini's | environment overrides for every command: `PAGER=cat` and the like |
 | `tools` | `["bash", "submit"]` | the tools offered, in order. `bash` and `submit` are required; `ask_user` and `time_budget` may be added. The list replaces the default one |
 | `question_types` | `[]` | the kinds of question `ask_user` lets the model ask: any of `yes_no`, `single_choice`, `open_ended`. Required, and not empty, when `ask_user` is offered |
-| `recover_output` | false | name the file that holds the whole of a cut output (§5) |
-| `context_reserve` | 8000 | tokens kept free for the next response (§5) |
-| `mask_observations` | null | `{keep_turns, block}`: leave old outputs out of the view (§5) |
+| `recover_output` | false | name the file that holds the whole of a cut output (§4) |
+| `context_reserve` | 8000 | tokens kept free for the next response (§3) |
+| `mask_observations` | null | `{keep_turns, block}`: leave old outputs out of the view (§4) |
 
 ## 2. What the model is sent
 
@@ -62,57 +62,40 @@ The agent returns `{status, submission}`:
 
 A tool that fails does not end the agent: the model is shown the error as the call's result.
 
-## 4. How a command runs
-
-- **One container for a run**, started from the run's image at the first command, with the
-  workspace mounted at the run's workdir. Each command is a `docker exec` in it. Nothing runs
-  on the host.
-- **Through `/bin/sh`, with stderr merged into stdout**, so the model sees output in the order
-  a terminal would.
-- **Whatever a command does is an answer.** One that runs out of time has no exit code and an
-  `error` saying so. One that leaves docker unable to run it, as a command that kills its own
-  container does, is told to the model only as "the command could not be run"; what docker
-  said, with its paths and container, is kept in the log as the answer's `detail`.
-- **What the machine cannot do is no answer.** A container that cannot be started — a missing
-  image, a user or a network docker does not know — stops the driver with an environment
-  error. Nothing is logged, and the next `run` asks for the command again.
-- **A command reads nothing from standard input**: it is closed.
-- **Only the workspace is kept.** What a command installs elsewhere in the container lasts
-  until a later `run` starts a new container.
-
-## 5. Long outputs and a full context
-
-**Reading a cut output back** (`recover_output`). The warning on a cut output names a file that
-holds the whole of it, which the agent reads with `bash`:
-
-```
-[output truncated; full output: /alaya/outputs/3f9a1c2b7d4e.txt]
-```
-
-The driver writes each command's whole output to a file named by a hash of its content, and
-mounts the files of the log's earlier commands read-only at `/alaya/outputs`. The name is shown
-to the model, so it holds nothing of the log: the same output has the same name in every run,
-whatever comments or messages came before it. A fork sees its own log's files; no snapshot and
-no grader sees them.
-
 **A full context ends the agent.** When the model's `context_tokens` is known, the agent ends
 with `ContextExceeded` before a request that would not fit: one whose size reaches the context
 less `context_reserve`, or less the model's `output_tokens` when that is smaller. The size is
 taken from the last response's reported usage, plus four characters a token for what was added
 since.
 
-**Masking** (`mask_observations: {keep_turns: K, block: B}`) leaves the outputs of the oldest
-turns out of the view. An omitted output keeps its exit code and names its file:
+## 4. Commands and their output
+
+A command runs through `/bin/sh` in the run's container, at its workdir, with stderr merged into
+stdout and no standard input. A command that fails or runs out of time still gets an answer,
+which the model sees.
+
+A long output would flood the context, so the model sees only the first and last 5 000
+characters of an output of 10 000 or more (§2). With `recover_output`, the warning also names a
+file that holds the whole output, which the model can read with `bash`:
+
+```
+[output truncated; full output: /alaya/outputs/3f9a1c2b7d4e.txt]
+```
+
+The file is named by a hash of the output, so the same output has the same name in every run.
+
+Over a long run, old outputs fill the context too. With
+`mask_observations: {keep_turns: K, block: B}`, the outputs of turns older than the last `K` are
+replaced by a note that names their file:
 
 ```json
 {"output": "[output omitted; full output: /alaya/outputs/8b21e0c47a19.txt]", "exit_code": 0}
 ```
 
-The boundary keeps the last `K` turns whole and moves `B` turns at a time. Between its moves
-the context only grows at its end, so the provider's prompt cache holds. Only command outputs
-are omitted, and the choice depends on turn positions alone, never on the model.
+The boundary moves `B` turns at a time, so between its moves the conversation only grows at its
+end, and the provider's prompt cache stays valid.
 
-## 6. Differences from mini-SWE-agent
+## 5. Differences from mini-SWE-agent
 
 - **A run ends with the `submit` tool**, not with a sentinel line in a command's output. The
   two prompt sentences and the last line of the format-error message say so.
@@ -127,8 +110,9 @@ are omitted, and the choice depends on turn positions alone, never on the model.
   `command` that is not a string is a format error, where Python would run a list.
 - **Error texts are plain**, not Python's exception messages, and invalid UTF-8 in output is
   replaced byte by byte.
-- **The environment is a snapshot of the workspace**, not a persistent machine (§4).
-- **A full context ends the agent** (§5), where mini sends the request.
+- **The environment is a snapshot of the workspace**, not a persistent machine: what a command
+  installs outside the workspace lasts only until a later `run` starts a new container.
+- **A full context ends the agent** (§3), where mini sends the request.
 - **No cost accounting or step limit**: mini's `cost_limit` and `step_limit` are not enforced,
   and the agent never ends with `LimitsExceeded`. `alaya run --samples N` pauses a run after `N`
   responses instead, and a later `run` goes on from there (`docs/cli.md`).

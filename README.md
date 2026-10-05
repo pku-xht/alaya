@@ -79,8 +79,7 @@ forest of logs and its forks, the grader's protocol and its verdict, the data di
 workspace snapshots, and the model cache entry.
 
 [`docs/miniswe.md`](docs/miniswe.md) — MiniSwe, the port of mini-SWE-agent: its options, what
-the model is sent, how it ends, how a command runs, long outputs and a full context, and how it
-differs from the original.
+the model is sent, how it ends, commands and their output, and how it differs from the original.
 
 [`docs/minivero.md`](docs/minivero.md) — MiniVero, MiniSwe with Vero's instructions for Lean
 implementation and proof tasks: its options, what the model is sent, how that differs from
