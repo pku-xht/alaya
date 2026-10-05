@@ -294,8 +294,8 @@ alaya grade 4f2c8b --grader 'sh /grader/strict.sh' --grader-input ./hidden      
   runs in, by default the run's. **`--grader-timeout S`** is 900 unless given, 0 for none.
 - **No provider is needed**: the agent does not go on. The grader's container never has a
   network.
-- **A log has one grader.** Where the log at `ENTRY` has one already, the new one is assigned
-  on a fork, and `tree` shows both verdicts.
+- **Grading again forks.** Where the log at `ENTRY` already has a grader, the new one is
+  assigned on a fork, and `tree` shows both verdicts.
 
 What a grader is given, and how its output becomes a verdict, is `docs/log-schema.md` §4.
 

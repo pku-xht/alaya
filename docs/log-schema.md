@@ -292,11 +292,11 @@ the `external` operation before it.
 
 ### Grading again
 
-A log has one grader. Grading a point again, with the same grader or a corrected one, is a fork
-from the entry before the first was assigned, and `alaya tree` shows both verdicts. A grader
-that reads only the workspace gives one verdict for each version of it, so the points worth
-grading are the entries that leave a new version: the answers of commands, and changes from
-outside.
+A grader is assigned at most once along a log. Grading a point again, with the same grader or a
+corrected one, is a fork from the entry before the first was assigned, and `alaya tree` shows
+both verdicts. A grader that reads only the workspace gives one verdict for each version of it,
+so the points worth grading are the entries that leave a new version: the answers of commands,
+and changes from outside.
 
 ## 5. The data directory
 
@@ -345,20 +345,6 @@ two runs of it are two entries.
 
 A snapshot or a checkout of a directory that overlaps `D` is refused before anything is touched.
 
-The repository is restic's own format, unencrypted like the entries beside it, so `restic
-snapshots` and `restic mount` work on it directly. A crashed run can leave a stale lock, which
-`restic unlock` removes. A `restic` process spends about 0.8 s before it does anything, which is
-why reads are batched. On a Lean project with Mathlib — 7.2 GB in 121,433 files, on an Apple M5
-Pro's internal volume, one run each:
-
-| | |
-| --- | ---: |
-| first snapshot | 18.5 s |
-| snapshot after a command, nothing or one file changed | 5.6 s |
-| checkout, into an empty directory or in place | 22–25 s |
-| diff of two versions | 1.6 s |
-| repository after three snapshots | 2.4 GB |
-
 ## 6. The model cache entry
 
 `D/cache/<hash>.json`, where `<hash>` is the SHA-256 of the cache key (`docs/llm-api.md` §4):
@@ -383,19 +369,9 @@ How the cache is used is `docs/llm-api.md` §5.4.
 
 - **Names.** An entry's name is the hash of its parent's name and its event. Nothing under a
   name changes, and a log only grows.
-- **Opening.** A log's first event is a `changed` notice, the workspace it starts on, and its
-  second the opening of the agent's call, with the run's configuration.
 - **Traces.** Every log the driver writes is a trace of its run's program: replay agrees with
-  it at every prefix. A log that is not is refused, never driven on. Comments are no part of a
-  trace: they can be taken out or put in, and only positions count them.
+  it at every prefix. A log that is not is refused, not driven on.
 - **Draws.** A sample from an entry with `n` sampled continuations is draw `n` of its request.
-  A response's entry has the time of its draw, in every log that holds the draw.
-- **From outside.** A reply is appended only where its question waits, in the form it asks for;
-  a stop, a message and a change only while the agent runs; a grader only once the agent is
-  over, and where none is assigned yet.
-- **One grader.** A log has at most one grader. A graded log is complete: it ends with the
-  return of the run's own frame, the verdict.
-- **Workspace.** The version a log has reached is the last one a command or a change from
-  outside left, and every command runs on it. A grader's checkout is its own.
+- **Grading.** A graded log is complete: it ends with the verdict.
 - **Snapshots.** Every snapshot an entry names is kept while the entry is: a version of the
   workspace, a grader's checkout, and the input of the grader assigned.
