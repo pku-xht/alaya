@@ -59,10 +59,15 @@ the next `run`.
 
 ## 4. Differences from Vero's own instructions
 
-- **Only the run's mode.** A run is sent the grading rules of its own mode, as Vero's per-mode
-  templates do. A `proof` run never reads about the stubs or Part A of `codeproof`.
-- **File lists are the sandbox's own.** Where Vero's single template lists files generically,
-  the instance lists them as they are in this mode: `Impl/*.lean` is frozen in `proof` and
+- **No prescribed way of working.** Vero's `Persistence`, `Workflow` and `Proof strategy`
+  sections tell the agent how to work: keep iterating until the budget is spent, follow a fixed
+  order of steps, and decompose proofs over lists into helper lemmas. MiniVero leaves them out
+  and sends only the rules the grader enforces, so the strategy is the model's own. Vero's
+  `Previous iteration feedback` is left out too: feedback is a message appended with
+  `alaya tell` (§3).
+- **File lists are the sandbox's own.** Vero's base template, shared by both modes, lists
+  `Impl/*.lean` as editable even in `proof`, where its mode template says it is frozen. The
+  instance lists the files as they are in the run's mode: `Impl/*.lean` is frozen in `proof` and
   editable in `codeproof`.
 - **`Checkpointing` is adapted**, the one section not Vero's to the byte. Vero's is for a chunk
   of a known number of minutes, and says to check the time with `date`. Here the budget is
