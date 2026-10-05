@@ -112,9 +112,7 @@ partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit
     let agent? := place.agent?.or (AgentEnd.of? event)
     let spentMs := place.spentMs + entry.elapsedMs
     let next? := replayer?.map (·.next)
-    let question? := match next? with
-      | some (.waits frame) => (stack.find? (·.frame == frame)).bind (questionOfCall? ·.call)
-      | _ => none
+    let question? := (next?.bind questionOf?).map (·.2)
     let visit : Visit := {
       hash, entry, position := place.position, config?, asked?, next?, question?, stack, agent?, spentMs
       usage, workspace?

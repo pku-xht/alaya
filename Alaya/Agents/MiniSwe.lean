@@ -45,6 +45,9 @@ structure Config where
   recoverOutput : Bool := false
   /-- The tools offered, by name, in order: `bash` and `submit`, and any others of `Tools.all`. -/
   tools : Array String := #["bash", "submit"]
+  /-- The kinds of question `ask_user` lets the model ask: at least one when the tool is
+  offered, and none when it is not. There is no default: whoever offers the tool says. -/
+  questionTypes : Array Question.Kind := #[]
   /-- Tokens kept free for the next response when deciding whether the context is full, or the
   model's `output_tokens` when that is less. -/
   contextReserve : Nat := 8000
@@ -66,6 +69,7 @@ def Config.toJson (config : Config) : Lean.Json :=
       ("env", .arr (config.executor.env.map fun (name, value) => .arr #[.str name, .str value]))]),
     ("recover_output", (config.recoverOutput : Lean.Json)),
     ("tools", .arr (config.tools.map .str)),
+    ("question_types", .arr (config.questionTypes.map fun kind => .str kind.name)),
     ("context_reserve", (config.contextReserve : Lean.Json)),
     ("mask_observations", match config.masking? with
       | none => .null
@@ -77,7 +81,7 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array St
     Except String Config := do
   let object ← ConfigJson.object json
     (#["name", "step_limit", "max_consecutive_format_errors", "executor", "recover_output", "tools",
-      "context_reserve", "mask_observations"] ++ own)
+      "question_types", "context_reserve", "mask_observations"] ++ own)
   let executor ← match ← object.field? "executor" with
     | none => pure defaults.executor
     | some json => do
@@ -110,12 +114,29 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array St
     if !names.contains required then throw s!"'tools' must include {required}: mini's prompts are about it"
   for name in names do
     if (names.filter (· == name)).size > 1 then throw s!"'tools' names {name} twice"
+  let wrongTypes := s!"'question_types' must be an array of {Question.Kind.names}"
+  let questionTypes ← match ← object.field? "question_types" with
+    | none => pure defaults.questionTypes
+    | some (.arr names) => names.mapM fun
+      | .str name => match Question.Kind.ofName? name with
+        | some kind => pure kind
+        | none => throw s!"unknown kind of question '{name}': {wrongTypes}"
+      | other => throw s!"{wrongTypes}, not {other.compress}"
+    | some other => throw s!"{wrongTypes}, not {other.compress}"
+  for kind in questionTypes do
+    if (questionTypes.filter (· == kind)).size > 1 then throw s!"'question_types' names {kind.name} twice"
+  -- The kinds a model may ask are chosen with the tool, never assumed.
+  if names.contains "ask_user" && questionTypes.isEmpty then
+    throw s!"'tools' offers ask_user: 'question_types' must say which kinds of question the model may ask ({Question.Kind.names})"
+  if !names.contains "ask_user" && !questionTypes.isEmpty then
+    throw "'question_types' is for ask_user, which 'tools' does not offer"
   pure {
     stepLimit := ← object.nat "step_limit" defaults.stepLimit
     maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors
     executor
     recoverOutput := ← object.bool "recover_output" defaults.recoverOutput
     tools
+    questionTypes
     contextReserve := ← object.nat "context_reserve" defaults.contextReserve
     masking? }
 
@@ -126,7 +147,7 @@ def Config.commands (config : Config) : Executor.Config :=
 
 /-- The tools the configuration offers, its commands run as it says. -/
 def Config.offered (config : Config) : Array Tool :=
-  config.tools.filterMap (Tools.named? · config.commands)
+  config.tools.filterMap (Tools.named? · { commands := config.commands, questions := config.questionTypes })
 
 /-! ## Prompts
 

@@ -163,24 +163,16 @@ def snapshots (log : Log Agent) : Array Snapshot :=
       | _ => found
     | _ => found
 
-/-- The question an `ask_user` call asks, read off its opening. -/
-def questionOfCall? (call : RoutineCall) : Option Question :=
-  if call.name != Agents.Tools.AskUser.definition.name then none
-  else (Agents.Tools.AskUser.question call.arguments).toOption
+/-- The question a run waits on, where it waits on one: the frame that asked, and the question.
+Whatever asked it — a tool a model called, a step of a workflow — replay says so itself. -/
+def questionOf? : Next Agent → Option (Frame × Question)
+  | .waits frame (some question) => some (frame, question)
+  | _ => none
 
-/-- The question a log waits on: the frame of the `ask_user` call that waits, and its question,
-read off the opening of the call. -/
-def questionOf? (log : Log Agent) (next : Next Agent) : Option (Frame × Question) := do
-  let .waits frame := next | none
-  let call ← log.findSome? fun
-    | .opened opened call => if opened == frame then some call else none
-    | _ => none
-  pure (frame, ← questionOfCall? call)
-
-/-- A person's reply to the question a log waits on, as the event to append: refused when no
+/-- A person's reply to the question a run waits on, as the event to append: refused when no
 question waits, or when the reply is not of the form the question asks for. -/
-def replyTo (log : Log Agent) (next : Next Agent) (answer : Reply) : Except String (Event Agent) := do
-  let some (frame, question) := questionOf? log next | throw "no question waits for a reply here"
+def replyTo (next : Next Agent) (answer : Reply) : Except String (Event Agent) := do
+  let some (frame, question) := questionOf? next | throw "no question waits for a reply here"
   if !question.accepts answer then
     throw s!"the answer does not fit a {question.form.name} question"
   pure (.arrived (.replied frame answer))

@@ -212,10 +212,10 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
     | .raised error =>
       pure (tip, .over ((agentEnd? log).getD (.failed error))
         (some (.mkObj [("status", "error"), ("reason", .str error)])))
-    | .waits frame =>
+    | .waits frame question? =>
       match frame.isEmpty, agentEnd? log with
       | true, some agent => pure (tip, .over agent none)
-      | _, _ => pure (tip, .waits frame ((questionOf? log (.waits frame)).map (·.2)))
+      | _, _ => pure (tip, .waits frame question?)
     | .mismatch position =>
       throw <| .input s!"the log is no trace of its run's program: the event at {position} is not what it does"
     | .unguarded frame =>
@@ -227,6 +227,7 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
         return (tip, .paused reason)
       append (.heard frame notices) checkout samples
     | .comments frame text => append (.commented (some frame) text) checkout samples
+    | .questions frame question => append (.asked frame question) checkout samples
     | .opens frame call => append (.opened frame call) checkout samples
     | .returns frame value => append (.returned frame value) checkout samples
     | .fails frame error => append (.failed frame error) checkout samples
@@ -278,8 +279,8 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
 frame, or inside it. -/
 def running : Next Agent → Bool
   | .ask call => call.frame.inAgent
-  | .opens frame _ | .returns frame _ | .fails frame _ | .hears frame _ | .waits frame
-  | .comments frame _ => frame.inAgent
+  | .opens frame _ | .returns frame _ | .fails frame _ | .hears frame _ | .waits frame _
+  | .questions frame _ | .comments frame _ => frame.inAgent
   | _ => false
 
 /-- Appends an event that comes from outside — a notice, a stop — after `tip`, after checking
@@ -299,7 +300,7 @@ def append (store : Store) (run : Run Agent) (tip : Hash) (event : Event Agent) 
   | .arrived (.assigned grader) =>
     if running next then
       throw <| .input "the agent is still running: a grader is assigned once it is over; `alaya grade` stops it first"
-    if !(next matches .waits #[]) then
+    if !(next matches .waits #[] _) then
       throw <| .input "the log has its grader: a point is graded again on a fork, from the entry before the grader was assigned, as `alaya grade` does"
     if let .error problem := Grader.fromJson grader then
       throw <| .input s!"the grader cannot be read: {problem}"

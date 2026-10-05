@@ -145,7 +145,7 @@ def suite : Suite := Testing.suite "runs" #[
         check agrees s!"replay disagrees at {i}: {Render.eventSummary log[i]!}"
       -- What follows the agent waits for a grader: the run ends with its verdict, not before.
       match next run log with
-      | .waits #[] => pure ()
+      | .waits #[] _ => pure ()
       | _ => fail "the agent is over, and the run waits for a grader"
       -- Driven again from its end, a run whose agent is over stays as it is: nothing is appended.
       let count := (← assertOk rt.store.forest).entries.size
@@ -410,7 +410,7 @@ def suite : Suite := Testing.suite "runs" #[
     -- A comment is taken at any entry, with nothing to check: where the agent is over, where a
     -- stop or a message is refused, and on a log that is no trace of its run.
     let (after, _) ← assertOk <| Notices.comment rt.store first "after the end"
-    check ((next run (← logAt rt after)) matches .waits #[]) "the run stands as it stood"
+    check ((next run (← logAt rt after)) matches .waits #[] _) "the run stands as it stood"
     assertError "a message there" (Driver.append rt.store run after (.arrived (.said "late"))) fun
       | .input _ => true
       | _ => false

@@ -370,6 +370,7 @@ def describe : Event Agent → String
     s!"{frame.toList}  failed: {error.replace "no routine named" "no tool named"}"
   | .stopped reason => s!"-  stopped: {reason}"
   | .heard frame notices => s!"{frame.toList}  heard {notices.toList}"
+  | .asked frame question => s!"{frame.toList}  asked: {question.text}"
 
 def describeNext : Next Agent → String
   | .done value => s!"done: {txt value}"
@@ -379,7 +380,8 @@ def describeNext : Next Agent → String
   | .fails frame error => s!"log the failure of {frame.toList}: {error}"
   | .raised error => s!"failed: {error}"
   | .hears frame notices => s!"mark the read of {frame.toList}, of {notices.toList}"
-  | .waits frame =>
+  | .questions frame question => s!"log the question of {frame.toList}: {question.text}"
+  | .waits frame _ =>
     if frame.isEmpty then "wait: there is no workspace to start on"
     else s!"wait: {frame.toList} reads the inbox once something arrives"
   | .mismatch position => s!"mismatch at {position}"

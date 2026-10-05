@@ -41,7 +41,7 @@ This page is what an agent is written against, in the order one meets it:
 | 4 | **replay**: from the log back to the program | `Alaya.Replay` |
 | 5 | **routines**: how a program is scoped | `Alaya.Program` |
 | 6 | **tools**: routines a model can call | `Alaya.Agents.Tools` |
-| 7 | `ask_user`: a question for a person | `Alaya.Agents.Tools`, `Alaya.Question` |
+| 7 | `ask_user`: a model asks a person | `Alaya.Agents.Tools` |
 | 8 | an **agent**: a program and its routines | `Alaya.Agents.*` |
 | 9 | a **run**: the agent, then its grading | `Alaya.Run` |
 | 10 | **driving** a run: the driver's own API | `Alaya.Driver` |
@@ -92,7 +92,7 @@ flowchart TD
   linkStyle default stroke-width:1px
 ```
 
-A program is written in `do` notation, from seven things:
+A program is written in `do` notation, from eight things:
 
 | Written | Asks for | Goes on with |
 | --- | --- | --- |
@@ -100,6 +100,7 @@ A program is written in `do` notation, from seven things:
 | `throw error` | nothing: it gives up | |
 | `sample`, `exec`, `time`, `external` | an operation of the world | its answer |
 | `inbox`, `await` | the notices that arrived from outside | those it takes |
+| `ask question` | a person's answer to a question | the reply |
 | `call name arguments` | a routine, by its name | the routine's result |
 | `iter step state` | a loop from `state` | the result of its last round |
 | `comment text` | a line in the log, for a reader | nothing |
@@ -114,6 +115,7 @@ against a longer and longer log (§4).
 inductive Event (σ : Signature) where
   | arrived   (notice : Notice)                              -- from outside
   | heard     (frame : Frame) (notices : Array Nat)          -- a read of the inbox
+  | asked     (frame : Frame) (question : Question)          -- a question for a person
   | answered  (frame : Frame) (key : σ.Key) (answer : Except String σ.Stored)
   | opened    (frame : Frame) (call : RoutineCall)           -- a call begins
   | returned  (frame : Frame) (value : Json)                 -- … and ends with its value
@@ -131,7 +133,7 @@ event:
 | --- | --- | --- |
 | from outside | `arrived`, `stopped`, a person's `commented` | by a person, at any time; it has no frame |
 | answer | `answered` | by the driver, after it carried out an operation |
-| mark | `heard`, `opened`, `returned`, `failed`, a program's `commented` | by the driver, where the program did something that needs no world |
+| mark | `heard`, `asked`, `opened`, `returned`, `failed`, a program's `commented` | by the driver, where the program did something that needs no world |
 
 A mark tells the program nothing it does not know. It is in the log so that the log can be read
 without the program: who read which notice, where each call began and how it ended.
@@ -142,7 +144,7 @@ A **notice** is what arrives from outside:
 inductive Notice where
   | said     (message : String)                       -- a person: the task, or a message later on
   | changed  (workspace : Snapshot) (summary : String)   -- the workspace, changed from outside
-  | replied  (to : Frame) (reply : Reply)             -- an answer to the question the call `to` asked
+  | replied  (to : Frame) (reply : Reply)             -- an answer to the question asked in frame `to`
   | assigned (grader : Json)                          -- the grader of the run
 ```
 
@@ -324,6 +326,49 @@ A stop is no construct of a program. It comes from outside, `stopped reason`, ap
 
 ![A stop ends every frame of the agent, and the run goes on to its grading](figures/agent-api/stop.svg)
 
+### 3.8 Questions: `ask`
+
+```lean
+ask : Question → Program σ Reply
+
+structure Question where text : String ; form : Question.Form     -- yesNo | singleChoice options | openEnded
+inductive Reply where | yes | no | choice (number : Nat) | noneOfAbove | text (text : String) | unavailable
+```
+
+1. The program reaches `ask question`. A question that cannot be asked — a blank one, or a
+   choice with fewer than two distinct candidates — fails there.
+2. The driver marks it, `asked frame question`. So the question is in the log, whoever asks it.
+3. The run waits for a reply to that frame that fits the question, and the driver stops.
+4. A person replies: `arrived (replied frame reply)`. A reply where no question waits, or one
+   that does not fit, is refused before it is appended.
+5. The read is marked like any other, and the program goes on with the reply.
+
+There are three kinds of question and six kinds of reply, and no others:
+
+| Kind of question | A reply that fits |
+| --- | --- |
+| `yes_no` | `yes`, `no` |
+| `single_choice` | `choice n`, with `n` from 1; `noneOfAbove`: no candidate is right |
+| `open_ended` | `text`, not blank, kept verbatim |
+| any | `unavailable`: the person cannot answer |
+
+Any program may ask: a tool a model calls (§7), or a step of a workflow that wants a person's
+word before it goes on.
+
+```lean
+def deploy : Routine Agent String Bool := routine "deploy" fun target => do
+  let reply ← ask { text := s!"Deploy to {target}?", form := .yesNo }
+  if reply != .yes then return false
+  return (← exec s!"make deploy TARGET={target}").output.exitCode? == some 0
+```
+
+```lean
+questionOf? : Next Agent → Option (Frame × Question)        -- the question a run waits on
+replyTo     : Next Agent → Reply → Except String (Event Agent)   -- the reply as an event, or why not
+```
+
+The figure of §7 shows a question in a log.
+
 ## 4. Replay: from the log back to the program
 
 ```lean
@@ -354,7 +399,7 @@ flowchart TD
   next -- "waits" --> waits("stop: wait for a person<br/>a task, a reply, a grader"):::wait
   next -- "done · raised" --> over("the run is over"):::ok
   next -- "mismatch ·<br/>unguarded" --> refuse("refuse: the log<br/>is no trace of<br/>the program"):::bad
-  next -- "hears · opens<br/>returns · fails<br/>comments" --> mark("append<br/>the mark")
+  next -- "hears · questions<br/>opens · returns<br/>fails · comments" --> mark("append<br/>the mark")
   mark --> next
   next -- "ask" --> act("carry out<br/>the operation") --> answered("append answered")
   answered --> next
@@ -364,8 +409,8 @@ flowchart TD
 | `Next` | What the log says |
 | --- | --- |
 | `ask call` | it ends where the program asks for an operation |
-| `hears`, `opens`, `returns`, `fails`, `comments` | it ends where the program makes a mark |
-| `waits frame` | it ends where a read waits, and nothing the read is for has arrived |
+| `hears`, `questions`, `opens`, `returns`, `fails`, `comments` | it ends where the program makes a mark |
+| `waits frame question?` | it ends where a read waits, and nothing the read is for has arrived; with the question, when it waits for a reply |
 | `done value`, `raised error` | it is complete: the run is over |
 | `mismatch position` | its event at `position` is not what the program does |
 | `unguarded frame` | the program went round a loop without reading an event |
@@ -523,7 +568,7 @@ A model's tool call becomes a call of a routine in four steps:
 | --- | --- | --- | --- |
 | `bash` | `command` | `exec command`, with the agent's executor settings | `output`, `exit_code`, `error`, `file` |
 | `time_budget` | none | `time` | `seconds_left`, or that the run has no limit |
-| `ask_user` | `question_type`, `question`, `options` | `await` a reply to its own frame (§7) | the reply |
+| `ask_user` | `question_type`, `question`, `options` | `ask` the question (§7) | the reply |
 | `submit` | `message` | never called: the agent that offers it ends with the message | |
 
 `Agents.Tools.all` lists the tools an agent's configuration can name. A tool knows nothing of
@@ -531,54 +576,55 @@ the agent that offers it. The agent decides which tools its model is offered, ho
 call is worded, and how a result is shown: `bash` gives the whole output, and MiniSwe cuts what
 its model sees of it.
 
-## 7. `ask_user`: a question for a person
+## 7. `ask_user`: a model asks a person
 
-`ask_user` is the tool with which an agent asks a person and waits. It uses nothing that the
-sections above do not have: a call, a read that waits, and an addressed notice.
+`ask_user` is a model's way to `ask` (§3.8). What a question is, which replies fit it, and how
+a person gives one belong to the core. The tool adds what a model needs, and nothing else:
 
-1. **The model asks.** It calls `ask_user`, alone in its turn, with a `question_type`, the
-   `question`, and for a choice its `options`:
+| | The core: a question | The tool: `ask_user` |
+| --- | --- | --- |
+| owns | the three kinds, the replies that fit each, the wait, the checks on a reply | its name, its schema, its instruction, the rule that it is called alone |
+| decides | whether a reply answers a question | which kinds of question the model may ask |
+| translates | nothing | a call's arguments into a question, and a reply into what the model is shown |
+
+1. **The kinds are chosen in advance.** The agent's `question_types` names the kinds of
+   question the model may ask. There is no default: offering `ask_user` without it is an error.
+
+   ```sh
+   --set 'agent.tools=["bash","submit","ask_user"]' --set 'agent.question_types=["yes_no","single_choice"]'
+   ```
+
+2. **The model is offered exactly those.** The tool's schema, description and instruction name
+   only the kinds allowed, and `options` is there only when a choice is among them.
+3. **The model asks.** It calls `ask_user`, alone in its turn:
 
    ```json
    {"question_type": "single_choice",
     "question": "Should the function keep duplicate elements? The prose does not say.",
     "options": ["Keep them, in order.", "Drop them."]}
    ```
-2. **The call is checked.** `check` reads the question and refuses one that cannot be asked: a
-   blank one, options on a question that is no choice, or a choice with fewer than two distinct
-   candidates. A choice does not list "none of the above": every choice has that answer already.
-3. **The call opens.** `opened 0.2 ⟨"ask_user", arguments⟩`: the question is in the log.
-4. **The tool waits.** Its program is an `await` for a reply addressed to its own frame, of the
-   form the question asks for. None has arrived, so the run waits, and the driver stops:
-   `Stop.waits frame question`. `alaya waiting` lists the question.
-5. **A person replies.** `alaya reply ENTRY TEXT` builds the event with `replyTo`, which refuses
-   a reply where no question waits, or one of the wrong form. So a log never holds a reply its
-   program cannot take.
-6. **The run goes on.** The next `alaya run` makes the read, `heard 0.2 [13]`, and the call
-   returns the reply.
-7. **The model is told.** The reply is the tool's result in the next request.
 
-![A question: the call opens, the run waits, a person replies, the call returns](figures/agent-api/ask-user.svg)
+4. **The call is checked.** A kind that is not allowed, a blank question, options on a question
+   that is no choice, or a candidate that says "none of the above" is a format error, and
+   nothing is asked.
+5. **The tool asks.** Its program reads the question from the arguments and performs `ask`: the
+   question is marked in the log, and the run waits (§3.8).
+6. **A person replies**, with `alaya reply` (`docs/cli.md`) or the browser page in the
+   repository `msv-lab/vero-hci`.
+7. **The model is told.** The call returns the reply as the tool encodes it:
 
-```lean
-structure Question where text : String ; form : Question.Form      -- yesNo | openEnded | singleChoice options
-inductive Reply where | yes | no | choice (number : Nat) | noneOfAbove | text (text : String) | unavailable
+   | Reply | The call returns |
+   | --- | --- |
+   | `yes`, `no` | `"yes"`, `"no"` |
+   | `choice n` | the number `n` |
+   | `noneOfAbove` | `"none_of_above"` |
+   | `text` | the text |
+   | `unavailable` | `{"status": "unavailable"}` |
 
-questionOf? : Log Agent → Next Agent → Option (Frame × Question)   -- the question a log waits on
-replyTo     : Log Agent → Next Agent → Reply → Except String (Event Agent)
-```
+![A question: the tool asks, the run waits, a person replies, the call returns](figures/agent-api/ask-user.svg)
 
-| `question_type` | A reply that fits | The call returns |
-| --- | --- | --- |
-| `yes_no` | `yes`, `no` | `"yes"`, `"no"` |
-| `single_choice` | `choice n`, with `n` from 1; `noneOfAbove` | `n`; `"none_of_above"` |
-| `open_ended` | `text`, not blank | the text, verbatim |
-| any | `unavailable`: the person cannot answer | `{"status": "unavailable"}` |
-
-The question a log waits on is read off the opening of the call, so nothing else records it.
-The reply is taken by the call that asked and by no other read: the agent's own `inbox` leaves
-it. How a person answers on the command line is `docs/cli.md` (`waiting`, `reply`); a browser
-page that does the same is in the repository `msv-lab/vero-hci`.
+The reply is taken by the frame that asked and by no other read: the agent's own `inbox` leaves
+it.
 
 ## 8. An agent
 
@@ -725,7 +771,7 @@ replays the log first, and refuses what the log cannot take:
 | Event | Taken only |
 | --- | --- |
 | a stop, a message, a change | while the agent runs |
-| a reply | where its question waits (`replyTo`, §7) |
+| a reply | where its question waits (`replyTo`, §3.8) |
 | a grader | once the agent is over, and where none is assigned yet |
 
 Appending at an entry that already goes on is a fork: the entry has two continuations, and

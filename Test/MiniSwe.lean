@@ -232,10 +232,10 @@ def parseSuite : Suite := suite "mini-swe.parse" #[
 
   test "an added tool is offered, only appends to the prompt, and checks its calls" do
     let plain : Config := {}
-    let config : Config := { tools := #["bash", "submit", "ask_user"] }
+    let config : Config := { tools := #["bash", "submit", "ask_user"], questionTypes := Question.Kind.all }
     assertEqual "offered" ((tools config).map (·.name)) #["bash", "submit", "ask_user"]
     assertStringEq "appended" (openingText config)
-      (openingText plain ++ "\n\n" ++ Agents.Tools.AskUser.instruction)
+      (openingText plain ++ "\n\n" ++ Agents.Tools.AskUser.instruction Question.Kind.all)
     match parseActions (responseWith #[askCall "q" "Keep it?"]) plain with
     | .formatError message => check (contains message "Unknown tool 'ask_user'") "unknown where not offered"
     | .calls _ => fail "a tool not offered is unknown"

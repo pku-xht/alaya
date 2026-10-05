@@ -2,10 +2,11 @@ import Test.Framework
 import Test.Scripted
 import Alaya
 
-/-! The optional typed-question tool, from configuration through replies and forks. A question
-is the `ask_user` call's opening, its wait is a read of the inbox in the call's frame, and a
-reply is a notice to that frame, checked against the question's form before it is appended. All
-model responses are scripted; an executor that counts calls detects unwanted side effects. -/
+/-! Questions, and the tool that lets a model ask them. A program asks with `ask`: the question
+goes into the log, the run waits in the frame that asked, and a reply is a notice to that frame,
+checked against the question before it is appended. `ask_user` is a model's way to do that, for
+the kinds of question its configuration names. All model responses are scripted; an executor
+that counts calls detects unwanted side effects. -/
 
 namespace AskUserTests
 
@@ -20,7 +21,7 @@ private def args (question : String := "Which interpretation?\nThe examples disa
   .mkObj [("question_type", questionType), ("question", question),
     ("options", .arr (options.map Json.str))]
 
-private def ask (id : String := "q") (arguments : Json := args) : Chat.ToolCall :=
+private def askOne (id : String := "q") (arguments : Json := args) : Chat.ToolCall :=
   { id, name := "ask_user", arguments }
 
 private def bash : Chat.ToolCall :=
@@ -32,7 +33,11 @@ private def submit : Chat.ToolCall :=
 private def response (calls : Array Chat.ToolCall) : Chat.Response :=
   { toolCalls := calls, finishReason? := some "tool_calls" }
 
-private def enabled : Config := { tools := #["bash", "submit", "ask_user"] }
+private def enabled : Config :=
+  { tools := #["bash", "submit", "ask_user"], questionTypes := Question.Kind.all }
+
+/-- Every kind of question, as a configuration names them. -/
+private def everyKind : Json := .arr (Question.Kind.all.map fun kind => Json.str kind.name)
 
 /-- The `tools` a configuration of agent `name` names to offer asking, besides its defaults. -/
 private def askingTools (name : String) : Json :=
@@ -41,7 +46,7 @@ private def askingTools (name : String) : Json :=
 
 /-- The configuration of agent `name` that offers asking, with `extra` fields. -/
 private def asking (name : String) (extra : List (String × Json) := []) : Json :=
-  .mkObj ([("name", (name : Json)), ("tools", askingTools name)] ++ extra)
+  .mkObj ([("name", (name : Json)), ("tools", askingTools name), ("question_types", everyKind)] ++ extra)
 
 private def countingExecutor : IO (Executor × IO.Ref Nat) := do
   let calls ← IO.mkRef 0
@@ -55,7 +60,7 @@ private def scripted (responses : Array Chat.Response) : IO (Model × IO.Ref (Ar
   let index ← IO.mkRef 0
   let requests ← IO.mkRef #[]
   pure ({
-    identity := .mkObj [("model", "scripted-ask-user")]
+    identity := .mkObj [("model", "scripted-askOne-user")]
     sample := fun request => do
       Result.fromIO Error.cache <| requests.modify (·.push request)
       pure { next := do
@@ -85,11 +90,11 @@ private def replyAt (rt : Driver.Runtime) (run : Run Agent) (tip : Hash) (text? 
   let forest ← rt.store.forest
   let log ← rt.store.log forest tip
   let next := next run log
-  let some (_, question) := questionOf? log next | throw <| .input "no question waits for a reply"
+  let some (_, question) := questionOf? next | throw <| .input "no question waits for a reply"
   let reply ← match text? with
     | some text => Result.fromExcept Error.input (question.parseReply text)
     | none => pure .unavailable
-  let event ← Result.fromExcept Error.input (replyTo log next reply)
+  let event ← Result.fromExcept Error.input (replyTo next reply)
   pure (← Driver.append rt.store run tip event).1
 
 def suite : Suite := Testing.suite "ask_user" #[
@@ -106,12 +111,13 @@ def suite : Suite := Testing.suite "ask_user" #[
       | some (Chat.Message.user text) => text
       | _ => ""
     assertStringEq "asking only appends its instruction" (opening enabled)
-      (opening {} ++ "\n\n" ++ Tools.AskUser.instruction),
+      (opening {} ++ "\n\n" ++ Tools.AskUser.instruction Question.Kind.all),
 
   test "settings enable asking in both agents, round-trip, and reject wrong types" do
     for definition in Catalog.all do
       let config ← assertOk <| Catalog.resolve definition.name
-        #[{ target := .agent, path := ["tools"], value := askingTools definition.name }]
+        #[{ target := .agent, path := ["tools"], value := askingTools definition.name },
+          { target := .agent, path := ["question_types"], value := everyKind }]
       assertEqual s!"{definition.name} round-trips" (← assertOk <| Catalog.complete config).compress config.compress
       assertError "a string is no list of tools" (Catalog.resolve definition.name
         #[{ target := .agent, path := ["tools"], value := "ask_user" }]) fun
@@ -125,7 +131,7 @@ def suite : Suite := Testing.suite "ask_user" #[
   test "single choice adds a platform answer while retaining model candidates verbatim" do
     let question := "  Which rule applies?\nContext: α < β.  "
     let candidates := #[" Keep α ", "Change β\nwith evidence"]
-    let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question (args question candidates))
+    let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question Question.Kind.all (args question candidates))
     assertEqual "a choice of the original candidates" form.form (.singleChoice candidates)
     assertEqual "original question" form.text question
     let rendered := form.render
@@ -135,13 +141,13 @@ def suite : Suite := Testing.suite "ask_user" #[
     check (contains rendered "none_of_above. None of the above") "the platform adds its reserved answer"
     assertEqual "one platform label" (rendered.splitOn "None of the above").length 2
     check (contains rendered "Select exactly one answer") "the answer is single choice"
-    match parseActions (response #[ask "q" (args question candidates)]) enabled with
+    match parseActions (response #[askOne "q" (args question candidates)]) enabled with
     | .calls calls => assertEqual "the call" (calls.map (·.name)) #["ask_user"]
     | .formatError message => fail s!"valid choices should parse: {message}"
     for (questionType, expectedForm) in #[("yes_no", Question.Form.yesNo),
         ("open_ended", Question.Form.openEnded)] do
       let arguments := args question #[] questionType
-      let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question arguments)
+      let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question Question.Kind.all arguments)
       assertEqual "question form" form.form expectedForm
       assertEqual "original question" form.text question
       check (!contains form.render "none_of_above") s!"{questionType} must not offer the reserved single-choice answer",
@@ -167,10 +173,10 @@ def suite : Suite := Testing.suite "ask_user" #[
       args "q" #["yes", "no"] "yes_no",
       args "q" #["a", "b"] "open_ended",
       (args).setObjVal! "unexpected" true]
-    let cases := malformed.map (fun json => response #[ask "q" json]) ++ #[
-      response #[bash, ask], response #[ask, bash], response #[ask, submit],
-      response #[submit, ask], response #[ask, ask "second"],
-      response #[{ (ask) with invalidArguments? := some "{\"question_type\":" }]]
+    let cases := malformed.map (fun json => response #[askOne "q" json]) ++ #[
+      response #[bash, askOne], response #[askOne, bash], response #[askOne, submit],
+      response #[submit, askOne], response #[askOne, askOne "second"],
+      response #[{ (askOne) with invalidArguments? := some "{\"question_type\":" }]]
     for bad in cases do
       match parseActions bad enabled with
       | .formatError _ => pure ()
@@ -202,7 +208,7 @@ def suite : Suite := Testing.suite "ask_user" #[
         withRun (asking definition.name) fun run => do
           let (executor, calls) ← countingExecutor
           let continuations := (List.replicate answers.size (response #[submit])).toArray
-          let (model, requests) ← scripted (#[response #[ask "q" arguments]] ++ continuations)
+          let (model, requests) ← scripted (#[response #[askOne "q" arguments]] ++ continuations)
           let rt ← runtime executor (some model)
           let tip ← start rt run
           let (waiting, stop) ← assertOk <| Driver.drive rt run tip
@@ -228,13 +234,13 @@ def suite : Suite := Testing.suite "ask_user" #[
   test "a reply is refused where no question waits, in another form, or a second time" do
     withRun (asking "mini-swe") fun run => do
       let (executor, _) ← countingExecutor
-      let (model, _) ← scripted #[response #[ask "q" (args "Keep it?" #[] "yes_no")], response #[submit]]
+      let (model, _) ← scripted #[response #[askOne "q" (args "Keep it?" #[] "yes_no")], response #[submit]]
       let rt ← runtime executor (some model)
       let tip ← start rt run
       assertError "no question yet" (replyAt rt run tip (some "yes")) fun | .input _ => true | _ => false
       let (waiting, _) ← assertOk <| Driver.drive rt run tip
       let log ← logAt rt waiting
-      match replyTo log (next run log) (.choice 1) with
+      match replyTo (next run log) (.choice 1) with
       | .error message => check (contains message "yes_no") s!"says the form: {message}"
       | .ok _ => fail "a choice answers no yes/no question"
       for text in ["maybe", "YES", " yes ", "no\n", "true", "1", "\"yes\"", "none_of_above", ""] do
@@ -265,15 +271,93 @@ def suite : Suite := Testing.suite "ask_user" #[
     -- A candidate's number may have blank around it, as a person types it.
     assertEqual "a number typed with blank around it" (choice.parseReply " 2\n").toOption (some (.choice 2)),
 
-  test "the question a log waits on is read off the asking call's opening, if it can be asked" do
-    let some question := questionOfCall? ⟨"ask_user", args "Which?" #["first", "second"]⟩
-      | fail "a complete question reads back"
+  test "a call's arguments read as a question only when it can be asked" do
+    let question ← assertOk <| Result.fromExcept Error.protocol
+      (Tools.AskUser.question Question.Kind.all (args "Which?" #["first", "second"]))
     assertEqual "its form" question.form (.singleChoice #["first", "second"])
     for arguments in #[Json.null, args " \n" #["a", "b"], args "q" #["only"], args "q" #["same", " same "],
         args "q" #["valid", " \n"], args "q" #["valid", "None of the above"], args "q" #["a", "b"] "yes_no",
         (args).setObjVal! "question_type" "unknown", (args).setObjVal! "options" "not an array"] do
-      check (questionOfCall? ⟨"ask_user", arguments⟩).isNone s!"a question was read from {arguments.compress}"
-    check (questionOfCall? ⟨"bash", args "Which?" #["first", "second"]⟩).isNone "another tool's call asks nothing",
+      check (Tools.AskUser.question Question.Kind.all arguments).toOption.isNone
+        s!"a question was read from {arguments.compress}",
+
+  test "a program asks without any tool: the question is in the log, and a reply to its frame answers it" do
+    let deploy : Question := { text := "Deploy?", form := .yesNo }
+    let program : Program Agent Json := do
+      let first ← Alaya.ask deploy
+      let second ← Alaya.ask { text := "Which region?", form := .singleChoice #["east", "west"] }
+      return .str s!"{first.line}, {second.line}"
+    match Run.ofAgent (testConfig testAgent).toJson program #[] with
+    | .error problem => fail problem
+    | .ok run =>
+      let log := settle run #[.arrived (.changed default "p")]
+      check (log.back? matches some (.asked #[0] _)) "the question is the last event: a mark of the program"
+      check (log.any fun | .asked #[0] question => question == deploy | _ => false) "the question, whole"
+      match next run log with
+      | .waits #[0] (some question) => assertEqual "the question the run waits on" question deploy
+      | _ => fail "the run waits on the question, in the frame that asked"
+      -- A reply that does not fit is refused; one that fits is taken, and the next question asked.
+      check (replyTo (next run log) (.choice 1)).toOption.isNone "a choice answers no yes/no question"
+      let reply ← assertOk <| Result.fromExcept Error.input (replyTo (next run log) .yes)
+      check (reply matches .arrived (.replied #[0] .yes)) "the reply is addressed to the frame that asked"
+      let log := settle run (log.push reply)
+      match next run log with
+      | .waits #[0] (some question) => assertEqual "the second question" question.text "Which region?"
+      | _ => fail "the run waits on the second question, asked from the same frame"
+      -- The first reply is read already: it does not answer the second question.
+      check (replyTo (next run log) .yes).toOption.isNone "yes answers no choice"
+      let reply ← assertOk <| Result.fromExcept Error.input (replyTo (next run log) (.choice 2))
+      let log := settle run (log.push reply)
+      check (log.any fun | .returned #[0] (.str "yes, 2") => true | _ => false) "the program went on with both replies"
+      assertEqual "two questions asked" (log.filter (· matches .asked ..)).size 2
+      check (replyTo (next run log) .yes).toOption.isNone "no question waits once the agent is over"
+    -- A question that cannot be asked is a failure where it is asked, and nothing waits.
+    match Run.ofAgent (testConfig testAgent).toJson (Json.str <$> (·.line) <$> Alaya.ask { text := " \n" }) #[] with
+    | .error problem => fail problem
+    | .ok run =>
+      let log := settle run #[.arrived (.changed default "p")]
+      check (log.any fun | .failed #[0] error => contains error "blank" | _ => false) "a blank question fails"
+      check (!log.any (· matches .asked ..)) "and is never asked",
+
+  test "ask_user lets a model ask only the kinds of question its configuration names" do
+    let only (kinds : Array Question.Kind) : Config :=
+      { tools := #["bash", "submit", "ask_user"], questionTypes := kinds }
+    let schema (config : Config) : String :=
+      (((MiniSwe.tools config).find? (·.name == "ask_user")).map (·.toJson.compress)).getD ""
+    -- Yes/no alone: no other kind is named anywhere a model sees, and there are no options.
+    let yesNo := only #[.yesNo]
+    check (contains (schema yesNo) "yes_no") "the schema names yes_no"
+    for absent in ["single_choice", "open_ended", "options"] do
+      check (!contains (schema yesNo) absent) s!"the schema of a yes/no tool names {absent}"
+      check (!contains (Tools.AskUser.instruction #[.yesNo]) absent) s!"its instruction names {absent}"
+    match parseActions (response #[askOne "q" (.mkObj [("question_type", "yes_no"), ("question", "Keep it?")])]) yesNo with
+    | .calls _ => pure ()
+    | .formatError message => fail s!"a yes/no question is allowed: {message}"
+    for refused in #[args "Which?" #["a", "b"], args "What?" #[] "open_ended"] do
+      match parseActions (response #[askOne "q" refused]) yesNo with
+      | .formatError _ => pure ()
+      | .calls _ => fail s!"a kind that is not allowed was accepted: {refused.compress}"
+    -- With every kind, the words are the ones the tool always had.
+    check (contains (Tools.AskUser.instruction Question.Kind.all)
+      "choose question_type: yes_no for a yes/no answer, single_choice to select exactly one of at least two distinct candidates, or open_ended for a nonblank free-text answer.")
+      "the instruction for every kind"
+    -- The kinds are chosen with the tool: none by default, and none without it.
+    for definition in Catalog.all do
+      let config (fields : List (String × Json)) : Json := .mkObj (("name", (definition.name : Json)) :: fields)
+      for (fields, problem) in #[
+          ([("tools", askingTools definition.name)], "must say which kinds"),
+          ([("tools", askingTools definition.name), ("question_types", .arr #[])], "must say which kinds"),
+          ([("question_types", everyKind)], "which 'tools' does not offer"),
+          ([("tools", askingTools definition.name), ("question_types", .arr #["yes_no", "maybe"])], "unknown kind"),
+          ([("tools", askingTools definition.name), ("question_types", .arr #["yes_no", "yes_no"])], "twice"),
+          ([("tools", askingTools definition.name), ("question_types", "yes_no")], "must be an array")] do
+        assertError s!"{definition.name} with {(config fields).compress}" (Catalog.complete (config fields)) fun
+          | .input message => contains message problem
+          | _ => false
+      let one ← assertOk <| Catalog.complete (config [("tools", askingTools definition.name),
+        ("question_types", .arr #["open_ended"])])
+      assertEqual s!"{definition.name} records the kinds" ((one.getObjVal? "question_types").toOption.map (·.compress))
+        (some "[\"open_ended\"]"),
 
   test "an agent's tools must include bash and submit, each tool once" do
     for definition in Catalog.all do
@@ -281,53 +365,56 @@ def suite : Suite := Testing.suite "ask_user" #[
           (#["bash", "submit", "bash"], "names bash twice"),
           (#["bash", "submit", "ask_user", "ask_user"], "names ask_user twice")] do
         assertError s!"{definition.name} with {tools}"
-          (Catalog.complete (.mkObj [("name", definition.name), ("tools", .arr (tools.map Json.str))])) fun
+          (Catalog.complete (.mkObj [("name", definition.name), ("tools", .arr (tools.map Json.str)),
+            ("question_types", if tools.contains "ask_user" then everyKind else .arr #[])])) fun
           | .input message => contains message problem
           | _ => false,
 
   test "asking only appends its instruction: to MiniVero's opening, and to a format error after other tools'" do
     let veroOpening (tools : Array String) : String :=
-      let config : MiniVero.Config := { base := { ({} : MiniVero.Config).base with tools } }
+      let config : MiniVero.Config := { base := { ({} : MiniVero.Config).base with
+        tools, questionTypes := if tools.contains "ask_user" then Question.Kind.all else #[] } }
       match (MiniVero.openingMessages config "task" testUname)[1]? with
       | some (Chat.Message.user text) => text
       | _ => ""
     assertStringEq "MiniVero's opening" (veroOpening #["bash", "submit", "time_budget", "ask_user"])
-      (veroOpening #["bash", "submit", "time_budget"] ++ "\n\n" ++ Tools.AskUser.instruction)
+      (veroOpening #["bash", "submit", "time_budget"] ++ "\n\n" ++ Tools.AskUser.instruction Question.Kind.all)
     for recoverOutput in [false, true] do
       let plain : Config := { recoverOutput }
-      let both : Config := { plain with tools := #["bash", "submit", "time_budget", "ask_user"] }
+      let both : Config := { plain with tools := #["bash", "submit", "time_budget", "ask_user"]
+                                        questionTypes := Question.Kind.all }
       assertStringEq s!"the format error, recover_output {recoverOutput}"
         (MiniSwe.formatErrorMessage "x" true none both)
         (MiniSwe.formatErrorMessage "x" true none plain ++ "\n\n" ++ Tools.TimeBudget.instruction ++
-          "\n\n" ++ Tools.AskUser.instruction),
+          "\n\n" ++ Tools.AskUser.instruction Question.Kind.all),
 
   test "a question consumes its model turn and a reply does not reset the step limit" do
     withRun (asking "mini-swe" [("step_limit", 1)]) fun run => do
       let (executor, calls) ← countingExecutor
-      let (model, requests) ← scripted #[response #[ask]]
+      let (model, requests) ← scripted #[response #[askOne]]
       let rt ← runtime executor (some model)
       let (waiting, stop) ← assertOk <| Driver.drive rt run (← start rt run)
       match stop with
       | .waits _ (some _) => pure ()
-      | _ => fail "the last allowed model turn may still ask its question"
+      | _ => fail "the last allowed model turn may still askOne its question"
       let replied ← assertOk <| replyAt rt run waiting (some "2")
       let (final, _) ← assertOk <| Driver.drive rt run replied
       assertEqual "limit after reply" (agentStatus (← logAt rt final)) "LimitsExceeded"
       assertEqual "sample count" (← requests.get).size 1
       assertEqual "executor count" (← calls.get) 0,
 
-  test "invalid asks count as consecutive format errors and a valid ask resets the streak" do
-    let bad := response #[ask "bad" (args "q" #["only one"])]
+  test "invalid asks count as consecutive format errors and a valid askOne resets the streak" do
+    let bad := response #[askOne "bad" (args "q" #["only one"])]
     let prose : Chat.Response := { content? := some "no tool", finishReason? := some "stop" }
     withRun (asking "mini-swe" [("max_consecutive_format_errors", 2)]) fun run => do
       let (executor, _) ← countingExecutor
-      let (model, requests) ← scripted #[prose, response #[ask], bad, bad]
+      let (model, requests) ← scripted #[prose, response #[askOne], bad, bad]
       let rt ← runtime executor (some model)
       let (waiting, _) ← assertOk <| Driver.drive rt run (← start rt run)
       let replied ← assertOk <| replyAt rt run waiting (some "none_of_above")
       let (final, _) ← assertOk <| Driver.drive rt run replied
-      assertEqual "two in a row after the ask" (agentStatus (← logAt rt final)) "RepeatedFormatError"
-      assertEqual "the ask reset the streak" (← requests.get).size 4,
+      assertEqual "two in a row after the askOne" (agentStatus (← logAt rt final)) "RepeatedFormatError"
+      assertEqual "the askOne reset the streak" (← requests.get).size 4,
 
   test "the format-error limit can be turned off, and a person's message does not reset the streak" do
     let prose : Chat.Response := { content? := some "no tool", finishReason? := some "stop" }
@@ -354,7 +441,7 @@ def suite : Suite := Testing.suite "ask_user" #[
     withRun (asking "mini-vero") fun run => do
       let (executor, _) ← countingExecutor
       let timeCall : Chat.ToolCall := { id := "t", name := "time_budget", arguments := .mkObj [] }
-      let (model, _) ← scripted #[response #[ask "q" (args "Keep it?" #[] "yes_no")], response #[timeCall],
+      let (model, _) ← scripted #[response #[askOne "q" (args "Keep it?" #[] "yes_no")], response #[timeCall],
         response #[submit]]
       let rt ← runtime executor (some model)
       let limits : Driver.Limits := { budgetMs? := some 3600000 }

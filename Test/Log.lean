@@ -121,16 +121,16 @@ def suite : Suite := Testing.suite "log" #[
       -- grader.
       let stopped : Log Agent := #[.arrived (.changed default "p"), .stopped "now"]
       match next run stopped with
-      | .waits #[] => pure ()
+      | .waits #[] _ => pure ()
       | _ => fail "the run waits for a grader"
       -- Waiting for its task, the agent stops too.
       let waiting := settle run #[.arrived (.changed default "p"), .opened #[0] run.call]
       match next run waiting with
-      | .waits #[0] => pure ()
+      | .waits #[0] _ => pure ()
       | _ => fail "the agent waits for its task"
       let ended := settle run (waiting.push (.stopped "no task"))
       match next run ended with
-      | .waits #[] => pure ()
+      | .waits #[] _ => pure ()
       | _ => fail "the agent is over, and the run waits for a grader"
       check ((agentEnd? ended) matches some (.stopped "no task")) "the log says how the agent ended"
       match next run (ended.push (.stopped "again")) with
@@ -142,7 +142,7 @@ def suite : Suite := Testing.suite "log" #[
     | .error problem => fail problem
     | .ok run =>
       match next run #[] with
-      | .waits #[] => pure ()
+      | .waits #[] _ => pure ()
       | _ => fail "an empty log waits for its workspace"
       match next run #[.arrived (.said "hello")] with
       | .mismatch 0 => pure ()
@@ -288,7 +288,7 @@ def suite : Suite := Testing.suite "log" #[
     | .ok run =>
       -- The agent ends, and the run waits: nothing follows until a grader is assigned.
       let log := respond run (settle run (opening run)) (responseWith #[submitCall "s" "done"])
-      check ((next run log) matches .waits #[]) "the run waits for a grader"
+      check ((next run log) matches .waits #[] _) "the run waits for a grader"
       check ((agentEnd? log) matches some (.returned _)) "the agent returned"
       -- A grader: what follows the agent takes it, and runs its program itself, in the run's own
       -- frame. It is no routine: no call opens.

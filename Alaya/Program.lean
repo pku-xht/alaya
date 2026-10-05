@@ -71,10 +71,16 @@ def Notice.addressed : Notice → Bool
   | .replied .. | .assigned _ => true
   | _ => false
 
+/-- What a read that waits is for: the notices it takes, given the frame the read is made in,
+and, when it waits for the reply to a question, the question. -/
+structure Wait where
+  accepts : Frame → Notice → Bool
+  question? : Option Question := none
+
 /-- A program: a tree of operations, each continued with its answer, or with the error when the
 world could not give one. A read of the inbox takes the notices not yet read that are addressed to no one; one that waits is
 for some notices only, which it says given the frame it is made in, and is made once one of them
-has arrived. A call names a routine and what it is called with: the interpreter answers it by
+has arrived. A question is asked of a person, and continued with the reply. A call names a routine and what it is called with: the interpreter answers it by
 running the routine the run has under that name, in a child frame, and it ends with the
 routine's value or its error. A loop goes round `step` from a state until a round gives a result; the state of a
 loop is data, where a continuation is not. A comment says something to whoever reads the log,
@@ -84,7 +90,9 @@ inductive Program (σ : Signature) : Type → Type 1 where
   /-- Gives up, up to the call it is in, unless something catches it first. -/
   | fail : (error : String) → Program σ α
   | perform : (op : σ.Op) → (Except String (σ.Answer op) → Program σ α) → Program σ α
-  | inbox : (wait : Option (Frame → Notice → Bool)) → (List Notice → Program σ α) → Program σ α
+  | inbox : (wait : Option Wait) → (List Notice → Program σ α) → Program σ α
+  /-- Asks a person, and waits for a reply to the frame it is asked in, of a kind that fits. -/
+  | ask : Question → (Reply → Program σ α) → Program σ α
   | call : RoutineCall → (Except String Json → Program σ α) → Program σ α
   | iter : {S β : Type} → (S → Program σ (S ⊕ β)) → S → (β → Program σ α) → Program σ α
   | comment : (text : String) → Program σ α → Program σ α
@@ -98,6 +106,7 @@ def bind : Program σ α → (α → Program σ β) → Program σ β
   | .fail error, _ => .fail error
   | .perform op k, f => .perform op fun answer => (k answer).bind f
   | .inbox wait k, f => .inbox wait fun notices => (k notices).bind f
+  | .ask question k, f => .ask question fun reply => (k reply).bind f
   | .call routine k, f => .call routine fun result => (k result).bind f
   | .iter step s k, f => .iter step s fun b => (k b).bind f
   | .comment text k, f => .comment text (k.bind f)
@@ -112,6 +121,7 @@ def attempt : Program σ α → Program σ (Except String α)
   | .fail error => .pure (.error error)
   | .perform op k => .perform op fun answer => (k answer).attempt
   | .inbox wait k => .inbox wait fun notices => (k notices).attempt
+  | .ask question k => .ask question fun reply => (k reply).attempt
   | .call routine k => .call routine fun result => (k result).attempt
   | .iter step s k =>
     .iter (fun s => (step s).attempt.bind fun
@@ -134,7 +144,16 @@ end Program
 def inbox : Program σ (List Notice) := .inbox none .pure
 
 /-- Waits for notices that `accepts` takes, given the frame the read is made in, and takes them. -/
-def await (accepts : Frame → Notice → Bool) : Program σ (List Notice) := .inbox (some accepts) .pure
+def await (accepts : Frame → Notice → Bool) : Program σ (List Notice) := .inbox (some { accepts }) .pure
+
+/-- Asks a person a question, and waits for the reply. The question goes into the log where it
+is asked, and the run waits there until a person replies to the frame that asked, with a reply
+that fits the question: no other notice ends the wait. A question that cannot be asked
+(`Question.validate`) is a failure where it is asked. -/
+def ask (question : Question) : Program σ Reply :=
+  match question.validate with
+  | .ok () => .ask question .pure
+  | .error problem => .fail problem
 
 /-- Performs an operation, and fails where it was performed when the world could not answer. -/
 def perform (op : σ.Op) : Program σ (σ.Answer op) :=
@@ -215,13 +234,15 @@ structure Call (σ : Signature) where
 is what the world gave an operation, with the frame that asked and the key of the operation; it
 is an error when the world could not give one. The others are marks of what the program did,
 logged so that the log can be read without the program: a read of the inbox, with the positions
-of the notices it took, and the opening of a call and how it ended, with a return or a failure.
+of the notices it took, a question asked of a person, and the opening of a call and how it
+ended, with a return or a failure.
 A stop comes from outside and ends every frame of the agent. A comment is for a reader alone:
 replay passes over it wherever it stands. A program's comment has the frame that made it; a
 person's has none. -/
 inductive Event (σ : Signature) where
   | arrived (notice : Notice)
   | heard (frame : Frame) (notices : Array Nat)
+  | asked (frame : Frame) (question : Question)
   | answered (frame : Frame) (key : σ.Key) (answer : Except String σ.Stored)
   | opened (frame : Frame) (call : RoutineCall)
   | returned (frame : Frame) (value : Json)
@@ -234,8 +255,8 @@ instance : Inhabited (Event σ) := ⟨.stopped ""⟩
 /-- The frame an event is in; none for a notice, a stop or a person's comment, which come from
 outside. -/
 def Event.frame? : Event σ → Option Frame
-  | .heard frame _ | .answered frame .. | .opened frame _ | .returned frame _ | .failed frame _ =>
-    some frame
+  | .heard frame _ | .asked frame _ | .answered frame .. | .opened frame _ | .returned frame _
+  | .failed frame _ => some frame
   | .commented frame? _ => frame?
   | .arrived _ | .stopped _ => none
 

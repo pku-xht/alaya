@@ -118,10 +118,13 @@ def eventJson : Event Agent → Json
   | .arrived (.changed workspace summary) =>
     .mkObj [("k", "changed"), ("workspace", workspace.hex), ("text", summary)]
   | .arrived (.replied to reply) =>
-    .mkObj [("k", "replied"), ("to", to.toJson), ("text", reply.toJson.compress)]
+    .mkObj [("k", "replied"), ("to", to.toJson), ("text", reply.line)]
   | .arrived (.assigned grader) =>
     .mkObj [("k", "assigned"), ("grader", grader), ("summary", Render.argumentsSummary grader)]
   | .heard _ notices => .mkObj [("k", "heard"), ("notices", .arr (notices.map fun (n : Nat) => (n : Json)))]
+  | .asked _ question =>
+    .mkObj [("k", "asked"), ("text", question.text), ("form", question.form.name),
+      ("options", .arr (question.form.options.map Json.str))]
   | .answered _ key (.error error) =>
     let op := match key with
       | .sample _ => "sample" | .exec .. => "exec" | .time => "time" | .external .. => "external"
@@ -192,7 +195,7 @@ def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title 
       else none
     -- A run whose agent is over, graded or waiting for a grader, stands as its agent ended.
     let over := match visit.next? with
-      | some (.done _) | some (.raised _) | some (.waits #[]) => true
+      | some (.done _) | some (.raised _) | some (.waits #[] _) => true
       | _ => false
     let state : Option String := if !leaf then none else match visit.next?, visit.agent? with
       | some (.mismatch _), _ | some (.unguarded _), _ | none, _ => some "broken"
@@ -200,7 +203,7 @@ def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title 
       | some _, some (.failed _) => if over then some "failed" else some "paused"
       | some _, some (.stopped _) => if over then some "stopped" else some "paused"
       | some (.done _), none => some "done" | some (.raised _), none => some "failed"
-      | some (.waits _), none => some (if visit.question?.isSome then "question" else "waits")
+      | some (.waits _ _), none => some (if visit.question?.isSome then "question" else "waits")
       | _, none => some "paused"
     -- On an entry that ends a graded log: the verdict, in a line.
     let graded : Option String := if !leaf then none else match visit.next? with

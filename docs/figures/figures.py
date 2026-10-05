@@ -182,7 +182,7 @@ KINDS = [
     ("exec", "exec", TEAL, "answered", "ask", "executor"),
     ("external", "external", TEAL, "answered", "ask", "container"),
     ("time", "time", FAINT, "answered", "ask", "clock"),
-    ("open ask_user", "question", AMBER, "opened", "open", None),
+    ("ask ", "question", AMBER, "asked", "mark", None),
     ("open ", "open", MUTE, "opened", "open", None),
     ("return", "return", GREEN, "returned", "end", None),
     ("fail", "fail", RED, "failed", "end", None),
@@ -278,6 +278,16 @@ class Program:
             arrow(c.l0 - 4, x0 + w + 5, cy + 5.5, dashed=True),
         ]
 
+    def mark(self, text, border, cy):
+        """What the program does that needs no world: a chip, and one arrow to its mark in the log."""
+        x0 = self.inner()[0]
+        w = width(text, 12, mono=True) + 12
+        self.out += [
+            f'<rect x="{x0 + .5}" y="{cy - 9}" width="{n(w)}" height="18" rx="4" fill="{SOFT}" stroke="{border}"/>',
+            label(x0 + 6.5, cy + 4, text, "ch"),
+            arrow(x0 + w + 5, self.c.l0 - 4, cy + .5),
+        ]
+
     def cut(self, y, note):
         """A stop: every frame but the run's own ends here, with no mark."""
         cut = [f for f in self.stack if not f["run"]]
@@ -355,7 +365,9 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
                 program.chip(r.get("chip", default_chip(r["text"])), CHIP_BORDER.get(glyph, color), who, cy)
                 if glyph == "heard":
                     reads.append((cy, [int(p) for p in re.findall(r"\d+", r["text"])]))
-            if r.get("note") and role in ("open", "ask"):
+            elif role == "mark":
+                program.mark(r.get("chip", "ask question"), color, cy)
+            if r.get("note") and role in ("open", "ask", "mark"):
                 h += program.note(r["note"], y + ROW - 2) - 1
             if r.get("ws") or r.get("checkout"):
                 versions.append((cy, r))
@@ -572,18 +584,18 @@ figure("tool-call", "A response that asks for two tools, and the two calls it be
     GAP(),
 ], inside=["agent · 0"])
 
-figure("ask-user", "A question: the call opens, the run waits, a person replies, the call returns", [
+figure("ask-user", "A question: the tool asks, the run waits, a person replies, the call returns", [
     GAP(),
     R(10, "0", "inbox: nothing"),
     R(11, "0", "sample → ask_user Should duplicates be kept?"),
-    R(12, "0.2", "open ask_user “Should duplicates be kept?”",
-      note="the question is the call’s arguments: it is in the log"),
-    DIV("the driver stops: the call waits for a reply to 0.2"),
-    R(13, "-", "replied to 0.2: yes", by="`alaya reply`"),
-    R(14, "0.2", "inbox: takes 13", chip="await"),
-    R(15, "0.2", "return yes", end='return "yes"'),
-    R(16, "0", "inbox: nothing", note="a plain read leaves replies"),
-    R(17, "0", "sample → bash sort -u names.txt", note="the model is shown `yes` as the tool’s result"),
+    R(12, "0.2", "open ask_user “Should duplicates be kept?”"),
+    R(13, "0.2", "ask “Should duplicates be kept?”", note="the question is in the log, whoever asks it"),
+    DIV("the driver stops: the run waits for a reply to 0.2"),
+    R(14, "-", "replied to 0.2: yes", by="`alaya reply`"),
+    R(15, "0.2", "inbox: takes 14", chip="the reply"),
+    R(16, "0.2", "return yes", end='return "yes"'),
+    R(17, "0", "inbox: nothing", note="a plain read leaves replies"),
+    R(18, "0", "sample → bash sort -u names.txt", note="the model is shown `yes` as the tool’s result"),
     GAP(),
 ], inside=["agent · 0"], takes=True)
 
@@ -1120,7 +1132,7 @@ def cli_commit():
 def cli_reply():
     """`reply`: a reply is appended after the question it answers; the next run goes on from it."""
     y = TOP
-    out, at = strip(12, y, ["…", "sample → ask_user", ("open ask_user “keep duplicates?”", "old", True),
+    out, at = strip(12, y, ["…", "open ask_user", ("ask “keep duplicates?”", "old", True),
                             ("replied to 0.2: yes", "new"), ("inbox: takes it", "later"), ("return yes", "later")])
     below = y + CHIP_H + 3
     out += [tag(at[2][0], below, "waits for a reply", WAIT)[0], note(at[4][0], below, "the next run goes on from the reply")]
@@ -1179,7 +1191,7 @@ def cli_rm():
 def cli_read():
     """`tree`, `log`, `show`, `waiting`: what each reads of one small forest."""
     line = ["the workspace", "open agent", "said “the task”", "sample", "…", "return pass 48/48"]
-    bare, fork, waits = 3, 3, "open ask_user “…?”"  # chips with no text; the entry that forks; its second child
+    bare, fork, waits = 3, 3, "ask “…?”"  # chips with no text; the entry that forks; its second child
     panels = [("tree", "the whole forest: runs, stretches, forks", set(range(7)), None),
               ("log ENTRY", "the path from the root to `ENTRY`", set(range(6)), 5),
               ("show ENTRY", "one entry in full; `--request` adds the request it answered", {3}, 3),
