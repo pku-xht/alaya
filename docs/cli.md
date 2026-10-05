@@ -181,7 +181,7 @@ alaya new ./project --task-file TASK.txt --agent mini-swe --model gpt-6-luna --i
   the model's ID as its creator publishes it. Their defaults are in code, and there are no
   configuration files.
 - **`--set PATH=VALUE`** overrides one field, and repeats. `PATH` starts with `agent.` or
-  `model.` (`agent.step_limit=50`, `model.params.reasoning_effort=high`).
+  `model.` (`agent.executor.timeout_seconds=60`, `model.params.reasoning_effort=high`).
   `VALUE` is read as JSON when it parses, and as a string otherwise. An unknown field or a value
   of the wrong type is an input error.
 - **The image** is resolved to a digest and recorded: every command of the run runs in it. The

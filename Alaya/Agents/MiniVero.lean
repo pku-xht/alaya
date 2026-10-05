@@ -27,7 +27,6 @@ def Mode.ofString? (name : String) : Option Mode :=
 /-- MiniSwe's configuration, offering `time_budget` too, and Vero's evaluation mode. -/
 structure Config where
   base : MiniSwe.Config := {
-    stepLimit := 200
     executor := { timeoutSeconds := 600, env := #[] }
     tools := #["bash", "submit", "time_budget"] }
   mode : Mode := .proof

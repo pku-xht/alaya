@@ -145,18 +145,16 @@ def suite : Suite := Testing.suite "mini-vero" #[
       let log := after run #[.response { toolCalls := #[{
         id := "s", name := "submit", arguments := .mkObj [("message", "done")] }] }]
       assertEqual "status" (Scripted.agentStatus log) "Submitted",
-  test "the step limit is enforced and long output stays in the raw log" do
-    let cfg : MiniVero.Config := { config with base := { config.base with stepLimit := 1 } }
-    withVero cfg fun run => do
+  test "long output stays in the raw log" do
+    withVero config fun run => do
       let call : Chat.ToolCall := { id := "c", name := "bash", arguments := .mkObj [("command", "lake build")] }
       let raw := String.ofList (List.replicate 12000 'x')
       let log := after run #[.response { toolCalls := #[call] },
         .execution { output := { output := raw, exitCode? := some 0 }, workspace := default }]
-      assertEqual "limit" (Scripted.agentStatus log) "LimitsExceeded"
       check (log.any fun | .answered _ _ (.ok (.execution e)) => e.output.output == raw | _ => false) "raw output kept"
       let history : MiniSwe.History := { items := #[.turn { toolCalls := #[call] } #[(call, Tools.Bash.result
         { output := { output := raw, exitCode? := some 0 }, workspace := default })]] }
-      match (MiniSwe.view cfg.base history)[1]? with
+      match (MiniSwe.view config.base history)[1]? with
       | some (Chat.Message.tool _ (Json.str text)) =>
         check ((text.splitOn "elided_chars").length > 1) "view should truncate"
         check (text.length < raw.length) "view should be smaller"
