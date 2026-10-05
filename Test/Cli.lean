@@ -215,7 +215,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
       assertError label (Agents.Catalog.complete json) fun
         | .input m => (m.splitOn expected).length > 1
         | _ => false
-    refused "no name" (.mkObj [("step_limit", 1)]) "needs a \"name\""
+    refused "no name" (.mkObj [("context_reserve", 1)]) "needs a \"name\""
     refused "unknown agent" (.mkObj [("name", "mini-swf")]) "unknown agent"
     refused "typo" (.mkObj [("name", "mini-swe"), ("step_limt", 1)]) "unknown field 'step_limt'"
     refused "type" (.mkObj [("name", "mini-swe"), ("recover_output", "yes")]) "must be true or false"
@@ -241,7 +241,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
       | _ => false,
 
   test "a run's configuration is the opening of its agent's call, and the tree names it" do
-    let agent ← assertOk <| Agents.Catalog.complete (.mkObj [("name", "mini-swe"), ("step_limit", 7)])
+    let agent ← assertOk <| Agents.Catalog.complete (.mkObj [("name", "mini-swe"), ("context_reserve", 7)])
     match (Scripted.testConfig agent).run Scripted.testModelSpec with
     | .error problem => fail problem
     | .ok run =>

@@ -33,8 +33,6 @@ structure Masking where
   deriving Inhabited, BEq, Repr
 
 structure Config where
-  /-- Maximum model calls; 0 disables the limit (as in mini.yaml). -/
-  stepLimit : Nat := 0
   /-- Consecutive format errors tolerated before exiting; 0 disables. -/
   maxConsecutiveFormatErrors : Nat := 3
   /-- How commands are run. -/
@@ -62,7 +60,6 @@ structure Config where
 def Config.toJson (config : Config) : Lean.Json :=
   .mkObj [
     ("name", "mini-swe"),
-    ("step_limit", (config.stepLimit : Lean.Json)),
     ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
     ("executor", .mkObj [
       ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
@@ -80,8 +77,8 @@ def Config.toJson (config : Config) : Lean.Json :=
 def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array String := #[]) :
     Except String Config := do
   let object ← ConfigJson.object json
-    (#["name", "step_limit", "max_consecutive_format_errors", "executor", "recover_output", "tools",
-      "question_types", "context_reserve", "mask_observations"] ++ own)
+    (#["name", "max_consecutive_format_errors", "executor", "recover_output", "tools", "question_types",
+      "context_reserve", "mask_observations"] ++ own)
   let executor ← match ← object.field? "executor" with
     | none => pure defaults.executor
     | some json => do
@@ -131,7 +128,6 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array St
   if !names.contains "ask_user" && !questionTypes.isEmpty then
     throw "'question_types' is for ask_user, which 'tools' does not offer"
   pure {
-    stepLimit := ← object.nat "step_limit" defaults.stepLimit
     maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors
     executor
     recoverOutput := ← object.bool "recover_output" defaults.recoverOutput
@@ -305,8 +301,6 @@ inductive Item where
 /-- The state of the loop: the conversation, and what mini's limits count. -/
 structure History where
   items : Array Item := #[]
-  /-- Responses sampled. -/
-  samples : Nat := 0
   /-- The latest request whose response reported its size: its messages, the tokens it held,
   and the tokens of the response. -/
   measured? : Option (Dialogue × Nat × Option Nat) := none
@@ -411,16 +405,14 @@ def listen (history : History) : Program Agent History := do
   return { history with items := history.items ++ (heard.toArray.filterMap noticeMessage).map .told }
 
 /-- One round of mini's loop (`DefaultAgent.run`): read the inbox, so that what a person said
-or changed while the run was paused reaches the model in this round's request; stop at the step
-limit, or before a request too large for the model's context; sample, and stop the same way
+or changed while the run was paused reaches the model in this round's request; stop before a
+request too large for the model's context; sample, and stop the same way
 when the provider refuses the request as too long, which is the one failure of a sample the
 driver answers with; answer a malformed response with the format error, and stop after too many in a row; otherwise call each tool in
 order, a `submit` ending the agent with its message. A tool that fails gives its error as its
 result. -/
 def round (config : Config) (history : History) : Program Agent (History ⊕ Json) := do
   let history ← listen history
-  if config.stepLimit > 0 && history.samples >= config.stepLimit then
-    return .inr (outcome "LimitsExceeded")
   let request := request config history
   if let some limit := config.contextLimit? then
     if contextTokens history request.messages >= limit then return .inr (outcome "ContextExceeded")
@@ -430,7 +422,7 @@ def round (config : Config) (history : History) : Program Agent (History ⊕ Jso
   let measured? := match response.usage?.bind (·.input?) with
     | some input => some (request.messages, input, response.usage?.bind (·.output?))
     | none => history.measured?
-  let history := { history with samples := history.samples + 1, measured? }
+  let history := { history with measured? }
   match parseActions response config with
   | .formatError message =>
     let history := { history with items := history.items.push (.malformed message)

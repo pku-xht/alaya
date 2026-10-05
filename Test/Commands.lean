@@ -78,7 +78,7 @@ private def newRun : TestM (System.FilePath × System.FilePath × Array Json) :=
   writeSpec project #[("a.txt", "one\n"), ("src/b.txt", "two\n")]
   let made ← records (← ok data "new" #["--json", "--task", "the task", project.toString,
     "--image", testImageReference, "--agent", "mini-swe", "--model", "gpt-oss-120b",
-    "--set", "agent.step_limit=7"])
+    "--set", "agent.context_reserve=7"])
   pure (data, project, made)
 
 def suite : Suite := Testing.suite "commands" #[
@@ -91,7 +91,7 @@ def suite : Suite := Testing.suite "commands" #[
     assertEqual "the task" (text made[2]! ["event", "notice", "message"]) "the task"
     let config := field made[1]! ["event", "routine", "arguments"]
     assertEqual "the configuration is the agent's call" (text config ["agent", "name"], text config ["model", "name"],
-      (field config ["agent", "step_limit"]).compress) ("mini-swe", "gpt-oss-120b", "7")
+      (field config ["agent", "context_reserve"]).compress) ("mini-swe", "gpt-oss-120b", "7")
     check (has (text config ["environment", "image"]) "@sha256:") "the image is pinned by its digest"
     assertEqual "and names no grader" (field config ["graders"]).compress "null"
     check (has (← refused 64 data "new" #["--task", "t", "--image", testImageReference, "--agent", "mini-swe",

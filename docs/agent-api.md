@@ -650,9 +650,7 @@ flowchart TD
   classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
   classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
-  listen("listen: read the inbox"):::notice --> limit("step limit reached?")
-  limit -- "yes" --> limits("return LimitsExceeded"):::wait
-  limit -- "no" --> fits("request fits the context?")
+  listen("listen: read the inbox"):::notice --> fits("request fits the context?")
   fits -- "no" --> context("return ContextExceeded"):::wait
   fits -- "yes" --> sample("sample request"):::sample
   sample -- "refused as too long" --> context

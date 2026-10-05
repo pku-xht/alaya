@@ -388,18 +388,18 @@ def suite : Suite := Testing.suite "ask_user" #[
         (MiniSwe.formatErrorMessage "x" true none plain ++ "\n\n" ++ Tools.TimeBudget.instruction ++
           "\n\n" ++ Tools.AskUser.instruction Question.Kind.all),
 
-  test "a question consumes its model turn and a reply does not reset the step limit" do
-    withRun (asking "mini-swe" [("step_limit", 1)]) fun run => do
+  test "a question consumes its model turn and a reply leads to the next one" do
+    withRun (asking "mini-swe") fun run => do
       let (executor, calls) ← countingExecutor
       let (model, requests) ← scripted #[response #[askOne]]
       let rt ← runtime executor (some model)
-      let (waiting, stop) ← assertOk <| Driver.drive rt run (← start rt run)
+      let (waiting, stop) ← assertOk <| Driver.drive rt run (← start rt run) { samples? := some 1 }
       match stop with
       | .waits _ (some _) => pure ()
       | _ => fail "the last allowed model turn may still askOne its question"
       let replied ← assertOk <| replyAt rt run waiting (some "2")
-      let (final, _) ← assertOk <| Driver.drive rt run replied
-      assertEqual "limit after reply" (agentStatus (← logAt rt final)) "LimitsExceeded"
+      let (_, stop) ← assertOk <| Driver.drive rt run replied { samples? := some 0 }
+      check (stop matches .paused _) "after the reply, the agent goes on to sample"
       assertEqual "sample count" (← requests.get).size 1
       assertEqual "executor count" (← calls.get) 0,
 

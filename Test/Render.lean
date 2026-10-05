@@ -35,7 +35,7 @@ def suite : Suite := Testing.suite "render" #[
         ("{\"status\":\"fail\",\"passed\":2,\"total\":3,\"reason\":\"failed: b\",\"checks\":[]}", "fail 2/3"),
         ("[\"a\",2,{\"n\":1}]", "a, 2, n: 1"),
         ("{\"status\":\"Submitted\",\"submission\":\"done\\nand more\"}", "Submitted: done and more"),
-        ("{\"status\":\"LimitsExceeded\",\"submission\":\"\"}", "LimitsExceeded"),
+        ("{\"status\":\"RepeatedFormatError\",\"submission\":\"\"}", "RepeatedFormatError"),
         ("{\"status\":\"unavailable\"}", "status: unavailable"),
         ("{\"output\":\"\\nfirst line\\nsecond\",\"exit_code\":0,\"error\":null,\"file\":null}", "exit 0: first line"),
         ("{\"output\":\"\",\"exit_code\":null,\"error\":\"timed out\",\"file\":null}", "timed out: "),

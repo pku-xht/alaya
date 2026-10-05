@@ -320,12 +320,6 @@ def runSuite : Suite := suite "mini-swe.run" #[
     -- system, instance, then three user error messages.
     assertEqual "dialogue length" dialogue.size 5,
 
-  test "the step limit stops the run" do
-    let loopCmd := responseWith #[call "c" "bash" "echo working"]
-    let (_, _, outcome) ← runAgent { stepLimit := 2 }
-      #[loopCmd, loopCmd, loopCmd, loopCmd]
-    assertEqual "exit status" (status outcome) "LimitsExceeded",
-
   test "a command timeout is reported as an exception observation" do
     let (dialogue, _, _) ← runAgent { executor := { defaultExecutor with timeoutSeconds := 1 } } #[
       responseWith #[call "c1" "bash" "sleep 30"],

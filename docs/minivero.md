@@ -7,13 +7,12 @@ handling of long outputs and a full context are MiniSwe's, unchanged.
 
 ## 1. Options
 
-MiniSwe's options, with one more and three other defaults. `alaya config --agent mini-vero`
+MiniSwe's options, with one more and two other defaults. `alaya config --agent mini-vero`
 prints them all.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `mode` | `proof` | Vero's evaluation mode for the run: `proof` or `codeproof` |
-| `step_limit` | 200 | MiniSwe's is 0, no limit |
 | `executor.timeout_seconds` | 600 | MiniSwe's is 30 |
 | `executor.env` | none | MiniSwe's is mini's overrides |
 | `tools` | `["bash", "submit", "time_budget"]` | MiniSwe's has no `time_budget` |

@@ -13,7 +13,6 @@ defaults. A field left out is its default, and a misspelt one is an error.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `step_limit` | 0 | responses before the agent ends with `LimitsExceeded`; 0 is no limit |
 | `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
 | `executor.timeout_seconds` | 30 | the time a command may take |
 | `executor.env` | mini's | environment overrides for every command: `PAGER=cat` and the like |
@@ -58,7 +57,6 @@ The agent returns `{status, submission}`:
 | Status | When |
 | --- | --- |
 | `Submitted` | the model called `submit`; its message is the submission. Calls after it in the same response do not run |
-| `LimitsExceeded` | `step_limit` responses were sampled |
 | `RepeatedFormatError` | `max_consecutive_format_errors` malformed responses in a row |
 | `ContextExceeded` | the next request would not fit the model's context, or the provider refused it as too long; then `reason` holds the provider's words |
 
@@ -131,7 +129,9 @@ are omitted, and the choice depends on turn positions alone, never on the model.
   replaced byte by byte.
 - **The environment is a snapshot of the workspace**, not a persistent machine (§4).
 - **A full context ends the agent** (§5), where mini sends the request.
-- **No cost accounting**: mini's `cost_limit` is not enforced.
+- **No cost accounting or step limit**: mini's `cost_limit` and `step_limit` are not enforced,
+  and the agent never ends with `LimitsExceeded`. `alaya run --samples N` pauses a run after `N`
+  responses instead, and a later `run` goes on from there (`docs/cli.md`).
 - **A person can speak to it**: what a person says or changes reaches the model at the start of
   its next round, and with `ask_user` among its tools it can ask, in the kinds of question its
   configuration allows (`docs/agent-api.md` §7).
