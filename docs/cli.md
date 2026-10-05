@@ -210,7 +210,8 @@ alaya run 4f2c8b --provider apiyi --samples 50 --time-budget 3600
   **`--time-budget S`** once the run's time along its log is spent. Neither is recorded. A
   paused run is driven on by a later `run`, and a person may append there first.
 - **Containers** run with no network unless `--network NAME` gives one, and as
-  `--container-user UID:GID`.
+  `--container-user UID:GID`. A user or a network docker does not know stops `run` with an
+  environment error (69), and nothing is logged.
 - **A log that is no trace of its run's program** is refused (65): one edited by hand, or
   written by another version of the agent.
 - **From an entry where a `grade` was interrupted**, `run` runs the grader that was assigned.

@@ -422,16 +422,38 @@ def execSuite : Suite := suite "mini-swe.exec" #[
     assertEqual "replaced output" out.output "a�b"
     assertEqual "exit code" out.exitCode? (some 0),
 
-  test "a command that cannot run is an error observation, which tells the agent nothing of the machine" do
-    let missing := (← scratch) / "missing"
-    let out ← runIn missing "echo hi"
+  test "a command docker could not run tells the agent nothing of the machine" do
+    let said := "Error response from daemon: container 3f9a1c is not running (/data/tmp/41-7/work)"
+    let out := Executor.failed said
     assertEqual "no exit code" out.exitCode? none
     assertEqual "what the agent is told" out.error? (some Executor.couldNotRun)
-    check (contains (out.detail?.getD "") missing.toString) "the detail, for a reader of the log, names the directory"
-    -- What a model is shown of it, cut or whole, holds nothing of the host.
+    assertEqual "the detail, for a reader of the log" out.detail? (some said)
+    -- What a model is shown of it holds nothing docker said.
     let shown := (observation out outputLimit).compress
-    check (!contains shown missing.toString) s!"the observation names the host's directory: {shown}"
-    check (contains shown Executor.couldNotRun) "and says the command could not be run"
+    for leaked in ["3f9a1c", "/data/tmp", "daemon"] do
+      check (!contains shown leaked) s!"the observation holds {leaked}: {shown}"
+    check (contains shown Executor.couldNotRun) "and says the command could not be run",
+
+  test "a container that cannot be started is the machine's failure, not a command's result" do
+    -- A work directory that is not there: docker has nothing to mount.
+    let missing := (← scratch) / "missing"
+    let executor ← containerExecutor
+    let ran ← (try some <$> executor.bash defaultExecutor missing "echo hi" catch _ => pure none : IO (Option Output))
+    executor.close
+    check ran.isNone s!"the command was given a result: {repr ran}"
+    -- A user the image does not have, as a mistyped `--container-user` names.
+    let settings := { (← testSettings) with user? := some "no-such-user-of-alaya" }
+    let executor ← assertOk (Executor.Docker.executor settings)
+    let work ← workDir
+    let ran ← (try some <$> executor.bash defaultExecutor work "echo hi" catch _ => pure none : IO (Option Output))
+    executor.close
+    check ran.isNone s!"a command run as no user was given a result: {repr ran}",
+
+  test "a command reads nothing from whoever runs alaya" do
+    -- Its standard input is closed: a command that reads it gets the end at once.
+    let out ← runIn (← workDir) "cat; echo read to the end"
+    assertEqual "it went on past the read" out.output "read to the end\n"
+    assertEqual "exit code" out.exitCode? (some 0)
 ]
 def suites : Array Suite := #[goldenSuite, parseSuite, runSuite, execSuite]
 

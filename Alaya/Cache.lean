@@ -22,8 +22,9 @@ private def responsesFromJson (key : String) (json : Lean.Json) : Except String 
     let response ← Chat.Response.ofStored (← draw.getObjVal? "response")
     pure { response with elapsedMs? := some (← draw.getObjVal? "elapsed_ms" >>= Lean.Json.getNat?) }
 
+/-- An entry's file: the SHA-256 of its key, as everything else in a data directory is named. -/
 private def fileName (key : String) : String :=
-  s!"{hash key}.json"
+  s!"{(Hash.ofBytes key.toUTF8).hex}.json"
 
 private def entryPath (config : Config) (key : String) : System.FilePath :=
   config.directory / fileName key

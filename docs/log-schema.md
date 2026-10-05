@@ -106,7 +106,7 @@ response.
 {"type":"returned","frame":[0,0],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
 …
 {"type":"returned","frame":[0],"value":{"status":"Submitted","submission":"…"}}
-{"type":"arrived","notice":{"type":"assigned","grader":{"name":"grader","command":"sh /grader/grade.sh","image":"…@sha256:…","input":"7e0f…","timeout_seconds":900}}}
+{"type":"arrived","notice":{"type":"assigned","grader":{"command":"sh /grader/grade.sh","image":"…@sha256:…","input":"7e0f…","timeout_seconds":900}}}
 {"type":"heard","frame":[],"notices":[212]}
 {"type":"answered","frame":[],"op":{"type":"external",…},"answer":{"exit_code":0,"stdout":"1..2\nok 1\nok 2\n",…},"error":null}
 {"type":"returned","frame":[],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],…}}
@@ -186,7 +186,7 @@ run's configuration, so any point of any run is graded, by any grader, at any ti
 A grader is an external program, described by what the notice that assigns it holds:
 
 ```json
-{"name": "grader", "command": "sh /grader/grade.sh", "image": "…@sha256:…", "input": "7e0f…", "timeout_seconds": 900}
+{"command": "sh /grader/grade.sh", "image": "…@sha256:…", "input": "7e0f…", "timeout_seconds": 900}
 ```
 
 | Field | Holds |
@@ -361,7 +361,7 @@ Pro's internal volume, one run each:
 
 ## 6. The model cache entry
 
-`D/cache/<hash>.json`, where `<hash>` is a hash of the cache key (`docs/llm-api.md` §4):
+`D/cache/<hash>.json`, where `<hash>` is the SHA-256 of the cache key (`docs/llm-api.md` §4):
 
 ```json
 {"key": "<the cache key: the model's identity and the request>",

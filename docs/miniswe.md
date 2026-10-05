@@ -71,10 +71,14 @@ A tool that fails does not end the agent: the model is shown the error as the ca
   on the host.
 - **Through `/bin/sh`, with stderr merged into stdout**, so the model sees output in the order
   a terminal would.
-- **A command that times out or cannot be run is an answer**, with no exit code and an
-  `error`. A run does not die on a failed command. Of a command that could not be run, the
-  model is told only that: what docker said, with its paths and container, is kept in the log
-  as the answer's `detail`.
+- **Whatever a command does is an answer.** One that runs out of time has no exit code and an
+  `error` saying so. One that leaves docker unable to run it, as a command that kills its own
+  container does, is told to the model only as "the command could not be run"; what docker
+  said, with its paths and container, is kept in the log as the answer's `detail`.
+- **What the machine cannot do is no answer.** A container that cannot be started — a missing
+  image, a user or a network docker does not know — stops the driver with an environment
+  error. Nothing is logged, and the next `run` asks for the command again.
+- **A command reads nothing from standard input**: it is closed.
 - **Only the workspace is kept.** What a command installs elsewhere in the container lasts
   until a later `run` starts a new container.
 

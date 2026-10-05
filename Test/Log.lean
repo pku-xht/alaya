@@ -281,7 +281,7 @@ def suite : Suite := Testing.suite "log" #[
     check ((next spins (settle spins rootOnly)) matches .unguarded #[0]) "a loop that only comments is reported",
 
   test "what follows the agent waits for its grader, calls it once, and ends with its verdict" do
-    let grader (name : String) : Grader := { name, command := "true", image := "image" }
+    let grader : Grader := { command := "true", image := "image" }
     let ran : External := { exitCode? := some 0, stdout := "1..1\nok 1\n", stderr := "", checkout := default, elapsedMs := 1 }
     match miniRun with
     | .error problem => fail problem
@@ -293,7 +293,7 @@ def suite : Suite := Testing.suite "log" #[
       -- A grader: what follows the agent takes it, and runs its program itself, in the run's own
       -- frame. It is no routine: no call opens.
       let assigned := log.size
-      let log := settle run (log.push (assignment (grader "one")))
+      let log := settle run (log.push (assignment grader))
       check (log.any fun | .heard #[] notices => notices == #[assigned] | _ => false) "the run's own frame takes the grader"
       let .ask first := next run log | fail "the grader's program is asked for"
       assertEqual "in the run's own frame" first.frame #[]
@@ -312,7 +312,7 @@ def suite : Suite := Testing.suite "log" #[
       | .raised error => assertEqual "the run's error" error "the image cannot start"
       | _ => fail "the run ends with the failure"
       -- Stopped before its agent is opened, a run comes to its grader all the same.
-      let stopped := settle run ((rootOnly.push (.stopped "grade")).push (assignment (grader "one")))
+      let stopped := settle run ((rootOnly.push (.stopped "grade")).push (assignment grader))
       check ((next run stopped) matches .ask { frame := #[], op := .external .., .. }) "the grader runs on the root's workspace"
       check ((agentEnd? stopped) matches some (.stopped "grade")) "the agent was stopped",
 

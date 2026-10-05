@@ -258,7 +258,9 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
         else io do
           IO.FS.createDirAll rt.outputsDir
           for entry in ← rt.outputsDir.readDir do IO.FS.removeFile entry.path
-        let output ← io (rt.executor.bash config rt.workDir command)
+        -- What the executor throws is the machine's: no container could be started, or docker
+        -- could not be run. Nothing is logged for the command, and the next `run` asks again.
+        let output ← Result.fromIO Error.environment (rt.executor.bash config rt.workDir command)
         let file? := if config.outputs then some s!"{outputsDir}/{outputFile output.output}" else none
         let left ← rt.workspaces.snapshot rt.workDir
         append (.answered call.frame (.exec command config)

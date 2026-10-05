@@ -6,10 +6,8 @@ open Lean (Json)
 open Alaya
 open Alaya.Driver (Runtime Limits Stop)
 
-private def emit (s : String) : Result Unit := Result.fromIO Error.storage (IO.println s)
-
 private def emitLines (lines : Array String) : Result Unit :=
-  lines.forM emit
+  lines.forM Cli.emit
 
 /-- The data directory (`--data`, or `ALAYA_DATA`); its layout is in `docs/log-schema.md` §5. A
 command opens it with `withData`, which gives the command a scratch directory of its own. -/
@@ -402,7 +400,7 @@ private def replyAnswer : Cli.Spec (Option String) :=
 private def replyRun (data : System.FilePath) (reference : String) (answer? : Option String)
     (out : Cli.Out) : Result UInt32 :=
   withData data (write := true) fun data =>
-    appendTo data reference out fun log next => do
+    appendTo data reference out fun _ next => do
       let some (_, question) := questionOf? next
         | throw <| .input s!"no question waits for a reply at {reference}"
       let reply ← match answer? with

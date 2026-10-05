@@ -266,8 +266,8 @@ name the run has no routine under fails in its own frame, with `no routine named
   the frame.
 - An operation whose answer is an error fails where it was performed. The one such answer today
   is a model's refusal of a request as too long for its context. Any other trouble with the
-  world — a provider that cannot be reached, a full disk — is no answer: the driver stops,
-  nothing is logged, and the next `alaya run` asks again.
+  world — a provider that cannot be reached, a container that cannot be started, a full disk —
+  is no answer: the driver stops, nothing is logged, and the next `alaya run` asks again.
 - A failure that reaches the end of its frame is marked, `failed frame error`, and becomes the
   failure of the call.
 - `try … catch` leaves no mark. Nothing is rolled back: what a failed routine did stays in the
