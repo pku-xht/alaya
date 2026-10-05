@@ -1,17 +1,18 @@
 # LLM API
 
-A program of Alaya asks a model with `sample request` (`docs/agent-api.md` §3.1). This page is
-what stands behind that: the **request** and the **response** as typed values, and the
-**model** that turns one into the other. A model is a provider wrapped in layers, each with the
-same interface.
+Alaya accesses language models through three types: the **request**, the **response**, and the
+**model**, which answers a request with a stream of sampled responses, called draws. Providers fail
+transiently and are nondeterministic, so Alaya retries failures, caches every draw for replay,
+and controls which samples are independent. Each is a layer: a model built on another, stacked
+over the provider.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
 flowchart TD
   classDef sample stroke:#3567a0
 
-  caller("caller<br/>a sample of the agent")
-  subgraph layers["#160;#160;#160;each a Model: identity · structuredOutput · sample#160;#160;#160;"]
+  caller("caller")
+  subgraph layers["layers"]
     cache("Cache.persistent<br/>replays draws from disk")
     batch("Model.batch<br/>how several draws are made")
     retry("Model.retry<br/>repeats a transient failure")
@@ -70,8 +71,8 @@ chat-completions protocol, as typed values.
 | `assistant` | a turn of the model: its text, its tool calls, its reasoning |
 | `tool` | the result of one call, named by the call's id |
 
-A conversation grows by two messages a turn: the model's response, as an `assistant` message
-(`response.message`), and a `tool` message for each call it made.
+In a typical agent, the conversation grows each turn by the model's response, as an
+`assistant` message (`response.message`), and a `tool` message for each call it made.
 
 ![A request, its response, and the next request](figures/llm-api/conversation.svg)
 
@@ -86,12 +87,9 @@ let request : Chat.Request := {
 ```
 
 - **A tool's parameters are a `JsonSchema`** (§3), written with every property required and no
-  others allowed. The provider is not asked to enforce it, so an agent checks a call's
-  arguments itself (`Tool.check`, `docs/agent-api.md` §6).
+  others allowed. The provider is not asked to enforce it.
 - **`toolChoice`** says what the model may do with the tools: `.auto` leaves it free,
   `.required` makes it call one, `.function name` makes it call that one, `.none` forbids calls.
-- **A request has one serialization.** `Request.toJson` emits keys in sorted order, so equal
-  requests give equal strings. That is what lets a request name its draws (§4).
 
 ## 2. A response
 
@@ -121,11 +119,8 @@ structure ToolCall where
 | `reasoning?`, `reasoningItems` | its reasoning, as text or as the provider's own items (§6) |
 | `elapsedMs?` | how long its draw took, where the cache measured it (§5.4) |
 
-**Arguments that are not JSON.** A provider sends a call's arguments as a string the model
-wrote, and a model does write strings that are not JSON, most often when its response is cut
-off. Reading such a response does not fail: the call's `arguments` is `null`, and
-`invalidArguments?` keeps the text. What to do about it is the agent's to say; MiniSwe answers
-with a format error (`docs/miniswe.md`).
+When the model writes a call's arguments as invalid JSON, `arguments` is `null` and
+`invalidArguments?` keeps the text.
 
 ## 3. Structured output
 
@@ -185,7 +180,7 @@ Model.requestDigest : Chat.Request → Hash
    **draws**, and `next` takes the next one.
 2. **`nextN n` takes several.** By default it calls `next` `n` times. A layer that has a
    cheaper way, such as a provider asked for `n` completions in one request, supplies its own.
-3. **`identity` says what is answering**: the model's spec (§6), and never the provider. So the
+3. **`identity` says what is answering**: the model's spec (§6), excluding the provider. So the
    same model's answers are the same draws, whoever served them.
 4. **`cacheKey` names a sequence of draws**: the identity and the request, as one JSON string
    with sorted keys. Two requests with the same key have the same draws.
@@ -200,8 +195,7 @@ Model.requestDigest : Chat.Request → Hash
    When earlier assistant messages carry some, the key holds them in a field of its own, so two
    requests that differ only in them have different draws.
 
-5. **`requestDigest` names a request alone**, whichever model it goes to. It is what a log
-   keeps of the request a response answered (`docs/agent-api.md` §3.1).
+5. **`requestDigest` names a request alone**, whichever model it goes to.
 
 ## 5. Layers
 
@@ -268,14 +262,11 @@ the subject of Dai et al. (2026), which this design follows.
 
 - With `readOnly`, a missing draw is an error: a way to prove a replay called no provider.
 - One process writes a cache directory at a time; within it, streams take turns at an entry.
-- The entry's file is specified in `docs/log-schema.md` §6. Which draw a run takes at a point
-  of its log, and so how a fork samples again, is `docs/agent-api.md` §10.
+- The entry's file is specified in `docs/log-schema.md` §6.
 
 ## 6. Models and providers
 
-A **model** is what is asked, and a **provider** is who serves it. A run records its model and
-never its provider: a provider is chosen each time a run is driven (`run --provider`,
-`docs/cli.md`).
+A **model** is what is asked, and a **provider** is who serves it.
 
 ```lean
 structure Models.Spec where        -- a model: what a run records, and the Model's identity
@@ -334,8 +325,7 @@ flowchart TD
   linkStyle default stroke-width:1px
 ```
 
-So changing providers either sends the model the same requests or fails before any is sent. An
-agent may behave differently with different models, but never with different providers.
+So changing providers either sends the model the same requests or fails before any is sent.
 
 | Provider | Default endpoint | Key variable | Serves |
 | --- | --- | --- | --- |
@@ -377,11 +367,6 @@ conversation. The spec's `echo_reasoning` says how, and a route must be able to 
 | `text` | its `reasoning_content`; `""` where none was recorded | Chat Completions | `deepseek-v4.1-flash`, whose API rejects an earlier turn without it |
 | `items` | its encrypted reasoning items, before its text and calls | the Responses API | `gpt-6-luna`, which otherwise reasons afresh every turn |
 
-Recorded reasoning is never changed or dropped. So a message serializes the same in every later
-request, and the provider can reuse the prefix it has cached; the cost is the earlier reasoning
-in input tokens. A run that records items can be driven on only through a provider that serves
-its model through the Responses API.
-
 ## 7. Errors
 
 Every operation runs in `Result α := EIO Error α`. Each constructor of `Error` has a class,
@@ -401,9 +386,6 @@ which says what a caller does about it; the command line exits with one status p
 | `structuredOutput` | the reply is not of the requested shape | `model` |
 | `cache` | the cache could not be read or extended | `storage` |
 | `storage` | the entries or a workspace snapshot could not be read or written | `storage` |
-
-`contextExceeded` is the one failure of a provider that a run goes on from: the driver logs it
-as the sample's answer, and the agent deals with it (`docs/agent-api.md` §3.4).
 
 ## References
 
