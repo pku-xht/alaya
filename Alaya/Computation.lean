@@ -203,8 +203,8 @@ def comment (text : String) : Computation σ Unit := .comment text (.pure ())
 def iter (step : S → Computation σ (S ⊕ α)) (s : S) : Computation σ α := .iter step s .pure
 
 mutual
-/-- A routine: a computation from its arguments to its result, both JSON, under a name, with the
-scope the calls inside it name routines in. A call is the only way into a routine, so it always
+/-- A routine: a computation from its arguments to its result, both JSON, under a name, with a
+scope: the routines it can call. A call is the only way into a routine, so it always
 runs in a frame of its own, and the log brackets it: its opening, with its name and its
 arguments, and its end, with its result or its failure. So the structure of an agent — its
 workflows, its sub-agents, its tools — is the nesting of its log. The run itself is a routine,
@@ -218,7 +218,7 @@ structure Routine (σ : Signature) : Type 1 where
   body : Json → Computation σ Json
   scope : Scope σ
 
-/-- A scope: the routines a call can name, by name. -/
+/-- A scope: a set of routines, by name. -/
 structure Scope (σ : Signature) : Type 1 where
   find : String → Option (Routine σ)
 end

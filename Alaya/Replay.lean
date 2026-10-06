@@ -25,10 +25,9 @@ namespace Alaya
 open Lean (Json)
 
 /-- What waits for the value of the computation being run: the rounds of loops, and the calls it
-is in, each with the frame of the caller to go back to and the calls it will have opened, and
-the scope of the
-routine called, which the calls inside it name routines in. The bottom is the run's own frame,
-with the scope of the run's routine, and its value is the result of the run. -/
+is in, each with the frame of the caller to go back to, the calls it will have opened, and the
+scope of the routine called: the routines it can call. The bottom is the run's own frame, with
+the scope of the run's routine, and its value is the result of the run. -/
 inductive Stack (σ : Signature) : Type → Type 1 where
   | top (scope : Scope σ) : Stack σ Json
   /-- A round of a loop; `start` is how many events the machine had read when it began. -/
@@ -37,7 +36,7 @@ inductive Stack (σ : Signature) : Type → Type 1 where
   | call {α : Type} (parent : Frame) (opened : Array String) (k : Except String Json → Computation σ α)
       (scope : Scope σ) (rest : Stack σ α) : Stack σ Json
 
-/-- The scope a call names its routine in: that of the routine running in the innermost frame. -/
+/-- The routines a call can reach: the scope of the routine running in the innermost frame. -/
 def Stack.scope : Stack σ α → Scope σ
   | .top scope => scope
   | .round _ _ _ rest => rest.scope

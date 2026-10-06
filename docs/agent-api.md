@@ -448,16 +448,16 @@ into a data directory of its own, as the changed computation makes it (`docs/cli
 ## 5. Routines and scopes
 
 A **routine** is a computation from its arguments to its result, both JSON, under a name, with
-the scope its calls name routines in. It is the one way to structure an agent: a tool, a step
+a scope: the routines it can call. It is the one way to structure an agent: a tool, a step
 of a workflow, a sub-agent and the agent itself are routines, and each runs in a frame of its
-own (§3.3). A **scope** is the routines a call can name. The run itself is a routine, whose
+own (§3.3). A **scope** is a set of routines, by name. The run itself is a routine, whose
 computation runs in frame `#[]`, entered by no call (§9).
 
 ```lean
 structure Routine σ where
   name  : String
   body  : Json → Computation σ Json            -- from the arguments to the result
-  scope : Scope σ                              -- what the calls inside it can name
+  scope : Scope σ                              -- the routines it can call
 
 structure Scope σ where
   find : String → Option (Routine σ)
