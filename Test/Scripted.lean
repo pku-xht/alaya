@@ -96,10 +96,10 @@ def taskOf (config : Json) : Option String :=
 /-- A run of Alaya whose program `agent` runs `body` on its call's configuration, its calls
 naming routines in `scope`. Every program of the catalog is there too, the grader among them. -/
 def runWith (body : Json → Computation Agent Json) (scope : Scope Agent := .empty) : Routine Agent :=
-  session ⟨fun name =>
+  Catalog.session ⟨fun name =>
       if name == "agent" then
         some { name, scope, body }
-      else Agents.Catalog.scope.find name⟩
+      else Catalog.scope.find name⟩
 
 /-- A run of Alaya whose program `agent` is `make`'s computation for the call's task, its calls
 naming routines in `scope`. -/
@@ -112,15 +112,15 @@ program. -/
 def runOfConfig (name : String) (config : Json) (model : Models.Spec := testModelSpec) :
     Except String (Routine Agent) :=
   let config := config.setObjVal! "model" model.toJson
-  match Agents.Catalog.build name config with
+  match Catalog.build name config with
   | .error problem => .error problem
   | .ok _ =>
-    let scope := ((Agents.Catalog.named? name).map (·.routine.scope)).getD .empty
+    let scope := ((Catalog.named? name).map (·.routine.scope)).getD .empty
     .ok (runWith (scope := scope) fun called =>
       let config := match taskOf called with
         | some task => config.setObjVal! "task" task
         | none => config
-      match Agents.Catalog.build name config with
+      match Catalog.build name config with
       | .error problem => .fail problem
       | .ok built => match built.computation with
         | .ok computation => computation

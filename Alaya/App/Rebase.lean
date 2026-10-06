@@ -1,6 +1,6 @@
 import Alaya.Core.Rebase
 import Alaya.App.Render
-import Alaya.Agents.Catalog
+import Alaya.App.Catalog
 
 /-! The rebase command's part: the log reconfigured as the current version of its programs reads
 it, and what a rebase says of itself; `Data.rebase` writes the rebased log into a new data
@@ -25,11 +25,11 @@ private def reading (name : String) (action : Result α) : Result α :=
 of `settings` its program takes over it, every field complete; and which of `settings` it takes. -/
 private def reconfigureCall (call : RoutineCall) (settings : Array Settings.Setting) :
     Result (RoutineCall × Array Bool) := do
-  let mut config ← reading call.name (Agents.Catalog.complete call.name call.arguments)
+  let mut config ← reading call.name (Catalog.complete call.name call.arguments)
   let mut taken := #[]
   -- A setting fits a call when its program takes it.
   for setting in settings do
-    match ← tryCatch (some <$> Agents.Catalog.applying call.name config #[setting]) (fun _ => pure none) with
+    match ← tryCatch (some <$> Catalog.applying call.name config #[setting]) (fun _ => pure none) with
     | some applied => config := applied; taken := taken.push true
     | none => taken := taken.push false
   pure ({ call with arguments := config }, taken)

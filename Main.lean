@@ -51,7 +51,7 @@ private def exitPaused : UInt32 := 4
 
 /-- `PROGRAM`: a program the catalog has. -/
 private def programName : Cli.Value String :=
-  .enum "PROGRAM" (Agents.Catalog.all.map fun d => (d.name, d.name)).toList
+  .enum "PROGRAM" (Catalog.all.map fun d => (d.name, d.name)).toList
 
 /-- `--set PATH=VALUE` and `--set-file PATH=FILE`: the fields of a program's configuration over
 its defaults, in the order given. -/
@@ -112,7 +112,7 @@ private def CallArgs.cli : Cli.Spec CallArgs :=
   CallArgs.mk
     <$> dataDir
     <*> entryArg "the entry to call the program after; any unambiguous prefix, or PREFIX:N"
-    <*> Cli.arg "PROGRAM" programName s!"the program: {Agents.Catalog.names}"
+    <*> Cli.arg "PROGRAM" programName s!"the program: {Catalog.names}"
     <*> Cli.flag "image" (.string "IMAGE") "the container image the call's commands run in, pinned by digest"
     <*> Cli.flagD "workdir" (.string "PATH") Executor.Docker.defaultWorkdir
       "where the workspace is mounted in the image"
@@ -122,12 +122,12 @@ private def CallArgs.cli : Cli.Spec CallArgs :=
 complete, with its image pinned. `resume` then drives it. -/
 private def callRun (a : CallArgs) (out : Cli.Out) : Result UInt32 := do
   -- A configuration that is wrong is said so before anything is appended.
-  let config ← Agents.Catalog.resolve a.program (← a.settings.mapM (·.read))
-  if let .error problem := Agents.Catalog.check { name := a.program, arguments := config } then
+  let config ← Catalog.resolve a.program (← a.settings.mapM (·.read))
+  if let .error problem := Catalog.check { name := a.program, arguments := config } then
     throw <| .input problem
   appendIn a.data out fun data => do
     let environment ← Environment.pinned a.image a.workdir
-    data.call Agents.Catalog.run a.entry
+    data.call Catalog.run a.entry
       { name := a.program, arguments := config, environment? := some environment.toJson }
 
 /-! ## Driving a run -/
@@ -195,7 +195,7 @@ grader, 1 when it failed, 0 otherwise. -/
 private def idleStatus (log : Log Agent) : UInt32 :=
   match lastCall? log with
   | some (call, some (.returned value)) =>
-    if call.name != Agents.Catalog.grader.name then 0 else
+    if call.name != Catalog.grader.name then 0 else
     match Agents.Grader.verdictStatus value with
     | "pass" => 0
     | "fail" => exitFail
@@ -215,7 +215,7 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
       samples? := if a.samples == 0 then none else some a.samples
       budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
     data.withRuntime a.options a.provider? baseUrl? (unserved := .input "a call samples its model: name a --provider") fun rt => do
-      let (last, stop, log) ← data.resume Agents.Catalog.run a.entry rt limits (entryRecord out)
+      let (last, stop, log) ← data.resume Catalog.run a.entry rt limits (entryRecord out)
       reportStop out last log stop
       pure <| match stop with
         | .idle => idleStatus log
@@ -223,12 +223,12 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
         | .paused _ => exitPaused
 
 private def tellRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
-  appendIn data out (·.tell Agents.Catalog.run reference text)
+  appendIn data out (·.tell Catalog.run reference text)
 
 private def commitRun (data : System.FilePath) (reference : String) (dir : System.FilePath)
     (message? : Option String) (out : Cli.Out) : Result UInt32 :=
   appendIn data out fun data =>
-    tryCatch (data.commit Agents.Catalog.run reference dir (message?.getD "")) fun
+    tryCatch (data.commit Catalog.run reference dir (message?.getD "")) fun
       | .input message => throw <| .input
           (if message.endsWith "not changed" then s!"{message}: to send a message alone, use `tell`" else message)
       | error => throw error
@@ -246,21 +246,21 @@ private def replyAnswer : Cli.Spec (Option String) :=
 
 private def replyRun (data : System.FilePath) (reference : String) (answer? : Option String)
     (out : Cli.Out) : Result UInt32 :=
-  appendIn data out (·.reply Agents.Catalog.run reference answer?)
+  appendIn data out (·.reply Catalog.run reference answer?)
 
 /-- Appends a person's comment after an entry. -/
 private def commentRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
   appendIn data out (·.comment reference text)
 
 private def stopRun (data : System.FilePath) (reference reason : String) (out : Cli.Out) : Result UInt32 :=
-  appendIn data out (·.stop Agents.Catalog.run reference reason)
+  appendIn data out (·.stop Catalog.run reference reason)
 
 /-! ## Reading the forest -/
 
 private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
     let forest ← data.store.forest
-    let rows ← Render.rows data.store forest Agents.Catalog.run
+    let rows ← Render.rows data.store forest Catalog.run
     if out.json then
       for row in rows do
         out.record (.mkObj [("entry", row.hash.hex), ("parent", row.parent?.map (Json.str ·.hex) |>.getD .null),
@@ -271,7 +271,7 @@ private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
 
 private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
-    for (hash, frame, question) in ← data.waiting Agents.Catalog.run do
+    for (hash, frame, question) in ← data.waiting Catalog.run do
       out.record (.mkObj [("entry", hash.hex), ("frame", frame.toJson), ("question", question.text),
           ("question_type", question.form.name),
           ("options", .arr (question.form.options.map Json.str))])
@@ -284,7 +284,7 @@ private def statusOf (visit : Visit) : String :=
 
 private def logRun (data : System.FilePath) (reference : String) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
-    let visits ← data.visitsAt Agents.Catalog.run reference
+    let visits ← data.visitsAt Catalog.run reference
     for visit in visits do
       let entry := visit.entry
       let frame := (entry.event.frame?.map Frame.render).getD "-"
@@ -300,7 +300,7 @@ private def logRun (data : System.FilePath) (reference : String) (out : Cli.Out)
 private def showRun (data : System.FilePath) (reference : String) (request : Bool) (out : Cli.Out) :
     Result UInt32 := do
   withData data fun data => do
-    let visit ← data.visitAt Agents.Catalog.run reference
+    let visit ← data.visitAt Catalog.run reference
     let { hash, entry, position, spentMs := spent, usage, stack, .. } := visit
     let asked? := match visit.asked? with
       | some { op := .sample _ request, .. } => some request
@@ -398,7 +398,7 @@ private def htmlRun (data : System.FilePath) (file : System.FilePath) (hide : Ar
     let forest ← data.store.forest
     if forest.entries.isEmpty then
       throw <| .input "nothing to report: the data directory holds no runs"
-    let page ← Html.report data.store data.workspaces forest s!"alaya {data.path}" hidden Agents.Catalog.run
+    let page ← Html.report data.store data.workspaces forest s!"alaya {data.path}" hidden Catalog.run
     Result.fromIO Error.storage (IO.FS.writeFile file page)
     out.record (.mkObj [("file", file.toString), ("bytes", page.length)])
       s!"wrote {file} ({page.length} bytes)"
@@ -422,7 +422,7 @@ private def rebaseRun (data : System.FilePath) (reference : String) (target : Sy
     let settings ← settings.mapM (·.read)
     let (_, tip, entries) ← data.entriesAt reference
     let log ← Rebase.reconfigure (entries.map (·.event)) settings
-    let rebased := rebase Agents.Catalog.run log
+    let rebased := rebase Catalog.run log
     let summary := Rebase.summary rebased log.size
     let source ← Result.fromIO Error.storage (IO.FS.realPath data.path)
     let written ← data.rebase entries rebased target s!"rebased from {tip.hex} in {source}: {summary}"
@@ -470,8 +470,8 @@ private def configRun (program? : Option String) (settings : Array Settings.Give
     throw <| .input "--set needs --program NAME, the program it changes"
   let settings ← settings.mapM (·.read)
   if program?.isNone then
-    for definition in Agents.Catalog.all do
-      let config ← Agents.Catalog.resolve definition.name #[]
+    for definition in Catalog.all do
+      let config ← Catalog.resolve definition.name #[]
       out.record (.mkObj [("program", definition.name), ("config", config)])
         s!"program {definition.name} {config.pretty}"
     for spec in Models.all do
@@ -480,7 +480,7 @@ private def configRun (program? : Option String) (settings : Array Settings.Give
       out.record (.mkObj [("provider", providerJson provider)]) (providerText provider)
     return 0
   let name := program?.getD ""
-  let config ← Agents.Catalog.resolve name settings
+  let config ← Catalog.resolve name settings
   out.record (.mkObj [("program", name), ("config", config)]) config.pretty
   pure 0
 
@@ -504,7 +504,7 @@ private def commands : Array Cli.Command := #[
     summary := "The programs, models and providers, or the configuration call would record; creates nothing."
     examples := #["alaya config",
       "alaya config --program mini-vero --set model=deepseek-v4.1-flash --set model.params.reasoning_effort=high --set mode=codeproof"]
-    spec := configRun <$> Cli.flag? "program" programName s!"the program: {Agents.Catalog.names}"
+    spec := configRun <$> Cli.flag? "program" programName s!"the program: {Catalog.names}"
       <*> overrides },
   { name := "resume"
     summary := "Drive a run on from an entry until no call runs, a call waits for a person, or a limit is reached."

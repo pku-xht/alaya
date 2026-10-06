@@ -56,13 +56,13 @@ private def answerOf (log : Log Agent) (command : String) : TestM Nat := do
 /-- A run of MiniSwe, as Alaya runs it, rebased with another model, and with a field of the
 agent changed. -/
 private def reconfigured : TestM Unit := do
-  let run := Agents.Catalog.run
+  let run := Catalog.run
   let rt ← runtime echoing (some (← scriptedModel #[
     responseWith #[call "c1" "bash" "echo one"], responseWith #[submitCall "s" "done"]]))
   let project := (← scratch) / "project"
   IO.FS.createDirAll project
   let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
-  let config ← assertOk <| Agents.Catalog.resolve "mini-swe"
+  let config ← assertOk <| Catalog.resolve "mini-swe"
     #[{ path := ["model"], value := "gpt-oss-120b" }, { path := ["task"], value := "t" }]
   let swe : RoutineCall := { name := "mini-swe", arguments := config, environment? := some testEnvironment.toJson }
   let (called, _) ← assertOk <| Driver.append rt.store run root swe.event

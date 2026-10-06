@@ -1,29 +1,15 @@
 import Alaya.Runtime.Agent
 
-/-! The calls of a run: a workspace, and the programs a person calls on it, one after another.
-The run's routine, `session scope`, in its frame `#[]`, waits for a person to call a program of
-`scope` — an agent, a grader — calls it in a frame of its own, named by the program (`mini-swe`,
-then `grader`), and when the call ends, waits for the next. A call's configuration is the
-arguments of its opening, so every later command builds the same program from the log alone;
-its commands run in the container of the environment the person's call names. Then what a log
-says of its calls: their arguments, where their commands run, and how they ended. See
-`docs/agent-api.md` §9. -/
+/-! What a log says of its calls: their arguments, where their commands run, and how they ended.
+A call's configuration is the arguments of its opening, so every later command builds the same
+program from the log alone; its commands run in the container of the environment the nearest
+call on its path names. See `docs/agent-api.md` §9. -/
 
 namespace Alaya.Runtime
 
 open Alaya.Base Alaya.Core Alaya.LLM
 
 open Lean (Json)
-
-/-- The run of programs of `scope`: it waits for a person to call one, calls it, and waits
-again. A call's failure, or its stop, is the call's: the run goes on to wait for the next. -/
-def session (scope : Scope Agent) : Routine Agent where
-  name := "session"
-  body _ := iter (fun (_ : Unit) => do
-    match ← await fun _ notice => notice matches .called _ with
-    | .called call :: _ => Computation.call call fun _ => pure (.inl ())
-    | _ => throw "the wait for a call ended without one") ()
-  scope
 
 /-- The arrival of a person's call. -/
 def _root_.Alaya.Core.RoutineCall.event (call : RoutineCall) : Event Agent := .arrived (.called call)

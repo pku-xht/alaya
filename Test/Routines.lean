@@ -75,7 +75,7 @@ def agent : Routine Agent :=
   (routine "agent" fun (config : Config) => workflow.call { goal := config.task }).within scope
 
 /-- The run: the run's routine, whose scope has the agent, so that a person's call of it finds it. -/
-def run : Routine Agent := session (Scope.of #[agent])
+def run : Routine Agent := Catalog.session (Scope.of #[agent])
 
 /-- Runs `k` with the run of `make`'s computation for the task, in the scope above. -/
 private def withRun (make : String → Computation Agent Json) (k : Routine Agent → TestM Unit) : TestM Unit :=
@@ -147,7 +147,7 @@ def suite : Suite := Testing.suite "routines" #[
       check (log.any fun | .failed ⟪"agent", "grader"⟫ "no routine named grader" => true | _ => false) "there is no such routine",
 
   test "a program brings its scope: an agent's tools and itself, fixed where it is defined" do
-    match Agents.Catalog.scope.find "mini-swe" with
+    match Catalog.scope.find "mini-swe" with
     | none => fail "mini-swe is a program"
     | some swe =>
       assertEqual "what a call inside MiniSwe can name"
@@ -156,7 +156,7 @@ def suite : Suite := Testing.suite "routines" #[
       -- The scope holds MiniSwe itself, with the same scope: what lets it call itself.
       check ((swe.scope.find "mini-swe").any fun inner => (inner.scope.find "bash").isSome)
         "MiniSwe in its own scope has the same scope"
-    check (Agents.Catalog.scope.find "nothing").isNone "no program of that name"
+    check (Catalog.scope.find "nothing").isNone "no program of that name"
 ]
 
 end RoutinesTests

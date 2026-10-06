@@ -193,7 +193,7 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
     assertEqual "context from the table" defaults.contextTokens? (some 131072)
     let modelOf (config : Lean.Json) : TestM Models.Spec := assertOk <| Models.fromJson
       ((config.getObjVal? "model").toOption.getD .null)
-    let set ← modelOf (← assertOk <| Agents.Catalog.resolve "mini-swe"
+    let set ← modelOf (← assertOk <| Catalog.resolve "mini-swe"
       #[agentSet ["model"] "gpt-oss-120b", agentSet ["model", "params", "temperature"] (1 : Nat),
         agentSet ["model", "context_tokens"] (65536 : Nat)])
     assertEqual "params" set.params.compress "{\"temperature\":1}"
@@ -202,7 +202,7 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
         ("unknown", #[agentSet ["model", "temperature"] (1 : Nat)], "unknown field 'temperature'"),
         ("protected", #[agentSet ["model", "params", "model"] "x"], "params cannot set 'model'"),
         ("name", #[agentSet ["name"] "x"], "unknown field 'name'")] do
-      assertError label (Agents.Catalog.resolve "mini-swe" (#[agentSet ["model"] "gpt-oss-120b"] ++ settings)) fun
+      assertError label (Catalog.resolve "mini-swe" (#[agentSet ["model"] "gpt-oss-120b"] ++ settings)) fun
         | .input m => (m.splitOn expected).length > 1
         | _ => false
     assertError "unknown model" (Models.fromJson (.mkObj [("name", "nope")])) fun
@@ -217,15 +217,15 @@ private def compressed (json : Lean.Json) : String := json.compress
 
 def agentsSuite : Suite := suite "cli.agents" #[
   test "a program's name alone is its complete defaults, and they read back as themselves" do
-    for definition in Agents.Catalog.all do
-      let defaults ← assertOk <| Agents.Catalog.resolve definition.name #[]
+    for definition in Catalog.all do
+      let defaults ← assertOk <| Catalog.resolve definition.name #[]
       check (defaults.getObjVal? "name").toOption.isNone s!"{definition.name}: the name is the call's, not the configuration's"
-      let again ← assertOk <| Agents.Catalog.complete definition.name defaults
+      let again ← assertOk <| Catalog.complete definition.name defaults
       assertEqual s!"{definition.name} round-trips" (compressed again) (compressed defaults),
 
   test "a configuration may leave fields out, but not misname or mistype one" do
     let refused (label : String) (name : String) (json : Lean.Json) (expected : String) : TestM Unit :=
-      assertError label (Agents.Catalog.complete name json) fun
+      assertError label (Catalog.complete name json) fun
         | .input m => (m.splitOn expected).length > 1
         | _ => false
     refused "unknown program" "mini-swf" (.mkObj []) "unknown program"
@@ -235,11 +235,11 @@ def agentsSuite : Suite := suite "cli.agents" #[
     refused "mode" "mini-vero" (.mkObj [("mode", "both")]) "unknown mode"
     refused "nested" "mini-swe" (.mkObj [("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
     refused "own field, misnamed" "mini-vero" (.mkObj [("stepp", 1)]) "mask_observations, mode"
-    let built ← assertOk <| Agents.Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
+    let built ← assertOk <| Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
     assertEqual "tools follow the settings" ((built.getObjVal? "tools").toOption.map (·.compress))
       (some "[\"bash\",\"submit\",\"time_budget\"]")
     -- How commands run is in each command the agent asks for.
-    let nested ← assertOk <| Agents.Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]
+    let nested ← assertOk <| Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]
     let timeout? : Option Nat := match Scripted.runOfConfig "mini-swe" nested with
       | .ok run =>
         let asked := Scripted.respond run (Scripted.settle run Scripted.opening)
@@ -249,13 +249,13 @@ def agentsSuite : Suite := suite "cli.agents" #[
         | _ => none
       | .error _ => none
     assertEqual "a nested setting" timeout? (some 5)
-    assertError "the name is not a setting" (Agents.Catalog.resolve "mini-swe" #[agentSet ["name"] "mini-vero"]) fun
+    assertError "the name is not a setting" (Catalog.resolve "mini-swe" #[agentSet ["name"] "mini-vero"]) fun
       | .input m => (m.splitOn "unknown field 'name'").length > 1
       | _ => false,
 
   test "a run's configuration is the opening of its agent's call, and the tree names it" do
-    let agent ← assertOk <| Agents.Catalog.complete "mini-swe" (.mkObj [("model", "gpt-oss-120b"), ("context_reserve", 7)])
-    let run := Agents.Catalog.run
+    let agent ← assertOk <| Catalog.complete "mini-swe" (.mkObj [("model", "gpt-oss-120b"), ("context_reserve", 7)])
+    let run := Catalog.run
     let rt ← Scripted.runtime noCommands none
     let project := (← scratch) / "project"
     IO.FS.createDirAll project

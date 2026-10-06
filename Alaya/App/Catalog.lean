@@ -14,9 +14,9 @@ call's opening in the log holds the name and the complete configuration, from wh
 command builds the same program again. There are no configuration files.
 -/
 
-namespace Alaya.Agents.Catalog
+namespace Alaya.App.Catalog
 
-open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
+open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.Agents
 
 open Lean (Json)
 
@@ -138,10 +138,20 @@ def check (call : RoutineCall) : Except String Unit :=
     | .ok _ => .ok ()
     | .error problem => .error problem
 
+/-- The run of programs of `scope`: it waits for a person to call one, calls it, and waits
+again. A call's failure, or its stop, is the call's: the run goes on to wait for the next. -/
+def session (scope : Scope Agent) : Routine Agent where
+  name := "session"
+  body _ := iter (fun (_ : Unit) => do
+    match ← await fun _ notice => notice matches .called _ with
+    | .called call :: _ => Computation.call call fun _ => pure (.inl ())
+    | _ => throw "the wait for a call ended without one") ()
+  scope
+
 /-- The programs a run calls: the run's scope. -/
 def scope : Scope Agent := Scope.of (all.map (·.routine))
 
 /-- The run of the catalog's programs. -/
 def run : Routine Agent := session scope
 
-end Alaya.Agents.Catalog
+end Alaya.App.Catalog

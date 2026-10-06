@@ -343,18 +343,18 @@ def suite : Suite := Testing.suite "runs" #[
         | .input message => contains message "no program named nothing"
         | _ => false
       -- Whether a call's arguments fit its program is the CLI's to check before it appends it.
-      check (match Agents.Catalog.check (graderCall "") with
+      check (match Catalog.check (graderCall "") with
         | .error message => contains message "needs its command"
         | .ok () => false) "a grader with no command"
       -- Every program is called the same way: a task is a field of an agent's configuration.
       let agentWith (fields : List (String × Json)) : RoutineCall :=
         { name := "mini-swe", arguments := .mkObj ((("model", "gpt-oss-120b") : String × Json) :: fields) }
-      check (match Agents.Catalog.check (agentWith []) with
+      check (match Catalog.check (agentWith []) with
         | .error message => contains message "works on a task"
         | .ok () => false) "an agent with no task"
-      check (Agents.Catalog.check (agentWith [("task", "fix it")]) matches .ok ()) "an agent with its task"
+      check (Catalog.check (agentWith [("task", "fix it")]) matches .ok ()) "an agent with its task"
       let tasked : RoutineCall := { name := "grader", arguments := .mkObj [("command", "true"), ("task", "t")] }
-      check (match Agents.Catalog.check tasked with
+      check (match Catalog.check tasked with
         | .error message => contains message "task"
         | .ok () => false) "a grader takes no task: it has no such field"
       let (asked, _) ← assertOk <| Driver.append rt.store run ended grader

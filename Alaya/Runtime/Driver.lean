@@ -259,7 +259,7 @@ def running : Next Agent → Bool
 that the log can take it: a stop, a message, a change or a reply only while a call is running,
 when it has something to end or someone to read it; a call only where the run waits for one,
 no call running and none asked for yet, and only of a routine the run's scope has. Whether the
-call's arguments fit the routine is its caller's to check (`Agents.Catalog.check`): a call that
+call's arguments fit the routine is its caller's to check (`Catalog.check`): a call that
 does not fails in its frame. Gives the new entry. -/
 def append (store : Store) (root : Routine Agent) (tip : Hash) (event : Event Agent) : Result (Hash × Entry) := do
   let forest ← store.forest
