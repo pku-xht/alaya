@@ -266,10 +266,7 @@ partial def drive (world : World) (run : Routine Agent) (log : Log') : Log' × N
   | .ask call =>
     let answer := (world.answer log call.op).map (store call.op)
     drive world run (log.push (.answered call.frame call.op answer))
-  | .hears frame notices => drive world run (log.push (.heard frame notices))
-  | .opens frame tool => drive world run (log.push (.opened frame tool))
-  | .returns frame value => drive world run (log.push (.returned frame value))
-  | .fails frame error => drive world run (log.push (.failed frame error))
+  | .mark event => drive world run (log.push event)
   | result => (log, result)
 
 def versions (log : Log') : List Nat :=
@@ -396,14 +393,15 @@ def describe (o : Frame → List Nat) : Event Agent → String
   | .asked frame question => s!"{o frame}  asked: {question.text}"
 
 def describeNext (o : Frame → List Nat) : Next Agent → String
-  | .done value => s!"done: {txt value}"
+  | .ended (.ok value) => s!"done: {txt value}"
   | .ask call => s!"ask {o call.frame} {call.op.describe}"
-  | .opens frame tool => s!"log the opening of {o frame}: {tool.name}"
-  | .returns frame value => s!"log the return of {o frame}: {txt value}"
-  | .fails frame error => s!"log the failure of {o frame}: {error}"
-  | .raised error => s!"failed: {error}"
-  | .hears frame notices => s!"mark the read of {o frame}, of {notices.toList}"
-  | .questions frame question => s!"log the question of {o frame}: {question.text}"
+  | .mark (.opened frame tool) => s!"log the opening of {o frame}: {tool.name}"
+  | .mark (.returned frame value) => s!"log the return of {o frame}: {txt value}"
+  | .mark (.failed frame error) => s!"log the failure of {o frame}: {error}"
+  | .ended (.error error) => s!"failed: {error}"
+  | .mark (.heard frame notices) => s!"mark the read of {o frame}, of {notices.toList}"
+  | .mark (.asked frame question) => s!"log the question of {o frame}: {question.text}"
+  | .mark event => s!"mark {describe o event}"
   | .waits frame _ =>
     if frame.isEmpty then "wait: there is no workspace to start on"
     else s!"wait: {o frame} reads the inbox once something arrives"
@@ -426,11 +424,9 @@ def faithful (run : Routine Agent) (log : Log') : Bool :=
     match log[i]?, next run (log.extract 0 i) with
     | some (.arrived _), _ => true
     | some (.answered frame op _), .ask call => frame == call.frame && op == call.op
-    | some (.heard frame notices), .hears reader taken => frame == reader && notices == taken
-    | some (.opened frame tool), .opens entered called => frame == entered && tool == called
-    | some (.returned frame value), .returns ended given => frame == ended && value == given
-    | some (.failed frame error), .fails ended given => frame == ended && error == given
-    | none, .done _ => true
+    | some (.heard frame notices), .mark (.heard reader taken) => frame == reader && notices == taken
+    | some event, .mark mark => event.sameMark mark
+    | none, .ended (.ok _) => true
     | _, _ => false
 
 def drop (log : Log') (start : Nat) : Log' := log.extract start log.size

@@ -190,7 +190,7 @@ def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title 
       else none
     -- A run that calls nothing stands as its last call ended.
     let idle := match visit.next? with
-      | some (.done _) | some (.raised _) | some (.waits #[] _) => true
+      | some (.ended _) | some (.waits #[] _) => true
       | _ => false
     let state : Option String := if !leaf then none else match visit.next?, ended? with
       | some (.mismatch _), _ | some (.unguarded _), _ | none, _ => some "broken"

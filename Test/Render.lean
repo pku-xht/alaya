@@ -94,18 +94,19 @@ def suite : Suite := Testing.suite "render" #[
     let question : Question := { text := "Keep the old API?", form := .yesNo }
     let request : Chat.Request := { messages := #[.user "a", .user "b"] }
     let lines : Array (Option Question × Next Agent × String) := #[
-      (none, .done (json "{\"status\":\"Submitted\",\"submission\":\"\"}"), "done: Submitted"),
-      (none, .raised "it broke", "failed: it broke"),
+      (none, .ended (.ok (json "{\"status\":\"Submitted\",\"submission\":\"\"}")), "done: Submitted"),
+      (none, .ended (.error "it broke"), "failed: it broke"),
       (some question, .waits ⟪"agent", "ask_user"⟫ (some question), "waits for a reply: Keep the old API?"),
       (none, .waits ⟪"agent"⟫ none, "waits for a notice in agent"),
       (none, .waits #[] none, "waits for a call"),
       (none, .ask { frame := ⟪"agent"⟫, op := .sample testModelSpec request }, "next: sample gpt-oss-120b on a request of 2 messages"),
       (none, .ask { frame := ⟪"agent", "bash"⟫, op := .exec "make" {} }, "next: run make"),
       (none, .ask { frame := ⟪"agent", "time_budget"⟫, op := .time }, "next: time the run"),
-      (none, .hears ⟪"agent"⟫ #[2], "next: a read of the inbox in agent"),
-      (none, .opens ⟪"agent", "bash"⟫ ⟨"bash", .null⟩, "next: open bash"),
-      (none, .returns ⟪"agent", "bash"⟫ .null, "next: the return of agent/bash"),
-      (none, .fails ⟪"agent", "bash"⟫ "x", "next: the failure of agent/bash"),
+      -- A mark to come reads as it will in the log.
+      (none, .mark (.heard ⟪"agent"⟫ #[2]), "next: inbox: takes [2]"),
+      (none, .mark (.opened ⟪"agent", "bash"⟫ ⟨"bash", .mkObj [("command", "ls")]⟩), "next: open bash \"ls\""),
+      (none, .mark (.returned ⟪"agent", "bash"⟫ .null), "next: return null"),
+      (none, .mark (.failed ⟪"agent", "bash"⟫ "x"), "next: fail: x"),
       (none, .mismatch 7, "broken: the event at 7 is no trace of the run"),
       (none, .unguarded ⟪"agent"⟫, "broken: a loop in agent reads no event")]
     for (question?, next, line) in lines do
@@ -217,7 +218,7 @@ def suite : Suite := Testing.suite "render" #[
     let rows ← assertOk <| Render.rows store forest
     assertEqual "every entry" rows.size 4
     assertEqual "the run is named by its call" (rows[0]!.title?) (some "an-agent-of-another-version, gpt-oss-120b")
-    assertEqual "and its end says the call fails" (rows.back?.bind (·.status?)) (some "next: the failure of an-agent-of-another-version")
+    assertEqual "and its end says the call fails" (rows.back?.bind (·.status?)) (some "next: fail: no routine named an-agent-of-another-version")
 ]
 
 end RenderTests

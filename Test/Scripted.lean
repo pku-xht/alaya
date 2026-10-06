@@ -245,11 +245,7 @@ partial def settle (run : Routine Agent) (log : Log Agent) : Log Agent :=
     let execution : Execution :=
       { output := { output := testUnameOutput, exitCode? := some 0 }, workspace := (workspace? log).getD default }
     settle run (appended run log (.answered frame (.exec command config) (.ok (.execution execution))))
-  | .hears frame notices => settle run (appended run log (.heard frame notices))
-  | .questions frame question => settle run (appended run log (.asked frame question))
-  | .opens frame opened => settle run (appended run log (.opened frame opened))
-  | .returns frame value => settle run (appended run log (.returned frame value))
-  | .fails frame error => settle run (appended run log (.failed frame error))
+  | .mark event => settle run (appended run log event)
   | _ => log
 
 /-- The log with the answer to what `run` asks next appended, and then its marks: what the world

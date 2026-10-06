@@ -414,9 +414,9 @@ flowchart TD
 
   person("a person"):::notice -- "appends a notice" --> next("next run log")
   next -- "waits" --> waits("stop: wait for a person<br/>a call, a reply, a message"):::wait
-  next -- "done · raised" --> over("the run is over"):::ok
+  next -- "ended" --> over("the run is over"):::ok
   next -- "mismatch ·<br/>unguarded" --> refuse("refuse: the log<br/>is not a trace<br/>of the computation"):::bad
-  next -- "hears · questions<br/>opens · returns<br/>fails" --> mark("append<br/>the mark")
+  next -- "mark" --> mark("append<br/>the mark")
   mark --> next
   next -- "ask" --> act("carry out<br/>the operation") --> answered("append answered")
   answered --> next
@@ -425,10 +425,10 @@ flowchart TD
 
 | `Next` | What the log says |
 | --- | --- |
-| `ask call` | it ends where the computation asks for an operation |
-| `hears`, `questions`, `opens`, `returns`, `fails` | it ends where the computation makes a mark |
+| `ask request` | it ends where the computation asks for an operation, which the world answers |
+| `mark event` | it ends where the computation makes a mark: `heard`, `asked`, `opened`, `returned` or `failed`, which is appended as it is |
 | `waits frame question?` | it ends where a read waits, and nothing the read is for has arrived; with the question, when it waits for a reply |
-| `done value`, `raised error` | it is complete: the run is over |
+| `ended result` | it is complete: the run is over, with its value or its failure |
 | `mismatch position` | its event at `position` is not what the computation does |
 | `unguarded frame` | the computation went round a loop without reading an event |
 

@@ -57,7 +57,7 @@ structure Machine (σ : Signature) : Type 1 where
 
 /-- What the machine needs next from the log: an answer to an operation, a mark it makes, a read
 of the inbox, or nothing more; or what it says before it, a comment, which it does not need. -/
-inductive Demand (σ : Signature) where
+private inductive Demand (σ : Signature) where
   | ask (request : OpRequest σ) (resume : Except String (σ.Answer request.op) → Machine σ)
   | mark (expected : Event σ) (resume : Machine σ)
   | read (frame : Frame) (wait : Option Wait) (resume : List Notice → Machine σ)
@@ -153,24 +153,27 @@ def stop (m : Machine σ) : Option (Machine σ) :=
 
 end Machine
 
-/-- What to do next, as far as the log tells. -/
+/-- Whether two events are the same mark: a question, an opening, a return or a failure, in the
+same frame, with the same content. -/
+def Event.sameMark : Event σ → Event σ → Bool
+  | .asked frame question, .asked frame' question' => frame == frame' && question == question'
+  | .opened frame call, .opened frame' call' => frame == frame' && call == call'
+  | .returned frame value, .returned frame' value' => frame == frame' && value == value'
+  | .failed frame error, .failed frame' error' => frame == frame' && error == error'
+  | _, _ => false
+
+/-- What to do next, as far as the log tells: an event to append, or why there is none yet. -/
 inductive Next (σ : Signature) where
-  /-- The run is over, with this result. -/
-  | done (value : Json)
-  /-- The run is over, and its own computation failed. -/
-  | raised (error : String)
-  /-- The first operation the log has no answer to. -/
+  /-- The first operation the log has no answer to: the world answers it. -/
   | ask (request : OpRequest σ)
-  /-- The first read of the inbox not yet marked, with the positions of what it takes. -/
-  | hears (frame : Frame) (notices : Array Nat)
+  /-- An event the computation makes itself, with no world: a read of the inbox and what it
+  takes, a question, the opening of a call, its return or its failure. Appended as it is. -/
+  | mark (event : Event σ)
   /-- A read that waits, and nothing it takes has arrived: for the reply to `question?`, when it
   is a question's. In `#[]` with no question when the log has no root. -/
   | waits (frame : Frame) (question? : Option Question)
-  /-- The computation asks a person a question: a mark, after which it waits for the reply. -/
-  | questions (frame : Frame) (question : Question)
-  | opens (frame : Frame) (call : RoutineCall)
-  | returns (frame : Frame) (value : Json)
-  | fails (frame : Frame) (error : String)
+  /-- The run is over: its result, or its failure. -/
+  | ended (result : Except String Json)
   /-- The event here is not what the computation does: the log is no trace of it. -/
   | mismatch (position : Nat)
   /-- A loop went round without reading an event. -/
@@ -219,21 +222,16 @@ def next (r : Replayer σ) : Next σ :=
   if let some broken := r.broken? then broken else
   if !r.rooted then .waits #[] none else
   match r.demand with
-  | .finished (.ok value) => .done value
-  | .finished (.error error) => .raised error
+  | .finished result => .ended result
   | .unguarded frame => .unguarded frame
   | .ask call _ => .ask call
-  | .mark (.asked frame question) _ => .questions frame question
-  | .mark (.opened frame call) _ => .opens frame call
-  | .mark (.returned frame value) _ => .returns frame value
-  | .mark (.failed frame error) _ => .fails frame error
-  | .mark _ _ => .mismatch r.position
+  | .mark event _ => .mark event
   -- Never: `settle` goes on past every comment.
   | .comment .. => .mismatch r.position
   | .read frame wait _ =>
     let (taken, _) := r.take frame wait
     if wait.isSome && taken.isEmpty then .waits frame (wait.bind (·.question?))
-    else .hears frame (taken.map (·.1))
+    else .mark (.heard frame (taken.map (·.1)))
 
 /-- The replayer with the machine gone on to `machine`, the event at its position read: the
 comments made before that event are behind it. -/
@@ -289,14 +287,8 @@ def feed (r : Replayer σ) (event : Event σ) : Replayer σ :=
             | some answer => r.resume (resume (.ok answer))
             | none => r.broken (.mismatch position)
         else r.broken (.mismatch position)
-      | .mark (.asked frame question) resume, .asked frame' question' =>
-        if frame == frame' && question == question' then r.resume resume else r.broken (.mismatch position)
-      | .mark (.opened frame call) resume, .opened frame' call' =>
-        if frame == frame' && call == call' then r.resume resume else r.broken (.mismatch position)
-      | .mark (.returned frame value) resume, .returned frame' value' =>
-        if frame == frame' && value == value' then r.resume resume else r.broken (.mismatch position)
-      | .mark (.failed frame error) resume, .failed frame' error' =>
-        if frame == frame' && error == error' then r.resume resume else r.broken (.mismatch position)
+      | .mark expected resume, event =>
+        if expected.sameMark event then r.resume resume else r.broken (.mismatch position)
       | _, _ => r.broken (.mismatch position)
 
 /-- Replays a whole log. -/

@@ -189,19 +189,16 @@ def endingSummary : CallEnd → String
 /-- What a run does next, in a line: what it waits for, or what it asks. `ended?` is how its last
 call ended, once it has: a run that calls nothing stands as that call ended. -/
 def nextSummary (question? : Option Question) (ended? : Option CallEnd) : Next Agent → String
-  | .done value => s!"done: {valueSummary value}"
-  | .raised error => s!"failed: {flatten error}"
+  | .ended (.ok value) => s!"done: {valueSummary value}"
+  | .ended (.error error) => s!"failed: {flatten error}"
   | .waits frame _ =>
     match question?, ended? with
     | some question, _ => s!"waits for a reply: {flatten question.text 70}"
     | none, some ended => if frame.isEmpty then endingSummary ended else s!"waits for a notice in {frame.render}"
     | none, none => if frame.isEmpty then "waits for a call" else s!"waits for a notice in {frame.render}"
   | .ask call => s!"next: {call.op.describe}"
-  | .hears frame _ => s!"next: a read of the inbox in {frame.render}"
-  | .questions frame _ => s!"next: a question in {frame.render}"
-  | .opens _ call => s!"next: open {call.name}"
-  | .returns frame _ => s!"next: the return of {frame.render}"
-  | .fails frame _ => s!"next: the failure of {frame.render}"
+  -- A mark to come reads as it will in the log.
+  | .mark event => s!"next: {eventSummary event}"
   | .mismatch position => s!"broken: the event at {position} is no trace of the run"
   | .unguarded frame => s!"broken: a loop in {frame.render} reads no event"
 

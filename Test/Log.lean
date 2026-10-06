@@ -100,7 +100,7 @@ def suite : Suite := Testing.suite "log" #[
     | .ok run =>
       let early : Log Agent := #[.arrived (.changed default "p"), .arrived (.said "a hint"), callAgent "the task"]
       match next run early with
-      | .hears #[] notices => assertEqual "the run takes the call alone" notices #[2]
+      | .mark (.heard #[] notices) => assertEqual "the run takes the call alone" notices #[2]
       | _ => fail "the run reads its call first"
       let log := settle run early
       match next run log with
@@ -178,12 +178,12 @@ def suite : Suite := Testing.suite "log" #[
       broken "another command" log (.answered ran.frame (.exec "rm -rf /" {}) (.ok (.execution default)))
       let execution : Execution := { output := { output := "x\n", exitCode? := some 0 }, workspace := default }
       let log := log.push (.answered ran.frame ran.op.key (.ok (.execution execution)))
-      let .returns frame value := next run log | fail "the call returns"
+      let .mark (.returned frame value) := next run log | fail "the call returns"
       broken "another value" log (.returned frame (.str "x"))
       broken "another frame's return" log (.returned ⟪"agent", "bash#1"⟫ value)
       broken "a failure where it returned" log (.failed frame "x")
       match next run (log.push (.returned frame value)) with
-      | .hears ⟪"agent"⟫ _ => pure ()
+      | .mark (.heard ⟪"agent"⟫ _) => pure ()
       | _ => fail "the log as the program makes it goes on",
 
   test "a failure is caught around a loop, around a call, or by no one, and each try is in the log" do
@@ -196,7 +196,7 @@ def suite : Suite := Testing.suite "log" #[
     for ms in [10, 20, 30] do
       log := answer caught log (.timing { spentMs := ms })
     match next caught log with
-    | .done value => assertEqual "the handler's value" value.compress "\"caught: gave up at 30\""
+    | .ended (.ok value) => assertEqual "the handler's value" value.compress "\"caught: gave up at 30\""
     | _ => fail "the run ends with what the handler gave"
     assertEqual "three reads of the clock" (log.filter fun | .answered _ .time _ => true | _ => false).size 3
     -- A loop that ends inside a `try` gives its value, and the handler is not run.
@@ -206,7 +206,7 @@ def suite : Suite := Testing.suite "log" #[
       catch _ => pure "never")
     let ended := answer ends (answer ends (settle ends rootOnly) (.timing { spentMs := 1 })) (.timing { spentMs := 2 })
     match next ends ended with
-    | .done value => assertEqual "the loop's value" value.compress "\"ended\""
+    | .ended (.ok value) => assertEqual "the loop's value" value.compress "\"ended\""
     | _ => fail "the run ends with the loop's value"
     -- Uncaught, the failure ends the agent's call, and with nothing after it the run.
     let uncaught := runOf rounds
@@ -215,7 +215,7 @@ def suite : Suite := Testing.suite "log" #[
       failing := answer uncaught failing (.timing { spentMs := ms })
     check (failing.any fun | .failed ⟪"agent"⟫ "gave up at 30" => true | _ => false) "the agent's call failed"
     match next uncaught failing with
-    | .raised error => assertEqual "the run's error" error "gave up at 30"
+    | .ended (.error error) => assertEqual "the run's error" error "gave up at 30"
     | _ => fail "the run ends with the error"
     -- A tool that fails ends its own call with the error; its caller catches it or fails too.
     let calls := runOf (try call "boom" .null catch error => pure (.str s!"the tool said: {error}"))
@@ -242,7 +242,7 @@ def suite : Suite := Testing.suite "log" #[
       return "done"
     let run := runOf commenting
     let over (label : String) (run : Routine Agent) (log : Log Agent) : TestM Unit :=
-      check ((next run log) matches .done _) s!"{label}: the run is not over"
+      check ((next run log) matches .ended (.ok _)) s!"{label}: the run is not over"
     -- At the end of a log, the program's comments since its last event wait for the next event:
     -- what comes next is the operation.
     let opened := rootOnly.push (.opened ⟪"agent"⟫ agentCall)
@@ -271,7 +271,7 @@ def suite : Suite := Testing.suite "log" #[
     | .ok mini =>
       let early : Log Agent := #[.arrived (.changed default "p"), .commented "before the call",
         callAgent "the task", .commented "after the call"]
-      check ((next mini early) matches .hears #[] #[2]) "the call is at 2, the comments around it"
+      check ((next mini early) matches .mark (.heard #[] #[2])) "the call is at 2, the comments around it"
     -- A comment reads no event: a loop that only comments is as unguarded as one that does nothing.
     let spins := runOf (iter (fun (n : Nat) => (do
       comment s!"round {n}"

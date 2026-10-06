@@ -185,23 +185,20 @@ partial def drive (rt : Runtime) (root : Routine Agent) (tip : Hash) (limits : L
     let append := appendTook none
     match replayer.next with
     -- The run's routine never ends; a run that did is no longer calling anything.
-    | .done _ | .raised _ => pure (tip, .idle)
+    | .ended _ => pure (tip, .idle)
     | .waits frame question? => pure (tip, if frame.inCall then .waits frame question? else .idle)
     | .mismatch position =>
       throw <| .input <| s!"the log is no trace of its run's program: the event at {position} is not what it does; " ++
         "`alaya rebase` copies the part that is into a new data directory"
     | .unguarded frame =>
       throw <| .input s!"a loop in frame {frame.render} went round without reading an event"
-    | .hears frame notices =>
+    | .mark event =>
       -- A limit is checked before a read of a call's inbox too, so that what a person adds
       -- where the run paused is read before the next sample, not after it.
-      if let some reason := limit? (← nowMs) frame (sampling := true) then
-        return (tip, .paused reason)
-      append (.heard frame notices) checkout samples
-    | .questions frame question => append (.asked frame question) checkout samples
-    | .opens frame call => append (.opened frame call) checkout samples
-    | .returns frame value => append (.returned frame value) checkout samples
-    | .fails frame error => append (.failed frame error) checkout samples
+      if let .heard frame _ := event then
+        if let some reason := limit? (← nowMs) frame (sampling := true) then
+          return (tip, .paused reason)
+      append event checkout samples
     | .ask call =>
       let now ← nowMs
       let timeSpent := spent + (now - stamp)
@@ -252,9 +249,9 @@ partial def drive (rt : Runtime) (root : Routine Agent) (tip : Hash) (limits : L
 the call opened already. -/
 def running : Next Agent → Bool
   | .ask call => call.frame.inCall
-  | .opens frame _ => frame.size > 1
-  | .returns frame _ | .fails frame _ | .hears frame _ | .waits frame _
-  | .questions frame _ => frame.inCall
+  | .mark (.opened frame _) => frame.size > 1
+  | .mark event => event.frame?.any (·.inCall)
+  | .waits frame _ => frame.inCall
   | _ => false
 
 /-- Appends an event that comes from outside — a notice, a stop — after `tip`, after checking

@@ -113,7 +113,7 @@ def suite : Suite := Testing.suite "runs" #[
       check (log[0]! matches .arrived (.changed ..)) "the root is the workspace"
       check (log[1]! matches .arrived (.called _)) "the call is a notice"
       match next run log with
-      | .hears #[] notices => assertEqual "the run's read takes the call" notices #[1]
+      | .mark (.heard #[] notices) => assertEqual "the run's read takes the call" notices #[1]
       | _ => fail "the run reads its call next"
       let settled := settle run log
       assertEqual "the call opens with its configuration" ((callAt? settled { name := "agent" }).map (·.toJson.compress))
@@ -130,10 +130,8 @@ def suite : Suite := Testing.suite "runs" #[
       for i in [2:log.size] do
         let agrees := match log[i]!, next run (log.extract 0 i) with
           | .answered frame key _, .ask asked => frame == asked.frame && key == asked.op.key
-          | .heard frame notices, .hears reader taken => frame == reader && notices == taken
-          | .opened frame tool, .opens entered called => frame == entered && tool == called
-          | .returned frame value, .returns ended given => frame == ended && value == given
-          | .failed frame error, .fails ended given => frame == ended && error == given
+          | .heard frame notices, .mark (.heard reader taken) => frame == reader && notices == taken
+          | event, .mark mark => event.sameMark mark
           | _, _ => false
         check agrees s!"replay disagrees at {i}: {Render.eventSummary log[i]!}"
       -- Once the agent is over, the run waits for the next call.
@@ -361,7 +359,7 @@ def suite : Suite := Testing.suite "runs" #[
         | .ok () => false) "a grader takes no task: it has no such field"
       let (asked, _) ← assertOk <| Driver.append rt.store run ended grader
       let log ← logAt rt asked
-      check ((next run log) matches .hears #[] _) "the run takes the call"
+      check ((next run log) matches .mark (.heard #[] _)) "the run takes the call"
       assertError "a second call, before the first is made" (Driver.append rt.store run asked grader) fun
         | .input message => contains message "a call to make here already"
         | _ => false
