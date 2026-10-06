@@ -52,7 +52,7 @@ inductive Error.Class where
   /-- Fix the machine. -/
   | environment
   /-- Try again later: another command is writing the data directory, or the provider was
-  unreachable, throttled, or failing and the retries `Alaya.Base.Retry` makes have run out. -/
+  unreachable, throttled, or failing and the retries `Alaya.LLM.Retry` makes have run out. -/
   | transient
   /-- The provider refused the request or answered it wrongly; trying again will not help. -/
   | model
@@ -68,7 +68,7 @@ def Error.Class.toString : Error.Class -> String
   | .storage => "storage"
 
 /-- An HTTP status worth retrying: a timeout, a conflict, too early, a rate limit, or the
-server's own failure. `Alaya.Base.Retry` retries these, and what is still failing after it is
+server's own failure. `Alaya.LLM.Retry` retries these, and what is still failing after it is
 transient. -/
 def Error.retryableStatus (status : Nat) : Bool :=
   status == 408 || status == 409 || status == 425 || status == 429 || (500 <= status && status < 600)

@@ -1,6 +1,8 @@
 import Alaya.Base.Error
 
-namespace Alaya.Base.Retry
+namespace Alaya.LLM.Retry
+
+open Alaya.Base
 
 structure Config where
   maxAttempts : Nat := 3
@@ -96,4 +98,4 @@ def run (config : Config) (action : Result alpha) : Result alpha := do
         if isRateLimit then go general (rate + 1) fuel else go (general + 1) rate fuel
   go 0 0 (config.maxAttempts + rateLimitBudget config)
 
-end Alaya.Base.Retry
+end Alaya.LLM.Retry

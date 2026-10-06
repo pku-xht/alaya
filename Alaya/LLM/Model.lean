@@ -1,7 +1,7 @@
 import Std.Sync.Semaphore
 import Alaya.Base.Error
 import Alaya.LLM.Chat.Protocol
-import Alaya.Base.Retry
+import Alaya.LLM.Retry
 import Alaya.Base.Hash
 
 namespace Alaya.LLM

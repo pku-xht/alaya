@@ -1,6 +1,6 @@
 import Alaya.Base.Error
 import Alaya.Base.Lock
-import Alaya.Base.Retry
+import Alaya.LLM.Retry
 import Alaya.Base.Tap
 import Alaya.Agents.Verdict
 import Alaya.LLM.Model
