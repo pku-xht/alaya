@@ -2,6 +2,7 @@ import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
 import Alaya.Agents.Grader
 import Alaya.Settings
+import Alaya.Calls
 
 /-!
 The programs a call can name, and how a call's configuration builds one: the agents, and the
@@ -138,5 +139,8 @@ def check (call : RoutineCall) : Except String Unit :=
 
 /-- The programs a run calls: the run's scope. -/
 def scope : Scope Agent := Scope.of (all.map (·.routine))
+
+/-- The run of the catalog's programs. -/
+def run : Routine Agent := session scope
 
 end Alaya.Agents.Catalog

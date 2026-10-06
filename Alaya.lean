@@ -10,6 +10,7 @@ import Alaya.Question
 import Alaya.Workspaces
 import Alaya.Workspaces.Restic
 import Alaya.Cli
+import Alaya.Options
 import Alaya.Settings
 import Alaya.Models
 import Alaya.Provider
@@ -26,11 +27,12 @@ import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
 import Alaya.Agents.Grader
 import Alaya.Agents.Catalog
-import Alaya.Run
+import Alaya.Calls
 import Alaya.Store
 import Alaya.Driver
 import Alaya.Notices
 import Alaya.Rebase
+import Alaya.RebaseCommand
 import Alaya.Walk
 import Alaya.Render
 import Alaya.Html

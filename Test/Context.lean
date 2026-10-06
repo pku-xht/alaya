@@ -125,7 +125,7 @@ def suite : Suite := Testing.suite "context" #[
     let small := contextTokens (measured 4) (view masking (measured 4))
     if small > 200 then throw <| IO.userError s!"not measured before the boundary moves: {small}"
     let moved := contextTokens (measured 5) (view masking (measured 5))
-    if moved != estimateTokens (view masking (measured 5)) then
+    if moved != Chat.estimateTokens (view masking (measured 5)) then
       throw <| IO.userError s!"measured across a move of the boundary: {moved}"
     -- The limit is the model's context less the reserve, or less its output size when smaller.
     let model : Models.Spec := { name := "m", contextTokens? := some 3000, outputTokens? := some 500 }

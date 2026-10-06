@@ -387,10 +387,6 @@ def view (config : Config) (history : History) : Dialogue := Id.run do
 def request (config : Config) (history : History) : Chat.Request :=
   { messages := view config history, tools := tools config }
 
-/-- The tokens of a request with `dialogue`, estimated at four characters a token of its JSON. -/
-def estimateTokens (dialogue : Dialogue) : Nat :=
-  (dialogue.foldl (fun n m => n + m.toJson.compress.length) 0 + 3) / 4
-
 /-- The tokens `full`, the messages of the next request, holds, known without a tokenizer. The
 latest response that reported its size says how many the request it answered held, and how many
 it returned; what `full` holds after that request and the message that shows the response is
@@ -399,12 +395,12 @@ masked, or nothing reported a size, the whole is estimated. -/
 def contextTokens (history : History) (full : Dialogue) : Nat :=
   let wire (dialogue : Dialogue) := dialogue.map (·.toJson.compress)
   match history.measured? with
-  | none => estimateTokens full
+  | none => Chat.estimateTokens full
   | some (before, input, output?) =>
     if before.size < full.size && wire (full.extract 0 before.size) == wire before then
-      let response := output?.getD (estimateTokens (full.extract before.size (before.size + 1)))
-      input + response + estimateTokens (full.extract (before.size + 1) full.size)
-    else estimateTokens full
+      let response := output?.getD (Chat.estimateTokens (full.extract before.size (before.size + 1)))
+      input + response + Chat.estimateTokens (full.extract (before.size + 1) full.size)
+    else Chat.estimateTokens full
 
 /-- How the agent ends: a status, what it submitted, and, where the status alone does not say,
 why. -/

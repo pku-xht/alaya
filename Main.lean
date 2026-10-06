@@ -150,8 +150,8 @@ private def appendTo (data : DataDir) (reference : String) (out : Cli.Out)
     (event : Log Agent → Next Agent → Result (Event Agent)) : Result UInt32 := do
   let (_, tip, entries) ← entriesAt data reference
   let log := entries.map (·.event)
-  let event ← event log (next session log)
-  let (hash, entry) ← Driver.append data.store session tip event
+  let event ← event log (next Agents.Catalog.run log)
+  let (hash, entry) ← Driver.append data.store Agents.Catalog.run tip event
   entryRecord out hash entries.size entry
   pure 0
 
@@ -305,7 +305,7 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
       budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
     let position ← IO.mkRef entries.size |> Result.fromIO Error.storage
     withRuntime data a.options a.provider? baseUrl? fun rt => do
-      let (last, stop) ← Driver.drive rt session tip limits fun hash entry => do
+      let (last, stop) ← Driver.drive rt Agents.Catalog.run tip limits fun hash entry => do
         let at' ← Result.fromIO Error.storage (position.modifyGet fun p => (p, p + 1))
         entryRecord out hash at' entry
       let log ← data.store.log (← data.store.forest) last
@@ -366,7 +366,7 @@ private def stopRun (data : System.FilePath) (reference reason : String) (out : 
 private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
     let forest ← data.store.forest
-    let rows ← Render.rows data.store forest
+    let rows ← Render.rows data.store forest Agents.Catalog.run
     if out.json then
       for row in rows do
         out.record (.mkObj [("entry", row.hash.hex), ("parent", row.parent?.map (Json.str ·.hex) |>.getD .null),
@@ -378,7 +378,7 @@ private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
 private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
     let forest ← data.store.forest
-    walk data.store forest () fun _ visit => do
+    walk data.store forest () (root := Agents.Catalog.run) fun _ visit => do
       let leaf := (forest.childrenOf visit.hash).isEmpty
       if let (true, some (.waits frame _), some question) := (leaf, visit.next?, visit.question?) then
         out.record (.mkObj [("entry", visit.hash.hex), ("frame", frame.toJson), ("question", question.text),
@@ -399,7 +399,7 @@ private def logRun (data : System.FilePath) (reference : String) (out : Cli.Out)
           ("frame", (entry.event.frame?.map Frame.toJson).getD .null),
           ("event", eventToJson entry.event), ("elapsed_ms", entry.elapsedMs)])
         s!"{position}  {Render.short entry.hash}  {frame}  {Render.eventSummary entry.event}  ({Render.seconds spent})"
-    let next := next session log
+    let next := next Agents.Catalog.run log
     let status := Render.nextSummary ((questionOf? next).map (·.2)) ((lastCall? log).bind (·.2)) next
     out.record (.mkObj [("next", status)]) status
     pure 0
@@ -423,7 +423,7 @@ private def showRun (data : System.FilePath) (reference : String) (request : Boo
       | .answered _ _ (.ok (.response response)) => addUsage usage (response.usage?.getD {})
       | _ => usage
     let stack := log.zipIdx.foldl (init := #[]) fun stack (event, i) => OpenCall.after stack i event
-    let before := Replayer.ofLog session (log.extract 0 position)
+    let before := Replayer.ofLog Agents.Catalog.run (log.extract 0 position)
     let asked? := match before.next, entry.event with
       | .ask { op := .sample _ request, .. }, .answered .. => some request
       | _, _ => none
@@ -523,7 +523,7 @@ private def htmlRun (data : System.FilePath) (file : System.FilePath) (hide : Ar
     let forest ← data.store.forest
     if forest.entries.isEmpty then
       throw <| .input "nothing to report: the data directory holds no runs"
-    let page ← Html.report data.store data.workspaces forest s!"alaya {data.path}" hidden
+    let page ← Html.report data.store data.workspaces forest s!"alaya {data.path}" hidden Agents.Catalog.run
     Result.fromIO Error.storage (IO.FS.writeFile file page)
     out.record (.mkObj [("file", file.toString), ("bytes", page.length)])
       s!"wrote {file} ({page.length} bytes)"
@@ -557,7 +557,7 @@ private def rebaseRun (data : System.FilePath) (reference : String) (target : Sy
     let log := entries.map (·.event)
     let log ← Rebase.reconfigure log settings
     do
-      let rebased := rebase session log
+      let rebased := rebase Agents.Catalog.run log
       let summary := Rebase.summary rebased log.size
       let staging := target.withFileName
         s!".{name}.rebase-{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"

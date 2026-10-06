@@ -1,4 +1,4 @@
-import Alaya.Run
+import Alaya.Calls
 import Alaya.Store
 
 /-! Reading the forest with the interpreter: one walk, depth first, that replays every log as it
@@ -74,7 +74,7 @@ private structure Place where
 /-- Folds `f` over every entry of the forest, depth first, from each root, parents before
 children, each log replayed by `root`, the run's routine. -/
 partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit → Result β)
-    (root : Routine Agent := session) : Result β := do
+    (root : Routine Agent) : Result β := do
   let rec go (acc : β) (place : Place) (hash : Hash) : Result β := do
     let entry ← store.get forest hash
     let event := entry.event

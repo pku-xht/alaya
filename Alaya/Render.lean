@@ -227,7 +227,7 @@ structure Row where
 
 /-- Every entry of the forest, as the tree shows it: what each log does next at its end, and on
 each root the program and the model of its first call. -/
-def rows (store : Store) (forest : Forest) (root : Routine Agent := session) : Result (Array Row) := do
+def rows (store : Store) (forest : Forest) (root : Routine Agent) : Result (Array Row) := do
   let rows ← walk (root := root) store forest (#[] : Array Row) fun rows visit => do
     let isLeaf := (forest.childrenOf visit.hash).isEmpty
     let status? := if !isLeaf then none else match visit.next? with

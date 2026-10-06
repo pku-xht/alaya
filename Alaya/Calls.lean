@@ -1,26 +1,27 @@
-import Alaya.Agents.Catalog
+import Alaya.Agent
 
-/-! A run of Alaya: a workspace, and the programs a person calls on it, one after another. The
-run's routine, `session`, in its frame `#[]`, waits for a person to call a program — an agent, a
-grader — calls it in a frame of its own, named by the program (`mini-swe`, then `grader`), and
-when the call ends, waits for the next. A call's configuration is the arguments of its opening,
-so every later command builds the same program from the log alone; its commands run in the
-container of the image the person's call names. See `docs/agent-api.md` §9. -/
+/-! The calls of a run: a workspace, and the programs a person calls on it, one after another.
+The run's routine, `session scope`, in its frame `#[]`, waits for a person to call a program of
+`scope` — an agent, a grader — calls it in a frame of its own, named by the program (`mini-swe`,
+then `grader`), and when the call ends, waits for the next. A call's configuration is the
+arguments of its opening, so every later command builds the same program from the log alone;
+its commands run in the container of the environment the person's call names. Then what a log
+says of its calls: their arguments, where their commands run, and how they ended. See
+`docs/agent-api.md` §9. -/
 
 namespace Alaya
 
 open Lean (Json)
 
-/-- The run of Alaya: it waits for a person to call a program, calls it, and waits again. A
-call's failure, or its stop, is the call's: the run goes on to wait for the next. The programs
-it calls are those of the catalog. -/
-def session : Routine Agent where
+/-- The run of programs of `scope`: it waits for a person to call one, calls it, and waits
+again. A call's failure, or its stop, is the call's: the run goes on to wait for the next. -/
+def session (scope : Scope Agent) : Routine Agent where
   name := "session"
   body _ := iter (fun (_ : Unit) => do
     match ← await fun _ notice => notice matches .called _ with
     | .called call :: _ => Computation.call call fun _ => pure (.inl ())
     | _ => throw "the wait for a call ended without one") ()
-  scope := Agents.Catalog.scope
+  scope
 
 /-- The arrival of a person's call. -/
 def RoutineCall.event (call : RoutineCall) : Event Agent := .arrived (.called call)

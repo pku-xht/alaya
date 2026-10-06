@@ -255,7 +255,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
 
   test "a run's configuration is the opening of its agent's call, and the tree names it" do
     let agent ← assertOk <| Agents.Catalog.complete "mini-swe" (.mkObj [("model", "gpt-oss-120b"), ("context_reserve", 7)])
-    let run := session
+    let run := Agents.Catalog.run
     let rt ← Scripted.runtime noCommands none
     let project := (← scratch) / "project"
     IO.FS.createDirAll project
@@ -270,7 +270,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
       for event in log.extract 2 log.size do
         tip := (← assertOk <| rt.store.put (← assertOk rt.store.forest) { parent? := some tip, event }).1
       let forest ← assertOk rt.store.forest
-      let tree := Render.treeLines (← assertOk <| Render.rows rt.store forest)
+      let tree := Render.treeLines (← assertOk <| Render.rows rt.store forest run)
       check (tree.any fun l => (l.splitOn "root  mini-swe, gpt-oss-120b").length > 1) s!"tree names the agent: {tree}"
 ]
 

@@ -1,6 +1,5 @@
 import Alaya.Render
 import Alaya.Workspaces
-import Alaya.Agents.MiniSwe
 
 /-!
 A standalone HTML report of a forest of logs, for reading only: the data as JSON in a `<script>`
@@ -178,7 +177,7 @@ private def envelope (request : Chat.Request) : Json :=
 
 /-- Everything the page renders, as one JSON document. -/
 def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title : String)
-    (hidden : Array String := #[]) (root : Routine Agent := session) : Result Json := do
+    (hidden : Array String := #[]) (root : Routine Agent) : Result Json := do
   let hidden := hidden.map fun prefix' =>
     if prefix'.endsWith "/" then (prefix'.dropEnd 1).toString else prefix'
   let acc ← walk (root := root) store forest ({} : Acc) fun acc visit => do
@@ -263,7 +262,7 @@ def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title 
         (·.getObjVal? "input") >>= Json.getNat? with
       | .ok n => some n
       | .error _ => none
-    let tokens := reported?.getD (Agents.MiniSwe.estimateTokens full)
+    let tokens := reported?.getD (Chat.estimateTokens full)
     requests := requests.push <| .mkObj [
       ("base", orNull from? fun n => (n : Json)), ("added", .arr (added.map (·.toJson))),
       ("size", full.size), ("envelope", e), ("tokens", tokens), ("estimated", reported?.isNone),
@@ -310,7 +309,7 @@ def page (title : String) (data : Json) : String :=
 rather than listed, so a directory that changes constantly and means nothing — a virtual
 environment, a bytecode cache — is reported without burying the rest. -/
 def report (store : Store) (workspaces : Workspaces) (forest : Forest) (title : String)
-    (hidden : Array String := #[]) (root : Routine Agent := session) : Result String := do
+    (hidden : Array String := #[]) (root : Routine Agent) : Result String := do
   pure (page title (← dataJson store workspaces forest title hidden root))
 
 end Alaya.Html

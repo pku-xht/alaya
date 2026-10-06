@@ -274,4 +274,9 @@ def fromJson (raw : Lean.Json) : Result Response := do
   | none => throw <| .protocol "response has no choices"
 
 end Response
+/-- The tokens of a request with `messages`, estimated at four characters a token of their
+JSON: what a request holds when no provider has said. -/
+def estimateTokens (messages : Array Message) : Nat :=
+  (messages.foldl (fun n m => n + m.toJson.compress.length) 0 + 3) / 4
+
 end Alaya.Chat

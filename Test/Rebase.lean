@@ -56,7 +56,7 @@ private def answerOf (log : Log Agent) (command : String) : TestM Nat := do
 /-- A run of MiniSwe, as Alaya runs it, rebased with another model, and with a field of the
 agent changed. -/
 private def reconfigured : TestM Unit := do
-  let run := session
+  let run := Agents.Catalog.run
   let rt ← runtime echoing (some (← scriptedModel #[
     responseWith #[call "c1" "bash" "echo one"], responseWith #[submitCall "s" "done"]]))
   let project := (← scratch) / "project"

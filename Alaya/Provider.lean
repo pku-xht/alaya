@@ -1,4 +1,3 @@
-import Alaya.Cli
 import Alaya.Models
 import Alaya.Provider.ChatCompletions
 import Alaya.Provider.Responses
@@ -138,15 +137,5 @@ def serve (provider : Provider) (spec : Models.Spec) (baseUrl? : Option String :
     | .responses => Responses.model {
         http, name := route.name, identity := spec.toJson, params := spec.params
         echoItems := spec.echoReasoning == .items, structuredOutput := route.structuredOutput }
-
-/-- `--url` and `--port`: where this invocation's `dgx` server listens. -/
-def endpointCli : Cli.Spec (Option Dgx.Endpoint) :=
-  let endpoint : Cli.Value Dgx.Endpoint := ⟨"URL", fun url =>
-    (Dgx.Endpoint.ofUrl url).mapError (s!"is not an endpoint: {·}")⟩
-  (fun url? port? => match port? with
-      | none => url?
-      | some port => some { url?.getD {} with port })
-    <$> Cli.flag? "url" endpoint "with --provider dgx: the server, e.g. spark.local:9000"
-    <*> Cli.flag? "port" .nat "with --provider dgx: its port, overriding the one in --url"
 
 end Alaya.Provider

@@ -1,5 +1,4 @@
 import Alaya.Executor
-import Alaya.Cli
 
 /-! The container executor: every command of a run in one container, with the working directory
 bind-mounted at the call's workdir, `/workspace` unless the call chose another, so the
@@ -299,12 +298,6 @@ structure RunOptions where
   user? : Option String := none
   network : String := "none"
   deriving Repr, Inhabited
-
-def RunOptions.cli : Cli.Spec RunOptions :=
-  (fun user? network => { user?, network })
-    <$> Cli.flag? "container-user" (.string "UID:GID")
-      "the user commands run as; by default the host user on Linux, the image's own on macOS"
-    <*> Cli.flagD "network" (.string "NAME") "none" "the docker network, e.g. bridge; none is no network"
 
 /-- Settings for a run's image and workdir, run as `options` say. -/
 def settingsOf (options : RunOptions) (image : String) (workdir : String := defaultWorkdir) :
