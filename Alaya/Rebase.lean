@@ -85,11 +85,11 @@ namespace Rebase
 
 open Alaya (Result Error)
 
-/-- The configuration a run has once rebased: the one its log records, read by this build, with
+/-- The configuration a run has once rebased: the one its log records, read by the current version of its agent, with
 `settings` over it, every field complete; and the model's spec. -/
 def configure (log : Log Agent) (settings : Array Settings.Setting) : Result (RunConfig × Models.Spec) := do
   let config ← configOf log
-  let explain (message : String) := s!"the run's configuration, as this build reads it: {message}"
+  let explain (message : String) := s!"the run's configuration, as the current version of its agent reads it: {message}"
   let agent ← match Settings.apply .agent config.agent settings with
     | .ok agent => tryCatch (Agents.Catalog.complete agent) fun
       | .input message => throw <| .input (explain message)
@@ -102,7 +102,7 @@ def configure (log : Log Agent) (settings : Array Settings.Setting) : Result (Ru
     | .error message => throw <| .input message
   pure ({ config with agent, model := model.toJson }, model)
 
-/-- `log` rebased onto `run`, a run of the agent of this build: the opening of the agent's call
+/-- `log` rebased onto `run`, a run of the current version of its agent: the opening of the agent's call
 is `run`'s, whose configuration may differ from the log's. A response of the model is taken only
 when `sameModel`, the model being the one the log was written with. -/
 def plan (run : Run Agent) (log : Log Agent) (sameModel : Bool) : Rebased Agent :=

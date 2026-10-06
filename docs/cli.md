@@ -53,7 +53,7 @@ alaya grade ENTRY --grader CMD [--grader-input DIR] [--grader-image IMAGE] [--gr
 alaya comment ENTRY TEXT                             append a comment to the log
 alaya rm ENTRY                                       delete ENTRY and everything after it
 alaya rebase ENTRY DIR [--set PATH=VALUE …]          copy the run at ENTRY into a new data directory,
-                                                     as the agent of this build makes it
+                                                     as the current version of its agent makes it
 
 alaya tree                                           the forest: runs, stretches of entries, forks
 alaya log ENTRY                                      the log that ends at ENTRY, an event a line
@@ -330,11 +330,10 @@ Then it drops the snapshots that only the deleted entries named.
 
 ### `rebase`
 
-Copies the run that ends at `ENTRY` into a new data directory, `DIR`, as the agent of this build
-makes it.
+Copies the run that ends at `ENTRY` into a new data directory, `DIR`, as the current version of
+its agent makes it.
 
 ```sh
-lake build                                     # the agent, changed
 tip=$(alaya rebase 4f2c8b ../v2 | tail -n 1 | cut -d' ' -f1)
 alaya run "$tip" --data ../v2 --provider apiyi
 ```

@@ -613,8 +613,8 @@ private def rmRun (data : System.FilePath) (reference : String) (out : Cli.Out) 
 
 /-! ## Rebasing a run -/
 
-/-- Copies the run that ends at an entry into a new data directory, `target`, as the agent of
-this build makes it, with `settings` over its configuration (`Alaya.Rebase`). The source is only
+/-- Copies the run that ends at an entry into a new data directory, `target`, as the current
+version of its agent makes it, with `settings` over its configuration (`Alaya.Rebase`). The source is only
 read. The new directory is written beside `target` under another name and renamed into place
 once complete, so a failure leaves none. -/
 private def rebaseRun (data : System.FilePath) (reference : String) (target : System.FilePath)
@@ -802,7 +802,7 @@ private def commands : Array Cli.Command := #[
     summary := "Delete an entry, everything after it, and the snapshots only they named."
     spec := rmRun <$> dataDir <*> entryArg "the first entry to delete" },
   { name := "rebase"
-    summary := "Copy the run at an entry into a new data directory, as the agent of this build makes it: the prefix it still makes."
+    summary := "Copy the run at an entry into a new data directory, as the current version of its agent makes it: the prefix it still makes."
     examples := #["alaya rebase 4f2c8b ../v2", "alaya rebase 4f2c8b ../v2 --set agent.context_reserve=16000"]
     spec := rebaseRun <$> dataDir <*> entryArg "the entry whose log is rebased"
       <*> Cli.arg "DIR" .path "the new data directory, which must not exist"
