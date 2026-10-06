@@ -948,7 +948,7 @@ grader()
 
 # === docs/cli.md ==========================================================================
 #
-# Eleven figures, one for a command or a group of commands: what the command does to the forest
+# Twelve figures, one for a command or a group of commands: what the command does to the forest
 # of entries. All are drawn with one kit: a strip of entries, each a chip in the report's words,
 # a parent at the left of its child. A chip's state says what the command does with the entry.
 
@@ -1188,6 +1188,35 @@ def cli_rm():
     cli("rm", "rm: the given entry and everything after it are deleted", below + CHIP_H + 24, out)
 
 
+def cli_rebase():
+    """`rebase`: the prefix the new agent still makes, copied into a new data directory, each
+    entry of the copy under the entry of the source it was made from."""
+    y, below = TOP + 4, TOP + 4 + CHIP_H + 50
+    source = [("the workspace", "read", False, True), ("open agent", "read", False, True), ("said “fix it”", "read"),
+              ("# the old comment", "old"), ("exec make", "read"), ("exec make test", "old"), "…",
+              ("return fail 12/48", "old", True)]
+    out, at = strip(12, y, source)
+    # The copy: each entry at the place of the one it is made from, and after the copy, the next run's.
+    copy = [(("the workspace", "new", False, True), 0), (("open agent", "new", False, True), 1), (("said “fix it”", "new"), 2),
+            (("# a new comment", "new"), 3), (("exec make", "new"), 4), (("# rebased from …", "new"), 5),
+            (("exec make check", "later"), None)]
+    joins, end = [], None
+    for item, slot in copy:
+        if end is not None:
+            joins.append(at[slot][0] - end if slot is not None else JOIN)
+        end = (at[slot][0] if slot is not None else end + joins[-1]) + chip(0, 0, *item)[1]
+    if min(joins) < 6:
+        print("  rebase: two chips of the copy may touch")
+    part, made = strip(12, below, [item for item, _ in copy], joins)
+    out += part
+    out += [label(12, y - 9, "`D`, the source, only read: in blue, what the new agent makes again", "s"),
+            label(12, below - 9, "`DIR`: what `rebase` writes, the new agent’s comments in place of the old", "s")]
+    out += under(at[5][0], y, "the new agent runs `make check` here: the copy ends")
+    out += under(made[-1][0], below, "the next `run`, in `DIR`")
+    cli("rebase", "rebase: the prefix the new agent still makes is copied into a new data directory, where the run goes on",
+        below + CHIP_H + 24, out)
+
+
 def cli_read():
     """`tree`, `log`, `show`, `waiting`: what each reads of one small forest."""
     line = ["the workspace", "open agent", "said “the task”", "sample", "…", "return pass 48/48"]
@@ -1255,5 +1284,6 @@ cli_stop()
 cli_grade()
 cli_comment()
 cli_rm()
+cli_rebase()
 cli_read()
 cli_workspace()

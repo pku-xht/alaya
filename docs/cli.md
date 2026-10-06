@@ -336,32 +336,30 @@ makes it.
 ```sh
 lake build                                     # the agent, changed
 tip=$(alaya rebase 4f2c8b ../v2 | tail -n 1 | cut -d' ' -f1)
-alaya run "$tip" --data ../v2 --provider apiyi --samples 3
+alaya run "$tip" --data ../v2 --provider apiyi
 ```
 
-A changed agent reads an old log only up to its first changed operation, and `run` refuses to go
-on from a log that is no trace of it (`docs/agent-api.md` §4). `rebase` keeps that prefix, in a
-data directory of its own, so every log of a data directory is a trace of the agent that runs it.
+![rebase: the prefix the new agent still makes is copied into a new data directory, where the run goes on](figures/cli/rebase.svg)
 
-- **The prefix** is made by the new agent from the old log. An operation it asks for again takes
-  the old answer, and a mark it makes again is checked against the old one. The copy ends at the
-  first event the new agent does not make there.
-- **Comments** are the new agent's, where it makes them; the old agent's are left out, and a
-  person's are kept. So adding comments to an agent and rebasing shows them on old runs, and the
-  whole log holds.
-- **What came from outside after the divergence** — a message, a change, a reply, a stop — is
-  left out and listed: a position after it corresponds to nothing in the new log.
-- **`--set PATH=VALUE`** changes the configuration, as on `new`, and the copy opens with it. A
-  configuration this build cannot read is an input error, which `--set` can fix. With another
-  model, no response of the old one is taken, and the copy ends at the first sample.
-- **The new directory** holds the copy, the snapshots it names in a new restic repository, under
-  names of their own, and the model cache, shared as hard links (`docs/log-schema.md` §6). Its
-  last entry is a person's comment that says where the copy came from and how much held.
-- **The source is only read.** `DIR` must not exist, and is made whole or not at all.
+An old log is a trace of a changed agent only up to the agent's first changed operation
+(`docs/agent-api.md` §4). `rebase` copies that prefix into `DIR`, so every log of a data
+directory is a trace of the agent that runs it.
 
-On stderr `rebase` says how much held: `141 of 260 events hold; at 141 the log has "exec make
-test → exit 2, 3f2a9c1b8e7d", where the agent goes on with: run make check`. With `--json`, `divergence` is
-`{position, found, expected}`, or `null` when the whole log holds.
+- **The copy** is the new agent replayed against the old log: an answer it asks for again is
+  taken from the log, and a mark it makes again is checked against it. The copy ends at the
+  first event the new agent does not make.
+- **Comments** are the new agent's. The old agent's are left out, and a person's are kept.
+- **Notices and stops after the copy's end** are left out, and listed.
+- **`--set PATH=VALUE`** changes the configuration, as on `new`. With another model, the copy
+  ends at the first sample.
+- **`DIR`** has a restic repository of its own, with copies of the snapshots, and the model cache
+  as hard links (`docs/log-schema.md` §6). Its last entry is a comment that names the source.
+- **`DIR` must not exist**, and is made whole or not at all. The source is only read.
+
+On stderr, `rebase` says where the copy ends: `141 of 260 events hold; at 141 the log has "exec
+make test → exit 2, 3f2a9c1b8e7d", where the agent goes on with: run make check`. With `--json`,
+its last object has `divergence`, `{position, found, expected}`, or `null` when the whole log
+holds.
 
 ## 5. Commands that read
 
