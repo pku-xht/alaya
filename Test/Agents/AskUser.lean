@@ -249,25 +249,6 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       let replied ← assertOk <| replyAt rt run waiting (some "yes")
       assertError "a second reply" (replyAt rt run replied (some "no")) fun | .input _ => true | _ => false,
 
-  test "invalid and blank answers are refused for every form" do
-    let blankCodepoints : Array Nat := #[0x0009, 0x000A, 0x000B, 0x000C, 0x000D,
-      0x0020, 0x00A0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005,
-      0x2006, 0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF]
-    let blanks := #["", " \n\t\r", String.ofList (blankCodepoints.toList.map Char.ofNat)] ++
-      blankCodepoints.map (fun n => String.ofList [Char.ofNat n])
-    let choice : Question := { text := "Which?", form := .singleChoice #["first", "second", "third"] }
-    for text in #["", " ", "true", "null", "{}", "\"1\"", "[]", "[1]", "1.5", "1.0", "1e0", "+1", "-1",
-        "0", "4", "999999999999999999999999999", "1 trailing", "01", "\"none_of_above\"",
-        "None of the above", "NONE_OF_ABOVE", " none_of_above ", "{\"status\":\"unavailable\"}"] do
-      check (choice.parseReply text).toOption.isNone s!"{repr text} answers a choice"
-    let open' : Question := { text := "What?" }
-    for text in blanks do
-      check (open'.parseReply text).toOption.isNone s!"{repr text} is no open answer"
-    check (open'.parseReply (String.ofList [Char.ofNat 0x00A0] ++ " Keep it. ")).toOption.isSome
-      "an answer with blank around it is kept verbatim"
-    -- A candidate's number may have blank around it, as a person types it.
-    assertEqual "a number typed with blank around it" (choice.parseReply " 2\n").toOption (some (.choice 2)),
-
   test "a call's arguments read as a question only when it can be asked" do
     let question ← assertOk <| Result.fromExcept Error.protocol
       (Tools.AskUser.question Question.Kind.all (args "Which?" #["first", "second"]))

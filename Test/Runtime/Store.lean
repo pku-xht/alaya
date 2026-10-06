@@ -143,7 +143,36 @@ def suite : Suite := Testing.suite "runtime/store" #[
     assertEqual "no root" forest.roots #[]
     assertEqual "what follows an entry ends" (forest.subtree a) #[a, b]
     check ((forest.path a).size <= 3) "and so does the path to it"
-    assertError "and neither is an entry" (store.get forest a) storage
+    assertError "and neither is an entry" (store.get forest a) storage,
+
+  test "a reference names an entry by a prefix of its name, and a position in its log; anything else says why" do
+    let named (c : Char) (n : Char) : Hash := ⟨String.ofList [c, c] ++ String.ofList (List.replicate 62 n)⟩
+    let a := named 'a' '0'
+    let b := named 'b' '1'
+    let c := named 'b' '2'
+    let other := named 'c' '3'
+    let forest := (((({} : Forest).add a none).add b (some a)).add c (some b)).add other none
+    let resolves (reference : String) (expected : Hash) : TestM Unit :=
+      assertEqual reference (forest.resolve reference).toOption (some expected)
+    let refused (reference : String) (needle : String) : TestM Unit :=
+      match forest.resolve reference with
+      | .ok hash => fail s!"{reference}: named {hash.hex}"
+      | .error message => assertContains reference message needle
+    resolves "bb1" b
+    resolves c.hex c
+    resolves "bb2:0" a
+    resolves "bb2:2" c
+    refused "bb" "ambiguous entry prefix bb (2 entries)"
+    refused "bb2:3" "there is no position 3"
+    refused "bb2:" "not a position in a log"
+    refused "bb2:x" "not a position in a log"
+    refused ":1" "named by its hash"
+    refused "" "named by its hash"
+    refused "a:b:c" "no entry matches a:b:c"
+    refused "dd" "no entry matches dd"
+    assertEqual "two roots, each a tree" forest.roots.size 2
+    assertEqual "the leaves" forest.leaves.size 2
+    assertEqual "the subtree" (forest.subtree b) #[b, c]
 ]
 
 end StoreTests

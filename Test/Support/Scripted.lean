@@ -14,6 +14,10 @@ open Testing
 open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 open Lean (Json)
 
+/-- An executor that answers every command with `output`, and runs nothing. -/
+def echoing (output : String := "ok") : Executor :=
+  { exec := fun _ _ _ _ => pure { output, exitCode? := some 0 } }
+
 /-- A fixed `uname`, so prompts do not depend on the machine the tests run on. -/
 def testUname : Uname :=
   { system := "Linux", machine := "x86_64" }
@@ -142,6 +146,45 @@ def runtime (executor : Executor) (model? : Option Model) : TestM Driver.Runtime
          model := fun _ => match model? with
            | some model => pure model
            | none => throw <| .input "a call samples its model: name a --provider" }
+
+/-- An executor that keeps files and runs nothing: `write PATH TEXT` writes a file of the work
+directory, `rm PATH` removes one, `cat PATH` prints one, `leak` drops a file among the outputs, and
+anything else lists the work directory and the outputs. -/
+def filing (outputs : System.FilePath) : Executor :=
+  let done : Output := { output := "", exitCode? := some 0 }
+  let names (dir : System.FilePath) : IO String := do
+    if !(← dir.isDir) then return ""
+    pure (" ".intercalate ((← dir.readDir).map (·.fileName) |>.qsort (· < ·)).toList)
+  { exec := fun _ workDir argv _ => do
+      match (argv[0]?.getD "").splitOn " " with
+      | ["write", path, text] =>
+        let file := workDir / (path : System.FilePath)
+        IO.FS.createDirAll (file.parent.getD workDir)
+        IO.FS.writeFile file (text ++ "\n")
+        pure done
+      | ["rm", path] =>
+        IO.FS.removeFile (workDir / (path : System.FilePath))
+        pure done
+      | ["cat", path] =>
+        let file := workDir / (path : System.FilePath)
+        if ← file.pathExists then pure { done with output := ← IO.FS.readFile file }
+        else pure { output := s!"cat: {path}: No such file or directory", exitCode? := some 1 }
+      | ["leak"] =>
+        IO.FS.createDirAll outputs
+        IO.FS.writeFile (outputs / "leak.txt") "x"
+        pure done
+      | _ => pure { done with output := s!"work: {← names workDir}; outputs: {← names outputs}" } }
+
+/-- A runtime whose commands are `filing`'s, over a store and workspaces of the test's own. -/
+def filingRuntime (model : Model) : TestM Driver.Runtime := do
+  let rt ← runtime (echoing) (some model)
+  pure { rt with executor := fun _ => pure (answeringUname (filing rt.outputsDir)) }
+
+/-- Runs `k` with MiniSwe's run, configured by `config`. -/
+def withMini (config : Agents.MiniSwe.Config := {}) (k : Scope Agent → TestM Unit) : TestM Unit :=
+  match miniRun config with
+  | .ok run => k run
+  | .error problem => fail problem
 
 /-- A runtime whose commands run in the test container, with the outputs directory mounted where
 a command finds the whole output of an earlier one. -/

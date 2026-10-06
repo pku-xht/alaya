@@ -8,7 +8,7 @@ namespace Testing
 /-- A program on the path, by what `--version` (or `args`) says when it runs. -/
 private def program (cmd : String) (args : Array String := #["--version"]) : IO (Option String) := do
   match ← (IO.Process.output { cmd, args }).toBaseIO with
-  | .ok out => pure (if out.exitCode == 0 then none else some s!"`{cmd}` exits {out.exitCode}")
+  | .ok out => pure (if out.exitCode == 0 then none else some s!"`{cmd}` is missing or fails (exit {out.exitCode})")
   | .error _ => pure (some s!"`{cmd}` is not installed")
 
 /-- A docker daemon, and the test image in it. -/

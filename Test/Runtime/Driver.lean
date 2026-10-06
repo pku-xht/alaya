@@ -14,10 +14,6 @@ namespace DriverTests
 open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Lean (Json)
 
-/-- An executor that answers every command with `output`, and runs nothing. -/
-private def echoing (output : String := "ok") : Executor :=
-  { exec := fun _ _ _ _ => pure { output, exitCode? := some 0 } }
-
 /-- A model that fails `failures` times, as a provider that cannot be reached does, then answers
 `responses` in order. -/
 private def unreachable (failures : Nat) (responses : Array Chat.Response) : IO Model := do
@@ -37,35 +33,6 @@ private def unreachable (failures : Nat) (responses : Array Chat.Response) : IO 
 /-- A model whose every response fails with `error`. -/
 private def failing (error : Error) : Model :=
   { identity := .mkObj [("model", "failing")], sample := fun _ => pure { next := throw error } }
-
-/-- An executor that keeps files and runs nothing: `write PATH TEXT` writes a file of the work
-directory, `rm PATH` removes one, `leak` drops a file among the outputs, and anything else lists
-the work directory and the outputs. -/
-private def filing (outputs : System.FilePath) : Executor :=
-  let done : Output := { output := "", exitCode? := some 0 }
-  let names (dir : System.FilePath) : IO String := do
-    if !(← dir.isDir) then return ""
-    pure (" ".intercalate ((← dir.readDir).map (·.fileName) |>.qsort (· < ·)).toList)
-  { exec := fun _ workDir argv _ => do
-      match (argv[0]?.getD "").splitOn " " with
-      | ["write", path, text] =>
-        let file := workDir / (path : System.FilePath)
-        IO.FS.createDirAll (file.parent.getD workDir)
-        IO.FS.writeFile file (text ++ "\n")
-        pure done
-      | ["rm", path] =>
-        IO.FS.removeFile (workDir / (path : System.FilePath))
-        pure done
-      | ["leak"] =>
-        IO.FS.createDirAll outputs
-        IO.FS.writeFile (outputs / "leak.txt") "x"
-        pure done
-      | _ => pure { done with output := s!"work: {← names workDir}; outputs: {← names outputs}" } }
-
-/-- A runtime whose commands are `filing`'s, over a store and workspaces of the test's own. -/
-private def filingRuntime (model : Model) : TestM Driver.Runtime := do
-  let rt ← runtime (echoing) (some model)
-  pure { rt with executor := fun _ => pure (answeringUname (filing rt.outputsDir)) }
 
 /-- What the command `command` printed, in a log. -/
 private def printed (log : Log Agent) (command : String) : Option String :=
@@ -91,12 +58,6 @@ private def describe (log : Log Agent) : Array String := log.map fun
     Render.eventSummary (.answered frame key (.ok (.execution { e with workspace := default })))
   | .arrived (.changed _ summary) => Render.eventSummary (.arrived (.changed default summary))
   | event => Render.eventSummary event
-
-/-- Runs `k` with MiniSwe's run, configured by `config`. -/
-private def withMini (config : Agents.MiniSwe.Config := {}) (k : Scope Agent → TestM Unit) : TestM Unit :=
-  match miniRun config with
-  | .ok run => k run
-  | .error problem => fail problem
 
 private def script : Array Chat.Response := #[
   responseWith #[call "c1" "bash" "echo one"],
@@ -343,24 +304,6 @@ def suite : Suite := Testing.suite "runtime/driver" #[
         | .input message => contains message "a call is running"
         | _ => false
       assertOk <| Catalog.admitsCall (next run (← logAt rt ended))
-      check (match Catalog.check { testCall with name := "nothing" } with
-        | .error message => contains message "unknown program: nothing"
-        | .ok () => false) "a call of no program"
-      -- Whether a call's arguments fit its program is the CLI's to check before it appends it.
-      check (match Catalog.check (graderCall "") with
-        | .error message => contains message "needs its command"
-        | .ok () => false) "a grader with no command"
-      -- Every program is called the same way: a task is a field of an agent's configuration.
-      let agentWith (fields : List (String × Json)) : RoutineCall :=
-        { name := "mini-swe", arguments := .mkObj ((("model", "gpt-oss-120b") : String × Json) :: fields) }
-      check (match Catalog.check (agentWith []) with
-        | .error message => contains message "works on a task"
-        | .ok () => false) "an agent with no task"
-      check (Catalog.check (agentWith [("task", "fix it")]) matches .ok ()) "an agent with its task"
-      let tasked : RoutineCall := { name := "grader", arguments := .mkObj [("command", "true"), ("task", "t")] }
-      check (match Catalog.check tasked with
-        | .error message => contains message "task"
-        | .ok () => false) "a grader takes no task: it has no such field"
       let grader := (graderCall "true").event
       let (asked, _) ← assertOk <| Driver.append rt.store run ended grader
       let log ← logAt rt asked
@@ -438,22 +381,12 @@ def suite : Suite := Testing.suite "runtime/driver" #[
     let _ ← assertOk <| Notices.comment rt.store bad "this log is broken"
     pure (),
 
-  test "a person's message is told to the model as an intervention, and nothing else is" do
-    let told (notice : Notice) : String :=
-      ((Agents.MiniSwe.noticeMessage notice).map (·.toStored.compress)).getD "nothing"
-    assertStringEq "a message" (told (.said "keep the old API"))
-      (Chat.Message.user "<intervention>\nA person sent you a message while you were paused.\nkeep the old API\n</intervention>").toStored.compress
-    assertStringEq "a change is no one's to read" (told (.changed default "M a.txt")) "nothing"
-    assertStringEq "a reply is the asking call's, not the model's to be told" (told (.replied ⟪"session", "agent", "ask_user"⟫ .yes)) "nothing"
-    assertStringEq "nor a call" (told (.called { name := "grader", arguments := .null, environment? := some testEnvironment.toJson })) "nothing",
-
   test "a change appends the files and what changed, no read takes it, and the next command runs on them" do
     withMini {} fun run => do
-      let executor ← containerExecutor
-      try
-        let rt ← runtime executor (some (← scriptedModel #[
-          responseWith #[call "c1" "bash" "echo one > a.txt"],
-          responseWith #[call "c2" "bash" "cat b.txt"], responseWith #[submitCall "s"]]))
+      do
+        let rt ← filingRuntime (← scriptedModel #[
+          responseWith #[call "c1" "bash" "write a.txt one"],
+          responseWith #[call "c2" "bash" "cat b.txt"], responseWith #[submitCall "s"]])
         let (paused, _) ← assertOk <| Driver.drive rt run (← start rt run) { samples? := some 1 }
         let edited := (← scratch) / "edited"
         assertOk <| rt.workspaces.materialize ((workspace? (← logAt rt paused)).getD default) edited
@@ -474,45 +407,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
         let found := log.findIdx? (fun | .arrived (.changed _ summary) => contains summary "b.txt" | _ => false)
         let some changedAt := found | fail "the change is in the log"
         check (!log.any fun | .heard _ notices => notices.contains changedAt | _ => false)
-          "no read took the change"
-      finally executor.close,
-
-  test "a command run with its outputs kept finds the whole of earlier ones; a fork, only its own" do
-    withMini { recoverOutput := true } fun run => do
-      let long := String.ofList (List.replicate 12000 'z')
-      let rt ← containerRuntime (some (← cached (← scriptedModel #[
-          responseWith #[call "c1" "bash" s!"printf '%s' {long}"],
-          responseWith #[call "c2" "bash" "ls /alaya/outputs"],
-          responseWith #[submitCall "s"],
-          responseWith #[call "c3" "bash" "ls /alaya/outputs"], responseWith #[submitCall "s"]])))
-      try
-        let tip ← start rt run
-        let (first, _) ← assertOk <| Driver.drive rt run tip
-        let log ← logAt rt first
-        let some listed := log.findSome? fun
-            | .answered _ (.exec "ls /alaya/outputs" _) (.ok (.execution e)) => some e.output.output
-            | _ => none
-          | fail "the listing ran"
-        let some firstFile := log.findSome? fun
-            | .answered _ (.exec _ _) (.ok (.execution e)) => e.file?
-            | _ => none
-          | fail "a file is named"
-        check (contains listed (firstFile.drop "/alaya/outputs/".length).toString) s!"{listed} lacks {firstFile}"
-        assertEqual "the file is named by its content" firstFile s!"/alaya/outputs/{Driver.outputFile long}"
-        -- From the point after the first command: the second listing is the fork's own.
-        let forest ← assertOk rt.store.forest
-        let returnedAt := log.findIdx? (fun | .returned ⟪"session", "agent", "bash"⟫ _ => true | _ => false)
-        let some at' := returnedAt | fail "no return"
-        let (forked, _) ← assertOk <| Driver.drive rt run (forest.path first)[at']!
-        let some again := (← logAt rt forked).findSome? fun
-            | .answered _ (.exec "ls /alaya/outputs" _) (.ok (.execution e)) => some e.output.output
-            | _ => none
-          | fail "the fork listed"
-        assertEqual "one file, the first command's" ((again.splitOn "\n").filter (!·.isEmpty)).length 1
-        let reached := (workspace? log).getD default
-        assertEqual "no output reaches the workspace"
-          ((← assertOk <| rt.workspaces.listEntries reached "").map (·.name)) #[]
-      finally pure (),
+          "no read took the change",
 
   test "an output's file is named by its content, so a comment before the command changes no request" do
     withMini { recoverOutput := true } fun run => do
@@ -562,84 +457,8 @@ def suite : Suite := Testing.suite "runtime/driver" #[
       -- And the first log's workspace is as it was.
       let reached := (workspace? log).getD default
       assertEqual "the first log's workspace"
-        ((← assertOk <| rt.workspaces.listEntries reached "").map (·.name) |>.qsort (· < ·)) #["a.txt", "b.txt"],
+        ((← assertOk <| rt.workspaces.listEntries reached "").map (·.name) |>.qsort (· < ·)) #["a.txt", "b.txt"]
 
-  test "the report shows how each command changed the workspace, with the text when it is cheap" do
-    withMini {} fun run => do
-      let commands := #["write a.txt one", "write .venv/x 1", "write a.txt two", "rm a.txt", "write .venv/x 2"]
-      let rt ← filingRuntime (← scriptedModel (commands.mapIdx (fun i command =>
-        responseWith #[call s!"c{i}" "bash" command]) ++ #[responseWith #[submitCall "s"]]))
-      let _ ← assertOk <| Driver.drive rt run (← start rt run)
-      let forest ← assertOk rt.store.forest
-      -- The directory to fold is given as a person types it, with its slash.
-      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" #[".venv/"] run
-      let entries ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "entries" >>= Json.getArr?)
-      let changesOf (command : String) : TestM Json := do
-        let some row := entries.find? fun row =>
-            (row.getObjVal? "e" >>= (·.getObjVal? "command") >>= Json.getStr?).toOption == some command
-          | fail s!"no entry for {command}"
-        pure ((row.getObjVal? "changes").toOption.getD .null)
-      let listed (changes : Json) : String := ((changes.getObjVal? "changes").toOption.getD .null).compress
-      let folded (changes : Json) : String := ((changes.getObjVal? "folded").toOption.getD .null).compress
-      assertStringEq "a file added" (listed (← changesOf commands[0]!))
-        "[{\"kind\":\"added\",\"new\":\"one\\n\",\"old\":null,\"path\":\"a.txt\"}]"
-      assertStringEq "a file modified" (listed (← changesOf commands[2]!))
-        "[{\"kind\":\"modified\",\"new\":\"two\\n\",\"old\":\"one\\n\",\"path\":\"a.txt\"}]"
-      assertStringEq "a file removed" (listed (← changesOf commands[3]!))
-        "[{\"kind\":\"removed\",\"new\":null,\"old\":\"two\\n\",\"path\":\"a.txt\"}]"
-      -- What changes under a folded directory is counted, not listed.
-      let made ← changesOf commands[1]!
-      assertStringEq "nothing listed" (listed made) "[]"
-      assertStringEq "a folded directory made" (folded made)
-        "[{\"added\":1,\"modified\":0,\"prefix\":\".venv\",\"removed\":0}]"
-      assertEqual "but counted" ((made.getObjVal? "count" >>= Json.getNat?).toOption) (some 1)
-      assertStringEq "a file modified under it" (folded (← changesOf commands[4]!))
-        "[{\"added\":0,\"modified\":1,\"prefix\":\".venv\",\"removed\":0}]"
-      -- An entry that leaves the workspace as it was carries no change.
-      check (entries.all fun row => (row.getObjVal? "e" >>= (·.getObjVal? "k") >>= Json.getStr?).toOption == some "exec"
-          || (row.getObjVal? "changes").toOption == some Json.null) "a change on an entry that is no command",
-
-  test "the report carries every sample's request, exactly, and every entry once" do
-    withMini {} fun run => do
-      let responses := #[responseWith #[call "a" "bash" "echo one", call "b" "bash" "echo two"],
-        responseWith #[],   -- a format error: the view substitutes a user turn
-        responseWith #[submitCall "s"], responseWith #[submitCall "t"]]
-      -- Behind the cache, as a run's model is: the fork's draw asks for one response more.
-      let rt ← runtime (echoing) (some (← cached (← scriptedModel responses)))
-      let tip ← start rt run
-      let (first, _) ← assertOk <| Driver.drive rt run tip
-      -- A fork from just before the last sample, so the forest has two branches.
-      let log ← logAt rt first
-      let forest ← assertOk rt.store.forest
-      let some lastSample := (log.zipIdx.filter fun (e, _) => e matches .answered _ (.sample ..) _).back?
-        | fail "no sample"
-      let _ ← assertOk <| Driver.drive rt run (forest.path first)[lastSample.2 - 1]!
-      let forest ← assertOk rt.store.forest
-      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (scope := run)
-      let entries ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "entries" >>= Json.getArr?)
-      assertEqual "every entry once" entries.size forest.entries.size
-      let envelopes ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "envelopes" >>= Json.getArr?)
-      -- Assemble each request as the page does, from what each adds to the one before it.
-      let rec messages (fuel i : Nat) : Array Json :=
-        match fuel with
-        | 0 => #[]
-        | fuel + 1 =>
-          let request := (entries[i]!.getObjVal? "request").toOption.getD .null
-          let added := ((request.getObjVal? "added" >>= Json.getArr?).toOption).getD #[]
-          match (request.getObjVal? "base" >>= Json.getNat?).toOption with
-          | some base => messages fuel base ++ added
-          | none => added
-      let byHash := entries.zipIdx.map fun (e, i) => ((e.getObjVal? "h" >>= Json.getStr?).toOption.getD "", i)
-      for (request, _) in samplesOf run log do
-        let digest := Model.requestDigest request
-        -- The entry that answered this request, in the first branch.
-        let found := log.findIdx? (fun | .answered _ (.sample _ d) _ => d == digest | _ => false)
-        let some position := found | fail "no answer for a request"
-        let some (_, i) := byHash.find? (·.1 == ((forest.path first)[position]!).hex) | fail "entry missing"
-        let row := entries[i]!.getObjVal? "request" |>.toOption.getD .null
-        let envelope := envelopes[(row.getObjVal? "envelope" >>= Json.getNat?).toOption.getD 0]!
-        let assembled := envelope.setObjVal! "messages" (.arr (messages entries.size i))
-        assertStringEq "request" assembled.compress request.toJson.compress
 ]
 
 end DriverTests

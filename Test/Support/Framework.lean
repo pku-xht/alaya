@@ -79,7 +79,7 @@ def assertEqual [BEq α] [Repr α] (label : String) (actual expected : α) : Tes
 
 /-- Whether `needle` occurs in `haystack`. -/
 def contains (haystack needle : String) : Bool :=
-  (haystack.splitOn needle).length >= 2
+  needle.isEmpty || (haystack.splitOn needle).length >= 2
 
 def assertContains (label haystack needle : String) : TestM Unit :=
   check (contains haystack needle) s!"{label}: {needle.quote} is not in {haystack.quote}"

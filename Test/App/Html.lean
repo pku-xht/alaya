@@ -60,17 +60,92 @@ def suite : Suite := Testing.suite "app/html" #[
     check (entries.any fun e => (e.getObjVal? "question").toOption.any (· != Json.null)) "a waiting question"
     check (entries.all fun e => (e.getObjVal? "t" >>= Json.getNat?).toOption.isSome) "every entry's time",
 
+  test "the report shows how each command changed the workspace, with the text when it is cheap" do
+    withMini {} fun run => do
+      let commands := #["write a.txt one", "write .venv/x 1", "write a.txt two", "rm a.txt", "write .venv/x 2"]
+      let rt ← filingRuntime (← scriptedModel (commands.mapIdx (fun i command =>
+        responseWith #[call s!"c{i}" "bash" command]) ++ #[responseWith #[submitCall "s"]]))
+      let _ ← assertOk <| Driver.drive rt run (← start rt run)
+      let forest ← assertOk rt.store.forest
+      -- The directory to fold is given as a person types it, with its slash.
+      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" #[".venv/"] run
+      let entries ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "entries" >>= Json.getArr?)
+      let changesOf (command : String) : TestM Json := do
+        let some row := entries.find? fun row =>
+            (row.getObjVal? "e" >>= (·.getObjVal? "command") >>= Json.getStr?).toOption == some command
+          | fail s!"no entry for {command}"
+        pure ((row.getObjVal? "changes").toOption.getD .null)
+      let listed (changes : Json) : String := ((changes.getObjVal? "changes").toOption.getD .null).compress
+      let folded (changes : Json) : String := ((changes.getObjVal? "folded").toOption.getD .null).compress
+      assertStringEq "a file added" (listed (← changesOf commands[0]!))
+        "[{\"kind\":\"added\",\"new\":\"one\\n\",\"old\":null,\"path\":\"a.txt\"}]"
+      assertStringEq "a file modified" (listed (← changesOf commands[2]!))
+        "[{\"kind\":\"modified\",\"new\":\"two\\n\",\"old\":\"one\\n\",\"path\":\"a.txt\"}]"
+      assertStringEq "a file removed" (listed (← changesOf commands[3]!))
+        "[{\"kind\":\"removed\",\"new\":null,\"old\":\"two\\n\",\"path\":\"a.txt\"}]"
+      -- What changes under a folded directory is counted, not listed.
+      let made ← changesOf commands[1]!
+      assertStringEq "nothing listed" (listed made) "[]"
+      assertStringEq "a folded directory made" (folded made)
+        "[{\"added\":1,\"modified\":0,\"prefix\":\".venv\",\"removed\":0}]"
+      assertEqual "but counted" ((made.getObjVal? "count" >>= Json.getNat?).toOption) (some 1)
+      assertStringEq "a file modified under it" (folded (← changesOf commands[4]!))
+        "[{\"added\":0,\"modified\":1,\"prefix\":\".venv\",\"removed\":0}]"
+      -- An entry that leaves the workspace as it was carries no change.
+      check (entries.all fun row => (row.getObjVal? "e" >>= (·.getObjVal? "k") >>= Json.getStr?).toOption == some "exec"
+          || (row.getObjVal? "changes").toOption == some Json.null) "a change on an entry that is no command",
+  test "the report carries every sample's request, exactly, and every entry once" do
+    withMini {} fun run => do
+      let responses := #[responseWith #[call "a" "bash" "echo one", call "b" "bash" "echo two"],
+        responseWith #[],   -- a format error: the view substitutes a user turn
+        responseWith #[submitCall "s"], responseWith #[submitCall "t"]]
+      -- Behind the cache, as a run's model is: the fork's draw asks for one response more.
+      let rt ← runtime (echoing) (some (← cached (← scriptedModel responses)))
+      let tip ← start rt run
+      let (first, _) ← assertOk <| Driver.drive rt run tip
+      -- A fork from just before the last sample, so the forest has two branches.
+      let log ← logAt rt first
+      let forest ← assertOk rt.store.forest
+      let some lastSample := (log.zipIdx.filter fun (e, _) => e matches .answered _ (.sample ..) _).back?
+        | fail "no sample"
+      let _ ← assertOk <| Driver.drive rt run (forest.path first)[lastSample.2 - 1]!
+      let forest ← assertOk rt.store.forest
+      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (scope := run)
+      let entries ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "entries" >>= Json.getArr?)
+      assertEqual "every entry once" entries.size forest.entries.size
+      let envelopes ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "envelopes" >>= Json.getArr?)
+      -- Assemble each request as the page does, from what each adds to the one before it.
+      let rec messages (fuel i : Nat) : Array Json :=
+        match fuel with
+        | 0 => #[]
+        | fuel + 1 =>
+          let request := (entries[i]!.getObjVal? "request").toOption.getD .null
+          let added := ((request.getObjVal? "added" >>= Json.getArr?).toOption).getD #[]
+          match (request.getObjVal? "base" >>= Json.getNat?).toOption with
+          | some base => messages fuel base ++ added
+          | none => added
+      let byHash := entries.zipIdx.map fun (e, i) => ((e.getObjVal? "h" >>= Json.getStr?).toOption.getD "", i)
+      for (request, _) in samplesOf run log do
+        let digest := Model.requestDigest request
+        -- The entry that answered this request, in the first branch.
+        let found := log.findIdx? (fun | .answered _ (.sample _ d) _ => d == digest | _ => false)
+        let some position := found | fail "no answer for a request"
+        let some (_, i) := byHash.find? (·.1 == ((forest.path first)[position]!).hex) | fail "entry missing"
+        let row := entries[i]!.getObjVal? "request" |>.toOption.getD .null
+        let envelope := envelopes[(row.getObjVal? "envelope" >>= Json.getNat?).toOption.getD 0]!
+        let assembled := envelope.setObjVal! "messages" (.arr (messages entries.size i))
+        assertStringEq "request" assembled.compress request.toJson.compress
+]
+
+/-- The page's own script, run in a fake DOM by node. -/
+def pageSuite : Suite := Testing.suite "app/html.page" #[
   test "the page renders every entry and every branch without an error" do
-    let node ← IO.Process.output { cmd := "node", args := #["--version"] } |>.toBaseIO
-    match node with
-    | .error _ => IO.println "  (node is not installed: the page's script is not run)"
-    | .ok _ =>
-      let (_, page) ← forest
-      let file := (← scratch) / "report.html"
-      IO.FS.writeFile file page
-      let out ← IO.Process.output { cmd := "node", args := #["Test/App/Html/page-check.js", file.toString] }
-      check (out.exitCode == 0) s!"the page failed: {out.stderr}"
-      check (out.stdout.startsWith "ok ") out.stdout
+    let (_, page) ← forest
+    let file := (← scratch) / "report.html"
+    IO.FS.writeFile file page
+    let out ← IO.Process.output { cmd := "node", args := #["Test/App/Html/page-check.js", file.toString] }
+    check (out.exitCode == 0) s!"the page failed: {out.stderr}"
+    check (out.stdout.startsWith "ok ") out.stdout
 ]
 
 end HtmlTests

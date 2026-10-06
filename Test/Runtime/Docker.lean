@@ -368,15 +368,6 @@ def suite : Suite := Testing.suite "runtime/docker" #[
             | _ => false
         finally pure (),
 
-  test "a workdir is an absolute, clean path, and not one alaya mounts" <| withDocker
-    fun _ => do
-      for good in ["/workspace", "/testbed", "/home/user/project"] do
-        assertOk <| Docker.checkWorkdir good #["/grader", "/out"]
-      for bad in ["workspace", "/", "/a/../b", "/a//b", "/a/", "/a/./b", "/grader", "/out/x"] do
-        assertError bad (Docker.checkWorkdir bad #["/grader", "/out"]) fun
-          | .input _ => true
-          | _ => false,
-
   test "a missing recorded image is pulled by its digest, and a local build's ID cannot be" <| withDocker
     fun _ => do
       let missing : Docker.Settings := { image := "alaya.invalid/nope@sha256:0" }
@@ -386,6 +377,94 @@ def suite : Suite := Testing.suite "runtime/docker" #[
       let local_ : Docker.Settings := { image := "sha256:" ++ "0".pushn '0' 63 }
       assertError "local" local_.ensurePresent fun
         | .environment m => (m.splitOn "cannot be pulled").length > 1
+        | _ => false
+]
+
+/-- Runs `command` with mini's default settings in a container over `work`. -/
+private def runIn (work : System.FilePath) (command : String) : TestM Output := do
+  let executor ← containerExecutor
+  try executor.bash Agents.MiniSwe.defaultExecutor work command finally executor.close
+
+/-- What the test image's own `/bin/sh -c command` prints on stdout and stderr, and its status. -/
+private def imageShell (command : String) : TestM (String × UInt32) := do
+  let out ← IO.Process.output { cmd := "docker", args := #["run", "--rm", "--network", "none",
+    "--label", testLabel, "--entrypoint", "/bin/sh", ← testImage, "-c", command] }
+  pure (out.stdout ++ out.stderr, out.exitCode)
+
+def execSuite : Suite := Testing.suite "runtime/docker.exec" #[
+  test "stderr is merged into stdout at the fd level" do
+    let out ← runIn (← Scripted.workDir) "echo hi >&2"
+    assertEqual "merged output" out.output "hi\n"
+    assertEqual "exit code" out.exitCode? (some 0),
+
+  test "shell diagnostics are the shell's own, with stderr merged" do
+    -- The inner shell sees the script as `$1`, so its messages are what the image's
+    -- `/bin/sh -c` prints; for commands whose output is all on one stream, concatenating the
+    -- streams is exact.
+    let work ← Scripted.workDir
+    for command in ["fi", "echo \"unterminated", "nosuchcmd_alaya_test"] do
+      let out ← runIn work command
+      let (output, code) ← imageShell command
+      assertEqual s!"output of {repr command}" out.output output
+      assertEqual s!"exit code of {repr command}" out.exitCode? (some code),
+
+  test "non-UTF-8 command output is replaced, not dropped" do
+    let out ← runIn (← Scripted.workDir) "printf 'a\\377b'"
+    assertEqual "replaced output" out.output "a�b"
+    assertEqual "exit code" out.exitCode? (some 0),
+
+  test "a container that cannot be started is the machine's failure, not a command's result" do
+    -- A work directory that is not there: docker has nothing to mount.
+    let missing := (← scratch) / "missing"
+    let executor ← containerExecutor
+    let ran ← (try some <$> executor.bash Agents.MiniSwe.defaultExecutor missing "echo hi" catch _ => pure none : IO (Option Output))
+    executor.close
+    check ran.isNone s!"the command was given a result: {repr ran}"
+    -- A user the image does not have, as a mistyped `--container-user` names.
+    let settings := { (← testSettings) with user? := some "no-such-user-of-alaya" }
+    let executor ← assertOk (Executor.Docker.executor settings)
+    let work ← Scripted.workDir
+    let ran ← (try some <$> executor.bash Agents.MiniSwe.defaultExecutor work "echo hi" catch _ => pure none : IO (Option Output))
+    executor.close
+    check ran.isNone s!"a command run as no user was given a result: {repr ran}",
+
+  test "a command reads nothing from whoever runs alaya" do
+    -- Its standard input is closed: a command that reads it gets the end at once.
+    let out ← runIn (← Scripted.workDir) "cat; echo read to the end"
+    assertEqual "it went on past the read" out.output "read to the end\n"
+    assertEqual "exit code" out.exitCode? (some 0)
+]
+
+/-- What an executor and docker's settings say before any container runs. -/
+def settingsSuite : Suite := Testing.suite "runtime/executor" #[
+  iotest "invalid UTF-8 bytes are replaced and valid text survives" do
+    let cases : Array (List UInt8 × String) := #[
+      ([0xff], "�"),
+      ([0xe2, 0x82, 0xac, 0x58], "€X"),
+      ([0x61, 0xc2], "a�"),
+      ([0xe2, 0x82], "��"),
+      ([0xf0, 0x9f, 0x98, 0x80], "😀")]
+    for (bytes, expected) in cases do
+      let actual := Executor.lossyDecodeUtf8 ⟨bytes.toArray⟩
+      if actual != expected then
+        throw <| IO.userError s!"lossy decode {bytes}: got {repr actual}, want {repr expected}",
+  test "a command docker could not run tells the agent nothing of the machine" do
+    let said := "Error response from daemon: container 3f9a1c is not running (/data/tmp/41-7/work)"
+    let out := Executor.failed said
+    assertEqual "no exit code" out.exitCode? none
+    assertEqual "what the agent is told" out.error? (some Executor.couldNotRun)
+    assertEqual "the detail, for a reader of the log" out.detail? (some said)
+    -- What a model is shown of it holds nothing docker said.
+    let shown := (Agents.Tools.Bash.observation out Agents.MiniSwe.outputLimit).compress
+    for leaked in ["3f9a1c", "/data/tmp", "daemon"] do
+      check (!contains shown leaked) s!"the observation holds {leaked}: {shown}"
+    check (contains shown Executor.couldNotRun) "and says the command could not be run",
+  test "a workdir is an absolute, clean path, and not one alaya mounts" do
+    for good in ["/workspace", "/testbed", "/home/user/project"] do
+      assertOk <| Docker.checkWorkdir good #["/grader", "/out"]
+    for bad in ["workspace", "/", "/a/../b", "/a//b", "/a/", "/a/./b", "/grader", "/out/x"] do
+      assertError bad (Docker.checkWorkdir bad #["/grader", "/out"]) fun
+        | .input _ => true
         | _ => false
 ]
 

@@ -27,7 +27,8 @@ def Status.ofString? : String -> Option Status
   | "pass" => some .pass | "fail" => some .fail | "error" => some .error | _ => none
 
 /-- One top-level test point. `ok` is whether it counts as passed: a failing `TODO` or `SKIP`
-point does not count as failed, and says so in `directive`. -/
+point does not count as failed, and says so in `directive`; a point whose subtest failed does,
+whatever the point itself says. -/
 structure Check where
   ok : Bool
   name : String
@@ -42,12 +43,16 @@ structure Verdict where
   reason : String := ""
   deriving Repr, Inhabited
 
+/-- Whether a point failed: itself, or a subtest under it. -/
+private def failedPoint (point : Tap.Point) : Bool :=
+  point.failed || point.subtest?.any (!·.ok)
+
 private def checkOf (point : Tap.Point) : Check :=
   let directive := match point.directive with
     | .none => ""
     | .todo reason => ("todo " ++ reason).trimAscii.toString
     | .skip reason => ("skip " ++ reason).trimAscii.toString
-  { ok := !point.failed, name := point.description, directive }
+  { ok := !failedPoint point, name := point.description, directive }
 
 /-- The verdict on a grader's stdout. `stopped?` says why the grader did not finish, when it did
 not: a timeout, or a failure to start it. -/
@@ -62,9 +67,7 @@ def verdict (stdout : String) (stopped? : Option String := none) : Verdict :=
   else if document.ok then
     { status := .pass, checks }
   else
-    let failed := document.points.filter (·.failed)
-    let subtests := document.points.filter fun p => p.subtest?.any (!·.ok)
-    let names := (failed ++ subtests).map fun p =>
+    let names := (document.points.filter failedPoint).map fun p =>
       if p.description.isEmpty then s!"#{p.id}" else p.description
     { status := .fail, checks, reason := s!"failed: {", ".intercalate names.toList}" }
 

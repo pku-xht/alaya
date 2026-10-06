@@ -30,10 +30,21 @@ def suite : Suite := Testing.suite "agents/grader" #[
     assertEqual "todo" (v.checks.map (·.directive)) #["", "todo later"]
     assertEqual "counted as ok" (Verdict.score v.checks) (2, 2),
 
-  test "a failing subtest fails the verdict even under an ok point" do
+  test "a failing subtest fails its check even under an ok point, and a check is named once" do
     let v := verdict (tap ["1..1", "# Subtest: group", "    1..1", "    not ok 1", "ok 1 - group"])
     assertEqual "status" v.status .fail
-    assertEqual "reason" v.reason "failed: group",
+    assertEqual "reason" v.reason "failed: group"
+    assertEqual "the check counts as failed" (Verdict.score v.checks) (0, 1)
+    let twice := verdict (tap ["1..2", "ok 1 - a", "# Subtest: b", "    1..1", "    not ok 1", "not ok 2 - b"])
+    assertEqual "a failing check whose subtest failed too" twice.reason "failed: b"
+    assertEqual "its score" (Verdict.score twice.checks) (1, 2),
+
+  test "a plan of no checks passes with nothing scored, and a status reads back from its name" do
+    let v := verdict (tap ["1..0 # skip nothing to check"])
+    assertEqual "status" v.status .pass
+    assertEqual "score" (Verdict.score v.checks) (0, 0)
+    for status in [Status.pass, .fail, .error] do
+      assertEqual status.toString (Status.ofString? status.toString) (some status),
 
   test "a stream that is not complete TAP is an error, with the reason" do
     for (label, stdout, reason) in [

@@ -14,10 +14,6 @@ namespace RebaseTests
 open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Lean (Json)
 
-/-- An executor that answers every command with `ok`, and runs nothing. -/
-private def echoing : Executor :=
-  { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 } }
-
 /-- An agent that waits for its task and runs `commands`, one after another, reading its inbox
 after each; when `comments`, it says which command it runs before each. -/
 private def agent (commands : Array String) (comments : Bool := false) : Scope Agent :=
@@ -52,43 +48,6 @@ private def answerOf (log : Log Agent) (command : String) : TestM Nat := do
       | _ => false
     | fail s!"no answer to {command}"
   pure position
-
-/-- A run of MiniSwe, as Alaya runs it, rebased with another model, and with a field of the
-agent changed. -/
-private def reconfigured : TestM Unit := do
-  let run := Catalog.run
-  let rt ← runtime echoing (some (← scriptedModel #[
-    responseWith #[call "c1" "bash" "echo one"], responseWith #[submitCall "s" "done"]]))
-  let project := (← scratch) / "project"
-  IO.FS.createDirAll project
-  let root ← begin rt.store rt.workspaces run project
-  let config ← assertOk <| Catalog.resolve "mini-swe"
-    #[{ path := ["model"], value := "gpt-oss-120b" }, { path := ["task"], value := "t" }]
-  let swe : RoutineCall := { name := "mini-swe", arguments := config, environment? := some testEnvironment.toJson }
-  let (called, _) ← assertOk <| Driver.append rt.store run root swe.event
-  let (last, _) ← assertOk <| Driver.drive rt run called
-  let log ← logAt rt last
-  let setting (text : String) : TestM Settings.Setting := match Settings.parse text with
-    | .ok setting => pure setting
-    | .error problem => fail problem
-  let rebaseWith (settings : Array Settings.Setting) : TestM (Rebased Agent) := do
-    pure (rebase run (← assertOk <| Rebase.reconfigure log settings))
-  -- A field of the agent that changes no request: the whole log holds, under the new opening.
-  let tuned ← rebaseWith #[← setting "context_reserve=7"]
-  check tuned.divergence?.isNone "the whole log holds"
-  let some opening := tuned.log.findSome? fun | (.opened ⟪"session", "mini-swe"⟫ opened, _) => some opened | _ => none
-    | fail "the opening of the agent"
-  let reserve := (opening.arguments.getObjVal? "context_reserve").toOption
-  assertEqual "the new configuration" (reserve.map (·.compress)) (some "7")
-  -- Another model's parameters: a sample names its model, so the first is another operation.
-  let other ← rebaseWith #[← setting "model.params.reasoning_effort=high"]
-  let some divergence := other.divergence? | fail "the log diverges"
-  check (divergence.found matches .answered _ (.sample ..) _) "at the first response"
-  check (divergence.expected matches .ask { op := .sample { params := .obj _, .. } _, .. }) "where the agent samples the other"
-  -- A field no call takes is the caller's to fix.
-  assertError "an unknown field" (Rebase.reconfigure log #[← setting "no_such_field=1"]) fun
-    | .input message => contains message "fits no call"
-    | _ => false
 
 def suite : Suite := Testing.suite "runtime/rebase" #[
   test "a log rebased onto the agent that wrote it is that log" do
@@ -170,24 +129,6 @@ def suite : Suite := Testing.suite "runtime/rebase" #[
     let rebased := rebase (agent #["echo one", "echo TWO"]) (← logAt rt stopped)
     assertEqual "the message and the stop" (rebased.dropped.map (·.1)) #[two + 1, two + 2]
     check (Rebase.droppedLines rebased |>.all (contains · "left out")) "each in a line"
-    check (rebased.log.any fun | (Event.arrived (.called ..), _) => true | _ => false) "the call, before it, is kept",
-
-  test "a response is not taken for another model, and a setting over the configuration is the new log's" do
-    reconfigured,
-
-  test "the cache is shared as links, and a write in either directory leaves the other as it was" do
-    let source := (← scratch) / "cache"
-    IO.FS.createDirAll source
-    IO.FS.writeFile (source / "a.json") "first"
-    IO.FS.writeFile (source / "a.json.1-2.tmp") "half-written"
-    let target := (← scratch) / "linked"
-    assertOk <| Cache.link source target
-    assertEqual "the entries, not a save in progress" ((← target.readDir).map (·.fileName)) #["a.json"]
-    assertEqual "the same content" (← IO.FS.readFile (target / "a.json")) "first"
-    -- As `save` writes: a new file renamed over the name.
-    IO.FS.writeFile (target / "a.json.tmp") "second"
-    IO.FS.rename (target / "a.json.tmp") (target / "a.json")
-    assertEqual "the source unchanged" (← IO.FS.readFile (source / "a.json")) "first"
-    assertEqual "the target changed" (← IO.FS.readFile (target / "a.json")) "second"]
+    check (rebased.log.any fun | (Event.arrived (.called ..), _) => true | _ => false) "the call, before it, is kept"]
 
 end RebaseTests

@@ -144,19 +144,8 @@ def suite : Suite := Testing.suite "runtime/routines" #[
     -- The grader is a program a person calls, no routine: nothing an agent calls reaches it.
     withRun (fun _ => Alaya.Core.call "grader" (.mkObj [("command", "true")])) fun run => do
       let log := settle run opening
-      check (log.any fun | .failed ⟪"session", "agent", "grader"⟫ "no routine named grader" => true | _ => false) "there is no such routine",
+      check (log.any fun | .failed ⟪"session", "agent", "grader"⟫ "no routine named grader" => true | _ => false) "there is no such routine"
 
-  test "a program brings its scope: an agent's tools and itself, fixed where it is defined" do
-    match Catalog.scope.find "mini-swe" with
-    | none => fail "mini-swe is a program"
-    | some swe =>
-      assertEqual "what a call inside MiniSwe can name"
-        (#["bash", "submit", "ask_user", "time_budget", "mini-swe", "mini-vero", "grader"].filter
-          fun name => (swe.scope.find name).isSome) #["bash", "ask_user", "time_budget", "mini-swe"]
-      -- The scope holds MiniSwe itself, with the same scope: what lets it call itself.
-      check ((swe.scope.find "mini-swe").any fun inner => (inner.scope.find "bash").isSome)
-        "MiniSwe in its own scope has the same scope"
-    check (Catalog.scope.find "nothing").isNone "no program of that name"
 ]
 
 end RoutinesTests

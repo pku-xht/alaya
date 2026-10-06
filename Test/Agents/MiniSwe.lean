@@ -244,19 +244,30 @@ def parseSuite : Suite := suite "agents/mini-swe.parse" #[
     | .calls _ => fail "a bad call is a format error"
     match parseActions (responseWith #[askCall "q" "Keep it?", call "c" "bash" "ls"]) config with
     | .formatError message => check (contains message "ask_user must be called alone") "alone"
-    | .calls _ => fail "ask_user is called alone"
+    | .calls _ => fail "ask_user is called alone",
+
+  test "a person's message is told to the model as an intervention, and nothing else is" do
+    let told (notice : Notice) : String :=
+      ((Agents.MiniSwe.noticeMessage notice).map (·.toStored.compress)).getD "nothing"
+    assertStringEq "a message" (told (.said "keep the old API"))
+      (Chat.Message.user "<intervention>\nA person sent you a message while you were paused.\nkeep the old API\n</intervention>").toStored.compress
+    assertStringEq "a change is no one's to read" (told (.changed default "M a.txt")) "nothing"
+    assertStringEq "a reply is the asking call's, not the model's to be told" (told (.replied ⟪"session", "agent", "ask_user"⟫ .yes)) "nothing"
+    assertStringEq "nor a call" (told (.called { name := "grader", arguments := .null, environment? := some testEnvironment.toJson })) "nothing"
 ]
 
 /-! ## End-to-end runs of the agent in a container -/
 
-/-- Runs the mini agent with a scripted model through the driver, in a container. Returns what
-its model saw last and said, the workspace the log reached, and how the agent ended. -/
-private def runAgent (config : Config) (responses : Array Chat.Response) :
+/-- Runs the mini agent with a scripted model through the driver, in a container, or, for a run
+whose commands do not matter, with an executor that runs none. Returns what its model saw last
+and said, the workspace the log reached, and how the agent ended. -/
+private def runAgent (config : Config) (responses : Array Chat.Response) (inContainer := true) :
     TestM (Array Chat.Message × Hash × Json) := do
   match miniRun config with
   | .error problem => fail problem
   | .ok run =>
-    let rt ← containerRuntime (some (← scriptedModel responses))
+    let model ← scriptedModel responses
+    let rt ← if inContainer then containerRuntime (some model) else runtime (echoing) (some model)
     let (last, _) ← assertOk <| Driver.drive rt run (← start rt run)
     let log ← logAt rt last
     let some (.ok outcome) := agentResult log | fail s!"the agent did not return: {agentStatus log}"
@@ -264,7 +275,7 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
 
 private def status (outcome : Json) : String := (outcome.getObjVal? "status" >>= Json.getStr?).toOption.getD ""
 
-def runSuite : Suite := suite "agents/mini-swe.run" #[
+def runSuite : Suite := suite "agents/mini-swe.container" #[
   test "subagent calls the agent itself on the model's task, in its own scope, in a frame of its own" do
     let config : Config := { tools := #["bash", "submit", "subagent"] }
     let delegated : Chat.ToolCall := { id := "d", name := "subagent", arguments := .mkObj [("task", "write b.txt")] }
@@ -333,25 +344,6 @@ def runSuite : Suite := suite "agents/mini-swe.run" #[
     check (← assertOk ((← workspaces).readFile? env "a.txt")).isSome "the call before submit ran"
     check (← assertOk ((← workspaces).readFile? env "b.txt")).isNone "the call after submit did not",
 
-  test "a format error is appended and the offending turn is dropped" do
-    let (dialogue, _, outcome) ← runAgent {} #[
-      { content? := some "I forgot to call a tool", finishReason? := some "stop" },
-      responseWith #[submitCall "c1"]]
-    assertEqual "submitted after recovery" (status outcome) "Submitted"
-    -- system, instance, user(format error), assistant(submit). The bad assistant turn is not kept.
-    assertEqual "dialogue length" dialogue.size 4
-    match dialogue[2]? with
-    | some (Chat.Message.user msg) => check (contains msg "Tool call error:") "format error text present"
-    | _ => fail "expected a user format-error message at index 2",
-
-  test "repeated format errors exit" do
-    let bad : Chat.Response := { content? := some "no tool", finishReason? := some "stop" }
-    let (dialogue, _, outcome) ← runAgent { maxConsecutiveFormatErrors := 3 }
-      #[bad, bad, bad, bad]
-    assertEqual "exit status" (status outcome) "RepeatedFormatError"
-    -- system, instance, then three user error messages.
-    assertEqual "dialogue length" dialogue.size 5,
-
   test "a command timeout is reported as an exception observation" do
     let (dialogue, _, _) ← runAgent { executor := { defaultExecutor with timeoutSeconds := 1 } } #[
       responseWith #[call "c1" "bash" "sleep 30"],
@@ -362,20 +354,6 @@ def runSuite : Suite := suite "agents/mini-swe.run" #[
       check (contains s "timed out after 1 seconds") "the timeout is reported as the error"
       check (contains s "\"exit_code\": null") "a timed-out command has no exit code"
     | _ => fail "expected a timeout observation",
-
-  test "truncated tool arguments recover as a format error, like mini" do
-    let bad : Chat.Response := {
-      toolCalls := #[{ id := "c1", name := "bash", arguments := .null,
-                       invalidArguments? := some "{\"command\": \"ls" }],
-      finishReason? := some "length" }
-    let (dialogue, _, outcome) ← runAgent {} #[bad, responseWith #[submitCall "c2"]]
-    assertEqual "submitted after recovery" (status outcome) "Submitted"
-    -- system, instance, user(truncation notice), assistant(submit); the bad turn is dropped.
-    assertEqual "dialogue length" dialogue.size 4
-    match dialogue[2]? with
-    | some (Chat.Message.user msg) =>
-      check (contains msg "output token limit (finish_reason=length)") "truncation message"
-    | _ => fail "expected a format-error user turn at index 2",
 
   test "the view keeps the record whole and shows the model a truncation" do
     let long := String.ofList (List.replicate 12000 'x')
@@ -401,86 +379,40 @@ def runSuite : Suite := suite "agents/mini-swe.run" #[
     | _ => fail "expected the second observation"
 ]
 
-/-! ## Command execution fidelity -/
-
-/-- Runs `command` with mini's default settings in a container over `work`. -/
-private def runIn (work : System.FilePath) (command : String) : TestM Output := do
-  let executor ← containerExecutor
-  try executor.bash defaultExecutor work command finally executor.close
-
-/-- What the test image's own `/bin/sh -c command` prints on stdout and stderr, and its status. -/
-private def imageShell (command : String) : TestM (String × UInt32) := do
-  let out ← IO.Process.output { cmd := "docker", args := #["run", "--rm", "--network", "none",
-    "--label", testLabel, "--entrypoint", "/bin/sh", ← testImage, "-c", command] }
-  pure (out.stdout ++ out.stderr, out.exitCode)
-
-def execSuite : Suite := suite "runtime/docker.exec" #[
-  iotest "invalid UTF-8 bytes are replaced and valid text survives" do
-    let cases : Array (List UInt8 × String) := #[
-      ([0xff], "�"),
-      ([0xe2, 0x82, 0xac, 0x58], "€X"),
-      ([0x61, 0xc2], "a�"),
-      ([0xe2, 0x82], "��"),
-      ([0xf0, 0x9f, 0x98, 0x80], "😀")]
-    for (bytes, expected) in cases do
-      let actual := Executor.lossyDecodeUtf8 ⟨bytes.toArray⟩
-      if actual != expected then
-        throw <| IO.userError s!"lossy decode {bytes}: got {repr actual}, want {repr expected}",
-
-  test "stderr is merged into stdout at the fd level" do
-    let out ← runIn (← workDir) "echo hi >&2"
-    assertEqual "merged output" out.output "hi\n"
-    assertEqual "exit code" out.exitCode? (some 0),
-
-  test "shell diagnostics are the shell's own, with stderr merged" do
-    -- The inner shell sees the script as `$1`, so its messages are what the image's
-    -- `/bin/sh -c` prints; for commands whose output is all on one stream, concatenating the
-    -- streams is exact.
-    let work ← workDir
-    for command in ["fi", "echo \"unterminated", "nosuchcmd_alaya_test"] do
-      let out ← runIn work command
-      let (output, code) ← imageShell command
-      assertEqual s!"output of {repr command}" out.output output
-      assertEqual s!"exit code of {repr command}" out.exitCode? (some code),
-
-  test "non-UTF-8 command output is replaced, not dropped" do
-    let out ← runIn (← workDir) "printf 'a\\377b'"
-    assertEqual "replaced output" out.output "a�b"
-    assertEqual "exit code" out.exitCode? (some 0),
-
-  test "a command docker could not run tells the agent nothing of the machine" do
-    let said := "Error response from daemon: container 3f9a1c is not running (/data/tmp/41-7/work)"
-    let out := Executor.failed said
-    assertEqual "no exit code" out.exitCode? none
-    assertEqual "what the agent is told" out.error? (some Executor.couldNotRun)
-    assertEqual "the detail, for a reader of the log" out.detail? (some said)
-    -- What a model is shown of it holds nothing docker said.
-    let shown := (observation out outputLimit).compress
-    for leaked in ["3f9a1c", "/data/tmp", "daemon"] do
-      check (!contains shown leaked) s!"the observation holds {leaked}: {shown}"
-    check (contains shown Executor.couldNotRun) "and says the command could not be run",
-
-  test "a container that cannot be started is the machine's failure, not a command's result" do
-    -- A work directory that is not there: docker has nothing to mount.
-    let missing := (← scratch) / "missing"
-    let executor ← containerExecutor
-    let ran ← (try some <$> executor.bash defaultExecutor missing "echo hi" catch _ => pure none : IO (Option Output))
-    executor.close
-    check ran.isNone s!"the command was given a result: {repr ran}"
-    -- A user the image does not have, as a mistyped `--container-user` names.
-    let settings := { (← testSettings) with user? := some "no-such-user-of-alaya" }
-    let executor ← assertOk (Executor.Docker.executor settings)
-    let work ← workDir
-    let ran ← (try some <$> executor.bash defaultExecutor work "echo hi" catch _ => pure none : IO (Option Output))
-    executor.close
-    check ran.isNone s!"a command run as no user was given a result: {repr ran}",
-
-  test "a command reads nothing from whoever runs alaya" do
-    -- Its standard input is closed: a command that reads it gets the end at once.
-    let out ← runIn (← workDir) "cat; echo read to the end"
-    assertEqual "it went on past the read" out.output "read to the end\n"
-    assertEqual "exit code" out.exitCode? (some 0)
+/-- Runs whose commands do not matter: what the model is told when it answers badly. -/
+def dialogueSuite : Suite := suite "agents/mini-swe.dialogue" #[
+  test "a format error is appended and the offending turn is dropped" do
+    let (dialogue, _, outcome) ← runAgent (inContainer := false) {} #[
+      { content? := some "I forgot to call a tool", finishReason? := some "stop" },
+      responseWith #[submitCall "c1"]]
+    assertEqual "submitted after recovery" (status outcome) "Submitted"
+    -- system, instance, user(format error), assistant(submit). The bad assistant turn is not kept.
+    assertEqual "dialogue length" dialogue.size 4
+    match dialogue[2]? with
+    | some (Chat.Message.user msg) => check (contains msg "Tool call error:") "format error text present"
+    | _ => fail "expected a user format-error message at index 2",
+  test "repeated format errors exit" do
+    let bad : Chat.Response := { content? := some "no tool", finishReason? := some "stop" }
+    let (dialogue, _, outcome) ← runAgent (inContainer := false) { maxConsecutiveFormatErrors := 3 }
+      #[bad, bad, bad, bad]
+    assertEqual "exit status" (status outcome) "RepeatedFormatError"
+    -- system, instance, then three user error messages.
+    assertEqual "dialogue length" dialogue.size 5,
+  test "truncated tool arguments recover as a format error, like mini" do
+    let bad : Chat.Response := {
+      toolCalls := #[{ id := "c1", name := "bash", arguments := .null,
+                       invalidArguments? := some "{\"command\": \"ls" }],
+      finishReason? := some "length" }
+    let (dialogue, _, outcome) ← runAgent (inContainer := false) {} #[bad, responseWith #[submitCall "c2"]]
+    assertEqual "submitted after recovery" (status outcome) "Submitted"
+    -- system, instance, user(truncation notice), assistant(submit); the bad turn is dropped.
+    assertEqual "dialogue length" dialogue.size 4
+    match dialogue[2]? with
+    | some (Chat.Message.user msg) =>
+      check (contains msg "output token limit (finish_reason=length)") "truncation message"
+    | _ => fail "expected a format-error user turn at index 2"
 ]
-def suites : Array Suite := #[goldenSuite, parseSuite, runSuite, execSuite]
+
+def suites : Array Suite := #[goldenSuite, parseSuite, dialogueSuite, runSuite]
 
 end MiniSweTests

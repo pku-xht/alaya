@@ -4,15 +4,12 @@ import Test.Support.Container
 import Test.Support.Scripted
 import Alaya
 
-/-! Command-line parsing and the DGX Spark endpoint syntax. -/
+/-! Command-line parsing: the spec of a command, and the settings `call` reads. -/
 
 namespace CliTests
 
 open Testing
 open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
-
-private def endpoint (url : String) : Option Provider.Dgx.Endpoint :=
-  (Provider.Dgx.Endpoint.ofUrl url).toOption
 
 private def parsed (label : String) (result : Except (Array String) α) : TestM α :=
   match result with
@@ -23,12 +20,6 @@ private def problemsOf (label : String) (result : Except (Array String) α) : Te
   match result with
   | .ok _ => fail s!"{label}: parsed, but should have been refused"
   | .error problems => pure problems
-
-private def baseUrlOf (argv : List String) : Except (Array String) (Option String) := do
-  pure ((← Provider.endpointCli.parse argv).map (·.baseUrl))
-
-private def agentSet (path : List String) (value : Lean.Json) : Settings.Setting :=
-  { path, value }
 
 /-- `--set` and `--set-file`, as `call` reads them. -/
 private def givenSpec : Cli.Spec (Array Settings.Given) :=
@@ -93,186 +84,7 @@ def taskSuite : Suite := suite "app/cli.task" #[
     configuration "invalid UTF-8" (← task ["--set-file", s!"task={missing}"]) (·.endsWith "is not valid UTF-8")
 ]
 
-def endpointSuite : Suite := suite "llm/providers" #[
-  test "the default endpoint is the Spark's own address" do
-    assertEqual "baseUrl" ({} : Provider.Dgx.Endpoint).baseUrl "http://10.42.0.1:8000/v1",
 
-  test "a URL fills in only what it specifies" do
-    assertEqual "full" ((endpoint "http://192.168.1.5:9000/v1").map (·.baseUrl))
-      (some "http://192.168.1.5:9000/v1")
-    assertEqual "host:port" ((endpoint "192.168.1.5:9000").map (·.baseUrl))
-      (some "http://192.168.1.5:9000/v1")
-    assertEqual "host only" ((endpoint "spark.local").map (·.baseUrl))
-      (some "http://spark.local:8000/v1")
-    assertEqual "https and path" ((endpoint "https://spark.local/openai/v1").map (·.baseUrl))
-      (some "https://spark.local:8000/openai/v1")
-    assertEqual "trailing slash" ((endpoint "http://spark.local:9000/").map (·.baseUrl))
-      (some "http://spark.local:9000/v1"),
-
-  test "a malformed URL is rejected" do
-    assertEqual "no host" (endpoint ":9000").isSome false
-    assertEqual "bad port" (endpoint "spark.local:http").isSome false
-    assertEqual "empty" (endpoint "  ").isSome false,
-
-  test "--port overrides the port from --url, and works on its own" do
-    assertEqual "port only" (← parsed "port" (baseUrlOf ["--port", "9001"]))
-      (some "http://10.42.0.1:9001/v1")
-    assertEqual "url and port" (← parsed "url" (baseUrlOf ["--url", "spark.local:9000", "--port", "7000"]))
-      (some "http://spark.local:7000/v1")
-    assertEqual "neither" (← parsed "neither" (baseUrlOf [])) none
-    let problems ← problemsOf "bad url" (baseUrlOf ["--url", ":9000"])
-    check (problems.size == 1 && problems[0]!.startsWith "--url is not an endpoint") s!"{problems}",
-
-  test "a provider serves a model under its own name, or the name its route gives" do
-    let route (provider model : String) : TestM (Except String Provider.Route) := do
-      let some p := Provider.named? provider | fail s!"no provider {provider}"
-      pure (p.route model)
-    let nameOf (provider model : String) : TestM (Option String) := do
-      pure ((← route provider model).toOption.map (·.name))
-    assertEqual "apiyi, its own name" (← nameOf "apiyi" "deepseek-v4.1-flash") (some "deepseek-v4.1-flash")
-    assertEqual "xmcp's name" (← nameOf "xmcp" "deepseek-v4.1-flash") (some "ds/deepseek-v4-flash")
-    assertEqual "fireworks' name" (← nameOf "fireworks" "deepseek-v4.1-flash")
-      (some "accounts/fireworks/models/deepseek-v4p1-flash")
-    match ← route "fireworks" "gpt-oss-120b" with
-    | .error m => check ((m.splitOn "does not serve gpt-oss-120b").length > 1) m
-    | .ok _ => fail "fireworks serves only its routes",
-
-  test "a route that cannot meet the recorded model refuses it before any request" do
-    let some dgx := Provider.named? "dgx" | fail "no dgx"
-    let spec : Models.Spec := { name := "m", echoReasoning := .text, contextTokens? := some 100000 }
-    let refused (label : String) (route : Provider.Route) (expected : String) : TestM Unit := do
-      match Provider.check dgx spec route with
-      | .error m => check ((m.splitOn expected).length > 1) s!"{label}: {m}"
-      | .ok _ => fail s!"{label}: accepted"
-    refused "echo rejected" { name := "m", reasoningEcho := .rejected } "rejects"
-    refused "short context" { name := "m", contextTokens? := some 32768 } "short of the run's 100000"
-    refused "text through Responses" { name := "m", api := .responses } "has no field for"
-    match Provider.check dgx { spec with echoReasoning := .items } { name := "m" } with
-    | .error m => check ((m.splitOn "need the Responses API").length > 1) m
-    | .ok _ => fail "items through Chat Completions"
-    check (Provider.check dgx { spec with echoReasoning := .items } { name := "m", api := .responses }).toOption.isSome
-      "items through Responses"
-    match Provider.check dgx { spec with echoReasoning := .none } { name := "m", reasoningEcho := .required } with
-    | .error m => check ((m.splitOn "needs m's earlier reasoning").length > 1) m
-    | .ok _ => fail "echo required but not sent"
-    check (Provider.check dgx spec { name := "m", contextTokens? := some 200000 }).toOption.isSome
-      "a route with room enough serves it",
-
-  test "echoed reasoning keeps every recorded trace, so a message reads the same on every request" do
-    let assistant (content : String) (reasoning? : Option String) : Lean.Json :=
-      Chat.Message.toJson (.assistant (some content) #[] reasoning?)
-    let user : Lean.Json := Chat.Message.toJson (.user "go on")
-    let payload (messages : Array Lean.Json) : Lean.Json := .mkObj [("messages", .arr messages)]
-    let traceOf (json : Lean.Json) : Option String := (json.getObjVal? "reasoning_content" >>= Lean.Json.getStr?).toOption
-    let early := #[user, assistant "a" (some "thought a"), user, assistant "b" none]
-    let later := early ++ #[user, assistant "c" (some "thought c"), user, assistant "d" (some "thought d")]
-    let messagesOf (json : Lean.Json) : Array Lean.Json := (json.getObjValAs? (Array Lean.Json) "messages").toOption.getD #[]
-    let echoed := messagesOf (Provider.ChatCompletions.echoReasoning (payload later))
-    assertEqual "traces as recorded, empty where none" (echoed.filterMap traceOf)
-      #["thought a", "", "thought c", "thought d"]
-    check (echoed.all fun m => (m.getObjVal? "role" >>= Lean.Json.getStr?).toOption != some "user" || traceOf m == none)
-      "a user message carries no reasoning"
-    let prefix_ := messagesOf (Provider.ChatCompletions.echoReasoning (payload early))
-    assertEqual "a stable prefix" ((prefix_.map (·.compress)).toList)
-      ((echoed.extract 0 prefix_.size).map (·.compress)).toList,
-
-  test "a served model's identity is its recorded spec, whoever serves it" do
-    let spec ← assertOk <| Models.fromJson (.mkObj [("name", "deepseek-v4.1-flash"),
-      ("params", .mkObj [("reasoning_effort", "high")])])
-    let some dgx := Provider.named? "dgx" | fail "no dgx"
-    let viaDgx ← assertOk <| Provider.serve dgx spec
-    let viaOther ← assertOk <| Provider.serve { dgx with name := "other", baseUrl := "http://elsewhere/v1" } spec
-    assertEqual "identity" viaDgx.identity.compress spec.toJson.compress
-    assertEqual "provider-independent" viaDgx.identity.compress viaOther.identity.compress
-    assertError "a missing key" (Provider.serve { dgx with keyVar := "ALAYA_TEST_UNSET_KEY", defaultKey? := none } spec) fun
-      | .environment m => (m.splitOn "ALAYA_TEST_UNSET_KEY is not set").length > 1
-      | _ => false,
-
-  test "a model's name alone is its defaults, and settings over an agent's model are checked" do
-    let defaults ← assertOk <| Models.fromJson "gpt-oss-120b"
-    assertEqual "context from the table" defaults.contextTokens? (some 131072)
-    let modelOf (config : Lean.Json) : TestM Models.Spec := assertOk <| Models.fromJson
-      ((config.getObjVal? "model").toOption.getD .null)
-    let set ← modelOf (← assertOk <| Catalog.resolve "mini-swe"
-      #[agentSet ["model"] "gpt-oss-120b", agentSet ["model", "params", "temperature"] (1 : Nat),
-        agentSet ["model", "context_tokens"] (65536 : Nat)])
-    assertEqual "params" set.params.compress "{\"temperature\":1}"
-    assertEqual "context" set.contextTokens? (some 65536)
-    for (label, settings, expected) in [
-        ("unknown", #[agentSet ["model", "temperature"] (1 : Nat)], "unknown field 'temperature'"),
-        ("protected", #[agentSet ["model", "params", "model"] "x"], "params cannot set 'model'"),
-        ("name", #[agentSet ["name"] "x"], "unknown field 'name'")] do
-      assertError label (Catalog.resolve "mini-swe" (#[agentSet ["model"] "gpt-oss-120b"] ++ settings)) fun
-        | .input m => (m.splitOn expected).length > 1
-        | _ => false
-    assertError "unknown model" (Models.fromJson (.mkObj [("name", "nope")])) fun
-      | .input m => m.startsWith "unknown model: nope"
-      | _ => false
-    match Settings.parse "model.params.reasoning_effort=high" with
-    | .ok s => check (s.path == ["model", "params", "reasoning_effort"] && s.value == "high") "parsed"
-    | .error m => fail m
-]
-
-private def compressed (json : Lean.Json) : String := json.compress
-
-def agentsSuite : Suite := suite "app/catalog" #[
-  test "a program's name alone is its complete defaults, and they read back as themselves" do
-    for definition in Catalog.all do
-      let defaults ← assertOk <| Catalog.resolve definition.name #[]
-      check (defaults.getObjVal? "name").toOption.isNone s!"{definition.name}: the name is the call's, not the configuration's"
-      let again ← assertOk <| Catalog.complete definition.name defaults
-      assertEqual s!"{definition.name} round-trips" (compressed again) (compressed defaults),
-
-  test "a configuration may leave fields out, but not misname or mistype one" do
-    let refused (label : String) (name : String) (json : Lean.Json) (expected : String) : TestM Unit :=
-      assertError label (Catalog.complete name json) fun
-        | .input m => (m.splitOn expected).length > 1
-        | _ => false
-    refused "unknown program" "mini-swf" (.mkObj []) "unknown program"
-    refused "a name in the configuration" "mini-swe" (.mkObj [("name", "mini-swe")]) "unknown field 'name'"
-    refused "typo" "mini-swe" (.mkObj [("step_limt", 1)]) "unknown field 'step_limt'"
-    refused "type" "mini-swe" (.mkObj [("recover_output", "yes")]) "must be true or false"
-    refused "mode" "mini-vero" (.mkObj [("mode", "both")]) "unknown mode"
-    refused "nested" "mini-swe" (.mkObj [("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
-    refused "own field, misnamed" "mini-vero" (.mkObj [("stepp", 1)]) "mask_observations, mode"
-    let built ← assertOk <| Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
-    assertEqual "tools follow the settings" ((built.getObjVal? "tools").toOption.map (·.compress))
-      (some "[\"bash\",\"submit\",\"time_budget\"]")
-    -- How commands run is in each command the agent asks for.
-    let nested ← assertOk <| Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]
-    let timeout? : Option Nat := match Scripted.runOfConfig "mini-swe" nested with
-      | .ok run =>
-        let asked := Scripted.respond run (Scripted.settle run Scripted.opening)
-          { toolCalls := #[{ id := "c", name := "bash", arguments := .mkObj [("command", "ls")] }] }
-        match next run asked with
-        | .ask { op := .exec _ config, .. } => some config.timeoutSeconds
-        | _ => none
-      | .error _ => none
-    assertEqual "a nested setting" timeout? (some 5)
-    assertError "the name is not a setting" (Catalog.resolve "mini-swe" #[agentSet ["name"] "mini-vero"]) fun
-      | .input m => (m.splitOn "unknown field 'name'").length > 1
-      | _ => false,
-
-  test "a run's configuration is the opening of its agent's call, and the tree names it" do
-    let agent ← assertOk <| Catalog.complete "mini-swe" (.mkObj [("model", "gpt-oss-120b"), ("context_reserve", 7)])
-    let run := Catalog.run
-    let rt ← Scripted.runtime noCommands none
-    let project := (← scratch) / "project"
-    IO.FS.createDirAll project
-    let root ← Scripted.begin rt.store rt.workspaces run project
-    let call : RoutineCall := { name := "mini-swe", arguments := agent, environment? := some Scripted.testEnvironment.toJson }
-    let (called, _) ← assertOk <| Driver.append rt.store run root call.event
-    -- The run reads the call and opens it; the agent's first read of its inbox takes nothing.
-    let log := Scripted.settle run (← Scripted.logAt rt called)
-    do
-      assertEqual "the configuration" ((argumentsAt? log { name := "mini-swe" }).map compressed) (some (compressed agent))
-      let mut tip := called
-      for event in log.extract 5 log.size do
-        tip := (← assertOk <| rt.store.put (← assertOk rt.store.forest) { parent? := some tip, event }).1
-      let forest ← assertOk rt.store.forest
-      let tree := Render.treeLines (← assertOk <| Render.rows rt.store forest run)
-      check (tree.any fun l => (l.splitOn "root  mini-swe, gpt-oss-120b").length > 1) s!"tree names the agent: {tree}"
-]
 
 private def view : Cli.Spec (Bool × String) :=
   Prod.mk <$> Cli.switch "view" "show the view" <*> Cli.arg "ENTRY" .string "the entry"
@@ -401,6 +213,6 @@ def specSuite : Suite := suite "app/cli.spec" #[
     assertEqual "described" names #["ENTRY", "count", "note", "json", "help"]
 ]
 
-def suites : Array Suite := #[taskSuite, specSuite, endpointSuite, agentsSuite]
+def suites : Array Suite := #[taskSuite, specSuite]
 
 end CliTests

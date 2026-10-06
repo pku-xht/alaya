@@ -312,6 +312,13 @@ def suite : Suite := Testing.suite "app/commands" #[
     let every ← bare #["config", "--json"]
     check (every.exit == 0 && (← records every.stdout).any fun record => text record ["provider", "name"] != "null")
       "with no flags, the programs, models and providers"
+    -- A stop names a frame as `log` shows it, and one with a call open in it.
+    check (contains (← refused 65 data "stop" #[tip, "--frame", "session//mini-swe"]) "empty step") "a malformed frame"
+    check (contains (← refused 65 data "stop" #[tip, "--frame", "session/grader"]) "no call is open in session/grader")
+      "a frame no call is open in"
+    let stopped ← records (← ok data "stop" #[tip, "--frame", "session/mini-swe", "--reason", "by frame", "--json"])
+    assertEqual "a stop of the frame named" (text stopped[0]! ["event", "type"], (field stopped[0]! ["event", "frame"]).compress,
+      text stopped[0]! ["event", "reason"]) ("broke", "[\"session\",\"mini-swe\"]", "by frame")
 ]
 
 end CommandsTests

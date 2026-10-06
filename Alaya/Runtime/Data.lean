@@ -19,6 +19,15 @@ structure Data where
   restores. Nothing in it lasts past the command, and no other command shares it. -/
   scratch : System.FilePath
 
+/-- How a data directory's workspaces are opened, given its path, the command's scratch, and the
+directories the workspaces must never take for one: by default restic's repository at `restic/`. -/
+abbrev Opener := (path scratch : System.FilePath) → (keep : Array System.FilePath) → Result Workspaces
+
+/-- The workspaces of a data directory: restic's repository at `restic/`, its restores in the
+command's scratch. -/
+def restic : Opener := fun path scratch keep =>
+  Workspaces.Restic.open (path / "restic") (scratch / "restic") (keep := keep)
+
 namespace Data
 
 def cache (data : Data) : System.FilePath := data.path / "cache"
@@ -28,8 +37,8 @@ created (`create`): otherwise it must exist, so a wrong path is an error rather 
 forest. A command that writes (`write`) holds the directory's lock throughout, so it is the only
 writer, and is refused at once when another has it; one that only reads takes no lock. The
 command's scratch directory is removed when it ends, however it ends. -/
-def «with» (path : System.FilePath) (f : Data → Result α) (write := false) (create := false) :
-    Result α := do
+def «with» (path : System.FilePath) (f : Data → Result α) (write := false) (create := false)
+    (workspaces : Opener := restic) : Result α := do
   if !create && !(← Result.fromIO Error.storage (path / "entries").isDir) then
     throw <| .input s!"no data directory at {path}"
   Result.fromIO Error.storage (IO.FS.createDirAll path)
@@ -41,8 +50,7 @@ def «with» (path : System.FilePath) (f : Data → Result α) (write := false) 
     Result.fromIO Error.storage (IO.FS.createDirAll scratch)
     try
       -- The entries and the model cache are as much the run as the repository is.
-      let workspaces ← Workspaces.Restic.open (path / "restic") (scratch / "restic")
-        (keep := #[store.dir, path / "cache"])
+      let workspaces ← workspaces path scratch #[store.dir, path / "cache"]
       f { path, store, workspaces, scratch }
     finally
       Workspaces.makeWritable scratch

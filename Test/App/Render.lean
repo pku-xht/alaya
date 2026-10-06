@@ -19,10 +19,6 @@ private def json (text : String) : Json := (Json.parse text).toOption.getD .null
 private def stored (usage? : Option Chat.TokenUsage) : String :=
   (usage?.map (·.toStored)).getD Json.null |>.compress
 
-/-- An executor that answers every command with `ok`. -/
-private def echoing : Executor :=
-  { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 } }
-
 def suite : Suite := Testing.suite "app/render" #[
   test "tokens, seconds and values read in a line" do
     assertEqual "tokens" (Render.tokens { input? := some 48200, cached? := some 41900, output? := some 1100, reasoning? := some 800 })

@@ -547,18 +547,8 @@ def transcript : Array String := Id.run do
   return out
 
 def suite : Testing.Suite := Testing.suite "core/prototype" #[
-  Testing.iotest "the interpreter reads every log as the sketch does, line for line" do
-    -- `ALAYA_REGENERATE=1` writes the transcript as the expected one, after a change of design.
-    if (← IO.getEnv "ALAYA_REGENERATE").isSome then
-      IO.FS.writeFile ("Test" / "Core" / "Prototype" / "expected.txt") ("\n".intercalate transcript.toList ++ "\n")
-    let expected := (← IO.FS.readFile ("Test" / "Core" / "Prototype" / "expected.txt")).splitOn "\n"
-    let expected := if expected.getLast? == some "" then expected.dropLast else expected
-    let actual := transcript.toList
-    for (line, i) in (actual.zip expected).zipIdx do
-      if line.1 != line.2 then
-        throw <| IO.userError s!"line {i + 1}:\n  ours:   {line.1}\n  sketch: {line.2}"
-    if actual.length != expected.length then
-      throw <| IO.userError s!"{actual.length} lines where the sketch prints {expected.length}"
+  Testing.test "the interpreter reads every log as the sketch does, line for line" do
+    Testing.golden ("Test" / "Core" / "Prototype" / "expected.txt") transcript
 ]
 
 end PrototypeTests
