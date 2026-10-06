@@ -73,7 +73,7 @@ with its kind under `type`, and its frame, where it has one, as an array of numb
 | `returned` | `frame`, `value` |
 | `failed` | `frame`, `error` |
 | `stopped` | `reason` |
-| `commented` | `frame`, or `null` for a person's; `text` |
+| `commented` | `text` |
 
 | Notice `type` | Fields |
 | --- | --- |

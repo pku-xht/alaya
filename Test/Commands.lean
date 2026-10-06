@@ -246,8 +246,8 @@ def suite : Suite := Testing.suite "commands" #[
     -- A comment: on an entry that goes on, an annotation and no branch; at the end of a log, its
     -- last entry. Either way the run stands as it stood.
     let noted ← appended data "comment" #[tip, "the task could say more"]
-    assertEqual "a comment" (text noted ["event", "type"], (field noted ["event", "frame"]).compress,
-      text noted ["event", "text"]) ("commented", "null", "the task could say more")
+    assertEqual "a comment" (text noted ["event", "type"], text noted ["event", "text"])
+      ("commented", "the task could say more")
     let tree := lines (← ok data "tree")
     assertEqual "no branch for it" tree.size 3
     check (tree.any (has · "# the task could say more")) s!"the annotation: {tree}"

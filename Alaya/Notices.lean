@@ -39,7 +39,7 @@ def create (store : Store) (workspaces : Workspaces) (run : Run Agent)
 over it, so it is appended at any entry of any log, with nothing to check. Gives the new entry. -/
 def comment (store : Store) (tip : Hash) (text : String) : Result (Hash × Entry) := do
   let forest ← store.forest
-  let entry : Entry := { parent? := some tip, event := .commented none text }
+  let entry : Entry := { parent? := some tip, event := .commented text }
   let (hash, _) ← store.put forest entry
   pure (hash, entry)
 

@@ -1193,12 +1193,12 @@ def cli_rebase():
     new data directory, each entry of the copy under the entry it was made from."""
     y, below = TOP + 4, TOP + 4 + CHIP_H + 50
     source = [("the workspace", "read", False, True), ("open agent", "read", False, True), ("said “fix it”", "read"),
-              ("# the original’s", "old"), ("exec make", "read"), ("exec make test", "old"), "…",
+              ("# an old comment", "old"), ("exec make", "read"), ("exec make test", "old"), "…",
               ("return fail 12/48", "old", True)]
     out, at = strip(12, y, source)
     # The copy: each entry at the place of the one it is made from, and after the copy, the next run's.
     copy = [(("the workspace", "new", False, True), 0), (("open agent", "new", False, True), 1), (("said “fix it”", "new"), 2),
-            (("# the revised’s", "new"), 3), (("exec make", "new"), 4), (("# rebased from …", "new"), 5),
+            (("# a new comment", "new"), 3), (("exec make", "new"), 4), (("# rebased from …", "new"), 5),
             (("exec make check", "later"), None)]
     joins, end = [], None
     for item, slot in copy:
@@ -1210,7 +1210,7 @@ def cli_rebase():
     part, made = strip(12, below, [item for item, _ in copy], joins)
     out += part
     out += [label(12, y - 9, "`D`, the original agent’s log, only read: in blue, what the revised agent makes too", "s"),
-            label(12, below - 9, "`DIR`: what `rebase` writes, the revised agent’s comments in place of the original’s", "s")]
+            label(12, below - 9, "`DIR`: what `rebase` writes; the log’s comments left out, the revised agent’s written", "s")]
     out += under(at[5][0], y, "the revised agent runs `make check` here: the copy ends", 300)
     out += under(made[-1][0], below, "the next `run`, in `DIR`")
     cli("rebase", "rebase: the log, up to where the two agents differ, is copied into a new data directory, where the revised agent goes on",

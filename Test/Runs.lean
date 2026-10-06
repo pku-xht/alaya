@@ -86,9 +86,9 @@ private def commenting : Run Agent :=
     call := ⟨agentRoutine, (testConfig testAgent).toJson⟩
     after := grading }
 
-/-- The comments of a log: who made each, a frame or a person, and what it says. -/
-private def comments (log : Log Agent) : Array (Option Frame × String) :=
-  log.filterMap fun | .commented frame? text => some (frame?, text) | _ => none
+/-- The comments of a log, in order. -/
+private def comments (log : Log Agent) : Array String :=
+  log.filterMap fun | .commented text => some text | _ => none
 
 /-- A log as lines, the names of snapshots left out: two runs take snapshots of their own. -/
 private def describe (log : Log Agent) : Array String := log.map fun
@@ -387,26 +387,33 @@ def suite : Suite := Testing.suite "runs" #[
         | .input message => contains message "no trace"
         | _ => false,
 
-  test "a program's comments are written once, and a person's is passed over by the run that goes on from it" do
+  test "a program's comments are written once, before the event that follows them, and every comment of a log is passed over" do
     let run := commenting
     let rt ← runtime (echoing) none
     let tip ← start rt run
-    let (first, stop) ← assertOk <| Driver.drive rt run tip
+    -- Paused before the command: the comment before it waits for it, and is not written yet.
+    let (paused, stop) ← assertOk <| Driver.drive rt run tip { budgetMs? := some 0 }
+    check (stop matches .paused _) "paused at the budget"
+    assertEqual "nothing written while paused" (comments (← logAt rt paused)) #[]
+    let (first, stop) ← assertOk <| Driver.drive rt run paused
     check (stop matches .over (.returned _) none) "the agent is over"
     let log ← logAt rt first
-    assertEqual "the program's comments, in their places" (comments log)
-      #[(some #[0], "before the command"), (some #[0], "it printed ok")]
-    -- Driven again from its end, nothing is written: the comments are there.
+    assertEqual "the program's comments, once each" (comments log) #["before the command", "it printed ok"]
+    let at' := log.findIdx? fun | .commented "before the command" => true | _ => false
+    check (at'.any fun i => log[i + 1]! matches .answered _ (.exec "echo one" _) _) "the first, just before its command"
+    -- Driven again from its end, nothing is written.
     let count := (← assertOk rt.store.forest).entries.size
     let _ ← assertOk <| Driver.drive rt run first
     assertEqual "no entry written" (← assertOk rt.store.forest).entries.size count
-    -- A person's comment where the run started: the run goes on from it as if it were not there.
-    let (noted, entry) ← assertOk <| Notices.comment rt.store tip "watch the command"
-    check (entry.event matches .commented none "watch the command") "a person's comment has no frame"
-    let (second, stop) ← assertOk <| Driver.drive rt run noted
-    check (stop matches .over (.returned _) none) "the agent is over, from the comment too"
-    assertEqual "the person's comment, then the program's" (comments (← logAt rt second))
-      #[(none, "watch the command"), (some #[0], "before the command"), (some #[0], "it printed ok")]
+    -- A comment in the log is passed over, even in the program's own words: the program's are
+    -- written after it all the same.
+    for text in #["watch the command", "before the command"] do
+      let (noted, entry) ← assertOk <| Notices.comment rt.store tip text
+      check (entry.event matches .commented _) "a comment"
+      let (second, stop) ← assertOk <| Driver.drive rt run noted
+      check (stop matches .over (.returned _) none) "the agent is over, from the comment too"
+      assertEqual "that comment, then the program's" (comments (← logAt rt second))
+        #[text, "before the command", "it printed ok"]
     -- A comment is taken at any entry, with nothing to check: where the agent is over, where a
     -- stop or a message is refused, and on a log that is no trace of its run.
     let (after, _) ← assertOk <| Notices.comment rt.store first "after the end"

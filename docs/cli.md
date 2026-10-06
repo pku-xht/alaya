@@ -347,8 +347,8 @@ written by one agent, and `run` refuses a log its agent did not write (`docs/age
 
 - **The copy** is the revised agent replayed against the log: an answer it asks for again is
   taken from the log, and a mark it makes is checked against the log's.
-- **Comments** in the copy are the revised agent's. The original agent's are left out, and a
-  person's are kept.
+- **Comments** of the log are left out. The revised agent's are written before the events they
+  precede, as `run` writes them.
 - **Notices and stops after the copy's end** are left out, and listed.
 - **`--set PATH=VALUE`** changes the revised agent's configuration, as on `new`. With another
   model, the copy ends at the first sample.

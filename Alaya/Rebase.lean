@@ -10,8 +10,8 @@ trace of the agent that directory runs.
 
 Rebase is the driver with the old log for its world. The new program is replayed, and whatever
 it asks for is taken from the old log: the answer to an operation it asks for again, a mark it
-makes again, a notice where one arrived. Its comments are written where it makes them, and the
-old program's are left out. Where the program asks for something the log does not hold, the
+makes again, a notice where one arrived. The comments of the old log are left out, and the new
+program's are written as the driver writes them. Where the program asks for something the log does not hold, the
 copy ends, and what came from outside after that point is left out, since a position after it
 corresponds to nothing in the new log. -/
 
@@ -38,27 +38,22 @@ structure Rebased (σ : Signature) where
 
 instance : Inhabited (Rebased σ) := ⟨{ log := #[] }⟩
 
-/-- Whether an event comes from outside: a notice, a stop, a person's comment. -/
+/-- Whether an event comes from outside: a notice or a stop. -/
 def Event.fromOutside : Event σ → Bool
-  | .arrived _ | .stopped _ | .commented none _ => true
+  | .arrived _ | .stopped _ => true
   | _ => false
 
-/-- The log `old` as `run` makes it: the longest prefix that is a trace of `run`, its program's
-comments its own. An event `takes` refuses ends the prefix, as one the program does not make
-there would. A read of the inbox is matched by the notices it takes, which the new log has at
-positions of their own. -/
+/-- The log `old` as `run` makes it: the longest prefix that is a trace of `run`. Its comments
+are `run`'s, each written before the event the program comes to after it, as the driver writes
+them; the comments of `old` are left out. An event `takes` refuses ends the prefix, as one the
+program does not make there would. A read of the inbox is matched by the notices it takes,
+which the new log has at positions of their own. -/
 partial def rebase (run : Run σ) (old : Log σ) (takes : Event σ → Bool := fun _ => true) :
     Rebased σ :=
   go 0 (Replayer.start run) #[] {}
 where
   go (i : Nat) (r : Replayer σ) (new : Array (Event σ × Option Nat))
       (moved : Std.HashMap Nat Nat) : Rebased σ :=
-    -- A comment is written as soon as the program makes it, before anything that comes after.
-    match r.next with
-    | .comments frame text =>
-      let comment : Event σ := .commented (some frame) text
-      go i (r.feed comment) (new.push (comment, none)) moved
-    | next =>
     match old[i]? with
     | none => { log := new }
     | some event =>
@@ -68,17 +63,19 @@ where
             if event.fromOutside then some (position, event) else none }
       let take (event : Event σ) : Rebased σ :=
         if !takes event then diverge none else
-        let fed := r.feed event
-        if fed.broken?.isSome then diverge (some next) else
+        -- An event of the program comes after the comments it made since its last one.
+        let comments := if event.frame?.isSome then r.comments.map fun text => (.commented text, none) else #[]
+        let fed := (comments.foldl (fun r (comment, _) => r.feed comment) r).feed event
+        if fed.broken?.isSome then diverge (some r.next) else
+        let new := new ++ comments
         let moved := if event matches .arrived _ then moved.insert i new.size else moved
         go (i + 1) fed (new.push (event, some i)) moved
       match event with
-      -- The old program's comment: the new one says its own.
-      | .commented (some _) _ => go (i + 1) r new moved
+      | .commented _ => go (i + 1) r new moved
       | .heard frame notices =>
         match notices.mapM moved.get? with
         | some notices => take (.heard frame notices)
-        | none => diverge (some next)
+        | none => diverge (some r.next)
       | event => take event
 
 namespace Rebase
@@ -150,7 +147,7 @@ def write (rebased : Rebased Agent) (entries : Array Entry) (workspaces : Worksp
   let mut written : Array (Hash × Entry) := #[]
   let events := rebased.log.map (fun (event, origin?) =>
     (event.renameSnapshots rename, (origin?.bind (entries[·]?)).map (·.elapsedMs) |>.getD 0))
-  for (event, elapsedMs) in events.push (.commented none note, 0) do
+  for (event, elapsedMs) in events.push (.commented note, 0) do
     let entry : Entry := { parent?, event, elapsedMs }
     let (hash, grown) ← store.put forest entry
     forest := grown

@@ -356,7 +356,7 @@ def describe : Event Agent → String
   | .arrived (.changed workspace _) => s!"-  arrived: changed → {workspace.hex}"
   | .arrived (.replied to answer) => s!"-  arrived: replied to {to.toList}: {render answer}"
   | .arrived (.assigned _) => "-  arrived: assigned a grader"
-  | .commented _ text => s!"-  commented: {text}"
+  | .commented text => s!"-  commented: {text}"
   | .answered frame (.external command image ..) (.ok (.external ran)) =>
     s!"{frame.toList}  answered: external {command}, in {image} → exit {ran.exit}, {ran.checkout.hex}"
   | .answered frame (.exec command) (.ok (.output output)) =>
@@ -386,7 +386,6 @@ def describeNext : Next Agent → String
     else s!"wait: {frame.toList} reads the inbox once something arrives"
   | .mismatch position => s!"mismatch at {position}"
   | .unguarded frame => s!"unguarded loop in {frame.toList}"
-  | .comments frame text => s!"comment in {frame.toList}: {text}"
 
 def withAgent (run : Run Agent) (program : Program Agent Json) : Run Agent :=
   { run with routines := fun name =>

@@ -24,15 +24,15 @@ private def runOf (body : Program Agent Json) : Run Agent :=
     call := ⟨agentRoutine, (testConfig testAgent).toJson⟩
     after := grading }
 
-/-- An agent that waits for its task and runs `commands`, one after another, commenting when
-`comments`: before it waits, and on what each command printed. -/
+/-- An agent that waits for its task and runs `commands`, one after another, reading its inbox
+after each; when `comments`, it says which command it runs before each. -/
 private def agent (commands : Array String) (comments : Bool := false) : Run Agent :=
   runOf do
-    if comments then comment "waiting for the task"
     let _ ← await fun _ notice => notice matches .said _
     for command in commands do
-      let ran ← exec command
-      if comments then comment s!"{command} printed {ran.output.output}"
+      if comments then comment s!"running {command}"
+      let _ ← exec command
+      let _ ← inbox
     return "done"
 
 private def first : Array String := #["echo one", "echo two", "echo three"]
@@ -44,8 +44,8 @@ private def json (log : Log Agent) : Array String := log.map (eventToJson · |>.
 private def describe (log : Log Agent) : Array String :=
   log.map fun event => Render.eventSummary (event.renameSnapshots fun _ => default)
 
-private def comments (log : Log Agent) : Array (Option Frame × String) :=
-  log.filterMap fun | .commented frame? text => some (frame?, text) | _ => none
+private def comments (log : Log Agent) : Array String :=
+  log.filterMap fun | .commented text => some text | _ => none
 
 /-- Drives `run` from a new log until it is over. -/
 private def driven (run : Run Agent) : TestM (Driver.Runtime × Hash × Log Agent) := do
@@ -100,28 +100,36 @@ def suite : Suite := Testing.suite "rebase" #[
     assertEqual "event for event" (json (rebased.log.map (·.1))) (json log)
     assertEqual "each from its own position" (rebased.log.map (·.2)) ((Array.range log.size).map some),
 
-  test "comments are the new agent's, where it makes them, and a read takes the notices at their new positions" do
-    let (_, _, log) ← driven (agent first)
-    let commenting := agent first (comments := true)
-    let rebased := rebase commenting log
+  test "comments are the revised agent's, before the events they precede, and a read takes the notices at their new positions" do
+    -- The original agent's log, with a message after the first command.
+    let original := agent first
+    let (rt, last, _) ← driven original
+    let forest ← assertOk rt.store.forest
+    let point := (forest.path last)[← answerOf (← logAt rt last) "echo one"]!
+    let (told, _) ← assertOk <| Driver.append rt.store original point (.arrived (.said "a hint"))
+    let (end', _) ← assertOk <| Driver.drive rt original told
+    let log ← logAt rt end'
+    let revised := agent first (comments := true)
+    let rebased := rebase revised log
     check rebased.divergence?.isNone "a change of comments only: the whole log holds"
     let new := rebased.log.map (·.1)
-    assertEqual "the new agent's comments" (comments new)
-      #[(some #[0], "waiting for the task"), (some #[0], "echo one printed ok"),
-        (some #[0], "echo two printed ok"), (some #[0], "echo three printed ok")]
-    -- The comment before the read comes before the task, which is now at 3, and read there.
-    check (new[2]! matches .commented (some #[0]) _) "the first comment, as soon as the agent opens"
-    check (new[3]! matches .arrived (.said "t")) "then the task"
-    check (new.any fun | .heard #[0] notices => notices == #[3] | _ => false) "the read takes the task at 3"
-    assertEqual "a trace of the new agent, to the same end" (Render.nextSummary none (agentEnd? new) (next commenting new))
-      (Render.nextSummary none (agentEnd? log) (next (agent first) log))
-    -- The way back: the old agent's comments are left out, and a person's is kept.
-    let (rt, last, commented) ← driven commenting
-    let (noted, _) ← assertOk <| Notices.comment rt.store last "a person's"
-    let back := rebase (agent first) (← logAt rt noted)
+    assertEqual "the revised agent's comments" (comments new) (first.map (s!"running {·}"))
+    check (first.all fun command => new.zipIdx.any fun (event, i) =>
+      event matches .commented _ && (new[i + 1]?.any fun | .answered _ (.exec ran _) _ => ran == command | _ => false))
+      "each just before its command"
+    -- The comment before the first command moves the message on by one, and its read with it.
+    let some hint := new.findIdx? (· matches .arrived (.said "a hint")) | fail "the message"
+    assertEqual "the message, one further on" hint ((log.findIdx? (· matches .arrived (.said "a hint"))).map (· + 1) |>.getD 0)
+    check (new.any fun | .heard _ notices => notices == #[hint] | _ => false) "the read takes it there"
+    assertEqual "a trace of the revised agent, to the same end" (Render.nextSummary none (agentEnd? new) (next revised new))
+      (Render.nextSummary none (agentEnd? log) (next original log))
+    -- The way back: every comment of the log is left out, whoever wrote it.
+    let (rt, last, commented) ← driven revised
+    let (noted, _) ← assertOk <| Notices.comment rt.store last "by hand"
+    let back := rebase original (← logAt rt noted)
     check back.divergence?.isNone "the whole log holds"
-    assertEqual "only the person's comment" (comments (back.log.map (·.1))) #[(none, "a person's")]
-    assertEqual "the rest kept" back.log.size (commented.size - 4 + 1),
+    assertEqual "no comment" (comments (back.log.map (·.1))) #[]
+    assertEqual "the rest kept" back.log.size (commented.size - first.size),
 
   test "a change after a point keeps the log before it, and the run goes on in a store of its own" do
     let (rt, last, log) ← driven (agent first)
@@ -150,8 +158,8 @@ def suite : Suite := Testing.suite "rebase" #[
     let goneOn ← logAt rt' end'
     let (_, _, fresh) ← driven changed
     assertEqual "the log the new agent makes from the start, and the note"
-      (describe (goneOn.filter fun | .commented none _ => false | _ => true)) (describe fresh)
-    check (goneOn[divergence.position]! matches .commented none "rebased") "the note, where the copy ends",
+      (describe (goneOn.filter fun | .commented _ => false | _ => true)) (describe fresh)
+    check (goneOn[divergence.position]! matches .commented "rebased") "the note, where the copy ends",
 
   test "what came from outside after the divergence is left out, and said so" do
     let (rt, last, log) ← driven (agent first)

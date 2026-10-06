@@ -157,7 +157,7 @@ def eventJson : Event Agent → Json
       ("kind", orNull (Render.valueKind? value) (Json.str ·.name))]
   | .failed _ error => .mkObj [("k", "fail"), ("error", error)]
   | .stopped reason => .mkObj [("k", "stop"), ("text", reason)]
-  | .commented _ text => .mkObj [("k", "comment"), ("text", text)]
+  | .commented text => .mkObj [("k", "comment"), ("text", text)]
 
 /-- What the walk keeps of the forest for the page. -/
 private structure Acc where

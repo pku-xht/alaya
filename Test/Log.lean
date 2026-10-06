@@ -46,8 +46,7 @@ private def events : Array (Event Agent) := #[
   .returned #[0, 1] (.mkObj [("output", "x")]),
   .failed #[0, 1] "no routine named bash",
   .stopped "to grade this point",
-  .commented none "a person's comment\non two lines",
-  .commented (some #[0, 1]) "a program's comment",
+  .commented "a comment\non two lines",
   assignment { command := "sh /grader/g.sh", image := "img@sha256:1", input? := some (snapshot 'd'), timeoutSeconds := 60 }]
 
 /-- A run with `program` as its agent, a tool `boom` that fails, and nothing after the agent. -/
@@ -248,31 +247,34 @@ def suite : Suite := Testing.suite "log" #[
     let run := runOf commenting
     let over (label : String) (run : Run Agent) (log : Log Agent) : TestM Unit :=
       check ((next run log) matches .done _) s!"{label}: the run is not over"
-    -- At the end of a log, the comment the program makes next is what comes next.
-    check ((next run (rootOnly.push (.opened #[0] run.call))) matches .comments #[0] "starting")
-      "the program's comment is next"
-    -- Settled as the driver settles it, the log holds each comment once, with the frame that made it.
+    -- At the end of a log, the program's comments since its last event wait for the next event:
+    -- what comes next is the operation.
+    let opened := rootOnly.push (.opened #[0] run.call)
+    check ((next run opened) matches .ask { op := .time, .. }) "the operation is next"
+    assertEqual "the comment before it" (Replayer.ofLog run opened).comments #["starting"]
+    -- Settled as the driver settles it, the log holds each comment once, before the event it precedes.
     let log := answer run (settle run rootOnly) (.timing { spentMs := 7 })
-    assertEqual "the comments" (log.filterMap fun | .commented frame? text => some (frame?, text) | _ => none)
-      #[(some #[0], "starting"), (some #[0], "the clock says 7")]
+    assertEqual "the comments" (log.filterMap fun | .commented text => some text | _ => none)
+      #["starting", "the clock says 7"]
+    check (log[2]! matches .commented "starting") "the first, before the clock"
     over "with its comments" run log
-    -- Replay needs none of them: without them, reworded, or with a person's among them, the log
-    -- is the same trace; and a program whose comments were taken out reads the old log.
+    -- Replay needs none of them: without them, reworded, or with others among them, the log is
+    -- the same trace; and a program whose comments were taken out reads the old log.
     over "without them" run (log.filter fun | .commented .. => false | _ => true)
-    over "reworded" run (log.map fun | .commented frame? _ => .commented frame? "reworded" | event => event)
+    over "reworded" run (log.map fun | .commented _ => .commented "reworded" | event => event)
     for i in [1:log.size + 1] do
-      over s!"a person's at {i}" run ((log.extract 0 i).push (.commented none "by hand") ++ log.extract i log.size)
+      over s!"another at {i}" run ((log.extract 0 i).push (.commented "by hand") ++ log.extract i log.size)
     over "a program without comments" (runOf quiet) log
-    -- A comment the log holds in the program's place, but not the program's, is passed over, and
-    -- the program's is still to be written.
-    check ((next run ((rootOnly.push (.opened #[0] run.call)).push (.commented none "starting"))) matches
-      .comments #[0] "starting") "a person's comment is not the program's"
+    -- A comment of the log is never taken for the program's, even with its very words: the
+    -- program's is still to be written.
+    assertEqual "the same words in the log" (Replayer.ofLog run (opened.push (.commented "starting"))).comments
+      #["starting"]
     -- A comment takes a position like any event, so the positions a read marks count it.
     match miniRun with
     | .error problem => fail problem
     | .ok mini =>
-      let early : Log Agent := #[.arrived (.changed default "p"), .commented none "before the agent",
-        .opened #[0] mini.call, .arrived (.said "the task"), .commented none "after the task"]
+      let early : Log Agent := #[.arrived (.changed default "p"), .commented "before the agent",
+        .opened #[0] mini.call, .arrived (.said "the task"), .commented "after the task"]
       check ((next mini early) matches .hears #[0] #[3]) "the task is at 3, the comments around it"
     -- A comment reads no event: a loop that only comments is as unguarded as one that does nothing.
     let spins := runOf (iter (fun (n : Nat) => (do
