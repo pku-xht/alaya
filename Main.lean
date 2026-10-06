@@ -802,7 +802,7 @@ private def commands : Array Cli.Command := #[
     summary := "Delete an entry, everything after it, and the snapshots only they named."
     spec := rmRun <$> dataDir <*> entryArg "the first entry to delete" },
   { name := "rebase"
-    summary := "Copy the run at an entry into a new data directory, as the current version of its agent makes it: the prefix it still makes."
+    summary := "Copy the log at an entry into a new data directory, up to where a revised version of its agent differs, to go on with it there."
     examples := #["alaya rebase 4f2c8b ../v2", "alaya rebase 4f2c8b ../v2 --set agent.context_reserve=16000"]
     spec := rebaseRun <$> dataDir <*> entryArg "the entry whose log is rebased"
       <*> Cli.arg "DIR" .path "the new data directory, which must not exist"

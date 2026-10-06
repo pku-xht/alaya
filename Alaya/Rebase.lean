@@ -127,8 +127,8 @@ def summary (rebased : Rebased Agent) (total : Nat) : String :=
     let found := s!"{divergence.position} of {total} events hold; at {divergence.position} the log has " ++
       (Render.eventSummary divergence.found).quote
     match divergence.expected? with
-    | some _ => s!"{found}, where the agent goes on with: {expectedSummary divergence.expected?}"
-    | none => s!"{found}: the agent takes {expectedSummary none}"
+    | some _ => s!"{found}, where the revised agent goes on with: {expectedSummary divergence.expected?}"
+    | none => s!"{found}: the revised agent takes {expectedSummary none}"
 
 /-- The events from outside a rebase left out, in a line each. -/
 def droppedLines (rebased : Rebased Agent) : Array String :=

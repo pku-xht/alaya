@@ -1189,16 +1189,16 @@ def cli_rm():
 
 
 def cli_rebase():
-    """`rebase`: the prefix the new agent still makes, copied into a new data directory, each
-    entry of the copy under the entry of the source it was made from."""
+    """`rebase`: the log, up to where the original and the revised agent differ, copied into a
+    new data directory, each entry of the copy under the entry it was made from."""
     y, below = TOP + 4, TOP + 4 + CHIP_H + 50
     source = [("the workspace", "read", False, True), ("open agent", "read", False, True), ("said “fix it”", "read"),
-              ("# the old comment", "old"), ("exec make", "read"), ("exec make test", "old"), "…",
+              ("# the original’s", "old"), ("exec make", "read"), ("exec make test", "old"), "…",
               ("return fail 12/48", "old", True)]
     out, at = strip(12, y, source)
     # The copy: each entry at the place of the one it is made from, and after the copy, the next run's.
     copy = [(("the workspace", "new", False, True), 0), (("open agent", "new", False, True), 1), (("said “fix it”", "new"), 2),
-            (("# a new comment", "new"), 3), (("exec make", "new"), 4), (("# rebased from …", "new"), 5),
+            (("# the revised’s", "new"), 3), (("exec make", "new"), 4), (("# rebased from …", "new"), 5),
             (("exec make check", "later"), None)]
     joins, end = [], None
     for item, slot in copy:
@@ -1209,11 +1209,11 @@ def cli_rebase():
         print("  rebase: two chips of the copy may touch")
     part, made = strip(12, below, [item for item, _ in copy], joins)
     out += part
-    out += [label(12, y - 9, "`D`, the source, only read: in blue, what the new agent makes again", "s"),
-            label(12, below - 9, "`DIR`: what `rebase` writes, the new agent’s comments in place of the old", "s")]
-    out += under(at[5][0], y, "the new agent runs `make check` here: the copy ends")
+    out += [label(12, y - 9, "`D`, the original agent’s log, only read: in blue, what the revised agent makes too", "s"),
+            label(12, below - 9, "`DIR`: what `rebase` writes, the revised agent’s comments in place of the original’s", "s")]
+    out += under(at[5][0], y, "the revised agent runs `make check` here: the copy ends", 300)
     out += under(made[-1][0], below, "the next `run`, in `DIR`")
-    cli("rebase", "rebase: the prefix the new agent still makes is copied into a new data directory, where the run goes on",
+    cli("rebase", "rebase: the log, up to where the two agents differ, is copied into a new data directory, where the revised agent goes on",
         below + CHIP_H + 24, out)
 
 

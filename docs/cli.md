@@ -52,8 +52,8 @@ alaya grade ENTRY --grader CMD [--grader-input DIR] [--grader-image IMAGE] [--gr
                                                      grade the run at ENTRY
 alaya comment ENTRY TEXT                             append a comment to the log
 alaya rm ENTRY                                       delete ENTRY and everything after it
-alaya rebase ENTRY DIR [--set PATH=VALUE …]          copy the run at ENTRY into a new data directory,
-                                                     as the current version of its agent makes it
+alaya rebase ENTRY DIR [--set PATH=VALUE …]          copy the log at ENTRY into a new data directory,
+                                                     to go on with a revised version of its agent
 
 alaya tree                                           the forest: runs, stretches of entries, forks
 alaya log ENTRY                                      the log that ends at ENTRY, an event a line
@@ -330,35 +330,36 @@ Then it drops the snapshots that only the deleted entries named.
 
 ### `rebase`
 
-Copies the run that ends at `ENTRY` into a new data directory, `DIR`, as the current version of
-its agent makes it.
+Continues a log with a revised version of its agent. Two versions take part: the **original
+agent**, which wrote the log that ends at `ENTRY`, and the **revised agent**, its current version.
+`rebase` copies the log into a new data directory, `DIR`, up to the first event where the two
+agents differ, and `run` goes on from there with the revised agent.
 
 ```sh
 tip=$(alaya rebase 4f2c8b ../v2 | tail -n 1 | cut -d' ' -f1)
 alaya run "$tip" --data ../v2 --provider apiyi
 ```
 
-![rebase: the prefix the new agent still makes is copied into a new data directory, where the run goes on](figures/cli/rebase.svg)
+![rebase: the log, up to where the two agents differ, is copied into a new data directory, where the revised agent goes on](figures/cli/rebase.svg)
 
-An old log is a trace of a changed agent only up to the agent's first changed operation
-(`docs/agent-api.md` §4). `rebase` copies that prefix into `DIR`, so every log of a data
-directory is a trace of the agent that runs it.
+The revised agent cannot go on in the original data directory: every log of a data directory is
+written by one agent, and `run` refuses a log its agent did not write (`docs/agent-api.md` §4).
 
-- **The copy** is the new agent replayed against the old log: an answer it asks for again is
-  taken from the log, and a mark it makes again is checked against it. The copy ends at the
-  first event the new agent does not make.
-- **Comments** are the new agent's. The old agent's are left out, and a person's are kept.
+- **The copy** is the revised agent replayed against the log: an answer it asks for again is
+  taken from the log, and a mark it makes is checked against the log's.
+- **Comments** in the copy are the revised agent's. The original agent's are left out, and a
+  person's are kept.
 - **Notices and stops after the copy's end** are left out, and listed.
-- **`--set PATH=VALUE`** changes the configuration, as on `new`. With another model, the copy
-  ends at the first sample.
+- **`--set PATH=VALUE`** changes the revised agent's configuration, as on `new`. With another
+  model, the copy ends at the first sample.
 - **`DIR`** has a restic repository of its own, with copies of the snapshots, and the model cache
   as hard links (`docs/log-schema.md` §6). Its last entry is a comment that names the source.
 - **`DIR` must not exist**, and is made whole or not at all. The source is only read.
 
 On stderr, `rebase` says where the copy ends: `141 of 260 events hold; at 141 the log has "exec
-make test → exit 2, 3f2a9c1b8e7d", where the agent goes on with: run make check`. With `--json`,
-its last object has `divergence`, `{position, found, expected}`, or `null` when the whole log
-holds.
+make test → exit 2, 3f2a9c1b8e7d", where the revised agent goes on with: run make check`. With
+`--json`, its last object has `divergence`, `{position, found, expected}`, or `null` when the
+whole log holds.
 
 ## 5. Commands that read
 
