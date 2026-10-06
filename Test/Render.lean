@@ -54,39 +54,39 @@ def suite : Suite := Testing.suite "render" #[
     let lines : Array (Event Agent × String) := #[
       (.arrived (.said "the task\nwith a second line"), "said \"the task with a second line\""),
       (.arrived (.changed (snapshot 'a') "  M a.txt\nfixed"), "changed → aaaaaaaaaaaa:   M a.txt fixed"),
-      (.arrived (.replied #[0, 3] (.choice 2)), "replied to 0.3: 2"),
-      (.arrived (.replied #[0, 3] .unavailable), "replied to 0.3: unavailable"),
-      (.arrived (.replied #[0, 3] .yes), "replied to 0.3: yes"),
-      (.asked #[0, 3] { text := "Keep the old API?", form := .yesNo }, "ask \"Keep the old API?\""),
+      (.arrived (.replied ⟪"agent", "ask_user"⟫ (.choice 2)), "replied to agent/ask_user: 2"),
+      (.arrived (.replied ⟪"agent", "ask_user"⟫ .unavailable), "replied to agent/ask_user: unavailable"),
+      (.arrived (.replied ⟪"agent", "ask_user"⟫ .yes), "replied to agent/ask_user: yes"),
+      (.asked ⟪"agent", "ask_user"⟫ { text := "Keep the old API?", form := .yesNo }, "ask \"Keep the old API?\""),
       (swe.event, "call mini-swe, gpt-oss-120b"),
       ((graderCall "python3 /grader/grade.py").event, "call grader"),
-      (.heard #[0] #[], "inbox: nothing"),
-      (.heard #[0] #[2, 5], "inbox: takes [2, 5]"),
-      (.answered #[0] (.sample testModelSpec.toJson (snapshot 'b')) (.error "too long"), "failed: too long"),
-      (.answered #[0] (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response { toolCalls := #[call "c" "bash" "ls -la", submitCall "s" "done"] })),
+      (.heard ⟪"agent"⟫ #[], "inbox: nothing"),
+      (.heard ⟪"agent"⟫ #[2, 5], "inbox: takes [2, 5]"),
+      (.answered ⟪"agent"⟫ (.sample testModelSpec.toJson (snapshot 'b')) (.error "too long"), "failed: too long"),
+      (.answered ⟪"agent"⟫ (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response { toolCalls := #[call "c" "bash" "ls -la", submitCall "s" "done"] })),
         "sample → bash ls -la; submit done"),
-      (.answered #[0] (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response { content? := some "hello\nthere" })),
+      (.answered ⟪"agent"⟫ (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response { content? := some "hello\nthere" })),
         "sample → says \"hello there\""),
-      (.answered #[0, 1] (.exec "ls -la" {}) (.ok (.execution { output := { output := "x", exitCode? := some 2 }, workspace := snapshot 'c' })),
+      (.answered ⟪"agent", "bash"⟫ (.exec "ls -la" {}) (.ok (.execution { output := { output := "x", exitCode? := some 2 }, workspace := snapshot 'c' })),
         "exec ls -la → exit 2, cccccccccccc"),
-      (.answered #[0, 1] (.exec "sleep 9" {}) (.ok (.execution { output := { output := "", error? := some "timed out" }, workspace := snapshot 'c' })),
+      (.answered ⟪"agent", "bash"⟫ (.exec "sleep 9" {}) (.ok (.execution { output := { output := "", error? := some "timed out" }, workspace := snapshot 'c' })),
         "exec sleep 9 → timed out, cccccccccccc"),
-      (.answered #[0, 2] .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })), "time 1.2 s of 60.0 s"),
-      (.answered #[0, 2] .time (.ok (.timing { spentMs := 1200 })), "time 1.2 s"),
-      (.opened #[0] swe, "open mini-swe, gpt-oss-120b"),
-      (.opened #[1] ⟨"grader", (graderCall "sh g.sh").toJson⟩, "open grader"),
-      (.opened #[0, 1] ⟨"bash", .mkObj [("command", "ls")]⟩, "open bash \"ls\""),
-      (.opened #[0, 1] ⟨"ask_user", (askCall "q" "Keep it?").arguments⟩, "open ask_user \"Keep it?\""),
-      (.opened #[0, 1] ⟨"time_budget", .mkObj []⟩, "open time_budget"),
-      (.returned #[0] (json "{\"status\":\"Submitted\",\"submission\":\"done\"}"), "return Submitted: done"),
-      (.failed #[0, 1] "no routine named bash", "fail: no routine named bash"),
+      (.answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })), "time 1.2 s of 60.0 s"),
+      (.answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200 })), "time 1.2 s"),
+      (.opened ⟪"mini-swe"⟫ swe, "open mini-swe, gpt-oss-120b"),
+      (.opened ⟪"grader"⟫ ⟨"grader", (graderCall "sh g.sh").toJson⟩, "open grader"),
+      (.opened ⟪"agent", "bash"⟫ ⟨"bash", .mkObj [("command", "ls")]⟩, "open bash \"ls\""),
+      (.opened ⟪"agent", "ask_user"⟫ ⟨"ask_user", (askCall "q" "Keep it?").arguments⟩, "open ask_user \"Keep it?\""),
+      (.opened ⟪"agent", "time_budget"⟫ ⟨"time_budget", .mkObj []⟩, "open time_budget"),
+      (.returned ⟪"agent"⟫ (json "{\"status\":\"Submitted\",\"submission\":\"done\"}"), "return Submitted: done"),
+      (.failed ⟪"agent", "bash"⟫ "no routine named bash", "fail: no routine named bash"),
       (.stopped "to grade this point", "stopped: to grade this point"),
       (.commented "the parser goes wrong here\nsee 5.7", "# the parser goes wrong here see 5.7")]
     for (event, line) in lines do
       assertEqual line (Render.eventSummary event) line
     assertEqual "an entry, as the commands that append print it"
-      (Render.entryLine (snapshot 'f') 7 (.heard #[0, 2] #[]))
-      (String.ofList (List.replicate 64 'f') ++ "  7  0.2  inbox: nothing")
+      (Render.entryLine (snapshot 'f') 7 (.heard ⟪"agent", "planner#2"⟫ #[]))
+      (String.ofList (List.replicate 64 'f') ++ "  7  agent/planner#2  inbox: nothing")
     assertEqual "a notice is in no frame" (Render.entryLine (snapshot 'f') 2 (.stopped "x"))
       (String.ofList (List.replicate 64 'f') ++ "  2  -  stopped: x"),
 
@@ -96,18 +96,18 @@ def suite : Suite := Testing.suite "render" #[
     let lines : Array (Option Question × Next Agent × String) := #[
       (none, .done (json "{\"status\":\"Submitted\",\"submission\":\"\"}"), "done: Submitted"),
       (none, .raised "it broke", "failed: it broke"),
-      (some question, .waits #[0, 0] (some question), "waits for a reply: Keep the old API?"),
-      (none, .waits #[0] none, "waits for a notice in 0"),
+      (some question, .waits ⟪"agent", "ask_user"⟫ (some question), "waits for a reply: Keep the old API?"),
+      (none, .waits ⟪"agent"⟫ none, "waits for a notice in agent"),
       (none, .waits #[] none, "waits for a call"),
-      (none, .ask { frame := #[0], op := .sample testModelSpec request }, "next: sample gpt-oss-120b on a request of 2 messages"),
-      (none, .ask { frame := #[0, 1], op := .exec "make" {} }, "next: run make"),
-      (none, .ask { frame := #[0, 1], op := .time }, "next: time the run"),
-      (none, .hears #[0] #[2], "next: a read of the inbox in 0"),
-      (none, .opens #[0, 1] ⟨"bash", .null⟩, "next: open bash"),
-      (none, .returns #[0, 1] .null, "next: the return of 0.1"),
-      (none, .fails #[0, 1] "x", "next: the failure of 0.1"),
+      (none, .ask { frame := ⟪"agent"⟫, op := .sample testModelSpec request }, "next: sample gpt-oss-120b on a request of 2 messages"),
+      (none, .ask { frame := ⟪"agent", "bash"⟫, op := .exec "make" {} }, "next: run make"),
+      (none, .ask { frame := ⟪"agent", "time_budget"⟫, op := .time }, "next: time the run"),
+      (none, .hears ⟪"agent"⟫ #[2], "next: a read of the inbox in agent"),
+      (none, .opens ⟪"agent", "bash"⟫ ⟨"bash", .null⟩, "next: open bash"),
+      (none, .returns ⟪"agent", "bash"⟫ .null, "next: the return of agent/bash"),
+      (none, .fails ⟪"agent", "bash"⟫ "x", "next: the failure of agent/bash"),
       (none, .mismatch 7, "broken: the event at 7 is no trace of the run"),
-      (none, .unguarded #[0], "broken: a loop in 0 reads no event")]
+      (none, .unguarded ⟪"agent"⟫, "broken: a loop in agent reads no event")]
     for (question?, next, line) in lines do
       assertEqual line (Render.nextSummary question? none next) line
     -- Where no call runs, the run stands as its last call ended: an agent with its outcome, a
@@ -121,8 +121,8 @@ def suite : Suite := Testing.suite "render" #[
       (.failed "it broke", "failed: it broke")]
     for (ended, line) in standings do
       assertEqual line (Render.nextSummary none (some ended) (.waits #[] none)) line
-    assertEqual "a call that waits is no ending" (Render.nextSummary none (some (.returned outcome)) (.waits #[1] none))
-      "waits for a notice in 1",
+    assertEqual "a call that waits is no ending" (Render.nextSummary none (some (.returned outcome)) (.waits ⟪"grader"⟫ none))
+      "waits for a notice in grader",
 
   test "a response's usage is read in either API's names, and summed where both report" do
     let completions := json ("{\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120," ++
@@ -210,14 +210,14 @@ def suite : Suite := Testing.suite "render" #[
     let mut forest ← assertOk store.forest
     let mut parent? : Option Hash := none
     for event in #[.arrived (.changed (snapshot 'a') "the project"), .arrived (.called call), .heard #[] #[1],
-        (.opened #[0] call : Event Agent)] do
+        (.opened #[{ name := call.name }] call : Event Agent)] do
       let (hash, grown) ← assertOk <| store.put forest { parent?, event }
       forest := grown
       parent? := some hash
     let rows ← assertOk <| Render.rows store forest
     assertEqual "every entry" rows.size 4
     assertEqual "the run is named by its call" (rows[0]!.title?) (some "an-agent-of-another-version, gpt-oss-120b")
-    assertEqual "and its end says the call fails" (rows.back?.bind (·.status?)) (some "next: the failure of 0")
+    assertEqual "and its end says the call fails" (rows.back?.bind (·.status?)) (some "next: the failure of an-agent-of-another-version")
 ]
 
 end RenderTests

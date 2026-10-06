@@ -279,10 +279,11 @@ def runSuite : Suite := suite "mini-swe.run" #[
     assertEqual "the agent's outcome" ((agentResult log).bind (·.toOption) |>.map (status ·)) (some "Submitted")
     assertEqual "the calls: each agent's uname, MiniSwe itself in the agent's frame, its bash in the sub-agent's"
       (log.filterMap fun | .opened frame opened => some (frame, opened.name) | _ => none)
-      #[(#[0], "agent"), (#[0, 0], "uname"), (#[0, 1], "mini-swe"), (#[0, 1, 0], "uname"), (#[0, 1, 1], "bash")]
+      #[(⟪"agent"⟫, "agent"), (⟪"agent", "uname"⟫, "uname"), (⟪"agent", "mini-swe"⟫, "mini-swe"),
+        (⟪"agent", "mini-swe", "uname"⟫, "uname"), (⟪"agent", "mini-swe", "bash"⟫, "bash")]
     -- The sub-agent's call is the agent's own, with the model's task: its configuration, its model.
     check (log.any fun
-        | .opened #[0, 1] ⟨"mini-swe", arguments⟩ => match ProgramArguments.fromJson arguments with
+        | .opened ⟪"agent", "mini-swe"⟫ ⟨"mini-swe", arguments⟩ => match ProgramArguments.fromJson arguments with
           | .ok delegated => taskOf delegated.config == some "write b.txt" && delegated.environment?.isNone &&
               (delegated.config.getObjVal? "tools").toOption == some (Lean.toJson config.tools)
           | .error _ => false

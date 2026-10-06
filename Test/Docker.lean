@@ -185,7 +185,7 @@ def suite : Suite := Testing.suite "docker" #[
         try
           let (paused, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 1 }
           let log ← Scripted.logAt rt paused
-          assertEqual "the call's image, from its configuration" ((callAt? log 0).bind (·.environment?.map (·.image))) (some settings.image)
+          assertEqual "the call's image, from its configuration" ((callAt? log { name := "agent" }).bind (·.environment?.map (·.image))) (some settings.image)
           -- The container wrote it, the host snapshotted it.
           assertEqual "snapshot"
             ((← assertOk ((← workspaces).readFile? ((workspace? log).getD default) "made.txt")).map (String.fromUTF8? ·))
@@ -293,7 +293,10 @@ def suite : Suite := Testing.suite "docker" #[
           let forest ← assertOk rt.store.forest
           let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (root := run)
           let rows := ((page.getObjVal? "entries" >>= Json.getArr?).toOption.getD #[]).filter fun row =>
-            (row.getObjVal? "f").toOption.any (·.compress == "[1]") &&
+            -- The grader's own frame: the run's call of `grader`, the first or a later one.
+            (row.getObjVal? "f").toOption.any (fun f => match f with
+              | .arr #[.str call] => call.startsWith "grader"
+              | _ => false) &&
             (row.getObjVal? "e" >>= (·.getObjVal? "k") >>= Json.getStr?).toOption == some "exec"
           assertEqual "the graders' commands" rows.size 2
           let changed (row : Json) : Array String :=

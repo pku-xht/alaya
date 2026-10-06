@@ -1,4 +1,5 @@
 import Test.Framework
+import Test.Frames
 import Test.DirectoryWorkspaces
 import Test.Container
 import Alaya
@@ -265,13 +266,13 @@ def respond (run : Routine Agent) (log : Log Agent) (response : Chat.Response) :
 /-- The start of a log of the test's agent: its root, the call of the agent on `task`, the run's
 read of it, and the opening of the call. -/
 def opening (task : String := "t") : Log Agent :=
-  #[.arrived (.changed default "the project"), callAgent task, .heard #[] #[1], .opened #[0] (testCall task)]
+  #[.arrived (.changed default "the project"), callAgent task, .heard #[] #[1], .opened ⟪"agent"⟫ (testCall task)]
 
 /-- How the agent of a log ended: the value its frame returned, or its error. -/
 def agentResult (log : Log Agent) : Option (Except String Json) :=
   log.findSome? fun
-    | .returned #[0] value => some (.ok value)
-    | .failed #[0] error => some (.error error)
+    | .returned ⟪"agent"⟫ value => some (.ok value)
+    | .failed ⟪"agent"⟫ error => some (.error error)
     | _ => none
 
 /-- The status of MiniSwe's outcome, from how its frame ended. -/

@@ -237,7 +237,7 @@ def rows (store : Store) (forest : Forest) (root : Routine Agent := session) : R
                       summary := eventSummary visit.entry.event, status?
                       comment := visit.entry.event matches .commented ..
                       title? := match visit.entry.event with
-                        | .opened #[0] call => some (callTitle call)
+                        | .opened #[_] call => some (callTitle call)
                         | _ => none })
   -- A run's title is its first call's, on its root.
   let titles : Std.HashMap Hash String := rows.foldl (init := {}) fun titles row =>

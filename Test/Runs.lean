@@ -116,9 +116,9 @@ def suite : Suite := Testing.suite "runs" #[
       | .hears #[] notices => assertEqual "the run's read takes the call" notices #[1]
       | _ => fail "the run reads its call next"
       let settled := settle run log
-      assertEqual "the call opens with its configuration" ((callAt? settled 0).map (·.toJson.compress))
+      assertEqual "the call opens with its configuration" ((callAt? settled { name := "agent" }).map (·.toJson.compress))
         (some (testArguments "the task").toJson.compress)
-      check (settled[3]? matches some (Event.opened #[0] _)) "in a frame of its own",
+      check (settled[3]? matches some (Event.opened ⟪"agent"⟫ _)) "in a frame of its own",
 
   test "the driver appends an entry an event, and replay agrees with the log at every prefix" do
     withMini {} fun run => do
@@ -145,9 +145,10 @@ def suite : Suite := Testing.suite "runs" #[
       let (again, stop) ← assertOk <| Driver.drive rt run last
       check ((stop matches .idle) && again == last) "the run is still over"
       assertEqual "no entry written" (← assertOk rt.store.forest).entries.size count
-      -- Three commands, each in a frame of its own under the agent's.
+      -- Three commands, each in a frame of its own under the agent's, named by its routine and how
+      -- many calls of it came before: the agent's uname, a call of another routine, moves none.
       let frames := log.filterMap fun | .opened frame ⟨"bash", _⟩ => some frame | _ => none
-      assertEqual "frames, after the agent's uname" frames #[#[0, 1], #[0, 2], #[0, 3]],
+      assertEqual "frames" frames #[⟪"agent", "bash"⟫, ⟪"agent", "bash#1"⟫, ⟪"agent", "bash#2"⟫],
 
   test "the driver reports each entry as it appends it, in order, with its time" do
     withMini {} fun run => do
@@ -173,7 +174,7 @@ def suite : Suite := Testing.suite "runs" #[
       | .paused reason => check (contains reason "1 response") reason
       | _ => fail "the run pauses after one sample"
       -- It pauses before the next round's read of the inbox, so a message added there is heard.
-      check ((← logAt rt paused).back? matches some (.returned #[0, 1] _)) "paused after the first call ended"
+      check ((← logAt rt paused).back? matches some (.returned ⟪"agent", "bash"⟫ _)) "paused after the first call ended"
       let (finished, _) ← assertOk <| Driver.drive rt run paused
       assertEqual "the same events" (describe (← logAt rt finished)) (describe (← logAt whole wholeEnd)),
 
@@ -225,7 +226,7 @@ def suite : Suite := Testing.suite "runs" #[
       let forest ← assertOk rt.store.forest
       assertEqual "one log" forest.leaves.size 1
       let log ← logAt rt forest.leaves[0]!
-      check (log.back? matches some (.opened #[0, 1] _)) "the log ends with the call that asked for the command"
+      check (log.back? matches some (.opened ⟪"agent", "bash"⟫ _)) "the log ends with the call that asked for the command"
       let (finished, stop) ← assertOk <| Driver.drive rt run forest.leaves[0]!
       check (stop matches .idle) "the run finishes"
       assertEqual "the command ran once in the log" ((← logAt rt finished).filter fun
@@ -295,7 +296,7 @@ def suite : Suite := Testing.suite "runs" #[
       assertEqual "two continuations" (forest.childrenOf point).size 2
       assertEqual "the first kept" (agentStatus (← logAt rt first)) "Submitted"
       let forked ← logAt rt second
-      check (forked.any fun | .returned #[0] value => contains value.compress "the other" | _ => false)
+      check (forked.any fun | .returned ⟪"agent"⟫ value => contains value.compress "the other" | _ => false)
         "the fork ended its own way",
 
   test "a message appended where a run paused reaches the model in its next request" do
@@ -327,7 +328,7 @@ def suite : Suite := Testing.suite "runs" #[
       check (stop matches .idle) "the agent is over"
       assertEqual "stopped, with the reason the stop gave"
         ((lastCall? (← logAt rt ended)).bind (·.2) |>.map Render.endingSummary) (some "stopped: enough")
-      check (!(← logAt rt ended).any fun | .returned #[0] _ | .failed #[0] _ => true | _ => false)
+      check (!(← logAt rt ended).any fun | .returned ⟪"agent"⟫ _ | .failed ⟪"agent"⟫ _ => true | _ => false)
         "a stop marks no end of the agent's frames"
       assertError "a stop after the end" (Driver.append rt.store run ended (.stopped "again")) fun
         | .input _ => true
@@ -366,7 +367,7 @@ def suite : Suite := Testing.suite "runs" #[
         | _ => false
       -- The grader is a call of its own: its command is asked for in its frame, and a stop ends it.
       let grading := settle run log
-      check ((next run grading) matches .ask { frame := #[1], op := .exec .., .. }) "the grader's command, in its own frame"
+      check ((next run grading) matches .ask { frame := ⟪"grader"⟫, op := .exec .., .. }) "the grader's command, in its own frame"
       let mut during := asked
       let mut forest ← assertOk rt.store.forest
       for event in grading.extract log.size grading.size do
@@ -384,7 +385,7 @@ def suite : Suite := Testing.suite "runs" #[
       let rt ← runtime (echoing) (some (← scriptedModel script))
       let tip ← start rt run
       let forest ← assertOk rt.store.forest
-      let (bad, _) ← assertOk <| rt.store.put forest { parent? := some tip, event := .returned #[0, 5] "x" }
+      let (bad, _) ← assertOk <| rt.store.put forest { parent? := some tip, event := .returned ⟪"agent", "bash#5"⟫ "x" }
       assertError "a mark the program does not make" (Driver.drive rt run bad) fun
         | .input message => contains message "no trace"
         | _ => false
@@ -427,7 +428,7 @@ def suite : Suite := Testing.suite "runs" #[
       | .input _ => true
       | _ => false
     let forest ← assertOk rt.store.forest
-    let (bad, _) ← assertOk <| rt.store.put forest { parent? := some tip, event := .returned #[0, 5] "x" }
+    let (bad, _) ← assertOk <| rt.store.put forest { parent? := some tip, event := .returned ⟪"agent", "bash#5"⟫ "x" }
     let _ ← assertOk <| Notices.comment rt.store bad "this log is broken"
     pure (),
 
@@ -438,7 +439,7 @@ def suite : Suite := Testing.suite "runs" #[
       (Chat.Message.user "<intervention>\nA person sent you a message while you were paused.\nkeep the old API\n</intervention>").toStored.compress
     assertStringEq "a change" (told (.changed default "  M a.txt\nI fixed it"))
       (Chat.Message.user "<intervention>\nA person changed the workspace while you were paused:\n  M a.txt\nI fixed it\n</intervention>").toStored.compress
-    assertStringEq "a reply is the asking call's, not the model's to be told" (told (.replied #[0, 0] .yes)) "nothing"
+    assertStringEq "a reply is the asking call's, not the model's to be told" (told (.replied ⟪"agent", "ask_user"⟫ .yes)) "nothing"
     assertStringEq "nor a call" (told (.called ⟨"grader", .null⟩)) "nothing",
 
   test "a commit appends the files and what changed, and the next command runs on them" do
@@ -467,7 +468,7 @@ def suite : Suite := Testing.suite "runs" #[
           | _ => false) "the command read the person's file"
         let found := log.findIdx? (fun | .arrived (.changed _ summary) => contains summary "b.txt" | _ => false)
         let some changedAt := found | fail "the change is in the log"
-        check (log.any fun | .heard #[0] notices => notices == #[changedAt] | _ => false)
+        check (log.any fun | .heard ⟪"agent"⟫ notices => notices == #[changedAt] | _ => false)
           "the agent heard the change"
       finally executor.close,
 
@@ -495,7 +496,7 @@ def suite : Suite := Testing.suite "runs" #[
         assertEqual "the file is named by its content" firstFile s!"/alaya/outputs/{Driver.outputFile long}"
         -- From the point after the first command: the second listing is the fork's own.
         let forest ← assertOk rt.store.forest
-        let returnedAt := log.findIdx? (fun | .returned #[0, 1] _ => true | _ => false)
+        let returnedAt := log.findIdx? (fun | .returned ⟪"agent", "bash"⟫ _ => true | _ => false)
         let some at' := returnedAt | fail "no return"
         let (forked, _) ← assertOk <| Driver.drive rt run (forest.path first)[at']!
         let some again := (← logAt rt forked).findSome? fun

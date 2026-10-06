@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 314" width="920" height="314">
-<title>A whole run: the agent in frame 0, then a grader in frame 1</title>
+<title>A whole run: the agent, then a grader, each in a frame of its own</title>
 <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}</style>
 <rect width="920" height="314" fill="#fff"/>
 <text x="12" y="14" class="s">computation</text>
@@ -11,8 +11,8 @@
 <path fill="#fff" d="M26.5,297.5V242.5Q26.5,236.5 32.5,236.5H287.5Q293.5,236.5 293.5,242.5V297.5Q293.5,303.5 287.5,303.5H32.5Q26.5,303.5 26.5,297.5Z"/><path class="bx" d="M26.5,297.5V242.5Q26.5,236.5 32.5,236.5H287.5Q293.5,236.5 293.5,242.5V297.5Q293.5,303.5 287.5,303.5H32.5Q26.5,303.5 26.5,297.5"/>
 <text x="460" y="42" class="f n" text-anchor="end">0</text>
 <text x="468" y="42" class="fr">-</text>
-<g transform="translate(527,31.5) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
-<text x="546" y="42.5">the workspace the run starts from</text>
+<g transform="translate(537,31.5) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<text x="556" y="42.5">the workspace the run starts from</text>
 <text x="898" y="42" class="f" text-anchor="end">arrived</text>
 <text x="20.5" y="42" class="s b">run · -</text>
 <text x="304" y="35.5" class="s">a person · <tspan class="m">alaya new</tspan></text>
@@ -20,16 +20,16 @@
 <circle cx="307" cy="43.5" r="2.5" fill="#7556a3"/>
 <text x="460" y="66" class="f n" text-anchor="end">1</text>
 <text x="468" y="66" class="fr">-</text>
-<g transform="translate(527,55.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
-<text x="546" y="66.5" style="fill:#7556a3">call mini-swe “Implement SPEC.md”</text>
+<g transform="translate(537,55.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
+<text x="556" y="66.5" style="fill:#7556a3">call mini-swe “Implement SPEC.md”</text>
 <text x="898" y="66" class="f" text-anchor="end">arrived</text>
 <text x="304" y="59.5" class="s">a person · <tspan class="m">alaya call</tspan></text>
 <path class="a" d="M307,67.5H432"/><path fill="#a3abb5" d="M436,67.5l-5,-2.5v5z"/>
 <circle cx="307" cy="67.5" r="2.5" fill="#7556a3"/>
 <text x="460" y="90" class="f n" text-anchor="end">2</text>
 <text x="468" y="90" class="fr">-</text>
-<g transform="translate(527,79.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
-<text x="546" y="90.5">inbox: takes 1</text>
+<g transform="translate(537,79.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="556" y="90.5">inbox: takes 1</text>
 <text x="898" y="90" class="f" text-anchor="end">heard</text>
 <rect x="21.0" y="77.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
 <text x="27" y="90" class="ch">await</text>
@@ -38,37 +38,37 @@
 <text x="369" y="85" class="s" text-anchor="middle">the log</text>
 <path class="a d" d="M436,91.5H77.8"/><path fill="#a3abb5" d="M73.8,91.5l5,-2.5v5z"/>
 <text x="460" y="114" class="f n" text-anchor="end">3</text>
-<text x="468" y="114" class="fr">0</text>
-<g transform="translate(527,103.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="546" y="114.5">open mini-swe</text>
+<text x="468" y="114" class="fr">mini-swe</text>
+<g transform="translate(537,103.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="556" y="114.5">open mini-swe</text>
 <text x="898" y="114" class="f" text-anchor="end">opened</text>
-<text x="34.5" y="114" class="s b">mini-swe · 0</text>
+<text x="34.5" y="114" class="s b">mini-swe</text>
 <path class="a" d="M294.5,110.5H432"/><path fill="#a3abb5" d="M436,110.5l-5,-2.5v5z"/>
 <circle cx="456" cy="127" r="0.9" fill="#a3abb5"/>
 <circle cx="456" cy="131" r="0.9" fill="#a3abb5"/>
 <circle cx="456" cy="135" r="0.9" fill="#a3abb5"/>
-<text x="546" y="135" class="s">the agent’s rounds</text>
+<text x="556" y="135" class="s">the agent’s rounds</text>
 <text x="460" y="156" class="f n" text-anchor="end">41</text>
-<text x="468" y="156" class="fr">0</text>
-<g transform="translate(527,145.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
-<text x="546" y="156.5">return Submitted</text>
+<text x="468" y="156" class="fr">mini-swe</text>
+<g transform="translate(537,145.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="556" y="156.5">return Submitted</text>
 <text x="898" y="156" class="f" text-anchor="end">returned</text>
 <text x="285.5" y="156" class="e" style="fill:#2a7a4b" text-anchor="end">return</text>
 <path class="a" d="M294.5,152.5H432"/><path fill="#a3abb5" d="M436,152.5l-5,-2.5v5z"/>
-<path stroke="#a8690f" stroke-dasharray="4 3" d="M4,175.5H538M756.7,175.5H914"/>
-<text x="546" y="179" class="s" style="fill:#a8690f">no call runs: the run waits for the next</text>
+<path stroke="#a8690f" stroke-dasharray="4 3" d="M4,175.5H548M766.7,175.5H914"/>
+<text x="556" y="179" class="s" style="fill:#a8690f">no call runs: the run waits for the next</text>
 <text x="460" y="202" class="f n" text-anchor="end">42</text>
 <text x="468" y="202" class="fr">-</text>
-<g transform="translate(527,191.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
-<text x="546" y="202.5" style="fill:#7556a3">call grader “pytest /grader”</text>
+<g transform="translate(537,191.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
+<text x="556" y="202.5" style="fill:#7556a3">call grader “pytest /grader”</text>
 <text x="898" y="202" class="f" text-anchor="end">arrived</text>
 <text x="304" y="195.5" class="s">a person · <tspan class="m">alaya call</tspan></text>
 <path class="a" d="M307,203.5H432"/><path fill="#a3abb5" d="M436,203.5l-5,-2.5v5z"/>
 <circle cx="307" cy="203.5" r="2.5" fill="#7556a3"/>
 <text x="460" y="226" class="f n" text-anchor="end">43</text>
 <text x="468" y="226" class="fr">-</text>
-<g transform="translate(527,215.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
-<text x="546" y="226.5">inbox: takes 42</text>
+<g transform="translate(537,215.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="556" y="226.5">inbox: takes 42</text>
 <text x="898" y="226" class="f" text-anchor="end">heard</text>
 <rect x="21.0" y="213.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
 <text x="27" y="226" class="ch">await</text>
@@ -77,16 +77,16 @@
 <text x="369" y="221" class="s" text-anchor="middle">the log</text>
 <path class="a d" d="M436,227.5H77.8"/><path fill="#a3abb5" d="M73.8,227.5l5,-2.5v5z"/>
 <text x="460" y="250" class="f n" text-anchor="end">44</text>
-<text x="468" y="250" class="fr">1</text>
-<g transform="translate(527,239.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="546" y="250.5">open grader</text>
+<text x="468" y="250" class="fr">grader</text>
+<g transform="translate(537,239.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="556" y="250.5">open grader</text>
 <text x="898" y="250" class="f" text-anchor="end">opened</text>
-<text x="34.5" y="250" class="s b">grader · 1</text>
+<text x="34.5" y="250" class="s b">grader</text>
 <path class="a" d="M294.5,246.5H432"/><path fill="#a3abb5" d="M436,246.5l-5,-2.5v5z"/>
 <text x="460" y="274" class="f n" text-anchor="end">45</text>
-<text x="468" y="274" class="fr">1</text>
-<g transform="translate(527,263.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
-<text x="546" y="274.5">exec pytest /grader → exit 0</text>
+<text x="468" y="274" class="fr">grader</text>
+<g transform="translate(537,263.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="556" y="274.5">exec pytest /grader → exit 0</text>
 <text x="898" y="274" class="f" text-anchor="end">answered</text>
 <rect x="35.0" y="261.0" width="164.5" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
 <text x="41" y="274" class="ch">exec "pytest /grader"</text>
@@ -95,9 +95,9 @@
 <text x="369" y="269" class="s" text-anchor="middle">executor</text>
 <path class="a d" d="M436,275.5H208"/><path fill="#a3abb5" d="M204,275.5l5,-2.5v5z"/>
 <text x="460" y="298" class="f n" text-anchor="end">46</text>
-<text x="468" y="298" class="fr">1</text>
-<g transform="translate(527,287.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
-<text x="546" y="298.5">return pass 48/48</text>
+<text x="468" y="298" class="fr">grader</text>
+<g transform="translate(537,287.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="556" y="298.5">return pass 48/48</text>
 <text x="898" y="298" class="f" text-anchor="end">returned</text>
 <text x="285.5" y="298" class="e" style="fill:#2a7a4b" text-anchor="end">return verdict</text>
 <path class="a" d="M294.5,294.5H432"/><path fill="#a3abb5" d="M436,294.5l-5,-2.5v5z"/>

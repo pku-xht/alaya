@@ -265,7 +265,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     -- The run reads the call and opens it; the agent's first read of its inbox takes nothing.
     let log := Scripted.settle run (← Scripted.logAt rt called)
     do
-      assertEqual "the configuration" ((callAt? log 0).map (compressed ·.config)) (some (compressed agent))
+      assertEqual "the configuration" ((callAt? log { name := "mini-swe" }).map (compressed ·.config)) (some (compressed agent))
       let mut tip := called
       for event in log.extract 2 log.size do
         tip := (← assertOk <| rt.store.put (← assertOk rt.store.forest) { parent? := some tip, event }).1

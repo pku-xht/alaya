@@ -78,7 +78,7 @@ function summary(i) {
     case 'said': return 'said “' + flat(e.text, 70) + '”';
     case 'changed': return entries[i].p === null ? 'the workspace the run starts from'
       : 'workspace changed: ' + flat(e.text, 70);
-    case 'replied': return 'replied to ' + e.to.join('.') + ': ' + flat(e.text, 60);
+    case 'replied': return 'replied to ' + e.to.join('/') + ': ' + flat(e.text, 60);
     case 'called': return 'call ' + e.title;
     case 'heard': return e.notices.length ? 'inbox: takes ' + e.notices.join(', ') : 'inbox: nothing';
     case 'asked': return 'ask “' + flat(e.text, 70) + '”';
@@ -372,7 +372,8 @@ function callsAround(i) {
     const x = entries[j];
     if (x.e.k === 'open') { if (j !== i) open.push(j); }
     else if ((x.e.k === 'return' || x.e.k === 'fail') && x.f && x.f.length) { if (j !== i) open.pop(); }
-    else if (x.e.k === 'stop') { while (open.length && entries[open[open.length - 1]].f[0] === 0) open.pop(); }
+    // A stop ends the call the run made, and every call in it.
+    else if (x.e.k === 'stop') open.length = 0;
   }
   return open;
 }

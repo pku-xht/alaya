@@ -128,10 +128,11 @@ private def hashOf (json : Json) : Except String Hash := do
   let hex ← json.getStr?
   if Hash.valid hex then pure ⟨hex⟩ else throw s!"not a digest: {hex}"
 
-def Frame.toJson (frame : Frame) : Json := .arr (frame.map fun (n : Nat) => (n : Json))
+/-- A frame as the log keeps it: its steps, each as `Frame.Segment.render` writes it. -/
+def Frame.toJson (frame : Frame) : Json := .arr (frame.map fun segment => .str segment.render)
 
 def Frame.fromJson (json : Json) : Except String Frame := do
-  (← json.getArr?).mapM Json.getNat?
+  (← json.getArr?).mapM fun step => do Frame.Segment.parse (← step.getStr?)
 
 def RoutineCall.toJson (call : RoutineCall) : Json :=
   .mkObj [("name", call.name), ("arguments", call.arguments)]

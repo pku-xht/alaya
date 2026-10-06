@@ -30,14 +30,40 @@ structure Signature where
   store : (op : Op) → Answer op → Stored
   read : (op : Op) → Stored → Option (Answer op)
 
-/-- A frame is the path of calls from the root, each call being its ordinal among the calls its
-parent made. Nothing in a computation states an ordinal: the interpreter assigns it. `#[]` is the
-frame of a run, and `#[0]`, `#[1]`, … in it those of the routines the run calls, in order. -/
-abbrev Frame := Array Nat
+/-- A step of a frame's path: a call, by the name of the routine called and how many calls of
+that name its caller made before it. Nothing in a computation states it: the interpreter
+assigns it. A call of one name does not move the calls of another, so a frame keeps its
+identity when a program changes around it. -/
+structure Frame.Segment where
+  name : String
+  occurrence : Nat := 0
+  deriving BEq, Hashable, Inhabited, Repr
 
-/-- A frame as a reader is shown it: `0.2.1`, or `-` for the run's own. -/
+/-- A frame is the path of calls from the root. `#[]` is the frame of a run, and in it the
+calls the run makes, each by its routine: `mini-swe`, then `grader`, a second `mini-swe` being
+`mini-swe#1`. -/
+abbrev Frame := Array Frame.Segment
+
+/-- A segment as a reader is shown it: `bash`, the first call of `bash`, or `bash#2`. -/
+def Frame.Segment.render (segment : Frame.Segment) : String :=
+  if segment.occurrence == 0 then segment.name else s!"{segment.name}#{segment.occurrence}"
+
+/-- Reads a segment as `render` writes it. -/
+def Frame.Segment.parse (text : String) : Except String Frame.Segment :=
+  match text.splitOn "#" with
+  | [name] => if name.isEmpty then .error "a frame has an empty step" else .ok { name }
+  | [name, occurrence] => match occurrence.toNat? with
+    | some occurrence => if name.isEmpty then .error s!"a frame step has no name: {text}" else .ok { name, occurrence }
+    | none => .error s!"a frame step counts its calls with a number: {text}"
+  | _ => .error s!"not a frame step: {text}"
+
+/-- A frame as a reader is shown it: `mini-swe/bash#2`, or `-` for the run's own. -/
 def Frame.render (frame : Frame) : String :=
-  if frame.isEmpty then "-" else ".".intercalate (frame.toList.map toString)
+  if frame.isEmpty then "-" else "/".intercalate (frame.toList.map (·.render))
+
+/-- Reads a frame as `render` writes it. -/
+def Frame.parse (text : String) : Except String Frame :=
+  if text == "-" then .ok #[] else (text.splitOn "/").toArray.mapM Frame.Segment.parse
 
 /-- Whether the frame is a call's, or inside one: not the run's own. -/
 def Frame.inCall (frame : Frame) : Bool := !frame.isEmpty

@@ -122,7 +122,7 @@ def suite : Suite := Testing.suite "commands" #[
       #["arrived", "arrived", "heard", "opened", "opened", "answered", "returned", "heard",
         "next: sample gpt-oss-120b on a request of 2 messages"]
     let plain := lines (← ok data "log" #[tip])
-    check (plain[3]?.any (has · "0  open mini-swe, gpt-oss-120b")) s!"the log in lines: {plain}"
+    check (plain[3]?.any (has · "mini-swe  open mini-swe, gpt-oss-120b")) s!"the log in lines: {plain}"
     let shown ← records (← ok data "show" #[s!"{tip}:3", "--json"])
     assertEqual "an entry by its position" (text shown[0]! ["entry"]) (text resumed[1]! ["entry"])
     assertEqual "the calls open at it" ((field shown[0]! ["calls"]).getArr?.toOption.map (·.map (text · ["routine", "name"])))
@@ -177,7 +177,7 @@ def suite : Suite := Testing.suite "commands" #[
     assertEqual "the run reads the call, opens it, runs its command, and it returns its verdict"
       ((ran.extract 0 4).map fun record => text record ["event", "type"]) #["heard", "opened", "answered", "returned"]
     assertEqual "the grader runs in a frame of its own" ((ran.extract 1 4).map fun record =>
-      (field record ["event", "frame"]).compress) #["[1]", "[1]", "[1]"]
+      (field record ["event", "frame"]).compress) #["[\"grader\"]", "[\"grader\"]", "[\"grader\"]"]
     let some status := ran.back? | fail "resume printed nothing"
     let verdictOf (status : Json) := (text status ["call"], text status ["value", "status"],
       (field status ["value", "passed"]).compress, (field status ["value", "total"]).compress)

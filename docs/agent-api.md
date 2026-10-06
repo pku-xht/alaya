@@ -150,9 +150,13 @@ inductive Notice where
 ```
 
 A **frame** says which call of a routine (`call name arguments`, §3.3) an event happened in. It
-lists, from the outermost call inward, each call's ordinal among its caller's calls: `#[]` is
-the run itself, `#[0]` the first program it calls, the agent, and `#[0, 2]` the agent's third
-call. It is written `0.2`, and `-` where there is none.
+lists, from the outermost call inward, each call by the routine's name and by how many calls of
+that name its caller made before it. `#[]` is the run itself, `mini-swe` the agent it calls, and
+`mini-swe/bash#2` the agent's third call of `bash`. It is written so, and `-` where there is none.
+
+A frame keeps its identity when a program changes around it: a call of one routine does not
+move the calls of another. An agent that comes to call `uname` first still has its first
+`bash` in `mini-swe/bash`.
 
 *The log of the agent below.*
 
@@ -244,8 +248,9 @@ call : (name : String) → (arguments : Json) → Computation σ Json
 ```
 
 1. The computation calls a routine by its name. The driver marks the call,
-   `opened child ⟨name, arguments⟩`. The **child frame** is the caller's frame and the ordinal
-   of the call among the caller's calls: `0.0`, then `0.1`.
+   `opened child ⟨name, arguments⟩`. The **child frame** is the caller's frame and a step for
+   the call: the routine's name, and how many calls of it the caller made before, as in
+   `mini-swe/bash`, then `mini-swe/bash#1`.
 2. The routine the caller's scope has under that name (§5) runs in the child frame: its
    operations are performed there, and its own calls open frames nested in it.
 3. The routine ends, and the driver marks how: `returned child value`, or `failed child error`.
@@ -575,11 +580,11 @@ def scope := Scope.fix fun scope =>
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
 flowchart TD
-  run("run · -") -- "call 0" --> agent("agent · 0") -- "call 0" --> workflow("workflow · 0.0")
-  workflow -- "call 0" --> planner("planner · 0.0.0")
-  workflow -- "call 1" --> make("step “make” · 0.0.1")
-  workflow -- "call 2" --> test("step “make test” · 0.0.2")
-  planner -- "call 0" --> lookup("lookup · 0.0.0.0")
+  run("run · -") --> agent("agent") --> workflow("agent/workflow")
+  workflow --> planner("agent/workflow/planner")
+  workflow --> make("step “make” · agent/workflow/step")
+  workflow --> test("step “make test” · agent/workflow/step#1")
+  planner --> lookup("agent/workflow/planner/lookup")
   linkStyle default stroke-width:1px
 ```
 
@@ -776,12 +781,12 @@ lastCall?      : Log Agent → Option (RoutineCall × Option CallEnd)   -- the l
    environment}⟩)`. The name is the program's, as a routine's is; the configuration has none.
 3. **The run reads it, and opens the call**: `heard - [1]`, then `opened 0 ⟨name, arguments⟩`, so
    every later command builds the same program from the log alone.
-4. **The call runs**, in frame `0`, until it returns, fails, or is stopped. Its calls name
+4. **The call runs**, in frame `mini-swe`, until it returns, fails, or is stopped. Its calls name
    routines in the program's scope, and its commands run in a container of its own image.
-5. **The run waits for the next call.** A grader is called the same way, in frame `1`, and its
+5. **The run waits for the next call.** A grader is called the same way, in frame `grader`, and its
    value is its verdict.
 
-![A whole run: the agent in frame 0, then a grader in frame 1](figures/agent-api/run.svg)
+![A whole run: the agent, then a grader, each in a frame of its own](figures/agent-api/run.svg)
 
 ## 10. Driving a run
 

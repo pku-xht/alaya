@@ -129,7 +129,7 @@ def suite : Suite := Testing.suite "mini-vero" #[
       let asked := after run #[.response { toolCalls := #[call] }]
       match next run asked with
       | .ask { op := .exec "lake lean Proof.lean" { timeoutSeconds := 600, .. }, frame } =>
-        assertEqual "in the call's frame" frame #[0, 1]
+        assertEqual "in the call's frame" frame ⟪"agent", "bash"⟫
       | _ => fail "expected the command run, as the response's first call"
       let ran := after run #[.response { toolCalls := #[call] },
         .execution { output := { output := "Lean type mismatch", exitCode? := some 1 }, workspace := default }]
@@ -186,11 +186,11 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     withVero config fun run => do
       let asked := after run #[.response (turn #[call "t" "time_budget"])]
       match next run asked with
-      | .ask { op := .time, frame } => assertEqual "in the tool's frame" frame #[0, 1]
+      | .ask { op := .time, frame } => assertEqual "in the tool's frame" frame ⟪"agent", "time_budget"⟫
       | _ => fail "expected the clock read"
       let gives (timing : Timing) : Option Json :=
         (Scripted.answer run asked (.timing timing)).findSome? fun
-          | .returned #[0, 1] value => some value
+          | .returned ⟪"agent", "time_budget"⟫ value => some value
           | _ => none
       assertEqual "left" ((gives { spentMs := 60500, budgetMs? := some 3600000 }).bind (·.getObjVal? "seconds_left" |>.toOption) |>.map (·.compress)) (some "3539")
       check ((gives { spentMs := 60500 }).bind (·.getObjVal? "seconds_left" |>.toOption) == some .null) "no budget, no number",

@@ -331,7 +331,7 @@ def runSuite : Suite := Testing.suite "workspaces.run" #[
     let (root, _) ← assertOk <| Notices.create store workspaces project
     let (called, _) ← assertOk <| Driver.append store run root (Scripted.callAgent)
     let (tip, stop) ← assertOk <| Driver.drive rt run called
-    check (stop matches .waits #[0] none) "the agent waits for a message"
+    check (stop matches .waits ⟪"agent"⟫ none) "the agent waits for a message"
     IO.FS.writeFile (project / "README.md") "readme, by hand"
     writeSpec project #[("tests/extra.txt", "extra")]
     let event ← assertOk <| Notices.changed store workspaces tip project "by hand"

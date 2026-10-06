@@ -25,7 +25,8 @@ namespace Alaya
 open Lean (Json)
 
 /-- What waits for the value of the computation being run: the rounds of loops, and the calls it
-is in, each with the frame and the counter of the caller to go back to, and the scope of the
+is in, each with the frame of the caller to go back to and the calls it will have opened, and
+the scope of the
 routine called, which the calls inside it name routines in. The bottom is the run's own frame,
 with the scope of the run's routine, and its value is the result of the run. -/
 inductive Stack (σ : Signature) : Type → Type 1 where
@@ -33,7 +34,7 @@ inductive Stack (σ : Signature) : Type → Type 1 where
   /-- A round of a loop; `start` is how many events the machine had read when it began. -/
   | round {S β α : Type} (step : S → Computation σ (S ⊕ β)) (k : β → Computation σ α) (start : Nat)
       (rest : Stack σ α) : Stack σ (S ⊕ β)
-  | call {α : Type} (parent : Frame) (opened : Nat) (k : Except String Json → Computation σ α)
+  | call {α : Type} (parent : Frame) (opened : Array String) (k : Except String Json → Computation σ α)
       (scope : Scope σ) (rest : Stack σ α) : Stack σ Json
 
 /-- The scope a call names its routine in: that of the routine running in the innermost frame. -/
@@ -43,13 +44,13 @@ def Stack.scope : Stack σ α → Scope σ
   | .call _ _ _ scope _ => scope
 
 /-- The interpreter between two events: the computation it runs, what waits for its value, the frame
-it runs in and how many calls that frame has opened, and how many events it has read. -/
+it runs in and the routines of the calls that frame has opened, and how many events it has read. -/
 structure Machine (σ : Signature) : Type 1 where
   α : Type
   computation : Computation σ α
   stack : Stack σ α
   frame : Frame
-  opened : Nat
+  opened : Array String
   read : Nat
   /-- The result of the run, once its end is logged. -/
   result? : Option (Except String Json) := none
@@ -64,7 +65,7 @@ inductive Demand (σ : Signature) where
   | finished (result : Except String Json)
   | unguarded (frame : Frame)
 
-instance : Inhabited (Machine σ) := ⟨⟨Json, .pure .null, .top .empty, #[], 0, 0, none⟩⟩
+instance : Inhabited (Machine σ) := ⟨⟨Json, .pure .null, .top .empty, #[], #[], 0, none⟩⟩
 instance : Inhabited (Demand σ) := ⟨.unguarded #[]⟩
 
 namespace Machine
@@ -72,7 +73,7 @@ namespace Machine
 /-- The machine at the start of a run: the body of the run's routine, entered by no call, in
 `#[]`, with no arguments. -/
 def start (root : Routine σ) : Machine σ :=
-  { α := Json, computation := root.body .null, stack := .top root.scope, frame := #[], opened := 0
+  { α := Json, computation := root.body .null, stack := .top root.scope, frame := #[], opened := #[]
     read := 0 }
 
 /-- Runs the machine until it needs something from the log. A call finds its routine in the scope
@@ -86,11 +87,11 @@ partial def advance (m : Machine σ) : Demand σ :=
     .mark (.failed frame error) { m with result? := some (.error error), read := read + 1 }
   | ⟨_, .pure value, .call parent opened k _ rest, frame, _, read, _⟩ =>
     .mark (.returned frame value)
-      { α := _, computation := k (.ok value), stack := rest, frame := parent, opened := opened + 1
+      { α := _, computation := k (.ok value), stack := rest, frame := parent, opened
         read := read + 1 }
   | ⟨_, .fail error, .call parent opened k _ rest, frame, _, read, _⟩ =>
     .mark (.failed frame error)
-      { α := _, computation := k (.error error), stack := rest, frame := parent, opened := opened + 1
+      { α := _, computation := k (.error error), stack := rest, frame := parent, opened
         read := read + 1 }
   | ⟨_, .pure (.inl s), .round step k start rest, frame, opened, read, _⟩ =>
     if read == start then .unguarded frame
@@ -113,14 +114,15 @@ partial def advance (m : Machine σ) : Demand σ :=
       | _ => .fail "the wait for a reply ended without one"
     .mark (.asked frame question) ⟨α, .inbox (some wait) answered, stack, frame, opened, read + 1, none⟩
   | ⟨_, .call routine k, stack, frame, opened, read, _⟩ =>
-    let child := frame.push opened
+    -- The call is named by its routine, and by how many calls of that name its frame made.
+    let child := frame.push { name := routine.name, occurrence := (opened.filter (· == routine.name)).size }
     let (body, inner) : Computation σ Json × Scope σ :=
       match stack.scope.find routine.name with
       | some found => (found.body routine.arguments, found.scope)
       | none => (.fail s!"no routine named {routine.name}", .empty)
     .mark (.opened child routine)
-      { α := _, computation := body, stack := .call frame opened k inner stack, frame := child
-        opened := 0, read := read + 1 }
+      { α := _, computation := body, stack := .call frame (opened.push routine.name) k inner stack
+        frame := child, opened := #[], read := read + 1 }
   | ⟨_, .iter step s k, stack, frame, opened, read, _⟩ =>
     advance { α := _, computation := step s, stack := .round step k read stack, frame, opened, read }
   -- A comment reads no event: a round that only comments is no guarded round.
@@ -137,13 +139,13 @@ def stop (m : Machine σ) : Option (Machine σ) :=
     | .call parent opened k _ rest =>
       if parent.isEmpty then
         some { α := _, computation := k (.error "stopped"), stack := rest, frame := parent
-               opened := opened + 1, read := m.read + 1 }
+               opened, read := m.read + 1 }
       else unwind rest
   match m with
   -- the first call is about to be opened
-  | ⟨_, .call _ k, stack, #[], opened, read, none⟩ =>
-    if opened == 0 then
-      some { α := _, computation := k (.error "stopped"), stack, frame := #[], opened := 1
+  | ⟨_, .call routine k, stack, #[], opened, read, none⟩ =>
+    if opened.isEmpty then
+      some { α := _, computation := k (.error "stopped"), stack, frame := #[], opened := #[routine.name]
              read := read + 1 }
     else none
   | ⟨_, _, stack, _, _, _, none⟩ => unwind stack

@@ -213,7 +213,7 @@ def suite : Suite := Testing.suite "ask_user" #[
           let (waiting, stop) ← assertOk <| Driver.drive rt run tip
           match stop with
           | .waits frame (some question) =>
-            assertEqual "the asking call's frame" frame #[0, 1]
+            assertEqual "the asking call's frame" frame ⟪"agent", "ask_user"⟫
             assertEqual "the form" question.form.name questionType
           | _ => fail "the run must wait for the answer"
           -- Every answer forks the waiting log: each is a branch of its own.
@@ -289,31 +289,31 @@ def suite : Suite := Testing.suite "ask_user" #[
     do
       let run := runOf fun _ => program
       let log := settle run opening
-      check (log.back? matches some (.asked #[0] _)) "the question is the last event: a mark of the program"
-      check (log.any fun | .asked #[0] question => question == deploy | _ => false) "the question, whole"
+      check (log.back? matches some (.asked ⟪"agent"⟫ _)) "the question is the last event: a mark of the program"
+      check (log.any fun | .asked ⟪"agent"⟫ question => question == deploy | _ => false) "the question, whole"
       match next run log with
-      | .waits #[0] (some question) => assertEqual "the question the run waits on" question deploy
+      | .waits ⟪"agent"⟫ (some question) => assertEqual "the question the run waits on" question deploy
       | _ => fail "the run waits on the question, in the frame that asked"
       -- A reply that does not fit is refused; one that fits is taken, and the next question asked.
       check (replyTo (next run log) (.choice 1)).toOption.isNone "a choice answers no yes/no question"
       let reply ← assertOk <| Result.fromExcept Error.input (replyTo (next run log) .yes)
-      check (reply matches .arrived (.replied #[0] .yes)) "the reply is addressed to the frame that asked"
+      check (reply matches .arrived (.replied ⟪"agent"⟫ .yes)) "the reply is addressed to the frame that asked"
       let log := settle run (log.push reply)
       match next run log with
-      | .waits #[0] (some question) => assertEqual "the second question" question.text "Which region?"
+      | .waits ⟪"agent"⟫ (some question) => assertEqual "the second question" question.text "Which region?"
       | _ => fail "the run waits on the second question, asked from the same frame"
       -- The first reply is read already: it does not answer the second question.
       check (replyTo (next run log) .yes).toOption.isNone "yes answers no choice"
       let reply ← assertOk <| Result.fromExcept Error.input (replyTo (next run log) (.choice 2))
       let log := settle run (log.push reply)
-      check (log.any fun | .returned #[0] (.str "yes, 2") => true | _ => false) "the program went on with both replies"
+      check (log.any fun | .returned ⟪"agent"⟫ (.str "yes, 2") => true | _ => false) "the program went on with both replies"
       assertEqual "two questions asked" (log.filter (· matches .asked ..)).size 2
       check (replyTo (next run log) .yes).toOption.isNone "no question waits once the agent is over"
     -- A question that cannot be asked is a failure where it is asked, and nothing waits.
     do
       let run := runOf fun _ => Json.str <$> (·.line) <$> Alaya.ask { text := " \n" }
       let log := settle run opening
-      check (log.any fun | .failed #[0] error => contains error "blank" | _ => false) "a blank question fails"
+      check (log.any fun | .failed ⟪"agent"⟫ error => contains error "blank" | _ => false) "a blank question fails"
       check (!log.any (· matches .asked ..)) "and is never asked",
 
   test "ask_user lets a model ask only the kinds of question its configuration names" do

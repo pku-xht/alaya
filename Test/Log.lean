@@ -18,30 +18,30 @@ private def snapshot (c : Char) : Snapshot := ⟨String.ofList (List.replicate 6
 private def events : Array (Event Agent) := #[
   .arrived (.changed (snapshot 'a') "the project"),
   .arrived (.said "the task\nwith a second line"),
-  .arrived (.replied #[0, 3] (.choice 2)),
-  .arrived (.replied #[0, 3] .noneOfAbove),
-  .arrived (.replied #[0, 3] (.text "words")),
-  .arrived (.replied #[0, 3] .unavailable),
-  .arrived (.replied #[0, 3] .yes),
-  .heard #[0] #[2, 5],
-  .heard #[0, 1] #[],
-  .answered #[0] (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response
+  .arrived (.replied ⟪"agent", "ask_user"⟫ (.choice 2)),
+  .arrived (.replied ⟪"agent", "ask_user"⟫ .noneOfAbove),
+  .arrived (.replied ⟪"agent", "ask_user"⟫ (.text "words")),
+  .arrived (.replied ⟪"agent", "ask_user"⟫ .unavailable),
+  .arrived (.replied ⟪"agent", "ask_user"⟫ .yes),
+  .heard ⟪"agent"⟫ #[2, 5],
+  .heard ⟪"agent", "bash"⟫ #[],
+  .answered ⟪"agent"⟫ (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response
     { content? := some "hi", toolCalls := #[call "c" "bash" "ls"], reasoning? := some "think"
       usage? := some { input? := some 10, output? := some 2, cached? := some 4 }
       finishReason? := some "tool_calls" })),
-  .answered #[0] (.sample testModelSpec.toJson (snapshot 'b')) (.error "context exceeded: too long"),
-  .answered #[0, 1] (.exec "ls -la" { timeoutSeconds := 30, env := #[("A", "1")], outputs := true })
+  .answered ⟪"agent"⟫ (.sample testModelSpec.toJson (snapshot 'b')) (.error "context exceeded: too long"),
+  .answered ⟪"agent", "bash"⟫ (.exec "ls -la" { timeoutSeconds := 30, env := #[("A", "1")], outputs := true })
     (.ok (.execution { output := { output := "x\n", exitCode? := some 0 }, workspace := snapshot 'c'
                        file? := some "/alaya/outputs/7.txt" })),
-  .answered #[0, 1] (.exec "sleep 9" {}) (.ok (.execution
+  .answered ⟪"agent", "bash#1"⟫ (.exec "sleep 9" {}) (.ok (.execution
     { output := { output := "", error? := some "timed out" }, workspace := snapshot 'c' })),
-  .answered #[0, 2] .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })),
-  .answered #[0, 2] .time (.ok (.timing { spentMs := 1200 })),
-  .answered #[1] (.exec "sh g.sh" { timeoutSeconds := 900, merge := false })
+  .answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })),
+  .answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200 })),
+  .answered ⟪"grader"⟫ (.exec "sh g.sh" { timeoutSeconds := 900, merge := false })
     (.ok (.execution { output := { output := "ok 1\n", stderr? := some "e", exitCode? := some 1 }, workspace := snapshot 'e' })),
-  .opened #[0, 1] ⟨"bash", .mkObj [("command", "ls")]⟩,
-  .returned #[0, 1] (.mkObj [("output", "x")]),
-  .failed #[0, 1] "no routine named bash",
+  .opened ⟪"agent", "bash"⟫ ⟨"bash", .mkObj [("command", "ls")]⟩,
+  .returned ⟪"agent", "bash"⟫ (.mkObj [("output", "x")]),
+  .failed ⟪"agent", "bash"⟫ "no routine named bash",
   .stopped "to grade this point",
   .commented "a comment\non two lines",
   (graderCall "sh /grader/g.sh").event,
@@ -108,7 +108,7 @@ def suite : Suite := Testing.suite "log" #[
         check (request.messages.any fun | .user text => contains text "the task" | _ => false) "the task is told"
         check (request.messages.any fun | .user text => contains text "a hint" | _ => false) "and the message"
       | _ => fail "the agent goes on to sample"
-      check (log.any fun | .heard #[0] #[1] => true | _ => false) "the agent's read takes the message at 1",
+      check (log.any fun | .heard ⟪"agent"⟫ #[1] => true | _ => false) "the agent's read takes the message at 1",
 
   test "a stop ends the call wherever it is, and has no place where no call runs" do
     -- An agent that waits for a message.
@@ -121,7 +121,7 @@ def suite : Suite := Testing.suite "log" #[
     | _ => fail "a stop before any call is no trace of the run"
     let waiting := settle run opening
     match next run waiting with
-    | .waits #[0] _ => pure ()
+    | .waits ⟪"agent"⟫ _ => pure ()
     | _ => fail "the agent waits for a message"
     let ended := settle run (waiting.push (.stopped "no message"))
     match next run ended with
@@ -169,10 +169,10 @@ def suite : Suite := Testing.suite "log" #[
       let .ask sampled := next run log | fail "the agent samples"
       let other : Chat.Response := {}
       broken "another request" log (.answered sampled.frame (.sample testModelSpec.toJson (Hash.ofBytes "other".toUTF8)) (.ok (.response other)))
-      broken "another frame" log (.answered #[0, 0] sampled.op.key (.ok (.response other)))
+      broken "another frame" log (.answered ⟪"agent", "bash"⟫ sampled.op.key (.ok (.response other)))
       broken "an answer of another kind" log (.answered sampled.frame sampled.op.key (.ok (.timing { spentMs := 1 })))
       broken "an answer to another operation" log (.answered sampled.frame .time (.ok (.timing { spentMs := 1 })))
-      broken "a mark where an answer is due" log (.heard #[0] #[])
+      broken "a mark where an answer is due" log (.heard ⟪"agent"⟫ #[])
       let log := respond run log (responseWith #[call "c" "bash" "ls"])
       let .ask ran := next run log | fail "the command is asked for"
       broken "another command" log (.answered ran.frame (.exec "rm -rf /" {}) (.ok (.execution default)))
@@ -180,10 +180,10 @@ def suite : Suite := Testing.suite "log" #[
       let log := log.push (.answered ran.frame ran.op.key (.ok (.execution execution)))
       let .returns frame value := next run log | fail "the call returns"
       broken "another value" log (.returned frame (.str "x"))
-      broken "another frame's return" log (.returned #[0, 2] value)
+      broken "another frame's return" log (.returned ⟪"agent", "bash#1"⟫ value)
       broken "a failure where it returned" log (.failed frame "x")
       match next run (log.push (.returned frame value)) with
-      | .hears #[0] _ => pure ()
+      | .hears ⟪"agent"⟫ _ => pure ()
       | _ => fail "the log as the program makes it goes on",
 
   test "a failure is caught around a loop, around a call, or by no one, and each try is in the log" do
@@ -213,22 +213,22 @@ def suite : Suite := Testing.suite "log" #[
     let mut failing := settle uncaught rootOnly
     for ms in [10, 20, 30] do
       failing := answer uncaught failing (.timing { spentMs := ms })
-    check (failing.any fun | .failed #[0] "gave up at 30" => true | _ => false) "the agent's call failed"
+    check (failing.any fun | .failed ⟪"agent"⟫ "gave up at 30" => true | _ => false) "the agent's call failed"
     match next uncaught failing with
     | .raised error => assertEqual "the run's error" error "gave up at 30"
     | _ => fail "the run ends with the error"
     -- A tool that fails ends its own call with the error; its caller catches it or fails too.
     let calls := runOf (try call "boom" .null catch error => pure (.str s!"the tool said: {error}"))
     let called := settle calls rootOnly
-    check (called.any fun | .failed #[0, 0] "it broke" => true | _ => false) "the tool's call failed"
-    check (called.any fun | .returned #[0] (.str "the tool said: it broke") => true | _ => false) "its caller went on"
+    check (called.any fun | .failed ⟪"agent", "boom"⟫ "it broke" => true | _ => false) "the tool's call failed"
+    check (called.any fun | .returned ⟪"agent"⟫ (.str "the tool said: it broke") => true | _ => false) "its caller went on"
     let missing := runOf (call "nowhere" .null)
-    check ((settle missing rootOnly).any fun | .failed #[0, 0] "no routine named nowhere" => true | _ => false)
+    check ((settle missing rootOnly).any fun | .failed ⟪"agent", "nowhere"⟫ "no routine named nowhere" => true | _ => false)
       "a tool the run does not have fails its call"
     -- A loop that reads no event in a round would never end, and is found out.
     let spins := runOf (iter (fun (n : Nat) => (pure (Sum.inl (n + 1)) : Computation Agent (Nat ⊕ Json))) 0)
     match next spins (settle spins rootOnly) with
-    | .unguarded #[0] => pure ()
+    | .unguarded ⟪"agent"⟫ => pure ()
     | _ => fail "a loop that reads nothing is reported",
 
   test "a comment is written where the driver reaches it, and replay passes over every one" do
@@ -245,7 +245,7 @@ def suite : Suite := Testing.suite "log" #[
       check ((next run log) matches .done _) s!"{label}: the run is not over"
     -- At the end of a log, the program's comments since its last event wait for the next event:
     -- what comes next is the operation.
-    let opened := rootOnly.push (.opened #[0] agentCall)
+    let opened := rootOnly.push (.opened ⟪"agent"⟫ agentCall)
     check ((next run opened) matches .ask { op := .time, .. }) "the operation is next"
     assertEqual "the comment before it" (Replayer.ofLog run opened).comments #["starting"]
     -- Settled as the driver settles it, the log holds each comment once, before the event it precedes.
@@ -276,7 +276,7 @@ def suite : Suite := Testing.suite "log" #[
     let spins := runOf (iter (fun (n : Nat) => (do
       comment s!"round {n}"
       pure (Sum.inl (n + 1)) : Computation Agent (Nat ⊕ Json))) 0)
-    check ((next spins (settle spins rootOnly)) matches .unguarded #[0]) "a loop that only comments is reported",
+    check ((next spins (settle spins rootOnly)) matches .unguarded ⟪"agent"⟫) "a loop that only comments is reported",
 
   test "a grader is a call like any: the run waits for it, opens it in a frame of its own, and it gives the verdict" do
     match miniRun with
@@ -286,14 +286,14 @@ def suite : Suite := Testing.suite "log" #[
       let log := respond run (settle run opening) (responseWith #[submitCall "s" "done"])
       check ((next run log) matches .waits #[] none) "the run waits for a call"
       check (((lastCall? log).bind (·.2)) matches some (.returned _)) "the agent returned"
-      -- The grader: the run takes the call, opens it in #[1], and its command is asked for there,
+      -- The grader: the run takes the call, opens it in `grader`, and its command is asked for there,
       -- with its stderr apart.
       let called := log.size
       let log := settle run (log.push (graderCall "sh g.sh").event)
       check (log.any fun | .heard #[] notices => notices == #[called] | _ => false) "the run's own frame takes the call"
-      check (log.any fun | .opened #[1] ⟨"grader", _⟩ => true | _ => false) "the grader opens in a frame of its own"
+      check (log.any fun | .opened ⟪"grader"⟫ ⟨"grader", _⟩ => true | _ => false) "the grader opens in a frame of its own"
       let .ask first := next run log | fail "the grader's command is asked for"
-      assertEqual "in its frame" first.frame #[1]
+      assertEqual "in its frame" first.frame ⟪"grader"⟫
       check (first.op matches .exec "sh g.sh" { merge := false, .. }) "the command, its stderr apart"
       -- Its verdict is the value of its call, and the run waits again.
       let graded := answer run log (.execution { output := { output := "1..1\nok 1\n", stderr? := some "", exitCode? := some 0 }, workspace := default })
@@ -306,16 +306,20 @@ def suite : Suite := Testing.suite "log" #[
   test "a call's environment is read off the opening of the call the run made, or the log is refused" do
     let unreadable (label : String) (log : Log Agent) (frame : Frame) : TestM Unit :=
       assertError label (environmentOf log frame) fun | .storage _ => true | _ => false
-    unreadable "no opening" rootOnly #[0]
-    unreadable "the run's own frame" (rootOnly.push (.opened #[0] (testCall "t"))) #[]
-    unreadable "no environment" (rootOnly.push (.opened #[0] ⟨"agent", .mkObj [("config", .mkObj [])]⟩)) #[0]
+    unreadable "no opening" rootOnly ⟪"agent"⟫
+    unreadable "the run's own frame" (rootOnly.push (.opened ⟪"agent"⟫ (testCall "t"))) #[]
+    unreadable "no environment" (rootOnly.push (.opened ⟪"agent"⟫ ⟨"agent", .mkObj [("config", .mkObj [])]⟩)) ⟪"agent"⟫
     -- A call inside the call shares its environment.
-    let environment ← assertOk <| environmentOf (rootOnly.push (.opened #[0] (testCall "t"))) #[0, 3]
+    let environment ← assertOk <| environmentOf (rootOnly.push (.opened ⟪"agent"⟫ (testCall "t"))) ⟪"agent", "bash"⟫
     assertEqual "the environment" environment.toJson.compress testEnvironment.toJson.compress,
 
-  iotest "frames render as paths, and a reference to an entry may name a position" do
-    if Frame.render #[0, 2, 1] != "0.2.1" || Frame.render #[] != "-" then
-      throw <| IO.userError "frames render as dotted paths"
+  iotest "frames render as paths of routines, read back, and a reference to an entry may name a position" do
+    if Frame.render ⟪"agent", "bash#2", "x"⟫ != "agent/bash#2/x" || Frame.render ⟪⟫ != "-" then
+      throw <| IO.userError "frames render as paths of routines"
+    if (Frame.parse "agent/bash#2/x").toOption != some ⟪"agent", "bash#2", "x"⟫ || (Frame.parse "-").toOption != some ⟪⟫ then
+      throw <| IO.userError "frames read back as they render"
+    if (Frame.parse "agent/bash#x").toOption.isSome || (Frame.parse "agent//x").toOption.isSome then
+      throw <| IO.userError "a malformed frame is refused"
     let a : Hash := snapshot 'a'
     let b : Hash := ⟨"ab" ++ String.ofList (List.replicate 62 '1')⟩
     let c : Hash := ⟨"ab" ++ String.ofList (List.replicate 62 '2')⟩

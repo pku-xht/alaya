@@ -94,22 +94,24 @@ def suite : Suite := Testing.suite "routines" #[
       let log ← logAt rt last
       assertEqual "the agent's result" ((agentResult log).bind (·.toOption) |>.map (·.compress)) (some "\"2 steps, 1 failed\"")
       assertEqual "the calls, each in its caller's next frame" (openings log)
-        #[(#[0], "agent"), (#[0, 0], "workflow"), (#[0, 0, 0], "planner"), (#[0, 0, 0, 0], "lookup"),
-          (#[0, 0, 1], "step"), (#[0, 0, 2], "step")]
+        #[(⟪"agent"⟫, "agent"), (⟪"agent", "workflow"⟫, "workflow"), (⟪"agent", "workflow", "planner"⟫, "planner"),
+          (⟪"agent", "workflow", "planner", "lookup"⟫, "lookup"), (⟪"agent", "workflow", "step"⟫, "step"),
+          (⟪"agent", "workflow", "step#1"⟫, "step")]
       -- A call's opening holds its arguments, and its end its result: both data, in the log.
-      check (log.any fun | .opened #[0, 0] ⟨"workflow", arguments⟩ => arguments.compress == "{\"goal\":\"ship it\"}" | _ => false)
+      check (log.any fun | .opened ⟪"agent", "workflow"⟫ ⟨"workflow", arguments⟩ => arguments.compress == "{\"goal\":\"ship it\"}" | _ => false)
         "the workflow's arguments"
-      check (log.any fun | .returned #[0, 0, 0] value => value.compress == "{\"steps\":[\"make\",\"make test\"]}" | _ => false)
+      check (log.any fun | .returned ⟪"agent", "workflow", "planner"⟫ value => value.compress == "{\"steps\":[\"make\",\"make test\"]}" | _ => false)
         "the planner's plan"
-      check (log.any fun | .returned #[0, 0, 2] value => value.compress == "1" | _ => false) "the failed step's status"
+      check (log.any fun | .returned ⟪"agent", "workflow", "step#1"⟫ value => value.compress == "1" | _ => false) "the failed step's status"
       -- What a routine asks the world for is asked from its own frame.
       let asked := log.filterMap fun
         | .answered frame (.sample ..) _ => some (frame, "sample")
         | .answered frame (.exec command _) _ => some (frame, command)
         | _ => none
       assertEqual "who asked for what" asked
-        #[(#[0, 0, 0], "sample"), (#[0, 0, 0, 0], "grep build notes.txt"), (#[0, 0, 0], "sample"),
-          (#[0, 0, 1], "make"), (#[0, 0, 2], "make test")]
+        #[(⟪"agent", "workflow", "planner"⟫, "sample"), (⟪"agent", "workflow", "planner", "lookup"⟫, "grep build notes.txt"),
+          (⟪"agent", "workflow", "planner"⟫, "sample"), (⟪"agent", "workflow", "step"⟫, "make"),
+          (⟪"agent", "workflow", "step#1"⟫, "make test")]
       -- The sub-agent's conversation is its own: its second request holds the tool's result.
       let requests := samplesOf run log
       assertEqual "two samples, both the planner's" requests.size 2
@@ -120,20 +122,20 @@ def suite : Suite := Testing.suite "routines" #[
     -- Called with arguments it cannot read, a routine fails; its caller may catch that.
     withRun (fun _ => try Alaya.call "step" (.mkObj [("command", "make")]) catch error => pure (.str error)) fun run => do
       let log := settle run opening
-      check (log.any fun | .failed #[0, 0] error => contains error "step: its arguments cannot be read" | _ => false)
+      check (log.any fun | .failed ⟪"agent", "step"⟫ error => contains error "step: its arguments cannot be read" | _ => false)
         "the routine failed, in its own frame"
       check ((next run log) matches .waits #[] _) "and the agent went on, to its end"
     -- A handle that expects another result than the routine gives fails where the result is read.
     let mistaken : Routine.Typed Agent String String := routine "step" fun _ => pure ""
     withRun (fun _ => toJson <$> mistaken.call "make") fun run => do
       let log := answer run (settle run opening) (executed)
-      check (log.any fun | .returned #[0, 0] value => value.compress == "0" | _ => false) "the routine returned its status"
-      check (log.any fun | .failed #[0] error => contains error "step: its result cannot be read" | _ => false)
+      check (log.any fun | .returned ⟪"agent", "step"⟫ value => value.compress == "0" | _ => false) "the routine returned its status"
+      check (log.any fun | .failed ⟪"agent"⟫ error => contains error "step: its result cannot be read" | _ => false)
         "the caller could not read it"
     -- The grader is a program a person calls, no routine: nothing an agent calls reaches it.
     withRun (fun _ => Alaya.call "grader" (.mkObj [("command", "true")])) fun run => do
       let log := settle run opening
-      check (log.any fun | .failed #[0, 0] "no routine named grader" => true | _ => false) "there is no such routine",
+      check (log.any fun | .failed ⟪"agent", "grader"⟫ "no routine named grader" => true | _ => false) "there is no such routine",
 
   test "a program brings its scope: an agent's tools and itself, fixed where it is defined" do
     match Agents.Catalog.scope.find "mini-swe" with

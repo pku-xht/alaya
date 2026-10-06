@@ -75,7 +75,7 @@ private def reconfigured : TestM Unit := do
   -- A field of the agent that changes no request: the whole log holds, under the new opening.
   let tuned ← rebaseWith #[← setting "context_reserve=7"]
   check tuned.divergence?.isNone "the whole log holds"
-  let some opening := tuned.log.findSome? fun | (.opened #[0] opened, _) => some opened | _ => none
+  let some opening := tuned.log.findSome? fun | (.opened ⟪"mini-swe"⟫ opened, _) => some opened | _ => none
     | fail "the opening of the agent"
   let reserve := (opening.arguments.getObjVal? "config" >>= (·.getObjVal? "context_reserve")).toOption
   assertEqual "the new configuration" (reserve.map (·.compress)) (some "7")

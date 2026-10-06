@@ -2,10 +2,10 @@ import Alaya.Agents.Catalog
 
 /-! A run of Alaya: a workspace, and the programs a person calls on it, one after another. The
 run's routine, `session`, in its frame `#[]`, waits for a person to call a program — an agent, a
-grader — calls it in a frame of its own, `#[0]`, `#[1]`, …, and when the call ends, waits for the
-next. A call's configuration is the arguments of its opening, so every later command builds the
-same program from the log alone, and its commands run in the container of its own image. See
-`docs/agent-api.md` §9. -/
+grader — calls it in a frame of its own, named by the program (`mini-swe`, then `grader`), and
+when the call ends, waits for the next. A call's configuration is the arguments of its opening,
+so every later command builds the same program from the log alone, and its commands run in the
+container of its own image. See `docs/agent-api.md` §9. -/
 
 namespace Alaya
 
@@ -31,18 +31,19 @@ def programCall (name : String) (config : Json) (environment : Environment) : Ro
 
 /-! ## The calls of a log -/
 
-/-- The arguments of the call the run made in frame `#[index]`, read off its opening. -/
-def callAt? (log : Log Agent) (index : Nat) : Option ProgramArguments :=
+/-- The arguments of the call the run made in frame `#[call]`, read off its opening. -/
+def callAt? (log : Log Agent) (call : Frame.Segment) : Option ProgramArguments :=
   log.findSome? fun
-    | .opened #[i] call => if i == index then (ProgramArguments.fromJson call.arguments).toOption else none
+    | .opened #[opened] routine =>
+      if opened == call then (ProgramArguments.fromJson routine.arguments).toOption else none
     | _ => none
 
 /-- Where the commands of the call a frame is in run: the environment of the call the run made,
 which a call inside it shares. -/
 def environmentOf (log : Log Agent) (frame : Frame) : Result Environment := do
-  let some index := frame[0]? | throw <| .storage "the run's own frame is no call's"
-  let some { environment? := some environment, .. } := callAt? log index
-    | throw <| .storage s!"the log does not open the call in frame {index} with an environment this build reads"
+  let some call := frame[0]? | throw <| .storage "the run's own frame is no call's"
+  let some { environment? := some environment, .. } := callAt? log call
+    | throw <| .storage s!"the log does not open the call {call.render} with an environment this build reads"
   pure environment
 
 /-- How a call ended. -/
@@ -53,7 +54,7 @@ inductive CallEnd where
   | stopped (reason : String)
   deriving Inhabited
 
-/-- How a call ends with an event, if the event ends one: the call's frame is `#[i]`. -/
+/-- How a call the run made ends with an event, if the event ends one: its frame is one step. -/
 def CallEnd.of? : Event Agent → Option CallEnd
   | .returned #[_] value => some (.returned value)
   | .failed #[_] error => some (.failed error)

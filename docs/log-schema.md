@@ -61,7 +61,9 @@ The format carries no version: a data directory is read by the Alaya that wrote 
 ## 2. Events
 
 What each event means is `docs/agent-api.md` §2 and §3. This is how each is stored: an object
-with its kind under `type`, and its frame, where it has one, as an array of numbers.
+with its kind under `type`, and its frame, where it has one, as an array of steps, outermost
+first: each the name of the routine called, with `#N` after it for the call of that name its
+caller made after N others (`["mini-swe", "bash#1"]`).
 
 | `type` | Fields |
 | --- | --- |
@@ -98,22 +100,22 @@ response.
 {"type":"arrived","notice":{"type":"changed","workspace":"3f2a…","summary":"the workspace the run starts from"}}
 {"type":"arrived","notice":{"type":"called","call":{"name":"mini-swe","arguments":{"config":{"model":{…},"task":"Implement the language in SPEC.md",…},"environment":{…}}}}}
 {"type":"heard","frame":[],"notices":[1]}
-{"type":"opened","frame":[0],"routine":{"name":"mini-swe","arguments":{"config":{…},"environment":{…}}}}
-{"type":"opened","frame":[0,0],"routine":{"name":"uname","arguments":null}}
-{"type":"answered","frame":[0,0],"op":{"type":"exec","command":"uname -sm","config":{…}},"answer":{"output":{"output":"Linux x86_64\n",…},…},"error":null}
-{"type":"returned","frame":[0,0],"value":{"system":"Linux","machine":"x86_64"}}
-{"type":"heard","frame":[0],"notices":[]}
-{"type":"answered","frame":[0],"op":{"type":"sample","model":{…},"request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
-{"type":"opened","frame":[0,1],"routine":{"name":"bash","arguments":{"command":"make","executor":{"timeout_seconds":30,…}}}}
-{"type":"answered","frame":[0,1],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
-{"type":"returned","frame":[0,1],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
+{"type":"opened","frame":["mini-swe"],"routine":{"name":"mini-swe","arguments":{"config":{…},"environment":{…}}}}
+{"type":"opened","frame":["mini-swe","uname"],"routine":{"name":"uname","arguments":null}}
+{"type":"answered","frame":["mini-swe","uname"],"op":{"type":"exec","command":"uname -sm","config":{…}},"answer":{"output":{"output":"Linux x86_64\n",…},…},"error":null}
+{"type":"returned","frame":["mini-swe","uname"],"value":{"system":"Linux","machine":"x86_64"}}
+{"type":"heard","frame":["mini-swe"],"notices":[]}
+{"type":"answered","frame":["mini-swe"],"op":{"type":"sample","model":{…},"request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
+{"type":"opened","frame":["mini-swe","bash"],"routine":{"name":"bash","arguments":{"command":"make","executor":{"timeout_seconds":30,…}}}}
+{"type":"answered","frame":["mini-swe","bash"],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
+{"type":"returned","frame":["mini-swe","bash"],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
 …
-{"type":"returned","frame":[0],"value":{"status":"Submitted","submission":"…"}}
+{"type":"returned","frame":["mini-swe"],"value":{"status":"Submitted","submission":"…"}}
 {"type":"arrived","notice":{"type":"called","call":{"name":"grader","arguments":{"config":{"command":"sh /grader/grade.sh","timeout_seconds":900},"environment":{…}}}}}
 {"type":"heard","frame":[],"notices":[212]}
-{"type":"opened","frame":[1],"routine":{"name":"grader","arguments":{…}}}
-{"type":"answered","frame":[1],"op":{"type":"exec","command":"sh /grader/grade.sh","config":{…,"merge":false}},"answer":{"output":{"output":"1..2\nok 1\nok 2\n","stderr":"",…},…},"error":null}
-{"type":"returned","frame":[1],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],"exit_code":0}}
+{"type":"opened","frame":["grader"],"routine":{"name":"grader","arguments":{…}}}
+{"type":"answered","frame":["grader"],"op":{"type":"exec","command":"sh /grader/grade.sh","config":{…,"merge":false}},"answer":{"output":{"output":"1..2\nok 1\nok 2\n","stderr":"",…},…},"error":null}
+{"type":"returned","frame":["grader"],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],"exit_code":0}}
 ```
 
 A person's call of a program names it, and holds as its arguments, the same two for every

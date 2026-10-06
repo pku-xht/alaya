@@ -160,8 +160,8 @@ class Columns:
         self.l1 = 810 if workspace else 914
         self.pos = self.l0 + 20                          # positions end here
         self.frame = self.l0 + 28
-        self.icon = self.l0 + 87
-        self.text = self.l0 + 106
+        self.icon = self.l0 + 97
+        self.text = self.l0 + 116
         self.ctor = self.l1 - (8 if workspace else 16)   # constructors end here
         self.arc = self.l1 - 13                          # the arcs of `takes`
         self.version = 892.5                             # the line of versions
@@ -352,7 +352,7 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
             if role == "stop":
                 program.cut(y + 6.5, r.get("note"))
             elif role == "open":
-                program.open(r["text"].split()[1].rstrip(":") + " · " + r["frame"], y + 2.5, cy)
+                program.open(r["frame"], y + 2.5, cy)
                 out.append(arrow(program.stack[-1]["x1"] + 1, c.l0 - 4, cy + .5))
             elif role == "end":
                 x0, x1 = program.inner()
@@ -402,7 +402,7 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
     # around the rows: the heads of the columns, the ground of the log, what is said below
     head = [label(c.p0, 14, "computation", "s"), label(c.m0 + 6, 14, "carried out by", "s"), label(c.l0 + 7, 14, "log", "s")]
     if heads:
-        head += [label(c.pos, 31, "position", "f", anchor="end"), label(c.frame, 31, "frame", "f"),
+        head += [label(c.pos, 31, "position", "f", anchor="end"), label(c.frame, 31, "call", "f"),
                  label(c.icon, 31, "event", "f")]
     if versions:
         head.append(label(WIDTH - 6, 14, "workspace", "s", anchor="end"))
@@ -442,171 +442,171 @@ def CALLED(task="fix the build", program="agent"):
     """The start of every log: the root, a person's call of the agent, the run's read of it, and
     the opening of the call."""
     return [ROOT_ROW, R(1, "-", f"call {program} “{task}”"), R(2, "-", "inbox: takes 1", chip="await"),
-            R(3, "0", f"open {program}")]
+            R(3, program, f"open {program}")]
 
 
 figure("log", "The log of a small agent, beside its computation", CALLED() + [
-    R(4, "0", "inbox: nothing"),
-    R(5, "0", "sample → says “run make”"),
-    R(6, "0", "exec make → exit 0"),
-    R(7, "0", "return fixed", end='return "fixed"'),
+    R(4, "agent", "inbox: nothing"),
+    R(5, "agent", "sample → says “run make”"),
+    R(6, "agent", "exec make → exit 0"),
+    R(7, "agent", "return fixed", end='return "fixed"'),
 ], heads=True, legend=True)
 
 figure("perform", "Three operations, each answered by its part of the world", [
     GAP(),
-    R(7, "0", "sample → says “run the tests”"),
-    R(8, "0", "exec pytest -q → exit 1"),
-    R(9, "0", "time 4 min 12 s of 1 h"),
+    R(7, "agent", "sample → says “run the tests”"),
+    R(8, "agent", "exec pytest -q → exit 1"),
+    R(9, "agent", "time 4 min 12 s of 1 h"),
     GAP(),
-], inside=["agent · 0"])
+], inside=["agent"])
 
 figure("workspace", "The versions of the workspace along a log", [
     R(0, "-", "the workspace the run starts from", ws="w0"),
     R(1, "-", "call agent “fix the build”"),
-    R(3, "0", "open agent"),
-    GAP(on="bash · 0.0"),
-    R(7, "0.0", "exec make → exit 0", ws="w1", on="w0"),
+    R(3, "agent", "open agent"),
+    GAP(on="bash"),
+    R(7, "bash", "exec make → exit 0", ws="w1", on="w0"),
     GAP(off=1),
-    R(11, "-", "workspace changed: fixed the Makefile", ws="w2"),
-    GAP(on="bash · 0.1"),
-    R(14, "0.1", "exec make test → exit 0", ws="w3", on="w2"),
+    R(11, "-", "workspace changed: fixed Makefile", ws="w2"),
+    GAP(on="bash#1"),
+    R(14, "bash#1", "exec make test → exit 0", ws="w3", on="w2"),
     GAP(off=2),
     R(40, "-", "call grader “pytest /grader”"),
-    R(42, "1", "open grader"),
-    R(43, "1", "exec pytest /grader → exit 0", ws="w4", on="w3"),
+    R(42, "grader", "open grader"),
+    R(43, "grader", "exec pytest /grader → exit 0", ws="w4", on="w3"),
 ], workspace="a grader’s command, too, leaves a version: its reports are in `w4`")
 
 figure("inbox", "Notices arrive from outside, and reads take them", CALLED() + [
-    R(4, "0", "inbox: nothing", note="a read takes what has arrived, possibly nothing"),
-    R(5, "0", "sample → bash make"),
+    R(4, "agent", "inbox: nothing", note="a read takes what has arrived, possibly nothing"),
+    R(5, "agent", "sample → bash make"),
     GAP(),
     R(9, "-", "said “use ninja, not make”", by="at any time"),
     GAP(),
-    R(12, "0", "inbox: takes 9"),
-    R(13, "0", "sample → bash ninja"),
+    R(12, "agent", "inbox: takes 9"),
+    R(13, "agent", "sample → bash ninja"),
     GAP(),
-    R(17, "0", "inbox: nothing"),
+    R(17, "agent", "inbox: nothing"),
     GAP(),
 ], takes=True)
 
 figure("call", "Two calls of a routine, each a bracket in the log", CALLED() + [
-    R(4, "0.0", "open step “make”"),
-    R(5, "0.0", "exec make → exit 0"),
-    R(6, "0.0", "return 0", end="return 0"),
-    R(7, "0.1", "open step “make test”"),
-    R(8, "0.1", "exec make test → exit 1"),
-    R(9, "0.1", "return 1", end="return 1"),
-    R(10, "0", "return 2 steps, 1 failed"),
-], foot=["a child frame is its caller’s frame and the call’s ordinal"])
+    R(4, "step", "open step “make”"),
+    R(5, "step", "exec make → exit 0"),
+    R(6, "step", "return 0", end="return 0"),
+    R(7, "step#1", "open step “make test”"),
+    R(8, "step#1", "exec make test → exit 1"),
+    R(9, "step#1", "return 1", end="return 1"),
+    R(10, "agent", "return 2 steps, 1 failed"),
+], foot=["a child frame is its caller’s and a step: the routine, and how many calls of it came before"])
 
 figure("failure", "A failed sample ends its routine, and the caller catches the failure", CALLED() + [
-    R(4, "0.0", "open planner “ship it”"),
-    R(5, "0.0", "sample failed: the request is too long",
+    R(4, "planner", "open planner “ship it”"),
+    R(5, "planner", "sample failed: the request is too long",
       note="the answer is an error: the operation fails where it was performed"),
-    R(6, "0.0", "fail: the request is too long"),
+    R(6, "planner", "fail: the request is too long"),
     NOTE("`try … catch`: the caller catches the error; no mark"),
-    R(7, "0.1", "open step “make”"),
-    R(8, "0.1", "exec make → exit 0"),
-    R(9, "0.1", "return 0", end="return 0"),
-    R(10, "0", "return built without a plan"),
+    R(7, "step", "open step “make”"),
+    R(8, "step", "exec make → exit 0"),
+    R(9, "step", "return 0", end="return 0"),
+    R(10, "agent", "return built without a plan"),
 ])
 
 figure("loop", "A loop of three rounds: the log holds their events, flat", CALLED() + [
     ROUND("round 1 · state: 2 messages", 4),
-    R(4, "0", "sample → bash make"),
-    R(5, "0.0", "open bash “make”"),
-    R(6, "0.0", "exec make → exit 2"),
-    R(7, "0.0", "return exit 2: no rule to make target"),
+    R(4, "agent", "sample → bash make"),
+    R(5, "bash", "open bash “make”"),
+    R(6, "bash", "exec make → exit 2"),
+    R(7, "bash", "return exit 2: no rule to make target"),
     ROUND("round 2 · 4 messages", 4),
-    R(8, "0", "sample → bash ninja"),
-    R(9, "0.1", "open bash “ninja”"),
-    R(10, "0.1", "exec ninja → exit 0"),
-    R(11, "0.1", "return exit 0: build ok"),
+    R(8, "agent", "sample → bash ninja"),
+    R(9, "bash#1", "open bash “ninja”"),
+    R(10, "bash#1", "exec ninja → exit 0"),
+    R(11, "bash#1", "return exit 0: build ok"),
     ROUND("round 3 · 6 messages → result", 1),
-    R(12, "0", "sample → says “fixed: use ninja”"),
-    R(13, "0", "return fixed: use ninja"),
+    R(12, "agent", "sample → says “fixed: use ninja”"),
+    R(13, "agent", "return fixed: use ninja"),
 ], foot=["a loop writes nothing of its own; every round reads an event"])
 
 figure("stop", "A stop ends every frame of the call, and the run waits for the next", [
     R(0, "-", "the workspace the run starts from", opens="run · -"),
     R(1, "-", "call agent “ship it”"),
     R(2, "-", "inbox: takes 1", chip="await"),
-    R(3, "0", "open agent"),
-    R(4, "0.0", "open workflow “ship it”"),
-    R(5, "0.0.0", "open planner “ship it”"),
-    R(6, "0.0.0", "sample → lookup build"),
+    R(3, "agent", "open agent"),
+    R(4, "workflow", "open workflow “ship it”"),
+    R(5, "planner", "open planner “ship it”"),
+    R(6, "planner", "sample → lookup build"),
     R(7, "-", "stopped: to grade this point", note="every frame of the call ends; no marks"),
     DIV("no call runs: the run waits for the next"),
     R(8, "-", "call grader “pytest /grader”"),
     R(9, "-", "inbox: takes 8", chip="await"),
-    R(10, "1", "open grader"),
-    R(11, "1", "exec pytest /grader → exit 1"),
-    R(12, "1", "return fail 12/48", end="return verdict"),
+    R(10, "grader", "open grader"),
+    R(11, "grader", "exec pytest /grader → exit 1"),
+    R(12, "grader", "return fail 12/48", end="return verdict"),
 ])
 
 figure("routines", "The log of the workflow, its sub-agent and their tools", CALLED("ship it") + [
-    R(4, "0.0", "open workflow “ship it”"),
-    R(5, "0.0.0", "open planner “ship it”"),
-    R(6, "0.0.0", "sample → lookup build"),
-    R(7, "0.0.0.0", "open lookup “build”"),
-    R(8, "0.0.0.0", "exec grep build notes.txt → exit 0"),
-    R(9, "0.0.0.0", "return build: make"),
-    R(10, "0.0.0", "sample → says “make make test”"),
-    R(11, "0.0.0", "return steps: make, make test"),
-    R(12, "0.0.1", "open step “make”"),
-    R(13, "0.0.1", "exec make → exit 0"),
-    R(14, "0.0.1", "return 0"),
-    R(15, "0.0.2", "open step “make test”"),
-    R(16, "0.0.2", "exec make test → exit 1"),
-    R(17, "0.0.2", "return 1"),
-    R(18, "0.0", "return 2 steps, 1 failed"),
-    R(19, "0", "return 2 steps, 1 failed"),
+    R(4, "workflow", "open workflow “ship it”"),
+    R(5, "planner", "open planner “ship it”"),
+    R(6, "planner", "sample → lookup build"),
+    R(7, "lookup", "open lookup “build”"),
+    R(8, "lookup", "exec grep build notes.txt → exit 0"),
+    R(9, "lookup", "return build: make"),
+    R(10, "planner", "sample → says “make make test”"),
+    R(11, "planner", "return steps: make, make test"),
+    R(12, "step", "open step “make”"),
+    R(13, "step", "exec make → exit 0"),
+    R(14, "step", "return 0"),
+    R(15, "step#1", "open step “make test”"),
+    R(16, "step#1", "exec make test → exit 1"),
+    R(17, "step#1", "return 1"),
+    R(18, "workflow", "return 2 steps, 1 failed"),
+    R(19, "agent", "return 2 steps, 1 failed"),
 ])
 
 figure("tool-call", "A response that asks for two tools, and the two calls it becomes", [
     GAP(),
-    R(10, "0", "inbox: nothing"),
-    R(11, "0", "sample → bash make; bash make test", note="the response asks for two tools"),
+    R(10, "agent", "inbox: nothing"),
+    R(11, "agent", "sample → bash make; bash make test", note="the response asks for two tools"),
     NOTE("each: check its arguments, then call the tool's routine, the agent's settings added"),
-    R(12, "0.3", "open bash “make”"),
-    R(13, "0.3", "exec make → exit 0"),
-    R(14, "0.3", "return exit 0: build ok"),
-    R(15, "0.4", "open bash “make test”"),
-    R(16, "0.4", "exec make test → exit 1"),
-    R(17, "0.4", "return exit 1: 1 test failed"),
-    R(18, "0", "inbox: nothing"),
-    R(19, "0", "sample → says “one test fails”", note="the next request holds both results"),
+    R(12, "bash#2", "open bash “make”"),
+    R(13, "bash#2", "exec make → exit 0"),
+    R(14, "bash#2", "return exit 0: build ok"),
+    R(15, "bash#3", "open bash “make test”"),
+    R(16, "bash#3", "exec make test → exit 1"),
+    R(17, "bash#3", "return exit 1: 1 test failed"),
+    R(18, "agent", "inbox: nothing"),
+    R(19, "agent", "sample → says “one test fails”", note="the next request holds both results"),
     GAP(),
-], inside=["agent · 0"])
+], inside=["agent"])
 
 figure("ask-user", "A question: the tool asks, the run waits, a person replies, the call returns", [
     GAP(),
-    R(10, "0", "inbox: nothing"),
-    R(11, "0", "sample → ask_user Should duplicates be kept?"),
-    R(12, "0.2", "open ask_user “Should duplicates be kept?”"),
-    R(13, "0.2", "ask “Should duplicates be kept?”", note="the question is in the log, whoever asks it"),
-    DIV("the driver stops: the run waits for a reply to 0.2"),
-    R(14, "-", "replied to 0.2: yes", by="`alaya reply`"),
-    R(15, "0.2", "inbox: takes 14", chip="the reply"),
-    R(16, "0.2", "return yes", end='return "yes"'),
-    R(17, "0", "inbox: nothing", note="a plain read leaves replies"),
-    R(18, "0", "sample → bash sort -u names.txt", note="the model is shown `yes` as the tool’s result"),
+    R(10, "agent", "inbox: nothing"),
+    R(11, "agent", "sample → ask_user Keep duplicates?"),
+    R(12, "ask_user", "open ask_user “Keep duplicates?”"),
+    R(13, "ask_user", "ask “Keep duplicates?”", note="the question is in the log, whoever asks it"),
+    DIV("the driver stops: the run waits for a reply to agent/ask_user"),
+    R(14, "-", "replied to agent/ask_user: yes", by="`alaya reply`"),
+    R(15, "ask_user", "inbox: takes 14", chip="the reply"),
+    R(16, "ask_user", "return yes", end='return "yes"'),
+    R(17, "agent", "inbox: nothing", note="a plain read leaves replies"),
+    R(18, "agent", "sample → bash sort -u names.txt", note="the model is shown `yes` as the tool’s result"),
     GAP(),
-], inside=["agent · 0"], takes=True)
+], inside=["agent"], takes=True)
 
-figure("run", "A whole run: the agent in frame 0, then a grader in frame 1", [
+figure("run", "A whole run: the agent, then a grader, each in a frame of its own", [
     R(0, "-", "the workspace the run starts from", by="`alaya new`", opens="run · -"),
     R(1, "-", "call mini-swe “Implement SPEC.md”", by="`alaya call`"),
     R(2, "-", "inbox: takes 1", chip="await"),
-    R(3, "0", "open mini-swe"),
+    R(3, "mini-swe", "open mini-swe"),
     GAP("the agent’s rounds"),
-    R(41, "0", "return Submitted"),
+    R(41, "mini-swe", "return Submitted"),
     DIV("no call runs: the run waits for the next"),
     R(42, "-", "call grader “pytest /grader”", by="`alaya call`"),
     R(43, "-", "inbox: takes 42", chip="await"),
-    R(44, "1", "open grader"),
-    R(45, "1", "exec pytest /grader → exit 0"),
-    R(46, "1", "return pass 48/48", end="return verdict", note="the grader’s verdict"),
+    R(44, "grader", "open grader"),
+    R(45, "grader", "exec pytest /grader → exit 0"),
+    R(46, "grader", "return pass 48/48", end="return verdict", note="the grader’s verdict"),
 ])
 
 
@@ -1126,7 +1126,7 @@ def cli_reply():
     """`reply`: a reply is appended after the question it answers; the next run goes on from it."""
     y = TOP
     out, at = strip(12, y, ["…", "open ask_user", ("ask “keep duplicates?”", "old", True),
-                            ("replied to 0.2: yes", "new"), ("inbox: takes it", "later"), ("return yes", "later")])
+                            ("replied to mini-swe/ask_user: yes", "new"), ("inbox: takes it", "later"), ("return yes", "later")])
     below = y + CHIP_H + 3
     out += [tag(at[2][0], below, "waits for a reply", WAIT)[0], note(at[4][0], below, "the next resume goes on from the reply")]
     cli("reply", "reply: a reply is appended after the question that waits for it, and the next resume goes on from it",

@@ -6,30 +6,30 @@
 <text x="304" y="14" class="s">carried out by</text>
 <text x="447" y="14" class="s">log</text>
 <text x="460" y="31" class="f" text-anchor="end">position</text>
-<text x="468" y="31" class="f">frame</text>
-<text x="527" y="31" class="f">event</text>
+<text x="468" y="31" class="f">call</text>
+<text x="537" y="31" class="f">event</text>
 <rect x="440.5" y="37.5" width="474" height="199" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
 <path fill="#fafbfc" d="M12.5,224.5V121.5Q12.5,115.5 18.5,115.5H291.5Q297.5,115.5 297.5,121.5V224.5Q297.5,230.5 291.5,230.5H18.5Q12.5,230.5 12.5,224.5Z"/><path class="bx" d="M12.5,224.5V121.5Q12.5,115.5 18.5,115.5H291.5Q297.5,115.5 297.5,121.5V224.5Q297.5,230.5 291.5,230.5H18.5Q12.5,230.5 12.5,224.5"/>
 <text x="460" y="57" class="f n" text-anchor="end">0</text>
 <text x="468" y="57" class="fr">-</text>
-<g transform="translate(527,46.5) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
-<text x="546" y="57.5">the workspace the run starts from</text>
+<g transform="translate(537,46.5) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<text x="556" y="57.5">the workspace the run starts from</text>
 <text x="898" y="57" class="f" text-anchor="end">arrived</text>
 <text x="304" y="50.5" class="s">a person</text>
 <path class="a" d="M307,58.5H432"/><path fill="#a3abb5" d="M436,58.5l-5,-2.5v5z"/>
 <circle cx="307" cy="58.5" r="2.5" fill="#7556a3"/>
 <text x="460" y="81" class="f n" text-anchor="end">1</text>
 <text x="468" y="81" class="fr">-</text>
-<g transform="translate(527,70.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
-<text x="546" y="81.5" style="fill:#7556a3">call agent “fix the build”</text>
+<g transform="translate(537,70.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
+<text x="556" y="81.5" style="fill:#7556a3">call agent “fix the build”</text>
 <text x="898" y="81" class="f" text-anchor="end">arrived</text>
 <text x="304" y="74.5" class="s">a person</text>
 <path class="a" d="M307,82.5H432"/><path fill="#a3abb5" d="M436,82.5l-5,-2.5v5z"/>
 <circle cx="307" cy="82.5" r="2.5" fill="#7556a3"/>
 <text x="460" y="105" class="f n" text-anchor="end">2</text>
 <text x="468" y="105" class="fr">-</text>
-<g transform="translate(527,94.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
-<text x="546" y="105.5">inbox: takes 1</text>
+<g transform="translate(537,94.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="556" y="105.5">inbox: takes 1</text>
 <text x="898" y="105" class="f" text-anchor="end">heard</text>
 <rect x="12.5" y="92.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
 <text x="18.5" y="105" class="ch">await</text>
@@ -38,16 +38,16 @@
 <text x="369" y="100" class="s" text-anchor="middle">the log</text>
 <path class="a d" d="M436,106.5H69.3"/><path fill="#a3abb5" d="M65.3,106.5l5,-2.5v5z"/>
 <text x="460" y="129" class="f n" text-anchor="end">3</text>
-<text x="468" y="129" class="fr">0</text>
-<g transform="translate(527,118.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="546" y="129.5">open agent</text>
+<text x="468" y="129" class="fr">agent</text>
+<g transform="translate(537,118.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="556" y="129.5">open agent</text>
 <text x="898" y="129" class="f" text-anchor="end">opened</text>
-<text x="20.5" y="129" class="s b">agent · 0</text>
+<text x="20.5" y="129" class="s b">agent</text>
 <path class="a" d="M298.5,125.5H432"/><path fill="#a3abb5" d="M436,125.5l-5,-2.5v5z"/>
 <text x="460" y="153" class="f n" text-anchor="end">4</text>
-<text x="468" y="153" class="fr">0</text>
-<g transform="translate(527,142.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
-<text x="546" y="153.5">inbox: nothing</text>
+<text x="468" y="153" class="fr">agent</text>
+<g transform="translate(537,142.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="556" y="153.5">inbox: nothing</text>
 <text x="898" y="153" class="f" text-anchor="end">heard</text>
 <rect x="21.0" y="140.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
 <text x="27" y="153" class="ch">inbox</text>
@@ -56,9 +56,9 @@
 <text x="369" y="148" class="s" text-anchor="middle">the log</text>
 <path class="a d" d="M436,154.5H77.8"/><path fill="#a3abb5" d="M73.8,154.5l5,-2.5v5z"/>
 <text x="460" y="177" class="f n" text-anchor="end">5</text>
-<text x="468" y="177" class="fr">0</text>
-<g transform="translate(527,166.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
-<text x="546" y="177.5">sample → says “run make”</text>
+<text x="468" y="177" class="fr">agent</text>
+<g transform="translate(537,166.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="556" y="177.5">sample → says “run make”</text>
 <text x="898" y="177" class="f" text-anchor="end">answered</text>
 <rect x="21.0" y="164.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
 <text x="27" y="177" class="ch">sample request</text>
@@ -67,9 +67,9 @@
 <text x="369" y="172" class="s" text-anchor="middle">model</text>
 <path class="a d" d="M436,178.5H143.1"/><path fill="#a3abb5" d="M139.1,178.5l5,-2.5v5z"/>
 <text x="460" y="201" class="f n" text-anchor="end">6</text>
-<text x="468" y="201" class="fr">0</text>
-<g transform="translate(527,190.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
-<text x="546" y="201.5">exec make → exit 0</text>
+<text x="468" y="201" class="fr">agent</text>
+<g transform="translate(537,190.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="556" y="201.5">exec make → exit 0</text>
 <text x="898" y="201" class="f" text-anchor="end">answered</text>
 <rect x="21.0" y="188.0" width="91.9" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
 <text x="27" y="201" class="ch">exec "make"</text>
@@ -78,9 +78,9 @@
 <text x="369" y="196" class="s" text-anchor="middle">executor</text>
 <path class="a d" d="M436,202.5H121.4"/><path fill="#a3abb5" d="M117.4,202.5l5,-2.5v5z"/>
 <text x="460" y="225" class="f n" text-anchor="end">7</text>
-<text x="468" y="225" class="fr">0</text>
-<g transform="translate(527,214.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
-<text x="546" y="225.5">return fixed</text>
+<text x="468" y="225" class="fr">agent</text>
+<g transform="translate(537,214.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="556" y="225.5">return fixed</text>
 <text x="898" y="225" class="f" text-anchor="end">returned</text>
 <text x="289.5" y="225" class="e" style="fill:#2a7a4b" text-anchor="end">return "fixed"</text>
 <path class="a" d="M298.5,221.5H432"/><path fill="#a3abb5" d="M436,221.5l-5,-2.5v5z"/>
