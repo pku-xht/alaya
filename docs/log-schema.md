@@ -80,7 +80,7 @@ with its kind under `type`, and its frame, where it has one, as an array of numb
 | `said` | `message` |
 | `changed` | `workspace`: a snapshot; `summary` |
 | `replied` | `to`: the frame that asked; `reply`: `{type}` of `yes`, `no`, `none_of_above`, `unavailable`, or `{type: "choice", number}`, `{type: "text", text}` |
-| `called` | `call`: `{name, arguments}`, the program the run is to call and its configuration (§2) |
+| `called` | `call`: `{name, arguments}`, the program the run is to call, and its configuration and environment (§2) |
 
 | `op.type` | Fields of `op` | `answer` |
 | --- | --- | --- |
@@ -96,27 +96,32 @@ response.
 
 ```json
 {"type":"arrived","notice":{"type":"changed","workspace":"3f2a…","summary":"the workspace the run starts from"}}
-{"type":"arrived","notice":{"type":"called","call":{"name":"mini-swe","arguments":{"program":{…},"task":"Implement the language in SPEC.md","environment":{…}}}}}
+{"type":"arrived","notice":{"type":"called","call":{"name":"mini-swe","arguments":{"config":{"model":{…},"task":"Implement the language in SPEC.md",…},"environment":{…}}}}}
 {"type":"heard","frame":[],"notices":[1]}
-{"type":"opened","frame":[0],"routine":{"name":"mini-swe","arguments":{"program":{…},"task":"…","environment":{…}}}}
+{"type":"opened","frame":[0],"routine":{"name":"mini-swe","arguments":{"config":{…},"environment":{…}}}}
+{"type":"opened","frame":[0,0],"routine":{"name":"uname","arguments":null}}
+{"type":"answered","frame":[0,0],"op":{"type":"exec","command":"uname -sm","config":{…}},"answer":{"output":{"output":"Linux x86_64\n",…},…},"error":null}
+{"type":"returned","frame":[0,0],"value":{"system":"Linux","machine":"x86_64"}}
 {"type":"heard","frame":[0],"notices":[]}
 {"type":"answered","frame":[0],"op":{"type":"sample","model":{…},"request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
-{"type":"opened","frame":[0,0],"routine":{"name":"bash","arguments":{"command":"make"}}}
-{"type":"answered","frame":[0,0],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
-{"type":"returned","frame":[0,0],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
+{"type":"opened","frame":[0,1],"routine":{"name":"bash","arguments":{"command":"make","executor":{"timeout_seconds":30,…}}}}
+{"type":"answered","frame":[0,1],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
+{"type":"returned","frame":[0,1],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
 …
 {"type":"returned","frame":[0],"value":{"status":"Submitted","submission":"…"}}
-{"type":"arrived","notice":{"type":"called","call":{"name":"grader","arguments":{"program":{"name":"grader","command":"sh /grader/grade.sh","timeout_seconds":900},"task":null,"environment":{…}}}}}
+{"type":"arrived","notice":{"type":"called","call":{"name":"grader","arguments":{"config":{"command":"sh /grader/grade.sh","timeout_seconds":900},"environment":{…}}}}}
 {"type":"heard","frame":[],"notices":[212]}
 {"type":"opened","frame":[1],"routine":{"name":"grader","arguments":{…}}}
 {"type":"answered","frame":[1],"op":{"type":"exec","command":"sh /grader/grade.sh","config":{…,"merge":false}},"answer":{"output":{"output":"1..2\nok 1\nok 2\n","stderr":"",…},…},"error":null}
 {"type":"returned","frame":[1],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],"exit_code":0}}
 ```
 
-A call's opening holds its **configuration** as its arguments: the program's complete
-configuration, an agent's model in it, the task, for an agent, and the environment — the
-pinned image, the workdir, the image's system and architecture. Every later command builds the
-program from there.
+A person's call of a program names it, and holds as its arguments, the same two for every
+program, its complete **configuration**, an agent's model and task in it, and the
+**environment**: the pinned image, and the workdir. Every later
+command builds the program from there. A program a program calls, a sub-agent, is given its
+configuration alone: it runs where its caller's commands do. A tool's opening holds the model's
+arguments with what the agent's configuration adds, as how its command runs.
 
 ## 3. The forest
 
@@ -184,10 +189,10 @@ A **grader** is a program a person calls on a log like an agent: `grader`, of th
 runs one command, in a container of its own image, and returns the **verdict** read off what
 the command prints. Any point of any run is graded, by any grader, at any time.
 
-What a call of the grader holds as its program's configuration:
+What a call of the grader holds as its configuration:
 
 ```json
-{"name": "grader", "command": "sh /grader/grade.sh", "timeout_seconds": 900}
+{"command": "sh /grader/grade.sh", "timeout_seconds": 900}
 ```
 
 | Field | Holds |
@@ -372,7 +377,7 @@ How the cache is used is `docs/llm-api.md` §5.4.
 
 - **Names.** An entry's name is the hash of its parent's name and its event. Nothing under a
   name changes, and a log only grows.
-- **Traces.** Every log the driver writes is a trace of its run's program: replay agrees with
+- **Traces.** Every log the driver writes is a trace of its run's routine: replay agrees with
   it at every prefix. A log that is not is refused, not driven on; `rebase` copies the part
   that is into a new data directory.
 - **Draws.** A sample from an entry with `n` sampled continuations is draw `n` of its request.

@@ -40,7 +40,7 @@ last() { tail -n 1 | cut -d' ' -f1; }   # a command prints each entry it appends
 
 # Create a run on that project, call MiniSwe on its task, and drive it until the agent is over.
 root=$(alaya new benchmarks/bija/skeleton | last)
-called=$(alaya call "$root" mini-swe --set model=gpt-6-luna --task-file benchmarks/bija/TASK.txt \
+called=$(alaya call "$root" mini-swe --set model=gpt-6-luna --set-file task=benchmarks/bija/TASK.txt \
   --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
 end=$(alaya resume "$called" --provider apiyi | last)
 
@@ -66,10 +66,10 @@ fork of it:
 structured output, a model as the draws of a request, the layers a model is built from (retry,
 batching, sharing of draws, a persistent cache), and the providers that serve models.
 
-[`docs/agent-api.md`](docs/agent-api.md) — the agent API: a program, the log of events it
+[`docs/agent-api.md`](docs/agent-api.md) — the agent API: a computation, the log of events it
 writes, and what each construct writes there (an operation, a read of the inbox, a call, a
-failure, a loop, a comment); then replay, routines, tools, `ask_user`, an agent, a run, and the
-driver.
+failure, a loop, a comment); then replay, routines and scopes, tools, `ask_user`, an agent, a
+run, and the driver.
 
 [`docs/cli.md`](docs/cli.md) — the `alaya` command line: its commands for creating, running,
 grading, inspecting and rebasing runs, their text and JSON output, and their exit statuses.

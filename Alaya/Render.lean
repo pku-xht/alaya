@@ -138,7 +138,7 @@ def seconds (ms : Nat) : String := s!"{ms / 1000}.{(ms % 1000) / 100} s"
 
 /-- A call of a program, by its name and, for an agent, its model's: `mini-swe, gpt-6-luna`. -/
 def callTitle (call : RoutineCall) : String :=
-  match (call.arguments.getObjVal? "program" >>= (·.getObjVal? "model") >>= (·.getObjVal? "name") >>=
+  match (call.arguments.getObjVal? "config" >>= (·.getObjVal? "model") >>= (·.getObjVal? "name") >>=
       Json.getStr?).toOption with
   | some model => s!"{call.name}, {model}"
   | none => call.name
@@ -202,7 +202,7 @@ def nextSummary (question? : Option Question) (ended? : Option CallEnd) : Next A
   | .opens _ call => s!"next: open {call.name}"
   | .returns frame _ => s!"next: the return of {frame.render}"
   | .fails frame _ => s!"next: the failure of {frame.render}"
-  | .mismatch position => s!"broken: the event at {position} is no trace of the program"
+  | .mismatch position => s!"broken: the event at {position} is no trace of the run"
   | .unguarded frame => s!"broken: a loop in {frame.render} reads no event"
 
 /-- An entry as the commands that append print it: its full name, its position, its frame, and
@@ -227,8 +227,8 @@ structure Row where
 
 /-- Every entry of the forest, as the tree shows it: what each log does next at its end, and on
 each root the program and the model of its first call. -/
-def rows (store : Store) (forest : Forest) (run : Run Agent := Run.alaya) : Result (Array Row) := do
-  let rows ← walk (run := run) store forest (#[] : Array Row) fun rows visit => do
+def rows (store : Store) (forest : Forest) (root : Routine Agent := session) : Result (Array Row) := do
+  let rows ← walk (root := root) store forest (#[] : Array Row) fun rows visit => do
     let isLeaf := (forest.childrenOf visit.hash).isEmpty
     let status? := if !isLeaf then none else match visit.next? with
       | some next => some (nextSummary visit.question? (visit.last?.bind (·.2)) next)

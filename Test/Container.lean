@@ -36,8 +36,7 @@ def containerExecutor : TestM Executor := do
 
 /-- An executor for tests that build an agent but must not run a command. -/
 def noCommands : Executor := {
-  exec := fun _ _ _ _ => throw (IO.userError "this test runs no commands")
-  uname := pure default }
+  exec := fun _ _ _ _ => throw (IO.userError "this test runs no commands") }
 
 /-- Why the tests cannot run here, or `none` when docker and the test image are available. -/
 def dockerProblem? : IO (Option String) := do

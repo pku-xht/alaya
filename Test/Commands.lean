@@ -90,7 +90,7 @@ private def newRun : TestM (System.FilePath × System.FilePath × Array Json × 
   let project := (← scratch) / "project"
   writeSpec project #[("a.txt", "one\n"), ("src/b.txt", "two\n")]
   let root ← records (← ok data "new" #["--json", project.toString])
-  let called ← records (← ok data "call" #["--json", text root[0]! ["entry"], "mini-swe", "--task", "the task",
+  let called ← records (← ok data "call" #["--json", text root[0]! ["entry"], "mini-swe", "--set", "task=the task",
     "--image", testImageReference, "--set", "model=gpt-oss-120b", "--set", "context_reserve=7"])
   let resumed ← alaya data "resume" #[text called[0]! ["entry"], "--json"]
   if resumed.exit != 65 || !has resumed.stderr "--provider" then
@@ -105,20 +105,22 @@ def suite : Suite := Testing.suite "commands" #[
     let call := field made[1]! ["event", "notice", "call"]
     let config := field call ["arguments"]
     assertEqual "the call names its program, and holds its configuration, model and task"
-      (text call ["name"], text config ["program", "name"], text config ["program", "model", "name"],
-        (field config ["program", "context_reserve"]).compress, text config ["task"])
-      ("mini-swe", "mini-swe", "gpt-oss-120b", "7", "the task")
+      (text call ["name"], text config ["config", "model", "name"],
+        (field config ["config", "context_reserve"]).compress, text config ["config", "task"])
+      ("mini-swe", "gpt-oss-120b", "7", "the task")
+    check ((field config ["config", "name"]) == Json.null) "the name is the call's alone"
     check (has (text config ["environment", "image"]) "@sha256:") "the image is pinned by its digest"
     check (has (← refused 64 data "new" #["--task", "t", ((← scratch) / "project").toString]) "unknown option --task")
       "new takes no task"
-    assertEqual "resume reads the call, opens the agent, and the agent reads its inbox"
-      (resumed.map (text · ["event", "type"])) #["heard", "opened", "heard"]
+    assertEqual "resume reads the call, opens the agent, which runs uname and reads its inbox"
+      (resumed.map (text · ["event", "type"])) #["heard", "opened", "opened", "answered", "returned", "heard"]
     let tip := text resumed.back! ["entry"]
     -- A prefix names an entry, and `:N` a position of its log.
     let log ← records (← ok data "log" #[(tip.take 10).toString, "--json"])
     assertEqual "the log, and what comes next" (log.map fun record =>
         if (field record ["next"]) != Json.null then text record ["next"] else text record ["event", "type"])
-      #["arrived", "arrived", "heard", "opened", "heard", "next: sample gpt-oss-120b on a request of 2 messages"]
+      #["arrived", "arrived", "heard", "opened", "opened", "answered", "returned", "heard",
+        "next: sample gpt-oss-120b on a request of 2 messages"]
     let plain := lines (← ok data "log" #[tip])
     check (plain[3]?.any (has · "0  open mini-swe, gpt-oss-120b")) s!"the log in lines: {plain}"
     let shown ← records (← ok data "show" #[s!"{tip}:3", "--json"])
@@ -130,7 +132,7 @@ def suite : Suite := Testing.suite "commands" #[
     let tree := lines (← ok data "tree")
     assertEqual "the tree" tree.size 2
     check (has tree[0]! "root  mini-swe, gpt-oss-120b" && has tree[1]! "[next: sample gpt-oss-120b on a request of 2 messages]") s!"{tree}"
-    assertEqual "the tree as records" (← records (← ok data "tree" #["--json"])).size 5
+    assertEqual "the tree as records" (← records (← ok data "tree" #["--json"])).size 8
     assertEqual "no question waits" (← ok data "waiting") ""
     -- The workspace at an entry: listed, read, written out.
     let listed := lines (← ok data "ls" #[tip])
@@ -151,7 +153,7 @@ def suite : Suite := Testing.suite "commands" #[
     let tip := text resumed.back! ["entry"]
     let told ← appended data "tell" #[tip, "keep the old API"]
     assertEqual "a message" (text told ["event", "notice", "message"], (field told ["position"]).compress)
-      ("keep the old API", "5")
+      ("keep the old API", "8")
     -- A change: the files of a directory, and what changed.
     let edited := (← scratch) / "edited"
     let _ ← ok data "checkout" #[tip, edited.toString]
@@ -230,7 +232,7 @@ def suite : Suite := Testing.suite "commands" #[
     let written ← records (← ok data "rebase" #[graded, target.toString, "--json"])
     let some summary := written.back? | fail "rebase printed nothing"
     assertEqual "the whole log holds" (text summary ["held"], text summary ["total"], text summary ["divergence"])
-      ("13", "13", "null")
+      ("16", "16", "null")
     let tip := text summary ["entry"]
     let note := written[written.size - 2]!
     check (text note ["entry"] == tip && has (text note ["event", "text"]) s!"rebased from {graded}")
@@ -239,7 +241,7 @@ def suite : Suite := Testing.suite "commands" #[
     -- The new directory reads as the old one: its tree, the file a person changed, the workspace
     -- the grader left, each by the new names of its snapshots.
     check ((lines (← ok target "tree")).any (has · "[done: pass 2/2]")) "the verdict"
-    assertEqual "the change" (← ok target "cat" #[s!"{tip}:6", "a.txt"]) "edited\n"
+    assertEqual "the change" (← ok target "cat" #[s!"{tip}:9", "a.txt"]) "edited\n"
     assertEqual "after the grader's command" (← ok target "cat" #[s!"{tip}:11", "a.txt"]) "edited\n"
     check ((text written[0]! ["event", "notice", "workspace"]) != (text made[0]! ["event", "notice", "workspace"]))
       "a snapshot under a name of the new repository"
@@ -249,7 +251,7 @@ def suite : Suite := Testing.suite "commands" #[
     check (has (← refused 65 data "rebase" #[graded, target.toString]) "exists") "a directory that exists is refused"
     -- Without --json: the entries, then what held on stderr.
     let plain ← alaya data "rebase" #[graded, ((← scratch) / "again").toString]
-    check (plain.exit == 0 && has plain.stderr "all 13 events hold") s!"what held: {plain.stderr}"
+    check (plain.exit == 0 && has plain.stderr "all 16 events hold") s!"what held: {plain.stderr}"
     check ((lines plain.stdout).back?.any (has · "# rebased from")) "the last line is the entry to go on from",
 
   test "a command says what it refuses, with its class's exit status" do
@@ -295,8 +297,9 @@ def suite : Suite := Testing.suite "commands" #[
     let shown ← bare #["config", "--program", "mini-vero", "--set", "model=gpt-oss-120b", "--set", "mode=codeproof", "--json"]
     assertEqual "config" shown.exit 0
     let config ← records shown.stdout
-    assertEqual "a configuration" (text config[0]! ["program", "mode"], text config[0]! ["program", "model", "name"])
-      ("codeproof", "gpt-oss-120b")
+    assertEqual "a configuration" (text config[0]! ["program"], text config[0]! ["config", "mode"],
+        text config[0]! ["config", "model", "name"])
+      ("mini-vero", "codeproof", "gpt-oss-120b")
     let wrong ← bare #["config", "--program", "mini-swe", "--set", "no_such_field=1"]
     check (wrong.exit == 65 && has wrong.stderr "no_such_field") s!"a setting that names no field: {wrong.stderr}"
     let every ← bare #["config", "--json"]

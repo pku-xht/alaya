@@ -16,7 +16,7 @@ open Lean (Json)
 
 /-- An executor that answers every command with `output`, and runs nothing. -/
 private def echoing (output : String := "ok") : Executor :=
-  { exec := fun _ _ _ _ => pure { output, exitCode? := some 0 }, uname := pure testUname }
+  { exec := fun _ _ _ _ => pure { output, exitCode? := some 0 } }
 
 /-- A model that fails `failures` times, as a provider that cannot be reached does, then answers
 `responses` in order. -/
@@ -46,8 +46,7 @@ private def filing (outputs : System.FilePath) : Executor :=
   let names (dir : System.FilePath) : IO String := do
     if !(← dir.isDir) then return ""
     pure (" ".intercalate ((← dir.readDir).map (·.fileName) |>.qsort (· < ·)).toList)
-  { uname := pure testUname
-    exec := fun _ workDir argv _ => do
+  { exec := fun _ workDir argv _ => do
       match (argv[0]?.getD "").splitOn " " with
       | ["write", path, text] =>
         let file := workDir / (path : System.FilePath)
@@ -66,7 +65,7 @@ private def filing (outputs : System.FilePath) : Executor :=
 /-- A runtime whose commands are `filing`'s, over a store and workspaces of the test's own. -/
 private def filingRuntime (model : Model) : TestM Driver.Runtime := do
   let rt ← runtime (echoing) (some model)
-  pure { rt with executor := fun _ => pure (filing rt.outputsDir) }
+  pure { rt with executor := fun _ => pure (answeringUname (filing rt.outputsDir)) }
 
 /-- What the command `command` printed, in a log. -/
 private def printed (log : Log Agent) (command : String) : Option String :=
@@ -75,7 +74,7 @@ private def printed (log : Log Agent) (command : String) : Option String :=
     | _ => none
 
 /-- A run whose agent comments on what it does: before a command, and on what it printed. -/
-private def commenting : Run Agent :=
+private def commenting : Routine Agent :=
   runOf fun _ => do
     comment "before the command"
     let ran ← exec "echo one"
@@ -94,7 +93,7 @@ private def describe (log : Log Agent) : Array String := log.map fun
   | event => Render.eventSummary event
 
 /-- Runs `k` with MiniSwe's run, configured by `config`. -/
-private def withMini (config : Agents.MiniSwe.Config := {}) (k : Run Agent → TestM Unit) : TestM Unit :=
+private def withMini (config : Agents.MiniSwe.Config := {}) (k : Routine Agent → TestM Unit) : TestM Unit :=
   match miniRun config with
   | .ok run => k run
   | .error problem => fail problem
@@ -118,7 +117,7 @@ def suite : Suite := Testing.suite "runs" #[
       | _ => fail "the run reads its call next"
       let settled := settle run log
       assertEqual "the call opens with its configuration" ((callAt? settled 0).map (·.toJson.compress))
-        (some (testCall "the task").toJson.compress)
+        (some (testArguments "the task").toJson.compress)
       check (settled[3]? matches some (Event.opened #[0] _)) "in a frame of its own",
 
   test "the driver appends an entry an event, and replay agrees with the log at every prefix" do
@@ -148,7 +147,7 @@ def suite : Suite := Testing.suite "runs" #[
       assertEqual "no entry written" (← assertOk rt.store.forest).entries.size count
       -- Three commands, each in a frame of its own under the agent's.
       let frames := log.filterMap fun | .opened frame ⟨"bash", _⟩ => some frame | _ => none
-      assertEqual "frames" frames #[#[0, 0], #[0, 1], #[0, 2]],
+      assertEqual "frames, after the agent's uname" frames #[#[0, 1], #[0, 2], #[0, 3]],
 
   test "the driver reports each entry as it appends it, in order, with its time" do
     withMini {} fun run => do
@@ -174,7 +173,7 @@ def suite : Suite := Testing.suite "runs" #[
       | .paused reason => check (contains reason "1 response") reason
       | _ => fail "the run pauses after one sample"
       -- It pauses before the next round's read of the inbox, so a message added there is heard.
-      check ((← logAt rt paused).back? matches some (.returned #[0, 0] _)) "paused after the first call ended"
+      check ((← logAt rt paused).back? matches some (.returned #[0, 1] _)) "paused after the first call ended"
       let (finished, _) ← assertOk <| Driver.drive rt run paused
       assertEqual "the same events" (describe (← logAt rt finished)) (describe (← logAt whole wholeEnd)),
 
@@ -189,7 +188,7 @@ def suite : Suite := Testing.suite "runs" #[
       let after := forest.leaves
       assertEqual "one log" after.size 1
       let log ← logAt rt after[0]!
-      check (!(log.any fun | .answered .. => true | _ => false)) "no answer was logged"
+      check (!(log.any fun | .answered _ (.sample ..) _ => true | _ => false)) "no response was logged"
       let (finished, stop) ← assertOk <| Driver.drive rt run after[0]!
       check (stop matches .idle) "the run finishes"
       assertEqual "the run is whole" (agentStatus (← logAt rt finished)) "Submitted",
@@ -205,8 +204,8 @@ def suite : Suite := Testing.suite "runs" #[
         assertError label (Driver.drive rt run tip) fun thrown => thrown.describe == error.describe
         let forest ← assertOk rt.store.forest
         assertEqual s!"{label}: one log" forest.leaves.size 1
-        check (!(← logAt rt forest.leaves[0]!).any fun | .answered .. => true | _ => false)
-          s!"{label}: an answer was logged"
+        check (!(← logAt rt forest.leaves[0]!).any fun | .answered _ (.sample ..) _ => true | _ => false)
+          s!"{label}: a response was logged"
       -- With no provider named, a run that needs a sample says so.
       let rt ← runtime (echoing) none
       assertError "no provider" (Driver.drive rt run (← start rt run)) fun
@@ -216,7 +215,7 @@ def suite : Suite := Testing.suite "runs" #[
   test "a command that could not be run stops the driver, and the next run asks for it again" do
     withMini {} fun run => do
       let attempts ← IO.mkRef 0
-      let flaky : Executor := { uname := pure testUname, exec := fun _ _ _ _ => do
+      let flaky : Executor := { exec := fun _ _ _ _ => do
         if (← attempts.modifyGet fun n => (n, n + 1)) == 0 then throw <| IO.userError "the daemon is gone"
         pure { output := "ok", exitCode? := some 0 } }
       let rt ← runtime flaky (some (← scriptedModel script))
@@ -226,7 +225,7 @@ def suite : Suite := Testing.suite "runs" #[
       let forest ← assertOk rt.store.forest
       assertEqual "one log" forest.leaves.size 1
       let log ← logAt rt forest.leaves[0]!
-      check (log.back? matches some (.opened #[0, 0] _)) "the log ends with the call that asked for the command"
+      check (log.back? matches some (.opened #[0, 1] _)) "the log ends with the call that asked for the command"
       let (finished, stop) ← assertOk <| Driver.drive rt run forest.leaves[0]!
       check (stop matches .idle) "the run finishes"
       assertEqual "the command ran once in the log" ((← logAt rt finished).filter fun
@@ -337,16 +336,28 @@ def suite : Suite := Testing.suite "runs" #[
         | .input _ => true
         | _ => false
       -- A program is called once no call runs, and only one the run can build.
-      let grader := Call.event (graderCall "true")
+      let grader := (graderCall "true").event
       assertError "a call while the agent runs" (Driver.append rt.store run paused grader) fun
         | .input message => contains message "a call is running"
         | _ => false
-      assertError "a call of no program" (Driver.append rt.store run ended (Call.event { testCall with program := .mkObj [("name", "nothing")] })) fun
+      assertError "a call of no program" (Driver.append rt.store run ended ({ testCall with name := "nothing" }).event) fun
         | .input message => contains message "no program named nothing"
         | _ => false
-      assertError "a grader with no command" (Driver.append rt.store run ended (Call.event (graderCall ""))) fun
-        | .input message => contains message "needs its command"
-        | _ => false
+      -- Whether a call's arguments fit its program is the CLI's to check before it appends it.
+      check (match Agents.Catalog.check (graderCall "") with
+        | .error message => contains message "needs its command"
+        | .ok () => false) "a grader with no command"
+      -- Every program is called the same way: a task is a field of an agent's configuration.
+      let agentWith (fields : List (String × Json)) : RoutineCall :=
+        programCall "mini-swe" (.mkObj ((("model", "gpt-oss-120b") : String × Json) :: fields)) testEnvironment
+      check (match Agents.Catalog.check (agentWith []) with
+        | .error message => contains message "works on a task"
+        | .ok () => false) "an agent with no task"
+      check (Agents.Catalog.check (agentWith [("task", "fix it")]) matches .ok ()) "an agent with its task"
+      let tasked := programCall "grader" (.mkObj [("command", "true"), ("task", "t")]) testEnvironment
+      check (match Agents.Catalog.check tasked with
+        | .error message => contains message "task"
+        | .ok () => false) "a grader takes no task: it has no such field"
       let (asked, _) ← assertOk <| Driver.append rt.store run ended grader
       let log ← logAt rt asked
       check ((next run log) matches .hears #[] _) "the run takes the call"
@@ -484,7 +495,7 @@ def suite : Suite := Testing.suite "runs" #[
         assertEqual "the file is named by its content" firstFile s!"/alaya/outputs/{Driver.outputFile long}"
         -- From the point after the first command: the second listing is the fork's own.
         let forest ← assertOk rt.store.forest
-        let returnedAt := log.findIdx? (fun | .returned #[0, 0] _ => true | _ => false)
+        let returnedAt := log.findIdx? (fun | .returned #[0, 1] _ => true | _ => false)
         let some at' := returnedAt | fail "no return"
         let (forked, _) ← assertOk <| Driver.drive rt run (forest.path first)[at']!
         let some again := (← logAt rt forked).findSome? fun
@@ -598,7 +609,7 @@ def suite : Suite := Testing.suite "runs" #[
         | fail "no sample"
       let _ ← assertOk <| Driver.drive rt run (forest.path first)[lastSample.2 - 1]!
       let forest ← assertOk rt.store.forest
-      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (run := run)
+      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (root := run)
       let entries ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "entries" >>= Json.getArr?)
       assertEqual "every entry once" entries.size forest.entries.size
       let envelopes ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "envelopes" >>= Json.getArr?)

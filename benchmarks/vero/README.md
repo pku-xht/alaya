@@ -102,7 +102,7 @@ The run is graded afterwards, by a call of the grader (below).
 MODE=codeproof    # or proof
 last() { tail -n 1 | cut -d' ' -f1; }
 ROOT=$(.lake/build/bin/alaya new "$RUN/source" --data "$RUN/audit" | last)
-CALL=$(.lake/build/bin/alaya call "$ROOT" mini-vero --task-file "$RUN/MINIVERO_TASK.md" \
+CALL=$(.lake/build/bin/alaya call "$ROOT" mini-vero --set-file task="$RUN/MINIVERO_TASK.md" \
   --set mode=$MODE --set model=MODEL --image "$AGENT" --data "$RUN/audit" | last)
 .lake/build/bin/alaya resume "$CALL" --provider PROVIDER --container-user "$(id -u):$(id -g)" \
   --time-budget 60 --data "$RUN/audit" --json > "$RUN/first.jsonl"

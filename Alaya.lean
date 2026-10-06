@@ -17,7 +17,7 @@ import Alaya.Chat.Schema
 import Alaya.Chat.Stored
 import Alaya.Executor
 import Alaya.Executor.Docker
-import Alaya.Program
+import Alaya.Computation
 import Alaya.Replay
 import Alaya.Agent
 import Alaya.Agents.Config

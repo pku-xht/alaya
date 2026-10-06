@@ -2,11 +2,11 @@ import Lean.Data.Json
 import Alaya.Hash
 import Alaya.Question
 
-/-! Programs and the log: an agent, and every routine it calls, is a program, a tree of the
-operations it asks the world for; a run is the flat, append-only log of what happened. See
-`docs/agent-api.md`.
+/-! Computations, routines and the log: an agent, and every routine it calls, is a computation,
+a tree of the operations it asks the world for, under a name; a run is the flat, append-only log
+of what happened. See `docs/agent-api.md`.
 
-A program is the free monad on a signature of operations (Hancock and Setzer 2000; Kiselyov
+A computation is the free monad on a signature of operations (Hancock and Setzer 2000; Kiselyov
 and Ishii 2015), with a way to fail, a read of the inbox, a call of a routine by its name, and a
 loop. The papers the design draws on are listed in `docs/agent-api.md`. -/
 
@@ -14,7 +14,7 @@ namespace Alaya
 
 open Lean (Json ToJson FromJson toJson fromJson?)
 
-/-- A signature: the operations a program may perform, each with the type of its answer, and how
+/-- A signature: the operations a computation may perform, each with the type of its answer, and how
 the log keeps both. The log keeps an operation by a `Key`, enough to tell it from another: for
 a model's sample that is the digest of its request, so the log does not hold the whole dialogue
 again with every response. It keeps every answer as a `Stored` value, of whichever operation,
@@ -31,8 +31,8 @@ structure Signature where
   read : (op : Op) → Stored → Option (Answer op)
 
 /-- A frame is the path of calls from the root, each call being its ordinal among the calls its
-parent made. Nothing in a program states an ordinal: the interpreter assigns it. `#[]` is the
-frame of a run, and `#[0]`, `#[1]`, … in it those of the programs the run calls, in order. -/
+parent made. Nothing in a computation states an ordinal: the interpreter assigns it. `#[]` is the
+frame of a run, and `#[0]`, `#[1]`, … in it those of the routines the run calls, in order. -/
 abbrev Frame := Array Nat
 
 /-- A frame as a reader is shown it: `0.2.1`, or `-` for the run's own. -/
@@ -49,8 +49,8 @@ structure RoutineCall where
   arguments : Json
   deriving BEq, Inhabited
 
-/-- Something that happened without a program asking for it, or the reply of a person to a
-question a program asked: that is asked for, but it comes in its own time, from outside, so it
+/-- Something that happened without a computation asking for it, or the reply of a person to a
+question a computation asked: that is asked for, but it comes in its own time, from outside, so it
 is logged when it arrives like the rest. -/
 inductive Notice where
   /-- A person said something: the task, or a message later on. -/
@@ -60,7 +60,7 @@ inductive Notice where
   | changed (workspace : Snapshot) (summary : String)
   /-- A person answered the question the call in frame `to` asked. -/
   | replied (to : Frame) (reply : Reply)
-  /-- A person asked the run to call a program: its name, and its arguments. -/
+  /-- A person asked the run to call a routine: its name, and its arguments. -/
   | called (call : RoutineCall)
   deriving Inhabited
 
@@ -76,31 +76,31 @@ structure Wait where
   accepts : Frame → Notice → Bool
   question? : Option Question := none
 
-/-- A program: a tree of operations, each continued with its answer, or with the error when the
+/-- A computation: a tree of operations, each continued with its answer, or with the error when the
 world could not give one. A read of the inbox takes the notices not yet read that are addressed to no one; one that waits is
 for some notices only, which it says given the frame it is made in, and is made once one of them
 has arrived. A question is asked of a person, and continued with the reply. A call names a routine and what it is called with: the interpreter answers it by
-running the routine the run has under that name, in a child frame, and it ends with the
+running the routine the scope of the calling routine has under that name, in a child frame, and it ends with the
 routine's value or its error. A loop goes round `step` from a state until a round gives a result; the state of a
 loop is data, where a continuation is not. A comment says something to whoever reads the log,
 and to no one else: nothing depends on it. -/
-inductive Program (σ : Signature) : Type → Type 1 where
-  | pure : α → Program σ α
+inductive Computation (σ : Signature) : Type → Type 1 where
+  | pure : α → Computation σ α
   /-- Gives up, up to the call it is in, unless something catches it first. -/
-  | fail : (error : String) → Program σ α
-  | perform : (op : σ.Op) → (Except String (σ.Answer op) → Program σ α) → Program σ α
-  | inbox : (wait : Option Wait) → (List Notice → Program σ α) → Program σ α
+  | fail : (error : String) → Computation σ α
+  | perform : (op : σ.Op) → (Except String (σ.Answer op) → Computation σ α) → Computation σ α
+  | inbox : (wait : Option Wait) → (List Notice → Computation σ α) → Computation σ α
   /-- Asks a person, and waits for a reply to the frame it is asked in, of a kind that fits. -/
-  | ask : Question → (Reply → Program σ α) → Program σ α
-  | call : RoutineCall → (Except String Json → Program σ α) → Program σ α
-  | iter : {S β : Type} → (S → Program σ (S ⊕ β)) → S → (β → Program σ α) → Program σ α
-  | comment : (text : String) → Program σ α → Program σ α
+  | ask : Question → (Reply → Computation σ α) → Computation σ α
+  | call : RoutineCall → (Except String Json → Computation σ α) → Computation σ α
+  | iter : {S β : Type} → (S → Computation σ (S ⊕ β)) → S → (β → Computation σ α) → Computation σ α
+  | comment : (text : String) → Computation σ α → Computation σ α
 
-namespace Program
+namespace Computation
 
 /-- Substitution. An operation, a read, a call and a failure commute with it; a loop extends
 only its continuation, never its rounds. -/
-def bind : Program σ α → (α → Program σ β) → Program σ β
+def bind : Computation σ α → (α → Computation σ β) → Computation σ β
   | .pure a, f => f a
   | .fail error, _ => .fail error
   | .perform op k, f => .perform op fun answer => (k answer).bind f
@@ -110,12 +110,12 @@ def bind : Program σ α → (α → Program σ β) → Program σ β
   | .iter step s k, f => .iter step s fun b => (k b).bind f
   | .comment text k, f => .comment text (k.bind f)
 
-instance : Monad (Program σ) := { pure := .pure, bind := .bind }
+instance : Monad (Computation σ) := { pure := .pure, bind := .bind }
 
-/-- A program made to give its value or its failure: what `try` and `catch` are. It does not
+/-- A computation made to give its value or its failure: what `try` and `catch` are. It does not
 reach into a routine that is called, whose failure the call has caught already, and nothing is
 logged for it. -/
-def attempt : Program σ α → Program σ (Except String α)
+def attempt : Computation σ α → Computation σ (Except String α)
   | .pure a => .pure (.ok a)
   | .fail error => .pure (.error error)
   | .perform op k => .perform op fun answer => (k answer).attempt
@@ -131,116 +131,132 @@ def attempt : Program σ α → Program σ (Except String α)
       | .error error => .pure (.error error)
   | .comment text k => .comment text k.attempt
 
-instance : MonadExcept String (Program σ) where
+instance : MonadExcept String (Computation σ) where
   throw := .fail
   tryCatch body handler := body.attempt.bind fun
     | .ok a => .pure a
     | .error error => handler error
 
-end Program
+end Computation
 
 /-- Takes every notice not yet read that is addressed to no one (`Notice.addressed`). -/
-def inbox : Program σ (List Notice) := .inbox none .pure
+def inbox : Computation σ (List Notice) := .inbox none .pure
 
 /-- Waits for notices that `accepts` takes, given the frame the read is made in, and takes them. -/
-def await (accepts : Frame → Notice → Bool) : Program σ (List Notice) := .inbox (some { accepts }) .pure
+def await (accepts : Frame → Notice → Bool) : Computation σ (List Notice) := .inbox (some { accepts }) .pure
 
 /-- Asks a person a question, and waits for the reply. The question goes into the log where it
 is asked, and the run waits there until a person replies to the frame that asked, with a reply
 that fits the question: no other notice ends the wait. A question that cannot be asked
 (`Question.validate`) is a failure where it is asked. -/
-def ask (question : Question) : Program σ Reply :=
+def ask (question : Question) : Computation σ Reply :=
   match question.validate with
   | .ok () => .ask question .pure
   | .error problem => .fail problem
 
 /-- Performs an operation, and fails where it was performed when the world could not answer. -/
-def perform (op : σ.Op) : Program σ (σ.Answer op) :=
+def perform (op : σ.Op) : Computation σ (σ.Answer op) :=
   .perform op fun | .ok answer => .pure answer | .error error => .fail error
 
-/-- Tries a program again while it fails, up to `attempts` times more. Every try is in the log. -/
-def retry (attempts : Nat) (program : Program σ α) : Program σ α :=
+/-- Tries a computation again while it fails, up to `attempts` times more. Every try is in the log. -/
+def retry (attempts : Nat) (computation : Computation σ α) : Computation σ α :=
   match attempts with
-  | 0 => program
-  | attempts + 1 => try program catch _ => retry attempts program
+  | 0 => computation
+  | attempts + 1 => try computation catch _ => retry attempts computation
 
 /-- Calls a routine by its name. Its failure is its caller's too, unless the caller catches it. -/
-def call (name : String) (arguments : Json) : Program σ Json :=
+def call (name : String) (arguments : Json) : Computation σ Json :=
   .call ⟨name, arguments⟩ fun | .ok value => .pure value | .error error => .fail error
 
 /-- Says `text` to whoever reads the log. Replay passes over it, and over every comment a log
-holds, so a program's comments can change without a log of it becoming no trace of it; the
+holds, so a computation's comments can change without a log of it becoming no trace of it; the
 driver writes it before the next event it appends. -/
-def comment (text : String) : Program σ Unit := .comment text (.pure ())
+def comment (text : String) : Computation σ Unit := .comment text (.pure ())
 
 /-- Goes round `step` from `s` until a round gives a result. -/
-def iter (step : S → Program σ (S ⊕ α)) (s : S) : Program σ α := .iter step s .pure
+def iter (step : S → Computation σ (S ⊕ α)) (s : S) : Computation σ α := .iter step s .pure
 
-/-- The routines of a run, by name: every program a call can enter. A tool a model may ask for
-is one, and so is a sub-agent, and a step of a workflow. -/
-abbrev Routines (σ : Signature) := String → Option (Json → Program σ Json)
-
-/-- A routine as a table lists it: its name, and its body from a call's arguments to its result,
-both JSON. -/
-abbrev Routine.Entry (σ : Signature) := String × (Json → Program σ Json)
-
-/-- The table of these routines. -/
-def Routines.of (entries : Array (Routine.Entry σ)) : Routines σ :=
-  fun name => (entries.find? (·.1 == name)).map (·.2)
-
-/-- A routine: a named program from arguments to a result. A call is the only way into it, so it
-always runs in a frame of its own, and the log brackets it: its opening, with its name and its
+mutual
+/-- A routine: a computation from its arguments to its result, both JSON, under a name, with the
+scope the calls inside it name routines in. A call is the only way into a routine, so it always
+runs in a frame of its own, and the log brackets it: its opening, with its name and its
 arguments, and its end, with its result or its failure. So the structure of an agent — its
-workflows, its sub-agents, its tools — is the nesting of its log.
+workflows, its sub-agents, its tools — is the nesting of its log. The run itself is a routine,
+whose computation runs in frame `#[]`, entered by no call.
 
-`entry` is what a run's table holds of it; `call` enters it by its name. Arguments and results
-cross the call as JSON, which is what makes them data in the log: a routine is given values,
-never a function. -/
-structure Routine (σ : Signature) (α β : Type) where
+Like a closure, a routine brings its scope: what a call inside it means is fixed where the
+routine is defined, not by whoever calls it. What varies from call to call comes in its
+arguments, so it is data in the log. -/
+structure Routine (σ : Signature) : Type 1 where
   name : String
-  entry : Routine.Entry σ
-  call : α → Program σ β
+  body : Json → Computation σ Json
+  scope : Scope σ
+
+/-- A scope: the routines a call can name, by name. -/
+structure Scope (σ : Signature) : Type 1 where
+  find : String → Option (Routine σ)
+end
+
+instance : Inhabited (Scope σ) := ⟨⟨fun _ => none⟩⟩
+
+namespace Scope
+
+/-- The scope with no routines. -/
+def empty : Scope σ := default
+
+/-- The scope of these routines. -/
+def of (routines : Array (Routine σ)) : Scope σ :=
+  ⟨fun name => routines.find? (·.name == name)⟩
+
+/-- The scope of the routines `make` gives, each given the scope itself, as `letrec` binds: so
+routines defined together call each other, and themselves, by name. -/
+partial def fix (make : Scope σ → Array (Routine σ)) : Scope σ :=
+  ⟨fun name => (make (fix make)).find? (·.name == name)⟩
+
+/-- The scope without the routine `name`, in it or in the scope of any routine it reaches. -/
+partial def without (scope : Scope σ) (name : String) : Scope σ :=
+  ⟨fun found => if found == name then none else
+    (scope.find found).map fun routine => { routine with scope := routine.scope.without name }⟩
+
+end Scope
+
+/-- A routine as Lean code calls it, with typed arguments and result: its name, its body, and the
+call. Its arguments and its result cross the call as JSON, which is what makes them data in the
+log: a routine is given values, never a function. It becomes a routine when it is given its
+scope (`within`). -/
+structure Routine.Typed (σ : Signature) (α β : Type) where
+  name : String
+  body : Json → Computation σ Json
+  call : α → Computation σ β
+
+/-- The routine, its calls naming routines in `scope`. -/
+def Routine.Typed.within (typed : Routine.Typed σ α β) (scope : Scope σ) : Routine σ :=
+  { name := typed.name, body := typed.body, scope }
 
 /-- The routine `name`, with `body`. Its arguments and its result are read back from JSON on the
 other side of the call; what cannot be read is a failure, of the routine or of its caller. -/
 def routine [ToJson α] [FromJson α] [ToJson β] [FromJson β] (name : String)
-    (body : α → Program σ β) : Routine σ α β where
+    (body : α → Computation σ β) : Routine.Typed σ α β where
   name
-  entry := (name, fun arguments =>
+  body arguments :=
     match fromJson? arguments with
     | .ok a => toJson <$> body a
-    | .error problem => .fail s!"{name}: its arguments cannot be read: {problem}")
+    | .error problem => .fail s!"{name}: its arguments cannot be read: {problem}"
   call a := do
     let result ← call name (toJson a)
     match fromJson? result with
     | .ok b => pure b
     | .error problem => throw s!"{name}: its result cannot be read: {problem}"
 
-/-- The programs a run can call from its own frame, by name: each one's body and the routines
-the calls inside it enter, both built from the call's arguments, or why they cannot be. -/
-abbrev Programs (σ : Signature) := String → Option (Json → Except String (Program σ Json × Routines σ))
-
-/-- The programs of a table of routines: each routine, entering the same table. -/
-def Programs.ofRoutines (routines : Routines σ) : Programs σ :=
-  fun name => (routines name).map fun body arguments => .ok (body arguments, routines)
-
-/-- A run: its own program, in frame `#[]`, and the programs it calls. A call from the run's own
-frame enters one of `programs`, and a call inside it the routines that program came with. -/
-structure Run (σ : Signature) where
-  programs : Programs σ
-  top : Program σ Json
-  /-- Whether a stop from outside may end the call the run's own program made `n`-th, from 0. -/
-  stops : Nat → Bool := fun _ => true
-
 /-- What the driver is asked to do: an operation, and the frame that asked. -/
-structure Call (σ : Signature) where
+structure OpRequest (σ : Signature) where
   frame : Frame
   op : σ.Op
 
 /-- One thing that happened. A notice is not asked for: it is logged when it arrives. An answer
 is what the world gave an operation, with the frame that asked and the key of the operation; it
-is an error when the world could not give one. The others are marks of what the program did,
-logged so that the log can be read without the program: a read of the inbox, with the positions
+is an error when the world could not give one. The others are marks of what the computation did,
+logged so that the log can be read without the computation: a read of the inbox, with the positions
 of the notices it took, a question asked of a person, and the opening of a call and how it
 ended, with a return or a failure.
 A stop comes from outside and ends every frame of the agent. A comment is for a reader alone,

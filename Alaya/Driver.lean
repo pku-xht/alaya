@@ -4,7 +4,7 @@ import Alaya.Cache
 import Alaya.Provider
 import Alaya.Workspaces
 
-/-! The driver: the only part that carries out what a program asks. It keeps the interpreter
+/-! The driver: the only part that carries out what a computation asks. It keeps the interpreter
 live, asks it what is next after the log, and either carries out the operation it asks for and
 appends the answer, or appends the mark it makes, an entry at a time, until no call is running,
 a call waits for a person, or this invocation reaches a limit. Each call's commands run in a
@@ -106,7 +106,7 @@ private structure Checkout where
   version? : Option Snapshot := none
 
 /-- Classifies a failure of the model. A refusal of the request as too long for the model's
-context is the program's to deal with: it is the answer, an error in the provider's own words,
+context is the computation's to deal with: it is the answer, an error in the provider's own words,
 and trying again would not help. Anything else — a provider that cannot be reached, a key it
 rejects, a response it garbles, a full disk — stops the driver with nothing logged, and the
 next `resume` asks again. -/
@@ -135,16 +135,16 @@ private def executorFor (rt : Runtime) (held : IO.Ref (Option (Nat × Executor))
   match ← io held.get with
   | some (at', executor) => if at' == index then return (executor, false) else io executor.close
   | none => pure ()
-  let executor ← rt.executor (← callOf log frame).environment
+  let executor ← rt.executor (← environmentOf log frame)
   io (held.set (some (index, executor)))
   pure (executor, true)
 
-/-- Drives `run` on from the entry `tip`, appending each event as an entry and calling `onEntry`
+/-- Drives the run of `root` on from the entry `tip`, appending each event as an entry and calling `onEntry`
 with it, until no call is running, a call waits for a person, or it reaches one of `limits`.
 Gives the last entry and why it stopped. A sample takes the next draw of its request: the first
 when the tip has no other continuation that sampled, so a run that crashed takes the response
 the cache kept, and the next one when it has, so running a point again is a new draw. -/
-partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits := {})
+partial def drive (rt : Runtime) (root : Routine Agent) (tip : Hash) (limits : Limits := {})
     (onEntry : OnEntry := fun _ _ => pure ()) : Result (Hash × Stop) := do
   let forest ← rt.store.forest
   let entries ← rt.store.entries forest tip
@@ -183,7 +183,7 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
         (spent + entry.elapsedMs) now samples checkout
     let append := appendTook none
     match replayer.next with
-    -- The run's own program never ends; a run that did is no longer calling anything.
+    -- The run's routine never ends; a run that did is no longer calling anything.
     | .done _ | .raised _ => pure (tip, .idle)
     | .waits frame question? => pure (tip, if frame.inCall then .waits frame question? else .idle)
     | .mismatch position =>
@@ -241,7 +241,7 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
       | .time =>
         append (.answered call.frame .time
           (.ok (.timing { spentMs := timeSpent, budgetMs? := limits.budgetMs? }))) checkout samples
-  try loop forest tip log (Replayer.ofLog run log) spent started 0 {}
+  try loop forest tip log (Replayer.ofLog root log) spent started 0 {}
   finally
     if let some (_, executor) ← io held.get then io executor.close
 
@@ -259,12 +259,13 @@ def running : Next Agent → Bool
 /-- Appends an event that comes from outside — a notice, a stop — after `tip`, after checking
 that the log can take it: a stop, a message, a change or a reply only while a call is running,
 when it has something to end or someone to read it; a call only where the run waits for one,
-no call running and none asked for yet, and only of a program the run can build from the call's
-arguments. Gives the new entry. -/
-def append (store : Store) (run : Run Agent) (tip : Hash) (event : Event Agent) : Result (Hash × Entry) := do
+no call running and none asked for yet, and only of a routine the run's scope has. Whether the
+call's arguments fit the routine is its caller's to check (`Agents.Catalog.check`): a call that
+does not fails in its frame. Gives the new entry. -/
+def append (store : Store) (root : Routine Agent) (tip : Hash) (event : Event Agent) : Result (Hash × Entry) := do
   let forest ← store.forest
   let log ← store.log forest tip
-  let next := (Replayer.ofLog run log).next
+  let next := (Replayer.ofLog root log).next
   if let .mismatch position := next then
     throw <| .input <| s!"the log is no trace of its run's program at position {position}; " ++
       "`alaya rebase` copies the part that is into a new data directory"
@@ -276,9 +277,7 @@ def append (store : Store) (run : Run Agent) (tip : Hash) (event : Event Agent) 
       throw <| .input "a call is running: a program is called once it is over; `alaya stop` ends it first"
     if !(next matches .waits #[] _) then
       throw <| .input "the run has a call to make here already: `alaya resume` makes it"
-    match run.programs call.name with
-    | none => throw <| .input s!"no program named {call.name}"
-    | some make => if let .error problem := make call.arguments then throw <| .input problem
+    if (root.scope.find call.name).isNone then throw <| .input s!"no program named {call.name}"
   | .arrived _ =>
     if !running next then
       throw <| .input "no call is running: nothing would read a notice appended here; append it at an entry before the call's end"

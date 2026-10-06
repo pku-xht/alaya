@@ -31,7 +31,7 @@ message, in this order:
 
 1. Vero's opening framing: the sandbox is the working directory, and the grader reads it after
    the agent stops.
-2. The instance, given to `call` as `--task-file`: the `MINIVERO_TASK.md` of §3.
+2. The instance, its `task`, given to `call` as `--set-file task=MINIVERO_TASK.md`: the file of §3.
 3. Vero's rule sections: `Marker grammar`, `Oracle commands`, `Grading` for the run's mode,
    `Done condition`, `Checkpointing`, `Anti-cheating`, and the two facts under `Scoring`.
 4. This agent's mechanics: repository-relative paths, no shell state between calls, one
@@ -98,7 +98,7 @@ The image build, render, prepare, run and grading commands are in
 
 ```sh
 alaya new source
-alaya call ROOT mini-vero --task-file MINIVERO_TASK.md --set model=MODEL --image ghcr.io/msv-lab/alaya-vero-agent:0a7325d
+alaya call ROOT mini-vero --set-file task=MINIVERO_TASK.md --set model=MODEL --image ghcr.io/msv-lab/alaya-vero-agent:0a7325d
 alaya resume CALLED --provider PROVIDER
 alaya call LAST grader --image vero-grader-TASK \
   --set command='python /opt/alaya-vero/grade.py --mode proof --benchmark /grader'

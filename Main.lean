@@ -96,12 +96,14 @@ private def exitPaused : UInt32 := 4
 private def programName : Cli.Value String :=
   .enum "PROGRAM" (Agents.Catalog.all.map fun d => (d.name, d.name)).toList
 
-/-- `--set PATH=VALUE`: one field of a program's configuration over its defaults. -/
-private def setting : Cli.Value Settings.Setting := ⟨"PATH=VALUE", Settings.parse⟩
-
-private def overrides : Cli.Spec (Array Settings.Setting) :=
-  Cli.repeated "set" setting
-    "a field over the program's defaults, in order, e.g. model=gpt-6-luna, model.params.reasoning_effort=high, mode=codeproof"
+/-- `--set PATH=VALUE` and `--set-file PATH=FILE`: the fields of a program's configuration over
+its defaults, in the order given. -/
+private def overrides : Cli.Spec (Array Settings.Given) :=
+  Cli.interleaved #[
+    ("set", ⟨"PATH=VALUE", fun text => Settings.Given.value <$> Settings.parse text⟩,
+      "a field over the program's defaults, in order, e.g. model=gpt-6-luna, model.params.reasoning_effort=high, task='Fix the bug'"),
+    ("set-file", ⟨"PATH=FILE", Settings.parseFile⟩,
+      "a field set to a file's text, as it is, in order with --set, e.g. task=TASK.md; stdin is /dev/stdin")]
 
 /-- What `new` takes: a project, or an image whose workdir the workspace is copied from. -/
 private structure NewArgs where
@@ -148,8 +150,8 @@ private def appendTo (data : DataDir) (reference : String) (out : Cli.Out)
     (event : Log Agent → Next Agent → Result (Event Agent)) : Result UInt32 := do
   let (_, tip, entries) ← entriesAt data reference
   let log := entries.map (·.event)
-  let event ← event log (next Run.alaya log)
-  let (hash, entry) ← Driver.append data.store Run.alaya tip event
+  let event ← event log (next session log)
+  let (hash, entry) ← Driver.append data.store session tip event
   entryRecord out hash entries.size entry
   pure 0
 
@@ -161,8 +163,7 @@ private structure CallArgs where
   program : String
   image : String
   workdir : String
-  task? : Option Cli.TextSource
-  settings : Array Settings.Setting
+  settings : Array Settings.Given
 
 private def CallArgs.cli : Cli.Spec CallArgs :=
   CallArgs.mk
@@ -172,23 +173,20 @@ private def CallArgs.cli : Cli.Spec CallArgs :=
     <*> Cli.flag "image" (.string "IMAGE") "the container image the call's commands run in, pinned by digest"
     <*> Cli.flagD "workdir" (.string "PATH") Executor.Docker.defaultWorkdir
       "where the workspace is mounted in the image"
-    <*> Cli.text "task" "the task, for an agent, saved verbatim"
     <*> overrides
 
 /-- Appends a call of a program after an entry, where no call is running: its configuration,
 complete, with its image pinned. `resume` then drives it. -/
 private def callRun (a : CallArgs) (out : Cli.Out) : Result UInt32 := do
   -- A configuration that is wrong is said so before anything is appended.
-  let program ← Agents.Catalog.resolve a.program a.settings
-  let task? ← a.task?.mapM (·.read "task")
+  let config ← Agents.Catalog.resolve a.program (← a.settings.mapM (·.read))
+  if let .error problem := Agents.Catalog.check ⟨a.program, ({ config } : ProgramArguments).toJson⟩ then
+    throw <| .input problem
   withData a.data (write := true) fun data => do
     Executor.Docker.checkWorkdir a.workdir #[Driver.outputsDir]
     let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
-    let uname ← Executor.Docker.uname settings
-    let config : CallConfig := {
-      program, task?
-      environment := { image := settings.image, workdir := a.workdir, uname } }
-    appendTo data a.entry out fun _ _ => pure (Call.event config)
+    let environment : Environment := { image := settings.image, workdir := a.workdir }
+    appendTo data a.entry out fun _ _ => pure (programCall a.program config environment).event
 
 /-! ## Driving a run -/
 
@@ -306,7 +304,7 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
       budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
     let position ← IO.mkRef entries.size |> Result.fromIO Error.storage
     withRuntime data a.options a.provider? baseUrl? fun rt => do
-      let (last, stop) ← Driver.drive rt Run.alaya tip limits fun hash entry => do
+      let (last, stop) ← Driver.drive rt session tip limits fun hash entry => do
         let at' ← Result.fromIO Error.storage (position.modifyGet fun p => (p, p + 1))
         entryRecord out hash at' entry
       let log ← data.store.log (← data.store.forest) last
@@ -400,7 +398,7 @@ private def logRun (data : System.FilePath) (reference : String) (out : Cli.Out)
           ("frame", (entry.event.frame?.map Frame.toJson).getD .null),
           ("event", eventToJson entry.event), ("elapsed_ms", entry.elapsedMs)])
         s!"{position}  {Render.short entry.hash}  {frame}  {Render.eventSummary entry.event}  ({Render.seconds spent})"
-    let next := next Run.alaya log
+    let next := next session log
     let status := Render.nextSummary ((questionOf? next).map (·.2)) ((lastCall? log).bind (·.2)) next
     out.record (.mkObj [("next", status)]) status
     pure 0
@@ -424,7 +422,7 @@ private def showRun (data : System.FilePath) (reference : String) (request : Boo
       | .answered _ _ (.ok (.response response)) => addUsage usage (response.usage?.getD {})
       | _ => usage
     let stack := log.zipIdx.foldl (init := #[]) fun stack (event, i) => OpenCall.after stack i event
-    let before := Replayer.ofLog Run.alaya (log.extract 0 position)
+    let before := Replayer.ofLog session (log.extract 0 position)
     let asked? := match before.next, entry.event with
       | .ask { op := .sample _ request, .. }, .answered .. => some request
       | _, _ => none
@@ -544,8 +542,9 @@ version of its agent makes it, with `settings` over its configuration (`Alaya.Re
 read. The new directory is written beside `target` under another name and renamed into place
 once complete, so a failure leaves none. -/
 private def rebaseRun (data : System.FilePath) (reference : String) (target : System.FilePath)
-    (settings : Array Settings.Setting) (out : Cli.Out) : Result UInt32 :=
+    (settings : Array Settings.Given) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
+    let settings ← settings.mapM (·.read)
     let io {α} (action : IO α) : Result α := Result.fromIO Error.storage action
     if ← io target.pathExists then
       throw <| .input s!"{target} exists: rebase makes a new data directory"
@@ -557,7 +556,7 @@ private def rebaseRun (data : System.FilePath) (reference : String) (target : Sy
     let log := entries.map (·.event)
     let log ← Rebase.reconfigure log settings
     do
-      let rebased := rebase Run.alaya log
+      let rebased := rebase session log
       let summary := Rebase.summary rebased log.size
       let staging := target.withFileName
         s!".{name}.rebase-{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"
@@ -610,21 +609,24 @@ private def providerText (provider : Provider.Provider) : String :=
 
 /-- The programs, models and providers with their defaults, or the configuration `call` would
 record for a program with these settings. -/
-private def configRun (program? : Option String) (settings : Array Settings.Setting)
+private def configRun (program? : Option String) (settings : Array Settings.Given)
     (out : Cli.Out) : Result UInt32 := do
   if program?.isNone && !settings.isEmpty then
     throw <| .input "--set needs --program NAME, the program it changes"
+  let settings ← settings.mapM (·.read)
   if program?.isNone then
     for definition in Agents.Catalog.all do
-      let program ← Agents.Catalog.resolve definition.name #[]
-      out.record (.mkObj [("program", program)]) s!"program {program.pretty}"
+      let config ← Agents.Catalog.resolve definition.name #[]
+      out.record (.mkObj [("program", definition.name), ("config", config)])
+        s!"program {definition.name} {config.pretty}"
     for spec in Models.all do
       out.record (.mkObj [("model", spec.toJson)]) s!"model {spec.toJson.pretty}"
     for provider in Provider.all do
       out.record (.mkObj [("provider", providerJson provider)]) (providerText provider)
     return 0
-  let program ← Agents.Catalog.resolve (program?.getD "") settings
-  out.record (.mkObj [("program", program)]) program.pretty
+  let name := program?.getD ""
+  let config ← Agents.Catalog.resolve name settings
+  out.record (.mkObj [("program", name), ("config", config)]) config.pretty
   pure 0
 
 /-! ## The table -/
@@ -637,9 +639,9 @@ private def commands : Array Cli.Command := #[
   { name := "call"
     summary := "Call a program after an entry where no call runs: an agent, or a grader; resume drives it."
     examples := #[
-      "alaya call 4f2c8b mini-swe --set model=gpt-oss-120b --task 'Add a hello.py that prints hello' " ++
+      "alaya call 4f2c8b mini-swe --set model=gpt-oss-120b --set task='Add a hello.py that prints hello' " ++
         "--image ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
-      "alaya call 4f2c8b mini-vero --set model=deepseek-v4.1-flash --set mode=codeproof --task-file TASK.md " ++
+      "alaya call 4f2c8b mini-vero --set model=deepseek-v4.1-flash --set mode=codeproof --set-file task=TASK.md " ++
         "--image my-task:1 --workdir /testbed",
       "alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grade.py'"]
     spec := callRun <$> CallArgs.cli },

@@ -265,6 +265,39 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
 private def status (outcome : Json) : String := (outcome.getObjVal? "status" >>= Json.getStr?).toOption.getD ""
 
 def runSuite : Suite := suite "mini-swe.run" #[
+  test "subagent calls the agent itself on the model's task, in its own scope, in a frame of its own" do
+    let config : Config := { tools := #["bash", "submit", "subagent"] }
+    let delegated : Chat.ToolCall := { id := "d", name := "subagent", arguments := .mkObj [("task", "write b.txt")] }
+    let .ok run := miniRun config | fail "mini-swe with subagent is a run"
+    let rt ← containerRuntime (some (← scriptedModel #[
+      responseWith #[delegated],
+      responseWith #[call "c1" "bash" "echo b > b.txt"],
+      responseWith #[submitCall "s1" "wrote it"],
+      responseWith #[submitCall "s2" "delegated"]]))
+    let (last, _) ← assertOk <| Driver.drive rt run (← start rt run)
+    let log ← logAt rt last
+    assertEqual "the agent's outcome" ((agentResult log).bind (·.toOption) |>.map (status ·)) (some "Submitted")
+    assertEqual "the calls: each agent's uname, MiniSwe itself in the agent's frame, its bash in the sub-agent's"
+      (log.filterMap fun | .opened frame opened => some (frame, opened.name) | _ => none)
+      #[(#[0], "agent"), (#[0, 0], "uname"), (#[0, 1], "mini-swe"), (#[0, 1, 0], "uname"), (#[0, 1, 1], "bash")]
+    -- The sub-agent's call is the agent's own, with the model's task: its configuration, its model.
+    check (log.any fun
+        | .opened #[0, 1] ⟨"mini-swe", arguments⟩ => match ProgramArguments.fromJson arguments with
+          | .ok delegated => taskOf delegated.config == some "write b.txt" && delegated.environment?.isNone &&
+              (delegated.config.getObjVal? "tools").toOption == some (Lean.toJson config.tools)
+          | .error _ => false
+        | _ => false)
+      "the sub-agent's call is the agent's configuration, with the model's task, and no environment"
+    -- The sub-agent's conversation is its own: its task, not the agent's, is what its model is told.
+    let requests := samplesOf run log
+    assertEqual "four samples" requests.size 4
+    check (requests[1]!.1.messages.any fun | .user text => contains text "write b.txt" | _ => false)
+      "the sub-agent was told the model's task"
+    check (requests[3]!.1.messages.any fun
+        | .tool "d" content => contains content.compress "wrote it" | _ => false)
+      "the agent was shown how the sub-agent ended"
+    assertEqual "the sub-agent's edit" (← IO.FS.readFile ((← scratch) / "work" / "b.txt")) "b\n",
+
   test "a two-step run edits the workspace and submits" do
     let (dialogue, env, outcome) ← runAgent {} #[
       responseWith #[call "c1" "bash" "echo hello > a.txt"],

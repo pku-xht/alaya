@@ -158,7 +158,7 @@ function stateChip(i) {
 /** A run by its first call: the program and the model, and the task, along its first branch. */
 function runTitle(root) {
   for (let i = root; i !== undefined; i = children[i][0])
-    if (entries[i].config) return { name: entries[i].e.title, task: entries[i].config.task || '' };
+    if (entries[i].config) return { name: entries[i].e.title, task: (entries[i].config.config || {}).task || '' };
   return { name: 'a run', task: '' };
 }
 
@@ -478,7 +478,7 @@ function renderValue(parent, value, kind) {
   else block(parent, 'value', json(value));
 }
 
-/** A run's configuration: the agent's, the model's, and where its commands run. */
+/** A call's configuration: the program's, an agent's model and task apart, and where its commands run. */
 function settingRows(value, prefix = '') {
   const out = [];
   for (const [key, v] of Object.entries(value || {})) {
@@ -493,12 +493,13 @@ function settingRows(value, prefix = '') {
 }
 
 function renderConfig(parent, config) {
-  for (const [title, value] of [['Program', config.program], ['Model', config.model], ['Environment', config.environment]]) {
+  const { model, task, ...program } = config.config || {};
+  for (const [title, value] of [['Program', program], ['Model', model], ['Environment', config.environment]]) {
     if (!value) continue;
     section(parent, title);
     facts(parent, settingRows(value), 'mono');
   }
-  if (config.task) { section(parent, 'Task'); block(parent, null, config.task, 'prose'); }
+  if (task) { section(parent, 'Task'); block(parent, null, task, 'prose'); }
 }
 
 /** What an entry holds. */
@@ -524,9 +525,9 @@ function renderEvent(parent, i) {
       facts(parent, [['kind', e.form]].concat(e.options.map((o, k) => [String(k + 1), o])));
       break;
     case 'called': {
-      const a = e.arguments || {};
-      facts(parent, [['program', e.routine], ['model', (a.model || {}).name], ['image', (a.environment || {}).image]]);
-      if (a.task) block(parent, 'task', a.task, 'prose');
+      const a = e.arguments || {}, program = a.config || {};
+      facts(parent, [['program', e.routine], ['model', (program.model || {}).name], ['image', (a.environment || {}).image]]);
+      if (program.task) block(parent, 'task', program.task, 'prose');
       break;
     }
     case 'heard': {

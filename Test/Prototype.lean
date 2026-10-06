@@ -5,7 +5,11 @@ import Test.Framework
 its scripted world and its driver, transliterated, must print what the sketch printed
 (`Test/Prototype/expected.txt`). Every way a log can
 be read — a fork that is stopped, a question that waits, a failure that is caught, a log that is
-no trace of the program — is checked against the sketch, line for line. -/
+no trace of the program — is checked against the sketch, line for line.
+
+One line departs from the sketch on purpose. The sketch could stop its agent alone; in Alaya a
+stop ends whichever call of the run is running, so a stop while the sketch's run grades ends the
+grading, and the run's routine fails with it. -/
 
 namespace PrototypeTests
 
@@ -115,13 +119,13 @@ def read : (op : Op) → Stored → Option op.Answer
 abbrev Agent : Signature :=
   { Op, Answer := Op.Answer, Key := Op, key := id, sameKey := (· == ·), Stored, store, read }
 
-def perform (op : Op) : Program Agent op.Answer := Alaya.perform (σ := Agent) op
+def perform (op : Op) : Computation Agent op.Answer := Alaya.perform (σ := Agent) op
 
 /-! ## The sketch's programs -/
 
 structure Tool where
   name : String
-  run : Json → Program Agent Json
+  run : Json → Computation Agent Json
 
 def bash : Tool where
   name := "bash"
@@ -157,7 +161,7 @@ def askUser : Tool where
     return .str ("\n".intercalate (replies.map noticeText))
 
 def round (agent : AgentConfig) (model : ModelConfig) (listen : Bool) (dialogue : Dialogue) :
-    Program Agent (Dialogue ⊕ String) := do
+    Computation Agent (Dialogue ⊕ String) := do
   let request := { model, messages := dialogue, tools := agent.tools }
   let response ← retry agent.retries (perform (.sample request))
   if response.toolCalls.isEmpty then return .inr response.text
@@ -175,7 +179,7 @@ def round (agent : AgentConfig) (model : ModelConfig) (listen : Bool) (dialogue 
     ++ heard.map (.user <| noticeText ·))
 
 def converse (agent : AgentConfig) (model : ModelConfig) (dialogue : Dialogue)
-    (listen := false) : Program Agent String :=
+    (listen := false) : Computation Agent String :=
   iter (round agent model listen) dialogue
 
 def delegate (model : ModelConfig) : Tool where
@@ -198,8 +202,9 @@ def agent (config : Config) : Tool where
     .str <$> converse config.agent config.model ([.system config.system] ++ task.map (.user <| noticeText ·))
       (listen := true)
 
-def table (tools : List Tool) : Routines Agent :=
-  fun name => (tools.find? (·.name == name)).map (·.run)
+/-- The sketch's tools as routines defined together, each calling the others by name. -/
+def scopeOf (tools : List Tool) : Scope Agent :=
+  Scope.fix fun scope => tools.toArray.map fun tool => { name := tool.name, body := tool.run, scope }
 
 def verdict (stdout : String) : String :=
   let lines := stdout.splitOn "\n"
@@ -213,14 +218,12 @@ def hiddenTests : Tool where
     let ran ← perform (.external "pytest /grader" "grader@sha256:9f2c" (some ⟨"hidden"⟩) 900)
     return .str (verdict ran.stdout)
 
-def grading (_ : Except String Json) : Program Agent Json := call "hidden_tests" (.str "")
+def grading (_ : Except String Json) : Computation Agent Json := call "hidden_tests" (.str "")
 
-def graded (config : Config) (after : Except String Json → Program Agent Json := grading) : Run Agent :=
-  { programs := Programs.ofRoutines <| table
-      [agent config, bash, timeBudget, askUser, delegate config.model, commit, hiddenTests]
-    top := .call ⟨"agent", config.json⟩ after
-    -- The sketch stops its agent alone: what follows it runs to its end.
-    stops := (· == 0) }
+def graded (config : Config) (after : Except String Json → Computation Agent Json := grading) : Routine Agent :=
+  { name := "run"
+    body := fun _ => .call ⟨"agent", config.json⟩ after
+    scope := scopeOf [agent config, bash, timeBudget, askUser, delegate config.model, commit, hiddenTests] }
 
 /-! ## The sketch's world and driver -/
 
@@ -256,7 +259,7 @@ def World.answer (world : World) (log : Log') : (op : Op) → Except String op.A
   | .time => .ok world.clock
   | .external command image _ _ => .ok (world.external (workspace log) image command)
 
-partial def drive (world : World) (run : Run Agent) (log : Log') : Log' × Next Agent :=
+partial def drive (world : World) (run : Routine Agent) (log : Log') : Log' × Next Agent :=
   let log := log ++ ((world.arrivals log).map Event.arrived).toArray
   match next run log with
   | .ask call =>
@@ -388,19 +391,18 @@ def describeNext : Next Agent → String
   | .mismatch position => s!"mismatch at {position}"
   | .unguarded frame => s!"unguarded loop in {frame.toList}"
 
-def withAgent (run : Run Agent) (program : Program Agent Json) : Run Agent :=
-  { run with programs := fun name =>
-      if name == "agent" then some fun arguments => match run.programs name with
-        | some make => (make arguments).map fun (_, routines) => (program, routines)
-        | none => .ok (program, fun _ => none)
-      else run.programs name }
+def withAgent (run : Routine Agent) (computation : Computation Agent Json) : Routine Agent :=
+  { run with scope := ⟨fun name =>
+      if name == "agent" then
+        let scope := ((run.scope.find name).map (·.scope)).getD .empty
+        some { name, body := fun _ => computation, scope }
+      else run.scope.find name⟩ }
 
-/-- The run without the routine `name`, wherever its programs would call it. -/
-def without (run : Run Agent) (name : String) : Run Agent :=
-  { run with programs := fun program => (run.programs program).map fun make arguments =>
-      (make arguments).map fun (body, routines) => (body, fun routine => if routine == name then none else routines routine) }
+/-- The run without the routine `name`, wherever its routines would call it. -/
+def without (run : Routine Agent) (name : String) : Routine Agent :=
+  { run with scope := run.scope.without name }
 
-def faithful (run : Run Agent) (log : Log') : Bool :=
+def faithful (run : Routine Agent) (log : Log') : Bool :=
   (List.range (log.size + 1)).all fun i =>
     match log[i]?, next run (log.extract 0 i) with
     | some (.arrived _), _ => true
@@ -514,7 +516,7 @@ def transcript : Array String := Id.run do
   let unseen := (log.extract 0 35).push (.arrived (.said "stop")) ++ drop log 35
   out := out.push s!"a log with no root: {replay (drop log 1)}"
   out := out.push s!"a notice put in before a read: {replay unseen}"
-  let spin : Program Agent Json := iter (fun (n : Nat) => pure (.inl (n + 1))) 0
+  let spin : Computation Agent Json := iter (fun (n : Nat) => pure (.inl (n + 1))) 0
   out := out.push s!"a loop that reads nothing: {describeNext (next (withAgent run spin) log)}"
   return out
 

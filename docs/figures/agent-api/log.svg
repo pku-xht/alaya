@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 300" width="920" height="300">
-<title>The log of a small agent, beside its program</title>
+<title>The log of a small agent, beside its computation</title>
 <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}</style>
 <rect width="920" height="300" fill="#fff"/>
-<text x="12" y="14" class="s">program</text>
+<text x="12" y="14" class="s">computation</text>
 <text x="304" y="14" class="s">carried out by</text>
 <text x="447" y="14" class="s">log</text>
 <text x="460" y="31" class="f" text-anchor="end">position</text>
@@ -84,7 +84,7 @@
 <text x="898" y="225" class="f" text-anchor="end">returned</text>
 <text x="289.5" y="225" class="e" style="fill:#2a7a4b" text-anchor="end">return "fixed"</text>
 <path class="a" d="M298.5,221.5H432"/><path fill="#a3abb5" d="M436,221.5l-5,-2.5v5z"/>
-<g transform="translate(0,249.5)"><path class="a" d="M12,0H74"/><path fill="#a3abb5" d="M78,0l-5,-2.5v5z"/><rect x="26" y="-7" width="34" height="13" fill="#fff"/><text x="43" y="3.5" class="s" text-anchor="middle">model</text></g><text x="90" y="253" class="s">the program asks; the driver carries it out and appends the answer</text>
+<g transform="translate(0,249.5)"><path class="a" d="M12,0H74"/><path fill="#a3abb5" d="M78,0l-5,-2.5v5z"/><rect x="26" y="-7" width="34" height="13" fill="#fff"/><text x="43" y="3.5" class="s" text-anchor="middle">model</text></g><text x="90" y="253" class="s">the computation asks; the driver carries it out and appends the answer</text>
 <g transform="translate(0,266.5)"><path class="a d" d="M78,0H16"/><path fill="#a3abb5" d="M12,0l5,-2.5v5z"/></g><text x="90" y="270" class="s">on replay the answer is read back from the log</text>
-<g transform="translate(0,283.5)"><path class="a" d="M12,0H74"/><path fill="#a3abb5" d="M78,0l-5,-2.5v5z"/></g><text x="90" y="287" class="s">a mark of what the program did: a call opened, a call ended</text>
+<g transform="translate(0,283.5)"><path class="a" d="M12,0H74"/><path fill="#a3abb5" d="M78,0l-5,-2.5v5z"/></g><text x="90" y="287" class="s">a mark of what the computation did: a call opened, a call ended</text>
 </svg>

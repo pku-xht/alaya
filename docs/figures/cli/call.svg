@@ -27,7 +27,7 @@
 <circle cx="668" cy="36.5" r="0.9" fill="#a3abb5"/>
 <circle cx="672" cy="36.5" r="0.9" fill="#a3abb5"/>
 <circle cx="676" cy="36.5" r="0.9" fill="#a3abb5"/>
-<text x="145" y="64" class="s">its configuration: the program, the</text>
-<text x="145" y="78" class="s">model, the task, the image by digest</text>
+<text x="145" y="64" class="s">its configuration: the program with its</text>
+<text x="145" y="78" class="s">model and task, the image by digest</text>
 <text x="691" y="40.5" class="s">the next <tspan class="m">resume</tspan></text>
 </svg>

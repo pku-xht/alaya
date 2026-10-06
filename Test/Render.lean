@@ -21,7 +21,7 @@ private def stored (usage? : Option Chat.TokenUsage) : String :=
 
 /-- An executor that answers every command with `ok`. -/
 private def echoing : Executor :=
-  { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 }, uname := pure testUname }
+  { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 } }
 
 def suite : Suite := Testing.suite "render" #[
   test "tokens, seconds and values read in a line" do
@@ -50,7 +50,7 @@ def suite : Suite := Testing.suite "render" #[
     assertEqual "a long value is cut" (Render.valueSummary (.str (String.ofList (List.replicate 200 'x')))).length 80,
 
   test "an event reads in a line" do
-    let swe : CallConfig := { testCall with program := testCall.program.setObjVal! "name" "mini-swe" }
+    let swe : RoutineCall := { testCall with name := "mini-swe" }
     let lines : Array (Event Agent × String) := #[
       (.arrived (.said "the task\nwith a second line"), "said \"the task with a second line\""),
       (.arrived (.changed (snapshot 'a') "  M a.txt\nfixed"), "changed → aaaaaaaaaaaa:   M a.txt fixed"),
@@ -58,8 +58,8 @@ def suite : Suite := Testing.suite "render" #[
       (.arrived (.replied #[0, 3] .unavailable), "replied to 0.3: unavailable"),
       (.arrived (.replied #[0, 3] .yes), "replied to 0.3: yes"),
       (.asked #[0, 3] { text := "Keep the old API?", form := .yesNo }, "ask \"Keep the old API?\""),
-      (Call.event swe, "call mini-swe, gpt-oss-120b"),
-      (Call.event (graderCall "python3 /grader/grade.py"), "call grader"),
+      (swe.event, "call mini-swe, gpt-oss-120b"),
+      ((graderCall "python3 /grader/grade.py").event, "call grader"),
       (.heard #[0] #[], "inbox: nothing"),
       (.heard #[0] #[2, 5], "inbox: takes [2, 5]"),
       (.answered #[0] (.sample testModelSpec.toJson (snapshot 'b')) (.error "too long"), "failed: too long"),
@@ -73,7 +73,7 @@ def suite : Suite := Testing.suite "render" #[
         "exec sleep 9 → timed out, cccccccccccc"),
       (.answered #[0, 2] .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })), "time 1.2 s of 60.0 s"),
       (.answered #[0, 2] .time (.ok (.timing { spentMs := 1200 })), "time 1.2 s"),
-      (.opened #[0] ⟨swe.name, swe.toJson⟩, "open mini-swe, gpt-oss-120b"),
+      (.opened #[0] swe, "open mini-swe, gpt-oss-120b"),
       (.opened #[1] ⟨"grader", (graderCall "sh g.sh").toJson⟩, "open grader"),
       (.opened #[0, 1] ⟨"bash", .mkObj [("command", "ls")]⟩, "open bash \"ls\""),
       (.opened #[0, 1] ⟨"ask_user", (askCall "q" "Keep it?").arguments⟩, "open ask_user \"Keep it?\""),
@@ -106,7 +106,7 @@ def suite : Suite := Testing.suite "render" #[
       (none, .opens #[0, 1] ⟨"bash", .null⟩, "next: open bash"),
       (none, .returns #[0, 1] .null, "next: the return of 0.1"),
       (none, .fails #[0, 1] "x", "next: the failure of 0.1"),
-      (none, .mismatch 7, "broken: the event at 7 is no trace of the program"),
+      (none, .mismatch 7, "broken: the event at 7 is no trace of the run"),
       (none, .unguarded #[0], "broken: a loop in 0 reads no event")]
     for (question?, next, line) in lines do
       assertEqual line (Render.nextSummary question? none next) line
@@ -150,7 +150,7 @@ def suite : Suite := Testing.suite "render" #[
         { (responseWith #[submitCall "s"]) with usage? := some { input? := some 150, output? := some 5 } }]
       let (rt, last, _) ← drive run echoing (← scriptedModel responses)
       let forest ← assertOk rt.store.forest
-      let usages ← assertOk <| walk (run := run) rt.store forest (#[] : Array (Event Agent × Chat.TokenUsage)) fun seen visit =>
+      let usages ← assertOk <| walk (root := run) rt.store forest (#[] : Array (Event Agent × Chat.TokenUsage)) fun seen visit =>
         pure (seen.push (visit.entry.event, visit.usage))
       assertEqual "an entry each" usages.size (forest.path last).size
       assertEqual "at the end" (stored (usages.back?.map (·.2)))
@@ -206,8 +206,7 @@ def suite : Suite := Testing.suite "render" #[
 
   test "a log that calls a program this version does not have is still shown, its call failing" do
     let store ← assertOk <| Store.create ((← scratch) / "entries")
-    let unknown : CallConfig := { testCall with program := testCall.program.setObjVal! "name" "an-agent-of-another-version" }
-    let call : RoutineCall := ⟨unknown.name, unknown.toJson⟩
+    let call : RoutineCall := { testCall with name := "an-agent-of-another-version" }
     let mut forest ← assertOk store.forest
     let mut parent? : Option Hash := none
     for event in #[.arrived (.changed (snapshot 'a') "the project"), .arrived (.called call), .heard #[] #[1],

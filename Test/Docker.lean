@@ -35,7 +35,8 @@ private def workspace : TestM System.FilePath := do
 
 /-- A runtime whose calls run their commands in a container of their own image and workdir, run
 as `settings` say, with the outputs directory mounted where a command finds it, over the test's
-store and directory workspaces. -/
+store and directory workspaces. An agent's `uname` is the test's machine, so an agent whose
+image does not exist starts no container. -/
 private def runtime (settings : Docker.Settings) (model? : Option Model)
     (outputsDir? : Option System.FilePath := none) : TestM Driver.Runtime := do
   let work ← workspace
@@ -44,31 +45,31 @@ private def runtime (settings : Docker.Settings) (model? : Option Model)
   let mounts := #[{ host := ← IO.FS.realPath outputsDir, container := Driver.outputsDir, readOnly := true }]
   let store ← assertOk <| Store.create ((← scratch) / "entries")
   pure { store, workspaces := ← workspaces, workDir := work, outputsDir
-         executor := fun environment =>
+         executor := fun environment => Scripted.answeringUname <$>
            Docker.executor { settings with image := environment.image, workdir := environment.workdir, mounts }
          model := fun _ => match model? with
            | some model => pure model
            | none => throw <| .input "a call samples its model: name a --provider" }
 
 /-- Runs `k` with MiniSwe's run, configured by `agent`. -/
-private def withRun (agent : Agents.MiniSwe.Config := miniConfig) (k : Run Agent → TestM Unit) : TestM Unit :=
-  match Scripted.runOfConfig agent.toJson with
+private def withRun (agent : Agents.MiniSwe.Config := miniConfig) (k : Routine Agent → TestM Unit) : TestM Unit :=
+  match Scripted.runOfConfig "mini-swe" agent.toJson with
   | .ok run => k run
   | .error problem => fail problem
 
 /-- Creates a run and calls its agent in `settings`' image, at its workdir. -/
-private def startIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Run Agent) : TestM Hash :=
-  Scripted.start rt run "t" none { image := settings.image, workdir := settings.workdir, uname := Scripted.testUname }
+private def startIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Routine Agent) : TestM Hash :=
+  Scripted.start rt run "t" none { image := settings.image, workdir := settings.workdir }
 
 /-- Creates a run, calls its agent in `settings`' image, and drives it until the agent is about to
 read its inbox: the agent runs, and nothing has been asked of a model. -/
-private def openIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Run Agent) : TestM Hash := do
+private def openIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Routine Agent) : TestM Hash := do
   let (tip, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 0 }
   pure tip
 
 /-- Grades the point `tip` of a run with the grader `call`: the agent stopped there, the grader
 called. Gives its verdict, and what its command left: its output and the workspace after it. -/
-private def gradeAt (rt : Driver.Runtime) (run : Run Agent) (tip : Hash) (call : CallConfig) :
+private def gradeAt (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (call : RoutineCall) :
     TestM (Json × Execution) := do
   let (graded, verdict) ← Scripted.grade rt run tip call
   let log ← Scripted.logAt rt graded
@@ -85,9 +86,17 @@ def suite : Suite := Testing.suite "docker" #[
         s!"expected a pinned reference, got {settings.image}"
       check ((settings.image.splitOn "sha256:").length > 1)
         s!"expected a digest, got {settings.image}"
-      let uname ← assertOk (Docker.uname settings)
-      assertEqual "system" uname.system "Linux"
-      check (!uname.machine.isEmpty) "machine should not be empty",
+      -- The agent's `uname` routine reads the machine in the container its commands run in.
+      let executor ← assertOk (Docker.executor settings)
+      try
+        let ran ← executor.exec config (← workspace) #[Agents.Tools.Uname.command] "uname"
+        let uname ← match Agents.Tools.Uname.parse ran.output with
+          | .ok uname => pure uname
+          | .error problem => fail problem
+        assertEqual "system" uname.system "Linux"
+        check (!uname.machine.isEmpty) "machine should not be empty"
+      finally
+        executor.close,
 
   test "runs commands in the container against the bind-mounted workspace" <| withDocker
     fun settings => do
@@ -176,7 +185,7 @@ def suite : Suite := Testing.suite "docker" #[
         try
           let (paused, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 1 }
           let log ← Scripted.logAt rt paused
-          assertEqual "the call's image, from its configuration" ((callAt? log 0).map (·.environment.image)) (some settings.image)
+          assertEqual "the call's image, from its configuration" ((callAt? log 0).bind (·.environment?.map (·.image))) (some settings.image)
           -- The container wrote it, the host snapshotted it.
           assertEqual "snapshot"
             ((← assertOk ((← workspaces).readFile? ((workspace? log).getD default) "made.txt")).map (String.fromUTF8? ·))
@@ -282,7 +291,7 @@ def suite : Suite := Testing.suite "docker" #[
           assertEqual "the exit status decides nothing" (read passed) #["\"pass\"", "1", "1", "7", "\"\""]
           -- The report shows what a grader's command changed, as any command's.
           let forest ← assertOk rt.store.forest
-          let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (run := run)
+          let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (root := run)
           let rows := ((page.getObjVal? "entries" >>= Json.getArr?).toOption.getD #[]).filter fun row =>
             (row.getObjVal? "f").toOption.any (·.compress == "[1]") &&
             (row.getObjVal? "e" >>= (·.getObjVal? "k") >>= Json.getStr?).toOption == some "exec"
@@ -308,7 +317,7 @@ def suite : Suite := Testing.suite "docker" #[
           check (stop matches .paused _) "paused before the agent's first read"
           let (stopped, _) ← assertOk <| Driver.append rt.store run paused (.stopped "out of time")
           let (asked, _) ← assertOk <| Driver.append rt.store run stopped
-            (Call.event (Scripted.graderCall "printf '1..1\\nok 1\\n'" settings.image))
+            (Scripted.graderCall "printf '1..1\\nok 1\\n'" settings.image).event
           let (held, stop) ← assertOk <| Driver.drive rt run asked spent
           check (stop matches .paused _) "the grader pauses before its command"
           let (graded, stop) ← assertOk <| Driver.drive rt run held
@@ -346,7 +355,7 @@ def suite : Suite := Testing.suite "docker" #[
           -- A grader whose image cannot start is no verdict: nothing is logged for its command.
           let (stopped, _) ← assertOk <| Driver.append rt.store run tip (.stopped "to grade this point")
           let (asked, _) ← assertOk <| Driver.append rt.store run stopped
-            (Call.event (Scripted.graderCall "true" "alaya.invalid/nope@sha256:0"))
+            (Scripted.graderCall "true" "alaya.invalid/nope@sha256:0").event
           assertError "cannot start" (Driver.drive rt run asked) fun
             | .environment _ => true
             | _ => false

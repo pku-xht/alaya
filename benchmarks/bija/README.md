@@ -70,7 +70,7 @@ docker pull ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd
 export ALAYA_DATA=$PWD/bija-runs   # created by new; every command below uses it
 last() { tail -n 1 | cut -d' ' -f1; }
 root=$(alaya new benchmarks/bija/skeleton | last)
-called=$(alaya call "$root" mini-swe --set model=gpt-oss-120b --task-file benchmarks/bija/TASK.txt \
+called=$(alaya call "$root" mini-swe --set model=gpt-oss-120b --set-file task=benchmarks/bija/TASK.txt \
   --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
 end=$(alaya resume "$called" --provider dgx | last)
 # mini-swe: done: Submitted: …

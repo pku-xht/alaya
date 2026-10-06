@@ -1,7 +1,7 @@
 import Lean
 
-/-! Questions a program asks a person, and the answers a person gives: what `ask` takes and
-gives (`Alaya.Program`), what the log records of both, and what whatever collects the answers
+/-! Questions a computation asks a person, and the answers a person gives: what `ask` takes and
+gives (`Alaya.Computation`), what the log records of both, and what whatever collects the answers
 reads. There are three kinds of question and six kinds of reply, and no others: a tool that lets
 a model ask chooses among them, and adds none. -/
 

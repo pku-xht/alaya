@@ -14,10 +14,11 @@ A field left out is its default, and a misspelt one is an error.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `model` | none | the model it samples: its spec (`docs/llm-api.md`), a name alone being that model's defaults; required |
+| `task` | none | the task, verbatim; required. `--set-file task=FILE` reads it from a file |
 | `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
 | `executor.timeout_seconds` | 30 | the time a command may take |
 | `executor.env` | mini's | environment overrides for every command: `PAGER=cat` and the like |
-| `tools` | `["bash", "submit"]` | the tools offered, in order. `bash` and `submit` are required; `ask_user` and `time_budget` may be added. The list replaces the default one |
+| `tools` | `["bash", "submit"]` | the tools offered, in order. `bash` and `submit` are required; `ask_user`, `time_budget` and `subagent` may be added. The list replaces the default one |
 | `question_types` | `[]` | the kinds of question `ask_user` lets the model ask: any of `yes_no`, `single_choice`, `open_ended`. Required, and not empty, when `ask_user` is offered |
 | `recover_output` | false | name the file that holds the whole of a cut output (§4) |
 | `context_reserve` | 8000 | tokens kept free for the next response (§3) |
@@ -26,7 +27,8 @@ A field left out is its default, and a misspelt one is an error.
 ## 2. What the model is sent
 
 **The opening** is mini's two messages, rendered from its `mini.yaml`: the system message, and
-the task with a line naming the machine: the system and the architecture of the run's image. Each offered tool's instruction is appended to the task message.
+the task with a line naming the machine: the system and the architecture, as the `uname`
+routine reads them in the call's container. Each offered tool's instruction is appended to the task message.
 
 **The view** is what each later request holds of the conversation:
 

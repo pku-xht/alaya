@@ -22,9 +22,9 @@ structure Visit where
   hash : Hash
   entry : Entry
   position : Nat
-  /-- The operation the event answers, as the program asked for it: for a sample, the whole
+  /-- The operation the event answers, as the computation asked for it: for a sample, the whole
   request. -/
-  asked? : Option (Call Agent)
+  asked? : Option (OpRequest Agent)
   /-- What the run does next after this entry, or none before the run is known. -/
   next? : Option (Next Agent)
   /-- The question the log waits on here, when it waits for a reply. -/
@@ -72,9 +72,9 @@ private structure Place where
   workspace? : Option Snapshot
 
 /-- Folds `f` over every entry of the forest, depth first, from each root, parents before
-children, each log replayed by `run`. -/
+children, each log replayed by `root`, the run's routine. -/
 partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit → Result β)
-    (run : Run Agent := Run.alaya) : Result β := do
+    (root : Routine Agent := session) : Result β := do
   let rec go (acc : β) (place : Place) (hash : Hash) : Result β := do
     let entry ← store.get forest hash
     let event := entry.event
@@ -102,8 +102,8 @@ partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit
     let acc ← f acc visit
     let place := { position := place.position + 1, replayer, stack, last?, spentMs, usage, workspace? }
     (forest.childrenOf hash).foldlM (init := acc) fun acc child => go acc place child
-  forest.roots.foldlM (init := init) fun acc root =>
-    go acc { position := 0, replayer := Replayer.start run, stack := #[], last? := none, spentMs := 0
-             usage := {}, workspace? := none } root
+  forest.roots.foldlM (init := init) fun acc first =>
+    go acc { position := 0, replayer := Replayer.start root, stack := #[], last? := none, spentMs := 0
+             usage := {}, workspace? := none } first
 
 end Alaya

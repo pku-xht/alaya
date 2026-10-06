@@ -25,13 +25,13 @@ private def openingText (task : String) (mode : MiniVero.Mode := .codeproof) : T
   | _ => fail "missing task"
 
 /-- Runs `k` with MiniVero's run, configured by `config`. -/
-private def withVero (config : MiniVero.Config) (k : Run Agent → TestM Unit) : TestM Unit :=
-  k (Scripted.runOf (MiniVero.program config Scripted.testModelSpec Scripted.testUname)
-    (config.base.offered.map (·.entry)))
+private def withVero (config : MiniVero.Config) (k : Routine Agent → TestM Unit) : TestM Unit :=
+  k (Scripted.runOf (MiniVero.computation config Scripted.testModelSpec)
+    (Scope.of Tools.routines))
 
 /-- The log after the world answered what the agent asked with `answers`, in order: settled at
 what it asks next. -/
-private def after (run : Run Agent) (answers : Array Stored) : Log Agent :=
+private def after (run : Routine Agent) (answers : Array Stored) : Log Agent :=
   answers.foldl (Scripted.answer run) (Scripted.settle run Scripted.opening)
 
 def suite : Suite := Testing.suite "mini-vero" #[
@@ -129,7 +129,7 @@ def suite : Suite := Testing.suite "mini-vero" #[
       let asked := after run #[.response { toolCalls := #[call] }]
       match next run asked with
       | .ask { op := .exec "lake lean Proof.lean" { timeoutSeconds := 600, .. }, frame } =>
-        assertEqual "in the call's frame" frame #[0, 0]
+        assertEqual "in the call's frame" frame #[0, 1]
       | _ => fail "expected the command run, as the response's first call"
       let ran := after run #[.response { toolCalls := #[call] },
         .execution { output := { output := "Lean type mismatch", exitCode? := some 1 }, workspace := default }]
@@ -186,11 +186,11 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     withVero config fun run => do
       let asked := after run #[.response (turn #[call "t" "time_budget"])]
       match next run asked with
-      | .ask { op := .time, frame } => assertEqual "in the tool's frame" frame #[0, 0]
+      | .ask { op := .time, frame } => assertEqual "in the tool's frame" frame #[0, 1]
       | _ => fail "expected the clock read"
       let gives (timing : Timing) : Option Json :=
         (Scripted.answer run asked (.timing timing)).findSome? fun
-          | .returned #[0, 0] value => some value
+          | .returned #[0, 1] value => some value
           | _ => none
       assertEqual "left" ((gives { spentMs := 60500, budgetMs? := some 3600000 }).bind (·.getObjVal? "seconds_left" |>.toOption) |>.map (·.compress)) (some "3539")
       check ((gives { spentMs := 60500 }).bind (·.getObjVal? "seconds_left" |>.toOption) == some .null) "no budget, no number",
@@ -200,7 +200,7 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     match MiniSwe.parseActions (turn #[call "t" "time_budget"]) with
     | .formatError message => check (contains message "Unknown tool 'time_budget'") "unknown"
     | .calls _ => fail "mini-swe must not accept time_budget"
-    assertError "config" (Catalog.complete (.mkObj [("name", "mini-swe"), ("time_budget", true)])) fun
+    assertError "config" (Catalog.complete "mini-swe" (.mkObj [("time_budget", true)])) fun
       | .input m => contains m "unknown field 'time_budget'"
       | _ => false,
 

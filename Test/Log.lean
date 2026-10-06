@@ -44,22 +44,21 @@ private def events : Array (Event Agent) := #[
   .failed #[0, 1] "no routine named bash",
   .stopped "to grade this point",
   .commented "a comment\non two lines",
-  Call.event (graderCall "sh /grader/g.sh"),
-  Call.event (testCall "the task")]
+  (graderCall "sh /grader/g.sh").event,
+  (testCall "the task").event]
 
 /-- The call of the agent of `runOf`'s runs. -/
 private def agentCall : RoutineCall := ⟨"agent", .null⟩
 
-/-- A run whose own program calls `program` as its agent at once, with a tool `boom` that fails,
+/-- A run whose routine calls `computation` as its agent at once, with a tool `boom` that fails,
 and ends with what the agent gave: no session, so that a log of one call ends where it does. -/
-private def runOf (program : Program Agent Json) : Run Agent :=
-  { programs := Programs.ofRoutines fun name =>
-      if name == "agent" then some fun _ => program
-      else if name == "boom" then some fun _ => throw "it broke"
-      else none
-    top := .call agentCall fun
+private def runOf (computation : Computation Agent Json) : Routine Agent :=
+  { name := "run"
+    body := fun _ => .call agentCall fun
       | .ok value => pure value
-      | .error error => throw error }
+      | .error error => throw error
+    scope := Scope.fix fun scope => #[{ name := "agent", body := fun _ => computation, scope },
+      { name := "boom", body := fun _ => throw "it broke", scope }] }
 
 private def rootOnly : Log Agent := #[.arrived (.changed default "p")]
 
@@ -181,7 +180,7 @@ def suite : Suite := Testing.suite "log" #[
       let log := log.push (.answered ran.frame ran.op.key (.ok (.execution execution)))
       let .returns frame value := next run log | fail "the call returns"
       broken "another value" log (.returned frame (.str "x"))
-      broken "another frame's return" log (.returned #[0, 1] value)
+      broken "another frame's return" log (.returned #[0, 2] value)
       broken "a failure where it returned" log (.failed frame "x")
       match next run (log.push (.returned frame value)) with
       | .hears #[0] _ => pure ()
@@ -189,7 +188,7 @@ def suite : Suite := Testing.suite "log" #[
 
   test "a failure is caught around a loop, around a call, or by no one, and each try is in the log" do
     -- Three rounds, each reading the clock; the third gives up.
-    let rounds : Program Agent Json := iter (fun (n : Nat) => do
+    let rounds : Computation Agent Json := iter (fun (n : Nat) => do
       let timing ← time
       if n == 2 then throw s!"gave up at {timing.spentMs}" else pure (Sum.inl (n + 1))) 0
     let caught := runOf (try rounds catch error => pure (.str s!"caught: {error}"))
@@ -227,22 +226,22 @@ def suite : Suite := Testing.suite "log" #[
     check ((settle missing rootOnly).any fun | .failed #[0, 0] "no routine named nowhere" => true | _ => false)
       "a tool the run does not have fails its call"
     -- A loop that reads no event in a round would never end, and is found out.
-    let spins := runOf (iter (fun (n : Nat) => (pure (Sum.inl (n + 1)) : Program Agent (Nat ⊕ Json))) 0)
+    let spins := runOf (iter (fun (n : Nat) => (pure (Sum.inl (n + 1)) : Computation Agent (Nat ⊕ Json))) 0)
     match next spins (settle spins rootOnly) with
     | .unguarded #[0] => pure ()
     | _ => fail "a loop that reads nothing is reported",
 
   test "a comment is written where the driver reaches it, and replay passes over every one" do
-    let commenting : Program Agent Json := do
+    let commenting : Computation Agent Json := do
       comment "starting"
       let timing ← time
       comment s!"the clock says {timing.spentMs}"
       return "done"
-    let quiet : Program Agent Json := do
+    let quiet : Computation Agent Json := do
       let _ ← time
       return "done"
     let run := runOf commenting
-    let over (label : String) (run : Run Agent) (log : Log Agent) : TestM Unit :=
+    let over (label : String) (run : Routine Agent) (log : Log Agent) : TestM Unit :=
       check ((next run log) matches .done _) s!"{label}: the run is not over"
     -- At the end of a log, the program's comments since its last event wait for the next event:
     -- what comes next is the operation.
@@ -276,7 +275,7 @@ def suite : Suite := Testing.suite "log" #[
     -- A comment reads no event: a loop that only comments is as unguarded as one that does nothing.
     let spins := runOf (iter (fun (n : Nat) => (do
       comment s!"round {n}"
-      pure (Sum.inl (n + 1)) : Program Agent (Nat ⊕ Json))) 0)
+      pure (Sum.inl (n + 1)) : Computation Agent (Nat ⊕ Json))) 0)
     check ((next spins (settle spins rootOnly)) matches .unguarded #[0]) "a loop that only comments is reported",
 
   test "a grader is a call like any: the run waits for it, opens it in a frame of its own, and it gives the verdict" do
@@ -290,7 +289,7 @@ def suite : Suite := Testing.suite "log" #[
       -- The grader: the run takes the call, opens it in #[1], and its command is asked for there,
       -- with its stderr apart.
       let called := log.size
-      let log := settle run (log.push (Call.event (graderCall "sh g.sh")))
+      let log := settle run (log.push (graderCall "sh g.sh").event)
       check (log.any fun | .heard #[] notices => notices == #[called] | _ => false) "the run's own frame takes the call"
       check (log.any fun | .opened #[1] ⟨"grader", _⟩ => true | _ => false) "the grader opens in a frame of its own"
       let .ask first := next run log | fail "the grader's command is asked for"
@@ -304,14 +303,15 @@ def suite : Suite := Testing.suite "log" #[
         assertEqual "the grader's verdict" (opened.name, Agents.Grader.verdictStatus verdict) ("grader", "pass")
       | _ => fail "the grader returned its verdict",
 
-  test "a call's configuration is read off its opening, or the log is refused" do
+  test "a call's environment is read off the opening of the call the run made, or the log is refused" do
     let unreadable (label : String) (log : Log Agent) (frame : Frame) : TestM Unit :=
-      assertError label (callOf log frame) fun | .storage _ => true | _ => false
+      assertError label (environmentOf log frame) fun | .storage _ => true | _ => false
     unreadable "no opening" rootOnly #[0]
-    unreadable "the run's own frame" (rootOnly.push (.opened #[0] ⟨"agent", (testCall "t").toJson⟩)) #[]
-    unreadable "no configuration" (rootOnly.push (.opened #[0] ⟨"agent", .mkObj [("program", .null)]⟩)) #[0]
-    let config ← assertOk <| callOf (rootOnly.push (.opened #[0] ⟨"agent", (testCall "t").toJson⟩)) #[0, 3]
-    assertEqual "the configuration" config.toJson.compress (testCall "t").toJson.compress,
+    unreadable "the run's own frame" (rootOnly.push (.opened #[0] (testCall "t"))) #[]
+    unreadable "no environment" (rootOnly.push (.opened #[0] ⟨"agent", .mkObj [("config", .mkObj [])]⟩)) #[0]
+    -- A call inside the call shares its environment.
+    let environment ← assertOk <| environmentOf (rootOnly.push (.opened #[0] (testCall "t"))) #[0, 3]
+    assertEqual "the environment" environment.toJson.compress testEnvironment.toJson.compress,
 
   iotest "frames render as paths, and a reference to an entry may name a position" do
     if Frame.render #[0, 2, 1] != "0.2.1" || Frame.render #[] != "-" then

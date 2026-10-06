@@ -176,10 +176,10 @@ private def envelope (request : Chat.Request) : Json :=
 
 /-- Everything the page renders, as one JSON document. -/
 def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title : String)
-    (hidden : Array String := #[]) (run : Run Agent := Run.alaya) : Result Json := do
+    (hidden : Array String := #[]) (root : Routine Agent := session) : Result Json := do
   let hidden := hidden.map fun prefix' =>
     if prefix'.endsWith "/" then (prefix'.dropEnd 1).toString else prefix'
-  let acc ← walk (run := run) store forest ({} : Acc) fun acc visit => do
+  let acc ← walk (root := root) store forest ({} : Acc) fun acc visit => do
     let i := acc.rows.size
     let parent? := visit.entry.parent?.bind acc.index.get?
     let event := visit.entry.event
@@ -311,7 +311,7 @@ def page (title : String) (data : Json) : String :=
 rather than listed, so a directory that changes constantly and means nothing — a virtual
 environment, a bytecode cache — is reported without burying the rest. -/
 def report (store : Store) (workspaces : Workspaces) (forest : Forest) (title : String)
-    (hidden : Array String := #[]) (run : Run Agent := Run.alaya) : Result String := do
-  pure (page title (← dataJson store workspaces forest title hidden run))
+    (hidden : Array String := #[]) (root : Routine Agent := session) : Result String := do
+  pure (page title (← dataJson store workspaces forest title hidden root))
 
 end Alaya.Html

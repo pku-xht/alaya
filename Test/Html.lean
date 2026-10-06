@@ -16,7 +16,7 @@ private def forest : TestM (Driver.Runtime × String) := do
   match miniRun { tools := #["bash", "submit", "ask_user"], questionTypes := Question.Kind.all } with
   | .error problem => fail problem
   | .ok run =>
-    let executor : Executor := { exec := fun _ _ _ _ => pure { output := "a\nb\n", exitCode? := some 0 }, uname := pure testUname }
+    let executor : Executor := { exec := fun _ _ _ _ => pure { output := "a\nb\n", exitCode? := some 0 } }
     let rt ← runtime executor (some (← scriptedModel #[
       { toolCalls := #[call "c1" "bash" "ls"], reasoning? := some "Look first.", finishReason? := some "tool_calls"
         usage? := some { input? := some 900, output? := some 30, cached? := some 400 } },
@@ -32,7 +32,7 @@ private def forest : TestM (Driver.Runtime × String) := do
     let _ ← assertOk <| Notices.comment rt.store waiting "why does it ask?"
     let _ ← assertOk <| Notices.comment rt.store replied "answered by hand"
     let forest ← assertOk rt.store.forest
-    pure (rt, ← assertOk <| Html.report rt.store rt.workspaces forest "a <test> report" (run := run))
+    pure (rt, ← assertOk <| Html.report rt.store rt.workspaces forest "a <test> report" (root := run))
 
 def suite : Suite := Testing.suite "html" #[
   iotest "the compiled page is the files in the source tree" do

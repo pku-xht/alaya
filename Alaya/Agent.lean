@@ -4,7 +4,7 @@ import Alaya.Models
 import Alaya.Executor
 import Alaya.Chat.Stored
 
-/-! What a program of Alaya may ask the world for: its signature, `Agent`. A model samples, a
+/-! What a computation of Alaya may ask the world for: its signature, `Agent`. A model samples, a
 command runs in the workspace, in the container of the call it is made in, and the clock tells
 the run's time. Each has its type of answer, and the log keeps every operation by a key and every
 answer as JSON (`docs/log-schema.md`). See `docs/agent-api.md`. -/
@@ -82,11 +82,11 @@ abbrev Agent : Signature :=
 
 /-- The operations, as programs: each fails where it was performed when the world could not
 answer it. -/
-def sample (model : Models.Spec) (request : Chat.Request) : Program Agent Chat.Response :=
+def sample (model : Models.Spec) (request : Chat.Request) : Computation Agent Chat.Response :=
   perform (σ := Agent) (.sample model request)
-def exec (command : String) (config : Executor.Config := {}) : Program Agent Execution :=
+def exec (command : String) (config : Executor.Config := {}) : Computation Agent Execution :=
   perform (σ := Agent) (.exec command config)
-def time : Program Agent Timing := perform (σ := Agent) .time
+def time : Computation Agent Timing := perform (σ := Agent) .time
 
 /-- The operation in a few words, for messages. -/
 def Op.describe : Op → String

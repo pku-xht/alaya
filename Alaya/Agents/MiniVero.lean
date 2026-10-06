@@ -32,10 +32,10 @@ structure Config where
   mode : Mode := .proof
   deriving Inhabited
 
-/-- The configuration as JSON: MiniSwe's fields with `name` `mini-vero`, and `mode`. -/
+/-- The configuration as JSON: MiniSwe's fields, and `mode`. -/
 def Config.toJson (config : Config) : Lean.Json :=
   match config.base.toJson with
-  | .obj fields => .obj ((fields.insert "name" "mini-vero").insert "mode" (toString config.mode))
+  | .obj fields => .obj (fields.insert "mode" (toString config.mode))
   | other => other
 
 /-- Whether the run is offered `time_budget`, and so asked to pace itself by it. -/
@@ -119,10 +119,13 @@ def openingMessages (config : Config) (task : String) (uname : Uname) : Array Ch
   #[.system systemMessage,
     .user (MiniSwe.withInstructions config.base (taskMessage task config.mode uname config.pacing))]
 
-/-- MiniVero, for a call of `model` on `task`, on a machine described by `uname`: MiniSwe's loop,
-with its linear context, and Vero's opening. -/
-def program (config : Config) (model : Models.Spec) (uname : Uname) (task : String) : Program Agent Lean.Json :=
-  MiniSwe.converse { config.base with model? := some model, contextLimit? := MiniSwe.contextLimit? config.base model }
+/-- MiniVero, for a call of `model` on `task`, on the machine the call names, which
+`subagent` calls as `itself`: MiniSwe's loop, with its linear context, and Vero's opening. -/
+def computation (config : Config) (model : Models.Spec) (task : String)
+    (itself : String × Lean.Json := ("", .null)) : Computation Agent Lean.Json := do
+  let uname ← Tools.Uname.ask
+  MiniSwe.converse { config.base with model? := some model
+                                      contextLimit? := MiniSwe.contextLimit? config.base model, itself }
     (openingMessages config task uname)
 
 end Alaya.Agents.MiniVero

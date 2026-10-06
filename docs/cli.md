@@ -41,8 +41,8 @@ flowchart TD
 
 ```
 alaya new (PROJECT | --image IMAGE [--workdir PATH])  create a run: its workspace
-alaya call ENTRY PROGRAM --image IMAGE [--workdir PATH] [--task TEXT | --task-file FILE]
-          [--set PATH=VALUE …]                       call a program, an agent or a grader
+alaya call ENTRY PROGRAM --image IMAGE [--workdir PATH]
+          [--set PATH=VALUE | --set-file PATH=FILE …] call a program, an agent or a grader
 alaya resume ENTRY [--provider NAME [--url URL] [--port N]] [--samples N] [--time-budget S]
           [--container-user UID:GID] [--network NAME]   drive a run on
 alaya tell ENTRY TEXT                                append a person's message
@@ -83,7 +83,7 @@ A session in a script:
 ```sh
 last() { tail -n 1 | cut -d' ' -f1; }
 root=$(alaya new ./project | last)
-called=$(alaya call "$root" mini-swe --set model=gpt-6-luna --task-file TASK.txt --image my-task:1 | last)
+called=$(alaya call "$root" mini-swe --set model=gpt-6-luna --set-file task=TASK.txt --image my-task:1 | last)
 end=$(alaya resume "$called" --provider apiyi | last)
 graded=$(alaya call "$end" grader --image my-grader:1 --set command='python3 /grader/grade.py' | last)
 alaya resume "$graded"                     # exits 0 for a pass, 1 for a fail, 2 for an error
@@ -114,7 +114,7 @@ With `--json`, a command prints one object a line:
 | --- | --- |
 | a command that appends | each entry: `{entry, parent, position, frame, summary, event, elapsed_ms}` |
 | `resume` | then how it stopped: `{entry, status, …}`. Where no call runs, `call` names the last call, and `status` is `done` with `value`, `failed` with `error`, or `stopped` with `reason`; or `idle` before any call. Or `waits` with `frame` and `question`; or `paused` with `reason` |
-| `config` | a line for each `{program}`, `{model}` and `{provider}`; with `--program`, the one `{program}` that `call` would record |
+| `config` | a line for each `{program, config}`, `{model}` and `{provider}`; with `--program`, the one `{program, config}` that `call` would record |
 | `tree` | every entry: `{entry, parent, position, summary, status}` |
 | `log` | every entry of the log: `{entry, position, frame, event, elapsed_ms}`, then `{next}` |
 | `show` | `{entry, parent, position, event, elapsed_ms, run_time_ms, run_usage, workspace, calls, next, request}` |
@@ -182,7 +182,7 @@ alaya new --image swebench/sweb.eval.django-11099:latest --workdir /testbed
 Calls a program after `ENTRY`, where no call runs: an agent, or a grader. `resume` then drives it.
 
 ```sh
-alaya call 3f2a9c mini-swe --set model=gpt-6-luna --task-file TASK.txt --image my-task:1
+alaya call 3f2a9c mini-swe --set model=gpt-6-luna --set-file task=TASK.txt --image my-task:1
 alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grade.py'
 ```
 
@@ -191,15 +191,18 @@ alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grad
 - **`PROGRAM`** is one of the catalog: `mini-swe` and `mini-vero`, the agents
   (`docs/miniswe.md`, `docs/minivero.md`), or `grader` (`docs/log-schema.md` §4). Their defaults
   are in code, and there are no configuration files.
-- **`--set PATH=VALUE`** overrides one field of the program's configuration, and repeats, in
-  order (`executor.timeout_seconds=60`, `command='make check'`). `VALUE` is read as JSON when
-  it parses, and as a string otherwise. An unknown field or a value of the wrong type is an
-  input error.
-- **An agent** takes its model as a field, `model`: `--set model=NAME` names it by its ID as
-  its creator publishes it, with the defaults of the model table, and a later setting changes
-  one of its fields (`model.params.reasoning_effort=high`). It takes a task, `--task TEXT` or
-  `--task-file FILE`. A file is read as it is and must be UTF-8; stdin is `/dev/stdin`. A
-  grader takes neither.
+- **`--set PATH=VALUE`** overrides one field of the program's configuration, and repeats
+  (`executor.timeout_seconds=60`, `command='make check'`). `VALUE` is read as JSON when it
+  parses, and as a string otherwise. An unknown field or a value of the wrong type is an input
+  error.
+- **`--set-file PATH=FILE`** sets one field to the text of a file, as it is (`task=TASK.md`).
+  The file must be UTF-8; stdin is `/dev/stdin`. Settings of both flags apply in the
+  order given.
+- **Every program is called the same way:** its configuration and its image. An agent's
+  model and task are fields of its configuration. `--set model=NAME` names the model by its ID
+  as its creator publishes it, with the defaults of the model table, and a later setting
+  changes one of its fields (`model.params.reasoning_effort=high`). `--set task=TEXT` or
+  `--set-file task=FILE` gives the task. A grader has neither field.
 - **The image** is resolved to a digest and recorded: every command of the call runs in a
   container of it, its own. The workspace is mounted at `--workdir`, `/workspace` unless given:
   an absolute path other than `/` and `/alaya/outputs`.
@@ -369,8 +372,8 @@ written by one agent, and `resume` refuses a log its agent did not write (`docs/
 - **Comments** of the log are left out. The revised agent's are written before the events they
   precede, as `resume` writes them.
 - **Notices and stops after the copy's end** are left out, and listed.
-- **`--set PATH=VALUE`** changes the configuration of every call it fits, as on `call`; one
-  that fits no call is refused. With another model, a call's copy ends at its first sample.
+- **`--set PATH=VALUE`** and **`--set-file PATH=FILE`** change the configuration of every call
+  they fit, as on `call`; one that fits no call is refused. With another model, a call's copy ends at its first sample.
 - **`DIR`** has a restic repository of its own, with copies of the snapshots, and the model cache
   as hard links (`docs/log-schema.md` §6). Its last entry is a comment that names the source.
 - **`DIR` must not exist**, and is made whole or not at all. The source is only read.

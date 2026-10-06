@@ -400,7 +400,7 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
                 out.append(label(x - 9, cy + 4, f"runs on `{r['on']}` →", "s", anchor="end"))
 
     # around the rows: the heads of the columns, the ground of the log, what is said below
-    head = [label(c.p0, 14, "program", "s"), label(c.m0 + 6, 14, "carried out by", "s"), label(c.l0 + 7, 14, "log", "s")]
+    head = [label(c.p0, 14, "computation", "s"), label(c.m0 + 6, 14, "carried out by", "s"), label(c.l0 + 7, 14, "log", "s")]
     if heads:
         head += [label(c.pos, 31, "position", "f", anchor="end"), label(c.frame, 31, "frame", "f"),
                  label(c.icon, 31, "event", "f")]
@@ -417,9 +417,9 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
         samples = [
             (arrow(x, x + 66, 0) + f'<rect x="{x + 14}" y="-7" width="34" height="13" fill="#fff"/>'
              + label(x + 31, 3.5, "model", "s", anchor="middle"),
-             "the program asks; the driver carries it out and appends the answer"),
+             "the computation asks; the driver carries it out and appends the answer"),
             (arrow(x + 66, x, 0, dashed=True), "on replay the answer is read back from the log"),
-            (arrow(x, x + 66, 0), "a mark of what the program did: a call opened, a call ended"),
+            (arrow(x, x + 66, 0), "a mark of what the computation did: a call opened, a call ended"),
         ]
         for sample, text in samples:
             out.append(f'<g transform="translate(0,{y + 6.5})">{sample}</g>' + label(x + 78, y + 10, text, "s"))
@@ -445,7 +445,7 @@ def CALLED(task="fix the build", program="agent"):
             R(3, "0", f"open {program}")]
 
 
-figure("log", "The log of a small agent, beside its program", CALLED() + [
+figure("log", "The log of a small agent, beside its computation", CALLED() + [
     R(4, "0", "inbox: nothing"),
     R(5, "0", "sample → says “run make”"),
     R(6, "0", "exec make → exit 0"),
@@ -567,7 +567,7 @@ figure("tool-call", "A response that asks for two tools, and the two calls it be
     GAP(),
     R(10, "0", "inbox: nothing"),
     R(11, "0", "sample → bash make; bash make test", note="the response asks for two tools"),
-    NOTE("each: check its arguments, then `call name arguments`"),
+    NOTE("each: check its arguments, then call the tool's routine, the agent's settings added"),
     R(12, "0.3", "open bash “make”"),
     R(13, "0.3", "exec make → exit 0"),
     R(14, "0.3", "return exit 0: build ok"),
@@ -1069,7 +1069,7 @@ def cli_call():
     y = TOP
     out, at = strip(12, y, [("the workspace", "old", True), ("call mini-swe “the task”", "new"),
                             ("inbox: takes 1", "later"), ("open mini-swe", "later"), ("inbox", "later"), "…"])
-    out += under(at[1][0], y, "its configuration: the program, the model, the task, the image by digest", 300)
+    out += under(at[1][0], y, "its configuration: the program with its model and task, the image by digest", 300)
     out.append(note(at[-1][1] + 12, y, "the next `resume`"))
     cli("call", "call: a call of a program is appended, and the next resume opens it in a frame of its own",
         y + CHIP_H + 38, out)

@@ -62,6 +62,13 @@ structure Uname where
   machine : String
   deriving Repr, Inhabited, BEq
 
+def Uname.toJson (uname : Uname) : Lean.Json :=
+  .mkObj [("system", uname.system), ("machine", uname.machine)]
+
+def Uname.fromJson (json : Lean.Json) : Except String Uname := do
+  let field (name : String) := json.getObjVal? name >>= Lean.Json.getStr?
+  pure { system := ← field "system", machine := ← field "machine" }
+
 namespace Executor
 
 /-- How a command is run: how long it may take, and what is added to its environment. Part of
@@ -101,8 +108,6 @@ the command as it appears in messages. -/
 structure Executor where
   exec : (config : Executor.Config) -> (workDir : System.FilePath) -> (argv : Array String) ->
     (display : String) -> IO Output
-  /-- `uname` where the commands run. -/
-  uname : IO Uname
   /-- Releases what the executor holds — a container, say — at the end of a run. -/
   close : IO Unit := pure ()
 

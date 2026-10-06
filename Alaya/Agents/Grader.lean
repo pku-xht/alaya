@@ -2,7 +2,7 @@ import Alaya.Agent
 import Alaya.Grader
 import Alaya.Agents.Config
 
-/-! The grader: a program that runs one command, in its call's container, and returns the verdict
+/-! The grader: a routine that runs one command, in its call's container, and returns the verdict
 read off the TAP the command prints on stdout (`Alaya.Grader`). Its trusted input — the tests, a
 reference — is in its image, so a call needs nothing besides the image and the command. What
 the command writes lands in the workspace, after the agent's last version: the agent is over by
@@ -21,11 +21,11 @@ structure Config where
   deriving Inhabited
 
 def Config.toJson (config : Config) : Json :=
-  .mkObj [("name", "grader"), ("command", config.command), ("timeout_seconds", config.timeoutSeconds)]
+  .mkObj [("command", config.command), ("timeout_seconds", config.timeoutSeconds)]
 
 /-- Reads a configuration; a field left out is the default, and an unknown one is an error. -/
 def Config.fromJson (json : Json) : Except String Config := do
-  let object ← ConfigJson.object json #["name", "command", "timeout_seconds"]
+  let object ← ConfigJson.object json #["command", "timeout_seconds"]
   pure { command := ← object.string "command" "", timeoutSeconds := ← object.nat "timeout_seconds" 900 }
 
 /-- The verdict as the grader returns it: the status, the score, why, every check, and how the
@@ -43,7 +43,7 @@ def verdictStatus (verdict : Json) : String :=
   (verdict.getObjVal? "status" >>= Json.getStr?).toOption.getD "error"
 
 /-- The grader: its command, and the verdict on what it printed. -/
-def program (config : Config) : Program Agent Json := do
+def computation (config : Config) : Computation Agent Json := do
   let ran ← exec config.command { timeoutSeconds := config.timeoutSeconds, merge := false }
   return verdictJson (Grader.verdict ran.output.output ran.output.failure?) ran.output
 

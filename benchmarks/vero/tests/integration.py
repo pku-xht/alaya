@@ -106,8 +106,8 @@ def test_mode(args, mode):
     def create():
         """A run on the rendered source, and a call of MiniVero on its task; its two entries."""
         root = json_lines(alaya("new", source, "--json").stdout)
-        called = json_lines(alaya("call", root[0]["entry"], "mini-vero", "--task-file",
-                                  directory / "MINIVERO_TASK.md", "--set", f"mode={mode}",
+        called = json_lines(alaya("call", root[0]["entry"], "mini-vero", "--set-file",
+                                  f"task={directory / 'MINIVERO_TASK.md'}", "--set", f"mode={mode}",
                                   "--set", "model=gpt-oss-120b", "--image", args.agent_image,
                                   "--workdir", "/testbed", "--json").stdout)
         assert [r["event"]["type"] for r in root + called] == ["arrived", "arrived"], root + called
@@ -154,7 +154,7 @@ def test_mode(args, mode):
     run_record = configuration(rows)
     assert run_record["environment"]["workdir"] == "/testbed"
     assert "sha256:" in run_record["environment"]["image"], run_record
-    assert run_record["program"]["mode"] == mode and run_record["task"], run_record
+    assert run_record["config"]["mode"] == mode and run_record["config"]["task"], run_record
 
     # The untouched source, graded at the root, before any call. No task file is in the snapshot.
     blank = vero_graded(root, "fail", 0)

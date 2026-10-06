@@ -24,7 +24,7 @@ structure Word where
   deriving ToJson, FromJson
 
 /-- A tool of the planner's: what the notes say of a word, by a command. -/
-def lookup : Routine Agent Word String := routine "lookup" fun asked => do
+def lookup : Routine.Typed Agent Word String := routine "lookup" fun asked => do
   return (← exec s!"grep {asked.word} notes.txt").output.output
 
 /-- `lookup`, as the planner offers it to its model. -/
@@ -35,7 +35,7 @@ def lookupDefinition : Chat.ToolDefinition := {
 
 /-- A sub-agent: a conversation of its own, which offers its model `lookup` alone and ends when
 the model answers without a call. Its answer, a command a line, is the plan. -/
-def planner : Routine Agent Task Plan := routine "planner" fun task => do
+def planner : Routine.Typed Agent Task Plan := routine "planner" fun task => do
   let opening : Array Chat.Message := #[.system "You plan.", .user task.goal]
   let answer ← iter (fun (messages : Array Chat.Message) => do
     let response ← sample testModelSpec { messages, tools := #[lookupDefinition] }
@@ -49,11 +49,11 @@ def planner : Routine Agent Task Plan := routine "planner" fun task => do
   return { steps := ((answer.splitOn "\n").filter (!·.isEmpty)).toArray }
 
 /-- A step of the workflow: one command, and how it ended. -/
-def step : Routine Agent String Nat := routine "step" fun command => do
+def step : Routine.Typed Agent String Nat := routine "step" fun command => do
   return (← exec command).output.exitCode?.map (·.toNat) |>.getD 1
 
 /-- The workflow: a plan from the planner, then each of its steps, and how many failed. -/
-def workflow : Routine Agent Task String := routine "workflow" fun task => do
+def workflow : Routine.Typed Agent Task String := routine "workflow" fun task => do
   let plan ← planner.call task
   let mut failed := 0
   for command in plan.steps do
@@ -61,14 +61,16 @@ def workflow : Routine Agent Task String := routine "workflow" fun task => do
   return s!"{plan.steps.size} steps, {failed} failed"
 
 /-- The agent: it runs the workflow on its task. -/
-def agent (goal : String) : Program Agent Json := do
+def agent (goal : String) : Computation Agent Json := do
   return toJson (← workflow.call { goal })
 
-def routines : Array (Routine.Entry Agent) := #[lookup.entry, planner.entry, step.entry, workflow.entry]
+/-- The routines above, defined together: each calls the others by name. -/
+def scope : Scope Agent :=
+  Scope.fix fun scope => #[lookup.within scope, planner.within scope, step.within scope, workflow.within scope]
 
-/-- Runs `k` with the run of `make`'s program for the task, with the routines above. -/
-private def withRun (make : String → Program Agent Json) (k : Run Agent → TestM Unit) : TestM Unit :=
-  k (runOf make routines)
+/-- Runs `k` with the run of `make`'s computation for the task, in the scope above. -/
+private def withRun (make : String → Computation Agent Json) (k : Routine Agent → TestM Unit) : TestM Unit :=
+  k (runOf make scope)
 
 /-- The openings of a log: the frame each call runs in, and the routine it names. -/
 private def openings (log : Log Agent) : Array (Frame × String) :=
@@ -80,7 +82,7 @@ private def executed (output : String := "ok") : Stored :=
 def suite : Suite := Testing.suite "routines" #[
   test "a workflow, its sub-agent and their tools are calls in frames of their own, nested in the log" do
     withRun agent fun run => do
-      let executor : Executor := { uname := pure testUname, exec := fun _ _ argv _ => do
+      let executor : Executor := { exec := fun _ _ argv _ => do
         let command := argv[0]?.getD ""
         pure { output := if command.startsWith "grep" then "build: make" else "ok"
                exitCode? := some (if command == "make test" then 1 else 0) } }
@@ -122,7 +124,7 @@ def suite : Suite := Testing.suite "routines" #[
         "the routine failed, in its own frame"
       check ((next run log) matches .waits #[] _) "and the agent went on, to its end"
     -- A handle that expects another result than the routine gives fails where the result is read.
-    let mistaken : Routine Agent String String := routine "step" fun _ => pure ""
+    let mistaken : Routine.Typed Agent String String := routine "step" fun _ => pure ""
     withRun (fun _ => toJson <$> mistaken.call "make") fun run => do
       let log := answer run (settle run opening) (executed)
       check (log.any fun | .returned #[0, 0] value => value.compress == "0" | _ => false) "the routine returned its status"
@@ -133,18 +135,17 @@ def suite : Suite := Testing.suite "routines" #[
       let log := settle run opening
       check (log.any fun | .failed #[0, 0] "no routine named grader" => true | _ => false) "there is no such routine",
 
-  test "a call enters its own program's routines: an agent's, the tools it offers" do
-    let program := ({ tools := #["bash", "submit", "ask_user"], questionTypes := Question.Kind.all, model? := some testModelSpec } : Agents.MiniSwe.Config)
-    let call : CallConfig := { testCall with program := program.toJson }
-    match Agents.Catalog.programs "mini-swe" with
+  test "a program brings its scope: an agent's tools and itself, fixed where it is defined" do
+    match Agents.Catalog.scope.find "mini-swe" with
     | none => fail "mini-swe is a program"
-    | some make =>
-      match make call.toJson with
-      | .error problem => fail problem
-      | .ok (_, routines) =>
-        assertEqual "what a call of MiniSwe enters" (#["bash", "submit", "ask_user", "time_budget", "grader"].filter
-          fun name => (routines name).isSome) #["bash", "submit", "ask_user"]
-    check (Agents.Catalog.programs "nothing").isNone "no program of that name"
+    | some swe =>
+      assertEqual "what a call inside MiniSwe can name"
+        (#["bash", "submit", "ask_user", "time_budget", "mini-swe", "mini-vero", "grader"].filter
+          fun name => (swe.scope.find name).isSome) #["bash", "ask_user", "time_budget", "mini-swe"]
+      -- The scope holds MiniSwe itself, with the same scope: what lets it call itself.
+      check ((swe.scope.find "mini-swe").any fun inner => (inner.scope.find "bash").isSome)
+        "MiniSwe in its own scope has the same scope"
+    check (Agents.Catalog.scope.find "nothing").isNone "no program of that name"
 ]
 
 end RoutinesTests

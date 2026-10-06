@@ -61,7 +61,7 @@ private def refusing (answers : Array Chat.Response) : IO Model := do
 /-- What MiniSwe does after its task, `task`, for a model of `context` tokens: sample, or end
 before it. -/
 private def afterTask (context? : Option Nat) (task : String) (config : Config := {}) : String :=
-  match runOfConfig config.toJson { testModelSpec with contextTokens? := context? } with
+  match runOfConfig "mini-swe" config.toJson { testModelSpec with contextTokens? := context? } with
   | .error problem => problem
   | .ok run =>
     let log := settle run (opening task)
@@ -137,7 +137,7 @@ def suite : Suite := Testing.suite "context" #[
     assertEqual "bounded" (afterTask (some 9000) long) "ContextExceeded"
     assertEqual "roomy" (afterTask (some 100000) long) "sample"
     assertEqual "unknown context" (afterTask none long) "sample"
-    assertEqual "MiniVero too" (match runOfConfig (.mkObj [("name", "mini-vero")])
+    assertEqual "MiniVero too" (match runOfConfig "mini-vero" (.mkObj [])
         { testModelSpec with contextTokens? := some 9000 } with
       | .ok run => agentStatus (settle run (opening long))
       | .error problem => problem) "ContextExceeded",
@@ -159,8 +159,7 @@ def suite : Suite := Testing.suite "context" #[
     | _ => throw <| IO.userError "a failed Responses overflow is not one",
 
   test "a refused request ends the agent with ContextExceeded, and the draw it took is not lost" do
-    let executor : Executor := { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 }
-                                 uname := pure default }
+    let executor : Executor := { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 } }
     match miniRun with
     | .error problem => fail problem
     | .ok run =>

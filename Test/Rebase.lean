@@ -16,11 +16,11 @@ open Lean (Json)
 
 /-- An executor that answers every command with `ok`, and runs nothing. -/
 private def echoing : Executor :=
-  { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 }, uname := pure testUname }
+  { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 } }
 
 /-- An agent that waits for its task and runs `commands`, one after another, reading its inbox
 after each; when `comments`, it says which command it runs before each. -/
-private def agent (commands : Array String) (comments : Bool := false) : Run Agent :=
+private def agent (commands : Array String) (comments : Bool := false) : Routine Agent :=
   runOf fun _ => do
     for command in commands do
       if comments then comment s!"running {command}"
@@ -41,7 +41,7 @@ private def comments (log : Log Agent) : Array String :=
   log.filterMap fun | .commented text => some text | _ => none
 
 /-- Drives `run` from a new log until it is over. -/
-private def driven (run : Run Agent) : TestM (Driver.Runtime × Hash × Log Agent) := do
+private def driven (run : Routine Agent) : TestM (Driver.Runtime × Hash × Log Agent) := do
   let (rt, last, _) ← drive run echoing (← scriptedModel #[])
   pure (rt, last, ← logAt rt last)
 
@@ -56,15 +56,15 @@ private def answerOf (log : Log Agent) (command : String) : TestM Nat := do
 /-- A run of MiniSwe, as Alaya runs it, rebased with another model, and with a field of the
 agent changed. -/
 private def reconfigured : TestM Unit := do
-  let run := Run.alaya
+  let run := session
   let rt ← runtime echoing (some (← scriptedModel #[
     responseWith #[call "c1" "bash" "echo one"], responseWith #[submitCall "s" "done"]]))
   let project := (← scratch) / "project"
   IO.FS.createDirAll project
   let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
-  let swe : CallConfig := { testCall with
-    program := ← assertOk <| Agents.Catalog.resolve "mini-swe" #[{ path := ["model"], value := "gpt-oss-120b" }] }
-  let (called, _) ← assertOk <| Driver.append rt.store run root (Call.event swe)
+  let swe := programCall "mini-swe" (← assertOk <| Agents.Catalog.resolve "mini-swe"
+      #[{ path := ["model"], value := "gpt-oss-120b" }, { path := ["task"], value := "t" }]) testEnvironment
+  let (called, _) ← assertOk <| Driver.append rt.store run root swe.event
   let (last, _) ← assertOk <| Driver.drive rt run called
   let log ← logAt rt last
   let setting (text : String) : TestM Settings.Setting := match Settings.parse text with
@@ -77,7 +77,7 @@ private def reconfigured : TestM Unit := do
   check tuned.divergence?.isNone "the whole log holds"
   let some opening := tuned.log.findSome? fun | (.opened #[0] opened, _) => some opened | _ => none
     | fail "the opening of the agent"
-  let reserve := (opening.arguments.getObjVal? "program" >>= (·.getObjVal? "context_reserve")).toOption
+  let reserve := (opening.arguments.getObjVal? "config" >>= (·.getObjVal? "context_reserve")).toOption
   assertEqual "the new configuration" (reserve.map (·.compress)) (some "7")
   -- Another model's parameters: a sample names its model, so the first is another operation.
   let other ← rebaseWith #[← setting "model.params.reasoning_effort=high"]

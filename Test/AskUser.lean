@@ -44,16 +44,15 @@ private def askingTools (name : String) : Json :=
   .arr ((#["bash", "submit"] ++ (if name == "mini-vero" then #["time_budget"] else #[]) ++
     #["ask_user"]).map Json.str)
 
-/-- The configuration of agent `name` that offers asking, with `extra` fields. -/
-private def asking (name : String) (extra : List (String × Json) := []) : Json :=
-  .mkObj ([("name", (name : Json)), ("tools", askingTools name), ("question_types", everyKind)] ++ extra)
+/-- The agent `name`, with a configuration that offers asking, with `extra` fields. -/
+private def asking (name : String) (extra : List (String × Json) := []) : String × Json :=
+  (name, .mkObj ([("tools", askingTools name), ("question_types", everyKind)] ++ extra))
 
 private def countingExecutor : IO (Executor × IO.Ref Nat) := do
   let calls ← IO.mkRef 0
   pure ({ exec := fun _ _ _ _ => do
             calls.modify (· + 1)
-            pure { output := "unexpected execution", exitCode? := some 0 }
-          uname := pure testUname }, calls)
+            pure { output := "unexpected execution", exitCode? := some 0 } }, calls)
 
 /-- A model that answers `responses` in order, keeping every request it is sent. -/
 private def scripted (responses : Array Chat.Response) : IO (Model × IO.Ref (Array Chat.Request)) := do
@@ -70,8 +69,8 @@ private def scripted (responses : Array Chat.Response) : IO (Model × IO.Ref (Ar
         | none => throw <| Error.protocol "scripted model exhausted" } }, requests)
 
 /-- Runs `k` with the run of `agent`. -/
-private def withRun (agent : Json) (k : Run Agent → TestM Unit) : TestM Unit :=
-  match runOfConfig agent with
+private def withRun (agent : String × Json) (k : Routine Agent → TestM Unit) : TestM Unit :=
+  match runOfConfig agent.1 agent.2 with
   | .ok run => k run
   | .error problem => fail problem
 
@@ -85,7 +84,7 @@ private def shownResult (request : Chat.Request) : TestM Json := do
 
 /-- Appends a reply to the question the log at `tip` waits on, read from `text` against the
 question's form, or that the person cannot answer. -/
-private def replyAt (rt : Driver.Runtime) (run : Run Agent) (tip : Hash) (text? : Option String) :
+private def replyAt (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (text? : Option String) :
     Result Hash := do
   let forest ← rt.store.forest
   let log ← rt.store.log forest tip
@@ -100,10 +99,10 @@ private def replyAt (rt : Driver.Runtime) (run : Run Agent) (tip : Hash) (text? 
 def suite : Suite := Testing.suite "ask_user" #[
   test "both agents keep their default prompts and tools when asking is disabled" do
     for definition in Catalog.all.filter (·.name != Catalog.grader.name) do
-      let plain ← assertOk <| Catalog.complete (.mkObj [("name", definition.name)])
+      let plain ← assertOk <| Catalog.complete definition.name (.mkObj [])
       let names := ((plain.getObjVal? "tools" >>= Json.getArr?).toOption.getD #[]).filterMap (·.getStr?.toOption)
       check (!names.contains "ask_user") s!"{definition.name} offers asking by default"
-      let enabled ← assertOk <| Catalog.complete (asking definition.name)
+      let enabled ← assertOk <| Catalog.complete definition.name (asking definition.name).2
       let names := ((enabled.getObjVal? "tools" >>= Json.getArr?).toOption.getD #[]).filterMap (·.getStr?.toOption)
       check (names.contains "ask_user") s!"{definition.name} does not offer asking when asked to"
     let opening (config : Config) : String :=
@@ -118,7 +117,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       let config ← assertOk <| Catalog.resolve definition.name
         #[{ path := ["tools"], value := askingTools definition.name },
           { path := ["question_types"], value := everyKind }]
-      assertEqual s!"{definition.name} round-trips" (← assertOk <| Catalog.complete config).compress config.compress
+      assertEqual s!"{definition.name} round-trips" (← assertOk <| Catalog.complete definition.name config).compress config.compress
       assertError "a string is no list of tools" (Catalog.resolve definition.name
         #[{ path := ["tools"], value := "ask_user" }]) fun
         | .input _ => true
@@ -214,7 +213,7 @@ def suite : Suite := Testing.suite "ask_user" #[
           let (waiting, stop) ← assertOk <| Driver.drive rt run tip
           match stop with
           | .waits frame (some question) =>
-            assertEqual "the asking call's frame" frame #[0, 0]
+            assertEqual "the asking call's frame" frame #[0, 1]
             assertEqual "the form" question.form.name questionType
           | _ => fail "the run must wait for the answer"
           -- Every answer forks the waiting log: each is a branch of its own.
@@ -283,7 +282,7 @@ def suite : Suite := Testing.suite "ask_user" #[
 
   test "a program asks without any tool: the question is in the log, and a reply to its frame answers it" do
     let deploy : Question := { text := "Deploy?", form := .yesNo }
-    let program : Program Agent Json := do
+    let program : Computation Agent Json := do
       let first ← Alaya.ask deploy
       let second ← Alaya.ask { text := "Which region?", form := .singleChoice #["east", "west"] }
       return .str s!"{first.line}, {second.line}"
@@ -341,7 +340,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       "the instruction for every kind"
     -- The kinds are chosen with the tool: none by default, and none without it.
     for definition in Catalog.all.filter (·.name != Catalog.grader.name) do
-      let config (fields : List (String × Json)) : Json := .mkObj (("name", (definition.name : Json)) :: fields)
+      let config (fields : List (String × Json)) : Json := .mkObj fields
       for (fields, problem) in #[
           ([("tools", askingTools definition.name)], "must say which kinds"),
           ([("tools", askingTools definition.name), ("question_types", .arr #[])], "must say which kinds"),
@@ -349,10 +348,10 @@ def suite : Suite := Testing.suite "ask_user" #[
           ([("tools", askingTools definition.name), ("question_types", .arr #["yes_no", "maybe"])], "unknown kind"),
           ([("tools", askingTools definition.name), ("question_types", .arr #["yes_no", "yes_no"])], "twice"),
           ([("tools", askingTools definition.name), ("question_types", "yes_no")], "must be an array")] do
-        assertError s!"{definition.name} with {(config fields).compress}" (Catalog.complete (config fields)) fun
+        assertError s!"{definition.name} with {(config fields).compress}" (Catalog.complete definition.name (config fields)) fun
           | .input message => contains message problem
           | _ => false
-      let one ← assertOk <| Catalog.complete (config [("tools", askingTools definition.name),
+      let one ← assertOk <| Catalog.complete definition.name (config [("tools", askingTools definition.name),
         ("question_types", .arr #["open_ended"])])
       assertEqual s!"{definition.name} records the kinds" ((one.getObjVal? "question_types").toOption.map (·.compress))
         (some "[\"open_ended\"]"),
@@ -363,7 +362,7 @@ def suite : Suite := Testing.suite "ask_user" #[
           (#["bash", "submit", "bash"], "names bash twice"),
           (#["bash", "submit", "ask_user", "ask_user"], "names ask_user twice")] do
         assertError s!"{definition.name} with {tools}"
-          (Catalog.complete (.mkObj [("name", definition.name), ("tools", .arr (tools.map Json.str)),
+          (Catalog.complete definition.name (.mkObj [("tools", .arr (tools.map Json.str)),
             ("question_types", if tools.contains "ask_user" then everyKind else .arr #[])])) fun
           | .input message => contains message problem
           | _ => false,

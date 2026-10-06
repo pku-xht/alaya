@@ -133,17 +133,6 @@ private def runArgs (settings : Settings) : Array String :=
     -- The uid usually has no passwd entry, and tools that want $HOME would write to /.
     ++ #["--env", "HOME=/tmp"]
 
-/-- `uname` inside the image, for a prompt that describes the machine. Read with a throwaway
-container, since it is needed when a run is created, before any command of it has run. -/
-def uname (settings : Settings) : Result Uname := do
-  let script := "uname -s; uname -m"
-  let out ← docker (#["run", "--rm", "--entrypoint", "/bin/sh"] ++ runArgs settings ++
-    #[settings.image, "-c", script]) s!"reading uname from {settings.image}"
-  match out.splitOn "\n" with
-  | [system, machine] =>
-    pure { system := system.trimAscii.toString, machine := machine.trimAscii.toString }
-  | _ => throw <| .environment s!"unexpected uname output from {settings.image}: {out}"
-
 /-- A running container, plus whether its image has `timeout(1)`, which kills the command's
 whole process group inside. Minimal images may not, and then the host-side deadline below is the
 only backstop. -/
@@ -296,7 +285,6 @@ def executor (settings : Settings) : Result Executor := do
   let ref ← Result.fromIO Error.storage (IO.mkRef (none : Option Container))
   pure {
     exec := execIn ref settings
-    uname := (uname settings).toUserIO
     close := do
       match ← ref.get with
       | some container => remove container.id; ref.set none
