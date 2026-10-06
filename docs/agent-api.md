@@ -244,7 +244,7 @@ the agent: no read takes it.
 `call` runs a routine, a named computation (§5), in a frame of its own, and gives back its result.
 
 ```lean
-call : (name : String) → (arguments : Json) → (environment? : Option Environment := none) → Computation σ Json
+call : (name : String) → (arguments : Json) → (environment? : Option Json := none) → Computation σ Json
 ```
 
 1. The computation calls a routine by its name. The driver marks the call,
@@ -797,9 +797,9 @@ waits again. Its scope is the catalog.
 ```lean
 session : Routine Agent                             -- wait for a call, make it, wait again
 
-structure Environment where                         -- where a call's commands run
-  image   : String                                  -- the pinned image
-  workdir : String                                  -- where the workspace is mounted
+structure Environment where                         -- where a call's commands run, as the driver
+  image   : String                                  --   reads a call's environment?, which the
+  workdir : String                                  --   core holds as data
 
 RoutineCall.event : RoutineCall → Event Agent      -- a person's call: arrived (called call)
 environmentOf : Log Agent → Frame → Result (Frame × Environment)  -- where a frame's commands run

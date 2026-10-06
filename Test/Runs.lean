@@ -438,7 +438,7 @@ def suite : Suite := Testing.suite "runs" #[
     assertStringEq "a change" (told (.changed default "  M a.txt\nI fixed it"))
       (Chat.Message.user "<intervention>\nA person changed the workspace while you were paused:\n  M a.txt\nI fixed it\n</intervention>").toStored.compress
     assertStringEq "a reply is the asking call's, not the model's to be told" (told (.replied ⟪"agent", "ask_user"⟫ .yes)) "nothing"
-    assertStringEq "nor a call" (told (.called { name := "grader", arguments := .null, environment? := some testEnvironment })) "nothing",
+    assertStringEq "nor a call" (told (.called { name := "grader", arguments := .null, environment? := some testEnvironment.toJson })) "nothing",
 
   test "a commit appends the files and what changed, and the next command runs on them" do
     withMini {} fun run => do

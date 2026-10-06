@@ -36,13 +36,17 @@ def argumentsAt? (log : Log Agent) (call : Frame.Segment) : Option Json :=
 /-- Where the commands of a frame run, and the frame whose call said so: the nearest call on its
 path that names an environment, read off the openings of `log`. -/
 def environmentOf (log : Log Agent) (frame : Frame) : Result (Frame × Environment) := do
-  let named : Std.HashMap Frame Environment := log.foldl (init := {}) fun named event =>
+  let named : Std.HashMap Frame Json := log.foldl (init := {}) fun named event =>
     match event with
     | .opened opened { environment? := some environment, .. } => named.insert opened environment
     | _ => named
   let mut here := frame
   while !here.isEmpty do
-    if let some environment := named.get? here then return (here, environment)
+    if let some json := named.get? here then
+      match Environment.fromJson json with
+      | .ok environment => return (here, environment)
+      | .error problem =>
+        throw <| .storage s!"the call {here.render} names an environment this build does not read: {problem}"
     here := here.pop
   throw <| .storage s!"no call on the path of {frame.render} names where its commands run"
 

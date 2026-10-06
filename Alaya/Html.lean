@@ -121,7 +121,7 @@ def eventJson : Event Agent → Json
     .mkObj [("k", "replied"), ("to", to.toJson), ("text", reply.line)]
   | .arrived (.called call) =>
     .mkObj [("k", "called"), ("routine", call.name), ("arguments", call.arguments),
-      ("environment", orNull call.environment? (·.toJson)), ("title", Render.callTitle call)]
+      ("environment", call.environment?.getD .null), ("title", Render.callTitle call)]
   | .heard _ notices => .mkObj [("k", "heard"), ("notices", .arr (notices.map fun (n : Nat) => (n : Json)))]
   | .asked _ question =>
     .mkObj [("k", "asked"), ("text", question.text), ("form", question.form.name),
@@ -145,7 +145,7 @@ def eventJson : Event Agent → Json
     .mkObj [("k", "time"), ("spent", t.spentMs), ("budget", orNull t.budgetMs? fun n => (n : Json))]
   | .opened _ call =>
     .mkObj [("k", "open"), ("routine", call.name), ("arguments", call.arguments),
-      ("environment", orNull call.environment? (·.toJson)),
+      ("environment", call.environment?.getD .null),
       ("summary", Render.argumentsSummary call.arguments),
       ("title", orNull (Render.agentTitle? call) .str)]
   | .returned _ value =>

@@ -69,6 +69,20 @@ def Uname.fromJson (json : Lean.Json) : Except String Uname := do
   let field (name : String) := json.getObjVal? name >>= Lean.Json.getStr?
   pure { system := ← field "system", machine := ← field "machine" }
 
+/-- Where a call's commands run: a pinned image, and the path the workspace is mounted at. A
+call names one as data (`RoutineCall.environment?`), which the driver reads as this. -/
+structure Environment where
+  image : String
+  workdir : String
+  deriving Inhabited, BEq
+
+def Environment.toJson (environment : Environment) : Lean.Json :=
+  .mkObj [("image", environment.image), ("workdir", environment.workdir)]
+
+def Environment.fromJson (json : Lean.Json) : Except String Environment := do
+  let field (name : String) := json.getObjVal? name >>= Lean.Json.getStr?
+  pure { image := ← field "image", workdir := ← field "workdir" }
+
 namespace Executor
 
 /-- How a command is run: how long it may take, and what is added to its environment. Part of

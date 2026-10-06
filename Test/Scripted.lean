@@ -83,7 +83,7 @@ def testConfig (task : String := "t") : Json :=
 
 /-- A person's call of the test's agent on `task`, in `environment`. -/
 def testCall (task : String := "t") (environment : Environment := testEnvironment) : RoutineCall :=
-  { name := "agent", arguments := testConfig task, environment? := some environment }
+  { name := "agent", arguments := testConfig task, environment? := some environment.toJson }
 
 /-- The notice that calls the test's agent on `task`. -/
 def callAgent (task : String := "t") (environment : Environment := testEnvironment) : Event Agent :=
@@ -189,7 +189,7 @@ def logAt (rt : Driver.Runtime) (hash : Hash) : TestM (Log Agent) := do
 def graderCall (command : String) (image : String := recordedImage) (timeoutSeconds : Nat := 900)
     (workdir : String := recordedWorkdir) : RoutineCall :=
   { name := "grader", arguments := .mkObj [("command", command), ("timeout_seconds", timeoutSeconds)]
-    environment? := some { image, workdir } }
+    environment? := some ({ image, workdir } : Environment).toJson }
 
 /-- Grades the point `tip` of a run with the grader `call`, as a person does: stops the call
 running there, if one is, calls the grader, and drives it to its end. Gives the entry the log

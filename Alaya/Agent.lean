@@ -134,20 +134,12 @@ def Frame.toJson (frame : Frame) : Json := .arr (frame.map fun segment => .str s
 def Frame.fromJson (json : Json) : Except String Frame := do
   (← json.getArr?).mapM fun step => do Frame.Segment.parse (← step.getStr?)
 
-def Environment.toJson (environment : Environment) : Json :=
-  .mkObj [("image", environment.image), ("workdir", environment.workdir)]
-
-def Environment.fromJson (json : Json) : Except String Environment := do
-  pure { image := ← str json "image", workdir := ← str json "workdir" }
-
 def RoutineCall.toJson (call : RoutineCall) : Json :=
   .mkObj (([("name", .str call.name), ("arguments", call.arguments)] : List (String × Json)) ++
-    (call.environment?.map fun environment => ("environment", environment.toJson)).toList)
+    (call.environment?.map fun environment => ("environment", environment)).toList)
 
 def RoutineCall.fromJson (json : Json) : Except String RoutineCall := do
-  let environment? ← match json.getObjVal? "environment" with
-    | .ok environment => some <$> Environment.fromJson environment
-    | .error _ => pure none
+  let environment? := (json.getObjVal? "environment").toOption
   pure { name := ← str json "name", arguments := ← json.getObjVal? "arguments", environment? }
 
 /-- A reply as the log keeps it: its kind under `type`, which needs no question to read. -/

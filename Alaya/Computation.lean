@@ -68,22 +68,17 @@ def Frame.parse (text : String) : Except String Frame :=
 /-- Whether the frame is a call's, or inside one: not the run's own. -/
 def Frame.inCall (frame : Frame) : Bool := !frame.isEmpty
 
-/-- Where a call's commands run: a pinned image, and the path the workspace is mounted at. -/
-structure Environment where
-  image : String
-  workdir : String
-  deriving Inhabited, BEq
-
 /-- A call of a routine, by its name, with its arguments, and, when the caller says, where its
 commands run: what the log holds as the opening of the call. It holds no body, so it is data.
 
 What a call can reach is the scope of the routine it is made in, fixed where that routine is
 defined; where its commands run is the environment of the nearest call on its path that names
-one, which its caller decides. A call that names none runs where its caller's commands do. -/
+one, which its caller decides. A call that names none runs where its caller's commands do. What
+an environment is, the runtime says: here it is data, as the arguments are. -/
 structure RoutineCall where
   name : String
   arguments : Json
-  environment? : Option Environment := none
+  environment? : Option Json := none
   deriving BEq, Inhabited
 
 /-- Something that happened without a computation asking for it, or the reply of a person to a
@@ -204,7 +199,7 @@ def retry (attempts : Nat) (computation : Computation σ α) : Computation σ α
 
 /-- Calls a routine by its name, its commands to run in `environment?` when one is given, and
 where the caller's do otherwise. Its failure is its caller's too, unless the caller catches it. -/
-def call (name : String) (arguments : Json) (environment? : Option Environment := none) :
+def call (name : String) (arguments : Json) (environment? : Option Json := none) :
     Computation σ Json :=
   .call { name, arguments, environment? } fun | .ok value => .pure value | .error error => .fail error
 

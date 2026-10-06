@@ -187,7 +187,7 @@ private def callRun (a : CallArgs) (out : Cli.Out) : Result UInt32 := do
     let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
     let environment : Environment := { image := settings.image, workdir := a.workdir }
     appendTo data a.entry out fun _ _ =>
-      pure ({ name := a.program, arguments := config, environment? := some environment } : RoutineCall).event
+      pure ({ name := a.program, arguments := config, environment? := some environment.toJson } : RoutineCall).event
 
 /-! ## Driving a run -/
 

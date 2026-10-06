@@ -260,7 +260,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let project := (← scratch) / "project"
     IO.FS.createDirAll project
     let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
-    let call : RoutineCall := { name := "mini-swe", arguments := agent, environment? := some Scripted.testEnvironment }
+    let call : RoutineCall := { name := "mini-swe", arguments := agent, environment? := some Scripted.testEnvironment.toJson }
     let (called, _) ← assertOk <| Driver.append rt.store run root call.event
     -- The run reads the call and opens it; the agent's first read of its inbox takes nothing.
     let log := Scripted.settle run (← Scripted.logAt rt called)
