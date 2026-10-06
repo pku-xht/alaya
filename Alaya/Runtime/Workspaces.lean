@@ -38,6 +38,13 @@ structure Change where
   directory : Bool := false
   deriving BEq, Repr, Inhabited
 
+/-- A change on one line, as a change notice keeps it: `M path`, `+ path`, `- path`. -/
+def Change.line (change : Change) : String :=
+  match change.kind with
+  | .added => s!"+ {change.path}"
+  | .removed => s!"- {change.path}"
+  | .modified => s!"M {change.path}"
+
 /-- The kind of an entry in an immutable workspace snapshot. Links are never directories. -/
 inductive EntryKind where
   | directory | file | symlink | other

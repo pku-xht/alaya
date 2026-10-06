@@ -101,4 +101,65 @@ def replyTo (next : Next Agent) (answer : Reply) : Except String (Event Agent) :
     throw s!"the answer does not fit a {question.form.name} question"
   pure (.arrived (.replied frame answer))
 
+/-! ## What a call is, and what it gave -/
+
+/-- A call of an agent, by its name and its model's, `mini-swe, gpt-6-luna`: a call whose
+arguments name a model, wherever it is made. -/
+def agentTitle? (call : RoutineCall) : Option String :=
+  (call.arguments.getObjVal? "model" >>= (·.getObjVal? "name") >>= Json.getStr?).toOption.map
+    fun model => s!"{call.name}, {model}"
+
+/-- A call of a program, by its name and, for an agent, its model's: `mini-swe, gpt-6-luna`. -/
+def callTitle (call : RoutineCall) : String := (agentTitle? call).getD call.name
+
+/-- What a value is, when it has the shape one of Alaya's own writes: a grader's verdict
+(`verdictJson`), a command's result (`Tools.Bash.result`), an agent's outcome
+(`MiniSwe.outcome`). Any routine may return any value, so a value is of a kind only when it has
+every field of the kind, each of its type, and no other; anything else is of no kind, and is
+shown as what it holds. -/
+inductive ValueKind where
+  | verdict
+  | command
+  | outcome
+  deriving BEq, Repr
+
+def ValueKind.name : ValueKind → String
+  | .verdict => "verdict"
+  | .command => "command"
+  | .outcome => "outcome"
+
+private def isText : Json → Bool
+  | .str _ => true
+  | _ => false
+
+private def isNumber : Json → Bool
+  | .num _ => true
+  | _ => false
+
+private def isArray : Json → Bool
+  | .arr _ => true
+  | _ => false
+
+private def orNull (fits : Json → Bool) : Json → Bool
+  | .null => true
+  | other => fits other
+
+/-- Whether `value` is an object that has every field of `required`, each as its test says, and
+beside them only fields of `optional`. -/
+private def shaped (value : Json) (required : List (String × (Json → Bool)))
+    (optional : List String := []) : Bool :=
+  match value with
+  | .obj fields =>
+    required.all (fun (name, fits) => (value.getObjVal? name).toOption.any fits) &&
+    fields.foldl (fun known name _ => known && (required.any (·.1 == name) || optional.contains name)) true
+  | _ => false
+
+def valueKind? (value : Json) : Option ValueKind :=
+  if shaped value [("status", isText), ("passed", isNumber), ("total", isNumber), ("checks", isArray)]
+      ["reason", "exit_code"] then some .verdict
+  else if shaped value [("output", isText), ("exit_code", orNull isNumber), ("error", orNull isText),
+      ("file", orNull isText)] then some .command
+  else if shaped value [("status", isText), ("submission", isText)] ["reason"] then some .outcome
+  else none
+
 end Alaya.Runtime

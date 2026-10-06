@@ -1,11 +1,10 @@
 import Alaya.Core.Rebase
 import Alaya.App.Render
-import Alaya.LLM.Cache
-import Alaya.Runtime.Workspaces
 import Alaya.Agents.Catalog
 
 /-! The rebase command's part: the log reconfigured as the current version of its programs reads
-it, the rebased log written into a store of its own, and what a rebase says of itself. The rebase
+it, and what a rebase says of itself; `Data.rebase` writes the rebased log into a new data
+directory. The rebase
 itself is `Alaya.Core.rebase`, a pure function of a routine and a log. -/
 
 namespace Alaya.App
@@ -74,30 +73,6 @@ def summary (rebased : Rebased Agent) (total : Nat) : String :=
 /-- The events from outside a rebase left out, in a line each. -/
 def droppedLines (rebased : Rebased Agent) : Array String :=
   rebased.dropped.map fun (position, event) => s!"left out: {position}  {Render.eventSummary event}"
-
-/-- Writes the rebased log into `store`, an empty one, with the snapshots it names copied from
-`workspaces` into a new store at `repository`, and then `note`, a comment that says where it came
-from. An entry taken from the old log keeps its time, `entries` being the old log's; a comment
-the routine made took none. Gives the entries written, in order. -/
-def write (rebased : Rebased Agent) (entries : Array Entry) (workspaces : Workspaces)
-    (repository : System.FilePath) (store : Store) (note : String) : Result (Array (Hash × Entry)) := do
-  let ids := snapshots (rebased.log.map (·.1))
-  let copies ← workspaces.transfer ids repository
-  let renamed : Std.HashMap Snapshot Snapshot := (ids.zip copies).foldl (init := {}) fun m (id, copy) =>
-    m.insert id copy
-  let rename (id : Snapshot) := renamed.getD id id
-  let mut forest ← store.forest
-  let mut parent? : Option Hash := none
-  let mut written : Array (Hash × Entry) := #[]
-  let events := rebased.log.map (fun (event, origin?) =>
-    (event.renameSnapshots rename, (origin?.bind (entries[·]?)).map (·.elapsedMs) |>.getD 0))
-  for (event, elapsedMs) in events.push (.commented note, 0) do
-    let entry : Entry := { parent?, event, elapsedMs }
-    let (hash, grown) ← store.put forest entry
-    forest := grown
-    parent? := some hash
-    written := written.push (hash, entry)
-  pure written
 
 end Rebase
 

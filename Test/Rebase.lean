@@ -142,7 +142,7 @@ def suite : Suite := Testing.suite "rebase" #[
     let entries ← assertOk <| rt.store.entries (← assertOk rt.store.forest) last
     let base := (← scratch) / "rebased"
     let store ← assertOk <| Store.create (base / "entries")
-    let written ← assertOk <| Rebase.write rebased entries rt.workspaces (base / "snapshots") store "rebased"
+    let written ← assertOk <| rebased.write entries rt.workspaces (base / "snapshots") store "rebased"
     let some (tip, _) := written.back? | fail "nothing written"
     let copied := (written.extract 0 (written.size - 1)).map (·.2)
     assertEqual "each entry keeps its time" (copied.map (·.elapsedMs)) ((entries.extract 0 copied.size).map (·.elapsedMs))

@@ -9,44 +9,12 @@ open Alaya.Runtime.Driver (Runtime Limits Stop)
 private def emitLines (lines : Array String) : Result Unit :=
   lines.forM Cli.emit
 
-/-- The data directory (`--data`, or `ALAYA_DATA`); its layout is in `docs/log-schema.md` §5. A
-command opens it with `withData`, which gives the command a scratch directory of its own. -/
-private structure DataDir where
-  path : System.FilePath
-  store : Store
-  workspaces : Workspaces
-  /-- This command's scratch, `tmp/<id>`: its work directory, a grader's checkout, restic's
-  restores. Nothing in it lasts past the command, and no other command shares it. -/
-  scratch : System.FilePath
-
-private def DataDir.cache (data : DataDir) : System.FilePath := data.path / "cache"
-
-/-- Opens the data directory at `path` for one command and runs `f` on it. Only `new` creates
-one (`create`): any other command needs one that exists, so a wrong path is an error rather than
-an empty forest. A command that writes (`write`) holds the directory's lock throughout, so it is
-the only writer, and is refused at once when another has it; one that only reads takes no lock.
-The command's scratch directory is removed when it ends, however it ends. -/
-private def withData (path : System.FilePath) (f : DataDir → Result α) (write := false)
-    (create := false) : Result α := do
-  if !create && !(← Result.fromIO Error.storage (path / "entries").isDir) then
+/-- Opens the data directory for one command (`Data.with`); one that is not there is said to be
+made by `new`. -/
+private def withData (path : System.FilePath) (f : Data → Result α) (write := false) : Result α := do
+  if !(← Result.fromIO Error.storage (path / "entries").isDir) then
     throw <| .input s!"no data directory at {path}: `alaya new --data {path}` creates one"
-  Result.fromIO Error.storage (IO.FS.createDirAll path)
-  let lock? ← if write then some <$> Lock.acquire path else pure none
-  try
-    let store ← Store.create (path / "entries")
-    let id := s!"{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"
-    let scratch := path / "tmp" / id
-    Result.fromIO Error.storage (IO.FS.createDirAll scratch)
-    try
-      -- The entries and the model cache are as much the run as the repository is.
-      let workspaces ← Workspaces.Restic.open (path / "restic") (scratch / "restic")
-        (keep := #[store.dir, path / "cache"])
-      f { path, store, workspaces, scratch }
-    finally
-      Workspaces.makeWritable scratch
-      Result.fromIO Error.storage (IO.FS.removeDirAll scratch)
-  finally
-    if let some lock := lock? then lock.release
+  Data.with path f (write := write)
 
 /-- `--data`, which every command but `config` takes, or `ALAYA_DATA`: there is no default, so a command run
 from the wrong directory cannot quietly start a new data directory. -/
@@ -58,21 +26,10 @@ private def entryArg (help : String := "an entry: its hash, any unambiguous pref
     Cli.Spec String :=
   Cli.arg "ENTRY" .string help
 
-/-- The entry a reference names, and the forest. -/
-private def resolve (data : DataDir) (reference : String) : Result (Forest × Hash) := do
-  let forest ← data.store.forest
-  let hash ← Result.fromExcept Error.input (forest.resolve reference)
-  pure (forest, hash)
-
-/-- The log at an entry, read whole. -/
-private def entriesAt (data : DataDir) (reference : String) :
-    Result (Forest × Hash × Array Entry) := do
-  let (forest, hash) ← resolve data reference
-  pure (forest, hash, ← data.store.entries forest hash)
-
 /-- A new entry, as the commands that append print it: a line that begins with its full name,
 or one JSON object. -/
-private def entryRecord (out : Cli.Out) (hash : Hash) (position : Nat) (entry : Entry) : Result Unit :=
+private def entryRecord (out : Cli.Out) (appended : Appended) : Result Unit :=
+  let { hash, position, entry } := appended
   out.record (.mkObj [("entry", hash.hex), ("parent", entry.parent?.map (Json.str ·.hex) |>.getD .null),
       ("position", position), ("frame", (entry.event.frame?.map Frame.toJson).getD .null),
       ("summary", Render.eventSummary entry.event), ("event", eventToJson entry.event),
@@ -126,34 +83,20 @@ private def NewArgs.cli : Cli.Spec NewArgs :=
 
 /-- Creates a run: its root, the workspace, where the run waits for a program to be called. -/
 private def newRun (a : NewArgs) (out : Cli.Out) : Result UInt32 := do
-  -- Before the data directory is created: inside the project it would become part of it.
-  if let .inl project := a.source then
-    Workspaces.refuseOverlap "snapshot" project #[a.data]
-  withData a.data (write := true) (create := true) fun data => do
-    let project ← match a.source with
-      | .inl project => pure project
-      | .inr (image, workdir) =>
-        let settings ← (← Executor.Docker.settingsOf {} image).pin
-        let workdir ← if workdir.isEmpty then Executor.Docker.imageWorkdir settings else pure workdir
-        let work := data.scratch / "project"
-        Result.fromIO Error.storage (IO.FS.createDirAll work)
-        Executor.Docker.copyOut settings workdir work
-        pure work
-    let (hash, entry) ← Notices.create data.store data.workspaces project
-    entryRecord out hash 0 entry
-    pure 0
+  let source := match a.source with
+    | .inl project => .directory project
+    | .inr (image, workdir) => .image image workdir
+  entryRecord out (← Data.create a.data source)
+  pure 0
 
 /-! ## What a person appends -/
 
-/-- Appends `event` after the entry a reference names, and prints the new entry. -/
-private def appendTo (data : DataDir) (reference : String) (out : Cli.Out)
-    (event : Log Agent → Next Agent → Result (Event Agent)) : Result UInt32 := do
-  let (_, tip, entries) ← entriesAt data reference
-  let log := entries.map (·.event)
-  let event ← event log (next Agents.Catalog.run log)
-  let (hash, entry) ← Driver.append data.store Agents.Catalog.run tip event
-  entryRecord out hash entries.size entry
-  pure 0
+/-- Appends with `append` in the data directory at `path`, and prints the new entry. -/
+private def appendIn (path : System.FilePath) (out : Cli.Out) (append : Data → Result Appended) :
+    Result UInt32 :=
+  withData path (write := true) fun data => do
+    entryRecord out (← append data)
+    pure 0
 
 /-! ## Calling a program -/
 
@@ -182,12 +125,10 @@ private def callRun (a : CallArgs) (out : Cli.Out) : Result UInt32 := do
   let config ← Agents.Catalog.resolve a.program (← a.settings.mapM (·.read))
   if let .error problem := Agents.Catalog.check { name := a.program, arguments := config } then
     throw <| .input problem
-  withData a.data (write := true) fun data => do
-    Executor.Docker.checkWorkdir a.workdir #[Driver.outputsDir]
-    let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
-    let environment : Environment := { image := settings.image, workdir := a.workdir }
-    appendTo data a.entry out fun _ _ =>
-      pure ({ name := a.program, arguments := config, environment? := some environment.toJson } : RoutineCall).event
+  appendIn a.data out fun data => do
+    let environment ← Environment.pinned a.image a.workdir
+    data.call Agents.Catalog.run a.entry
+      { name := a.program, arguments := config, environment? := some environment.toJson }
 
 /-! ## Driving a run -/
 
@@ -215,35 +156,6 @@ private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
     <*> Cli.flagD "samples" .nat 0 "responses this invocation may sample; 0 is no limit"
     <*> Cli.flagD "time-budget" (.nat "S") 0
       "seconds of run time, summed along the log, after which no operation starts; 0 is no limit"
-
-/-- Runs `k` with what a run is driven with: its work directory and outputs in the command's
-scratch, a container of each call's image as `options` say, and the models `provider` serves,
-each built once. -/
-private def withRuntime (data : DataDir) (options : Executor.Docker.RunOptions)
-    (provider? : Option Provider.Provider) (baseUrl? : Option String) (k : Runtime → Result α) : Result α := do
-  let outputs := data.scratch / "outputs"
-  let work := data.scratch / "work"
-  Result.fromIO Error.storage do
-    IO.FS.createDirAll outputs
-    IO.FS.createDirAll work
-  let outputsHost ← Result.fromIO Error.storage (IO.FS.realPath outputs)
-  let models ← Result.fromIO Error.storage (IO.mkRef (#[] : Array (String × Model)))
-  k { store := data.store, workspaces := data.workspaces, workDir := work, outputsDir := outputs
-      executor := fun environment => do
-        let settings ← Executor.Docker.settingsOf options environment.image environment.workdir
-        let settings := { settings with
-          mounts := #[{ host := outputsHost, container := Driver.outputsDir, readOnly := true }] }
-        settings.ensurePresent
-        Executor.Docker.executor settings
-      model := fun spec => do
-        let some provider := provider?
-          | throw <| .input "a call samples its model: name a --provider"
-        let key := spec.toJson.compress
-        if let some (_, model) := (← Result.fromIO Error.storage models.get).find? (·.1 == key) then
-          return model
-        let model ← Driver.buildModel spec provider data.cache baseUrl?
-        Result.fromIO Error.storage (models.modify (·.push (key, model)))
-        pure model }
 
 /-- How a driver stopped, as the last object of `--json`: its status, and, when no call runs,
 how the last call ended. -/
@@ -299,16 +211,11 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
     | some endpoint, some "dgx" => pure (some endpoint.baseUrl)
     | some _, other => throw <| .input s!"--url and --port address a dgx server, not {other.getD "none"}"
   withData a.data (write := true) fun data => do
-    let (_, tip, entries) ← entriesAt data a.entry
     let limits : Limits := {
       samples? := if a.samples == 0 then none else some a.samples
       budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
-    let position ← IO.mkRef entries.size |> Result.fromIO Error.storage
-    withRuntime data a.options a.provider? baseUrl? fun rt => do
-      let (last, stop) ← Driver.drive rt Agents.Catalog.run tip limits fun hash entry => do
-        let at' ← Result.fromIO Error.storage (position.modifyGet fun p => (p, p + 1))
-        entryRecord out hash at' entry
-      let log ← data.store.log (← data.store.forest) last
+    data.withRuntime a.options a.provider? baseUrl? (unserved := .input "a call samples its model: name a --provider") fun rt => do
+      let (last, stop, log) ← data.resume Agents.Catalog.run a.entry rt limits (entryRecord out)
       reportStop out last log stop
       pure <| match stop with
         | .idle => idleStatus log
@@ -316,15 +223,15 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
         | .paused _ => exitPaused
 
 private def tellRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
-  withData data (write := true) fun data =>
-    appendTo data reference out fun _ _ => pure (.arrived (.said text))
+  appendIn data out (·.tell Agents.Catalog.run reference text)
 
 private def commitRun (data : System.FilePath) (reference : String) (dir : System.FilePath)
     (message? : Option String) (out : Cli.Out) : Result UInt32 :=
-  withData data (write := true) fun data => do
-    let (_, tip) ← resolve data reference
-    let event ← Notices.changed data.store data.workspaces tip dir (message?.getD "")
-    appendTo data reference out fun _ _ => pure event
+  appendIn data out fun data =>
+    tryCatch (data.commit Agents.Catalog.run reference dir (message?.getD "")) fun
+      | .input message => throw <| .input
+          (if message.endsWith "not changed" then s!"{message}: to send a message alone, use `tell`" else message)
+      | error => throw error
 
 /-- A person's reply: the answer's text, or `none` when they cannot answer. -/
 private def replyAnswer : Cli.Spec (Option String) :=
@@ -339,27 +246,14 @@ private def replyAnswer : Cli.Spec (Option String) :=
 
 private def replyRun (data : System.FilePath) (reference : String) (answer? : Option String)
     (out : Cli.Out) : Result UInt32 :=
-  withData data (write := true) fun data =>
-    appendTo data reference out fun _ next => do
-      let some (_, question) := questionOf? next
-        | throw <| .input s!"no question waits for a reply at {reference}"
-      let reply ← match answer? with
-        | some text => Result.fromExcept Error.input (question.parseReply text)
-        | none => pure .unavailable
-      Result.fromExcept Error.input (replyTo next reply)
+  appendIn data out (·.reply Agents.Catalog.run reference answer?)
 
-/-- Appends a person's comment after an entry. Nothing reads it, so nothing is checked: the log
-need not even be one its run can still be built from. -/
+/-- Appends a person's comment after an entry. -/
 private def commentRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
-  withData data (write := true) fun data => do
-    let (forest, tip) ← resolve data reference
-    let (hash, entry) ← Notices.comment data.store tip text
-    entryRecord out hash (forest.path tip).size entry
-    pure 0
+  appendIn data out (·.comment reference text)
 
 private def stopRun (data : System.FilePath) (reference reason : String) (out : Cli.Out) : Result UInt32 :=
-  withData data (write := true) fun data =>
-    appendTo data reference out fun _ _ => pure (.stopped reason)
+  appendIn data out (·.stop Agents.Catalog.run reference reason)
 
 /-! ## Reading the forest -/
 
@@ -377,64 +271,47 @@ private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
 
 private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
-    let forest ← data.store.forest
-    walk data.store forest () (root := Agents.Catalog.run) fun _ visit => do
-      let leaf := (forest.childrenOf visit.hash).isEmpty
-      if let (true, some (.waits frame _), some question) := (leaf, visit.next?, visit.question?) then
-        out.record (.mkObj [("entry", visit.hash.hex), ("frame", frame.toJson), ("question", question.text),
-            ("question_type", question.form.name),
-            ("options", .arr (question.form.options.map Json.str))])
-          s!"{visit.hash.hex}  {question.render.quote}"
+    for (hash, frame, question) in ← data.waiting Agents.Catalog.run do
+      out.record (.mkObj [("entry", hash.hex), ("frame", frame.toJson), ("question", question.text),
+          ("question_type", question.form.name),
+          ("options", .arr (question.form.options.map Json.str))])
+        s!"{hash.hex}  {question.render.quote}"
     pure 0
+
+/-- What the run does next after a visit, for a person. -/
+private def statusOf (visit : Visit) : String :=
+  (visit.next?.map (Render.nextSummary visit.question? (visit.last?.bind (·.2)))).getD "the run cannot be read"
 
 private def logRun (data : System.FilePath) (reference : String) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
-    let (_, _, entries) ← entriesAt data reference
-    let log := entries.map (·.event)
-    let mut spent := 0
-    for (entry, position) in entries.zipIdx do
-      spent := spent + entry.elapsedMs
+    let visits ← data.visitsAt Agents.Catalog.run reference
+    for visit in visits do
+      let entry := visit.entry
       let frame := (entry.event.frame?.map Frame.render).getD "-"
-      out.record (.mkObj [("entry", entry.hash.hex), ("position", position),
+      out.record (.mkObj [("entry", visit.hash.hex), ("position", visit.position),
           ("frame", (entry.event.frame?.map Frame.toJson).getD .null),
           ("event", eventToJson entry.event), ("elapsed_ms", entry.elapsedMs)])
-        s!"{position}  {Render.short entry.hash}  {frame}  {Render.eventSummary entry.event}  ({Render.seconds spent})"
-    let next := next Agents.Catalog.run log
-    let status := Render.nextSummary ((questionOf? next).map (·.2)) ((lastCall? log).bind (·.2)) next
+        s!"{visit.position}  {Render.short visit.hash}  {frame}  {Render.eventSummary entry.event}  ({Render.seconds visit.spentMs})"
+    let some last := visits.back? | throw <| .storage "an empty log"
+    let status := statusOf last
     out.record (.mkObj [("next", status)]) status
     pure 0
-
-/-- The files an entry shows: the workspace the log has reached there. -/
-private def snapshotAt (entries : Array Entry) : Result Snapshot := do
-  match workspace? (entries.map (·.event)) with
-  | some snapshot => pure snapshot
-  | none => throw <| .storage "the log names no workspace"
 
 private def showRun (data : System.FilePath) (reference : String) (request : Bool) (out : Cli.Out) :
     Result UInt32 := do
   withData data fun data => do
-    let (_, hash, entries) ← entriesAt data reference
-    let log := entries.map (·.event)
-    let some entry := entries.back? | throw <| .storage "an empty log"
-    let position := entries.size - 1
-    let spent := entries.foldl (fun ms e => ms + e.elapsedMs) (0 : Nat)
-    let usage := log.foldl (init := ({} : Chat.TokenUsage)) fun usage event =>
-      match event with
-      | .answered _ _ (.ok (.response response)) => addUsage usage (response.usage?.getD {})
-      | _ => usage
-    let stack := log.zipIdx.foldl (init := #[]) fun stack (event, i) => OpenCall.after stack i event
-    let before := Replayer.ofLog Agents.Catalog.run (log.extract 0 position)
-    let asked? := match before.next, entry.event with
-      | .ask { op := .sample _ request, .. }, .answered .. => some request
-      | _, _ => none
-    let next := (before.feed entry.event).next
-    let after := Render.nextSummary ((questionOf? next).map (·.2)) ((lastCall? log).bind (·.2)) next
+    let visit ← data.visitAt Agents.Catalog.run reference
+    let { hash, entry, position, spentMs := spent, usage, stack, .. } := visit
+    let asked? := match visit.asked? with
+      | some { op := .sample _ request, .. } => some request
+      | _ => none
+    let after := statusOf visit
     let requestJson := if request then (asked?.map (·.toJson)).getD .null else .null
     if out.json then
       out.record (.mkObj [("entry", hash.hex), ("parent", entry.parent?.map (Json.str ·.hex) |>.getD .null),
         ("position", position), ("event", eventToJson entry.event), ("elapsed_ms", entry.elapsedMs),
         ("run_time_ms", spent), ("run_usage", usage.toStored),
-        ("workspace", (workspace? log).map (Json.str ·.hex) |>.getD .null),
+        ("workspace", visit.workspace?.map (Json.str ·.hex) |>.getD .null),
         ("calls", .arr (stack.map fun call => .mkObj [("frame", call.frame.toJson),
           ("routine", call.call.toJson), ("position", call.position)])),
         ("next", after), ("request", requestJson)]) ""
@@ -444,7 +321,7 @@ private def showRun (data : System.FilePath) (reference : String) (request : Boo
       s!"parent     {(entry.parent?.map (·.hex)).getD "none: a root"}",
       s!"position   {position}, frame {(entry.event.frame?.map Frame.render).getD "-"}",
       s!"time       {Render.seconds entry.elapsedMs}; the run {Render.seconds spent}",
-      s!"workspace  {((workspace? log).map (·.hex)).getD "none"}"]
+      s!"workspace  {(visit.workspace?.map (·.hex)).getD "none"}"]
     let spentTokens := Render.tokens usage
     if !spentTokens.isEmpty then lines := lines.push s!"tokens     the run: {spentTokens}"
     lines := lines.push s!"calls      {if stack.isEmpty then "none open" else " > ".intercalate (stack.map fun c => s!"{c.call.name} ({c.frame.render})").toList}"
@@ -460,8 +337,8 @@ private def showRun (data : System.FilePath) (reference : String) (request : Boo
 private def lsRun (data : System.FilePath) (reference : String) (path? : Option String) (out : Cli.Out) :
     Result UInt32 :=
   withData data fun data => do
-    let (_, hash, entries) ← entriesAt data reference
-    let snapshot ← snapshotAt entries
+    let (_, hash, entries) ← data.entriesAt reference
+    let snapshot ← Data.snapshotOf entries
     let path := path?.getD ""
     let listed ← data.workspaces.list snapshot path
     let lines := listed.map fun e =>
@@ -479,8 +356,8 @@ private def lsRun (data : System.FilePath) (reference : String) (path? : Option 
 and otherwise what it is. -/
 private def catRun (data : System.FilePath) (reference path : String) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
-    let (_, hash, entries) ← entriesAt data reference
-    let snapshot ← snapshotAt entries
+    let (_, hash, entries) ← data.entriesAt reference
+    let snapshot ← Data.snapshotOf entries
     if out.json then
       let preview ← data.workspaces.preview snapshot path
       out.record (.mkObj [("entry", hash.hex), ("snapshot", snapshot.hex), ("path", path),
@@ -497,8 +374,8 @@ private def catRun (data : System.FilePath) (reference path : String) (out : Cli
 private def checkoutRun (data : System.FilePath) (reference : String) (dir : System.FilePath)
     (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
-    let (_, hash, entries) ← entriesAt data reference
-    let snapshot ← snapshotAt entries
+    let (_, hash, entries) ← data.entriesAt reference
+    let snapshot ← Data.snapshotOf entries
     Workspaces.refuseOverlap "check out into" dir #[data.path]
     data.workspaces.materialize snapshot dir
     out.record (.mkObj [("entry", hash.hex), ("snapshot", snapshot.hex), ("directory", dir.toString)])
@@ -507,9 +384,7 @@ private def checkoutRun (data : System.FilePath) (reference : String) (dir : Sys
 
 private def diffRun (data : System.FilePath) (a b : String) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
-    let (_, _, before) ← entriesAt data a
-    let (_, _, after) ← entriesAt data b
-    let lines ← Notices.changedLines data.workspaces (← snapshotAt before) (← snapshotAt after)
+    let lines := (← data.changes a b).map (·.line)
     if out.json then out.record (.mkObj [("changes", .arr (lines.map Json.str))]) ""
     else emitLines lines
     pure 0
@@ -531,8 +406,7 @@ private def htmlRun (data : System.FilePath) (file : System.FilePath) (hide : Ar
 
 private def rmRun (data : System.FilePath) (reference : String) (out : Cli.Out) : Result UInt32 :=
   withData data (write := true) fun data => do
-    let (_, hash) ← resolve data reference
-    let removed ← Notices.remove data.store data.workspaces hash
+    let removed ← data.remove reference
     out.record (.mkObj [("removed", removed)]) s!"removed {removed} entries"
     pure 0
 
@@ -546,51 +420,31 @@ private def rebaseRun (data : System.FilePath) (reference : String) (target : Sy
     (settings : Array Settings.Given) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
     let settings ← settings.mapM (·.read)
-    let io {α} (action : IO α) : Result α := Result.fromIO Error.storage action
-    if ← io target.pathExists then
-      throw <| .input s!"{target} exists: rebase makes a new data directory"
-    let some name := target.fileName | throw <| .input s!"not a directory to create: {target}"
-    let source ← io (IO.FS.realPath data.path)
-    if Workspaces.overlap (← io (Workspaces.resolved target)) source then
-      throw <| .input s!"{target} overlaps the data directory {data.path}: put the new one beside it"
-    let (_, tip, entries) ← entriesAt data reference
-    let log := entries.map (·.event)
-    let log ← Rebase.reconfigure log settings
-    do
-      let rebased := rebase Agents.Catalog.run log
-      let summary := Rebase.summary rebased log.size
-      let staging := target.withFileName
-        s!".{name}.rebase-{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"
-      let written ← try
-          let store ← Store.create (staging / "entries")
-          let written ← Rebase.write rebased entries data.workspaces (staging / "restic") store
-            s!"rebased from {tip.hex} in {source}: {summary}"
-          Cache.link data.cache (staging / "cache")
-          io (IO.FS.rename staging target)
-          pure written
-        catch error =>
-          Workspaces.makeWritable staging
-          io do if ← staging.pathExists then IO.FS.removeDirAll staging
-          throw error
-      for ((hash, entry), position) in written.zipIdx do entryRecord out hash position entry
-      let some (last, _) := written.back? | throw <| .storage "a rebase wrote no entry"
-      if out.json then
-        out.record (.mkObj [("entry", last.hex), ("data", target.toString),
-          ("held", (rebased.divergence?.map (·.position)).getD log.size), ("total", log.size),
-          ("divergence", match rebased.divergence? with
-            | none => .null
-            | some divergence => .mkObj [("position", divergence.position),
-                ("found", eventToJson divergence.found),
-                ("expected", Rebase.expectedSummary divergence.expected)]),
-          ("dropped", .arr (rebased.dropped.map fun (position, event) =>
-            .mkObj [("position", position), ("event", eventToJson event)]))]) ""
-      else io do
-        (← IO.getStdout).flush
-        let stderr ← IO.getStderr
-        stderr.putStrLn summary
-        for line in Rebase.droppedLines rebased do stderr.putStrLn line
-        stderr.putStrLn s!"`alaya resume {Render.short last} --data {target}` goes on"
-      pure 0
+    let (_, tip, entries) ← data.entriesAt reference
+    let log ← Rebase.reconfigure (entries.map (·.event)) settings
+    let rebased := rebase Agents.Catalog.run log
+    let summary := Rebase.summary rebased log.size
+    let source ← Result.fromIO Error.storage (IO.FS.realPath data.path)
+    let written ← data.rebase entries rebased target s!"rebased from {tip.hex} in {source}: {summary}"
+    for appended in written do entryRecord out appended
+    let some last := written.back? | throw <| .storage "a rebase wrote no entry"
+    if out.json then
+      out.record (.mkObj [("entry", last.hash.hex), ("data", target.toString),
+        ("held", (rebased.divergence?.map (·.position)).getD log.size), ("total", log.size),
+        ("divergence", match rebased.divergence? with
+          | none => .null
+          | some divergence => .mkObj [("position", divergence.position),
+              ("found", eventToJson divergence.found),
+              ("expected", Rebase.expectedSummary divergence.expected)]),
+        ("dropped", .arr (rebased.dropped.map fun (position, event) =>
+          .mkObj [("position", position), ("event", eventToJson event)]))]) ""
+    else Result.fromIO Error.storage do
+      (← IO.getStdout).flush
+      let stderr ← IO.getStderr
+      stderr.putStrLn summary
+      for line in Rebase.droppedLines rebased do stderr.putStrLn line
+      stderr.putStrLn s!"`alaya resume {Render.short last.hash} --data {target}` goes on"
+    pure 0
 
 /-! ## Configuration -/
 

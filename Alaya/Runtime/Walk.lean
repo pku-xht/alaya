@@ -73,39 +73,55 @@ private structure Place where
   usage : Chat.TokenUsage
   workspace? : Option Snapshot
 
+namespace Place
+
+private def start (root : Routine Agent) : Place :=
+  { position := 0, replayer := Replayer.start root, stack := #[], last? := none, spentMs := 0
+    usage := {}, workspace? := none }
+
+/-- What a reader knows at `entry`, named `hash`, from where the walk is before it; and where
+the walk is after it. -/
+private def visit (place : Place) (hash : Hash) (entry : Entry) : Visit × Place :=
+  let event := entry.event
+  let asked? := match place.replayer.next, event with
+    | .ask call, .answered .. => some call
+    | _, _ => none
+  let replayer := place.replayer.feed event
+  let before := place.workspace?
+  let workspace? := (versionAfter? event).or before
+  let usage := match event with
+    | .answered _ _ (.ok (.response response)) => addUsage place.usage (response.usage?.getD {})
+    | _ => place.usage
+  let stack := OpenCall.after place.stack place.position event
+  let last? := match event, place.last? with
+    | .opened #[_] call, _ => some (call, none)
+    | event, some (call, none) => some (call, CallEnd.of? event)
+    | _, last => last
+  let spentMs := place.spentMs + entry.elapsedMs
+  let next? := some replayer.next
+  let question? := (next?.bind questionOf?).map (·.2)
+  let visit : Visit := {
+    hash, entry, position := place.position, asked?, next?, question?, stack, last?, spentMs
+    usage, workspace?
+    before? := if workspace? != before then before else none }
+  (visit, { position := place.position + 1, replayer, stack, last?, spentMs, usage, workspace? })
+
+end Place
+
 /-- Folds `f` over every entry of the forest, depth first, from each root, parents before
 children, each log replayed by `root`, the run's routine. -/
 partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit → Result β)
     (root : Routine Agent) : Result β := do
   let rec go (acc : β) (place : Place) (hash : Hash) : Result β := do
-    let entry ← store.get forest hash
-    let event := entry.event
-    let asked? := match place.replayer.next, event with
-      | .ask call, .answered .. => some call
-      | _, _ => none
-    let replayer := place.replayer.feed event
-    let before := place.workspace?
-    let workspace? := (versionAfter? event).or before
-    let usage := match event with
-      | .answered _ _ (.ok (.response response)) => addUsage place.usage (response.usage?.getD {})
-      | _ => place.usage
-    let stack := OpenCall.after place.stack place.position event
-    let last? := match event, place.last? with
-      | .opened #[_] call, _ => some (call, none)
-      | event, some (call, none) => some (call, CallEnd.of? event)
-      | _, last => last
-    let spentMs := place.spentMs + entry.elapsedMs
-    let next? := some replayer.next
-    let question? := (next?.bind questionOf?).map (·.2)
-    let visit : Visit := {
-      hash, entry, position := place.position, asked?, next?, question?, stack, last?, spentMs
-      usage, workspace?
-      before? := if workspace? != before then before else none }
+    let (visit, place) := place.visit hash (← store.get forest hash)
     let acc ← f acc visit
-    let place := { position := place.position + 1, replayer, stack, last?, spentMs, usage, workspace? }
     (forest.childrenOf hash).foldlM (init := acc) fun acc child => go acc place child
-  forest.roots.foldlM (init := init) fun acc first =>
-    go acc { position := 0, replayer := Replayer.start root, stack := #[], last? := none, spentMs := 0
-             usage := {}, workspace? := none } first
+  forest.roots.foldlM (init := init) fun acc first => go acc (Place.start root) first
+
+/-- What a reader knows at each entry of one log, replayed by `root`. -/
+def visits (root : Routine Agent) (entries : Array Entry) : Array Visit :=
+  (entries.foldl (init := (#[], Place.start root)) fun (visits, place) entry =>
+    let (visit, place) := place.visit entry.hash entry
+    (visits.push visit, place)).1
 
 end Alaya.Runtime

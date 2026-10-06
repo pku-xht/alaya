@@ -31,15 +31,6 @@ def comment (store : Store) (tip : Hash) (text : String) : Result (Hash × Entry
   let (hash, _) ← store.put forest entry
   pure (hash, entry)
 
-/-- The changes from `before` to `after`, one line each: `M path`, `+ path`, `- path`. -/
-def changedLines (workspaces : Workspaces) (before after : Snapshot) : Result (Array String) := do
-  let changes ← workspaces.diff before after
-  pure <| changes.map fun change =>
-    match change.kind with
-    | .added => s!"+ {change.path}"
-    | .removed => s!"- {change.path}"
-    | .modified => s!"M {change.path}"
-
 /-- A change to the workspace after `tip`: the files of `dir`, what changed from the version the
 log has reached, one line each, and then what the person says of it. A directory with no change
 is refused: a message alone is `said`. -/
@@ -49,9 +40,9 @@ def changed (store : Store) (workspaces : Workspaces) (tip : Hash) (dir : System
   let log ← store.log forest tip
   let some before := workspace? log | throw <| .storage "the log names no workspace"
   let after ← workspaces.snapshot dir
-  let lines ← changedLines workspaces before after
+  let lines := (← workspaces.diff before after).map (·.line)
   if lines.isEmpty then
-    throw <| .input s!"{dir} has no change from the workspace at {tip.hex}: to send a message alone, use `tell`"
+    throw <| .input s!"{dir} has no change from the workspace at {tip.hex}: a message alone is said, not changed"
   let summary := "\n".intercalate ((lines.map ("  " ++ ·)).toList ++ (if message.isEmpty then [] else [message]))
   pure (.arrived (.changed after summary))
 

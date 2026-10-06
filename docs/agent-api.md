@@ -39,7 +39,7 @@ flowchart LR
 | 7 | `ask_user`: a model asks a person | `Alaya.Agents.Tools` |
 | 8 | an **agent**: a program and its routines | `Alaya.Agents.*` |
 | 9 | a **run**: a workspace, and the programs called on it | `Alaya.Runtime.Calls` |
-| 10 | **driving** a run: the driver's own API | `Alaya.Runtime.Driver` |
+| 10 | **driving** a run: the driver's own API, and the data directory | `Alaya.Runtime.Driver`, `Alaya.Runtime.Commands` |
 
 `docs/log-schema.md` specifies how a log is stored; `docs/cli.md` is the command line.
 
@@ -882,6 +882,23 @@ each is a log.
 - **Failures.** A failure that is not an answer (§3.4) stops `drive` with an error, and nothing is
   logged for the operation; the next `drive` asks for it again. So a command happens at least
   once: what it does beyond the workspace may happen twice.
+
+### 10.1 The data directory
+
+A data directory holds a forest of runs, their workspaces, and the model cache
+(`docs/log-schema.md` §5). `Alaya.Runtime.Data` and `Alaya.Runtime.Commands` give every command
+of `alaya` as a function over it. Each returns a typed value, and a front end only parses and
+prints. Each takes the run's routine, so the runtime knows no catalog of programs.
+
+```lean
+Data.with   : FilePath → (Data → Result α) → (write create : Bool) → Result α   -- holds the lock to write
+Data.create : FilePath → Source → Result Appended                               -- a new run
+Data.call / tell / stop / commit / reply / comment : … → Result Appended         -- what a person appends
+Data.withRuntime : Data → RunOptions → Option Provider → … → (Runtime → Result α) → Result α
+Data.resume : Data → Routine Agent → String → Runtime → Limits → … → Result (Hash × Stop × Log Agent)
+Data.rebase : Data → Array Entry → Rebased Agent → (target : FilePath) → String → Result (Array Appended)
+Data.visitsAt / visitAt / waiting / changes                                     -- what a run did
+```
 
 ## References
 

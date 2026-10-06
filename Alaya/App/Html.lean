@@ -122,7 +122,7 @@ def eventJson : Event Agent → Json
     .mkObj [("k", "replied"), ("to", to.toJson), ("text", reply.line)]
   | .arrived (.called call) =>
     .mkObj [("k", "called"), ("routine", call.name), ("arguments", call.arguments),
-      ("environment", call.environment?.getD .null), ("title", Render.callTitle call)]
+      ("environment", call.environment?.getD .null), ("title", callTitle call)]
   | .heard _ notices => .mkObj [("k", "heard"), ("notices", .arr (notices.map fun (n : Nat) => (n : Json)))]
   | .asked _ question =>
     .mkObj [("k", "asked"), ("text", question.text), ("form", question.form.name),
@@ -148,10 +148,10 @@ def eventJson : Event Agent → Json
     .mkObj [("k", "open"), ("routine", call.name), ("arguments", call.arguments),
       ("environment", call.environment?.getD .null),
       ("summary", Render.argumentsSummary call.arguments),
-      ("title", orNull (Render.agentTitle? call) .str)]
+      ("title", orNull (agentTitle? call) .str)]
   | .returned _ value =>
     .mkObj [("k", "return"), ("value", value), ("summary", Render.valueSummary value),
-      ("kind", orNull (Render.valueKind? value) (Json.str ·.name))]
+      ("kind", orNull (valueKind? value) (Json.str ·.name))]
   | .failed _ error => .mkObj [("k", "fail"), ("error", error)]
   | .stopped reason => .mkObj [("k", "stop"), ("text", reason)]
   | .commented text => .mkObj [("k", "comment"), ("text", text)]
@@ -206,7 +206,7 @@ def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title 
     -- On an entry that ends a log whose last call was a grader: its verdict, in a line.
     let graded : Option String := if !leaf || !idle then none else match ended? with
       | some (.returned value) =>
-        if Render.valueKind? value == some .verdict then some (Render.valueSummary value) else none
+        if valueKind? value == some .verdict then some (Render.valueSummary value) else none
       | _ => none
     let row := Json.mkObj [
       ("h", visit.hash.hex), ("p", orNull parent? fun n => (n : Json)), ("pos", visit.position),
