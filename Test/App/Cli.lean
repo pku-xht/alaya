@@ -1,0 +1,406 @@
+import Test.Support.Framework
+import Test.Support.DirectoryWorkspaces
+import Test.Support.Container
+import Test.Support.Scripted
+import Alaya
+
+/-! Command-line parsing and the DGX Spark endpoint syntax. -/
+
+namespace CliTests
+
+open Testing
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
+
+private def endpoint (url : String) : Option Provider.Dgx.Endpoint :=
+  (Provider.Dgx.Endpoint.ofUrl url).toOption
+
+private def parsed (label : String) (result : Except (Array String) α) : TestM α :=
+  match result with
+  | .ok a => pure a
+  | .error problems => fail s!"{label}: {problems}"
+
+private def problemsOf (label : String) (result : Except (Array String) α) : TestM (Array String) :=
+  match result with
+  | .ok _ => fail s!"{label}: parsed, but should have been refused"
+  | .error problems => pure problems
+
+private def baseUrlOf (argv : List String) : Except (Array String) (Option String) := do
+  pure ((← Provider.endpointCli.parse argv).map (·.baseUrl))
+
+private def agentSet (path : List String) (value : Lean.Json) : Settings.Setting :=
+  { path, value }
+
+/-- `--set` and `--set-file`, as `call` reads them. -/
+private def givenSpec : Cli.Spec (Array Settings.Given) :=
+  Cli.interleaved #[
+    ("set", ⟨"PATH=VALUE", fun text => Settings.Given.value <$> Settings.parse text⟩, ""),
+    ("set-file", ⟨"PATH=FILE", Settings.parseFile⟩, "")]
+
+/-- The settings of `argv`, files read. -/
+private def given (argv : List String) : TestM (Result (Array Settings.Setting)) := do
+  let given ← parsed "settings" (givenSpec.parse argv)
+  pure (given.mapM (·.read))
+
+/-- The task of `argv`'s one setting. -/
+private def task (argv : List String) : TestM (Result String) := do
+  pure <| (← given argv).map fun settings => match (settings[0]?.map (·.value) : Option Lean.Json) with
+    | some (.str text) => text
+    | _ => ""
+
+def taskSuite : Suite := suite "app/cli.task" #[
+  test "a task file's middle reaches the first serialized model request as it is" do
+    let path := (← scratch) / "MINIVERO_TASK.md"
+    let contents := String.ofList (List.replicate 6500 '界') ++
+      "\nDONE: implement every API and prove every fixed specification.\n" ++
+      String.ofList (List.replicate 6500 '🦉') ++ "\n"
+    IO.FS.writeFile path contents
+    let task ← assertOk (← task ["--set-file", s!"task={path}"])
+    assertEqual "verbatim, trailing newline included" task contents
+    -- What each agent asks first, given the task as the notice it waits for.
+    for (name, agent) in [("mini-swe", Lean.Json.mkObj []), ("mini-vero", .mkObj [("mode", "proof")]),
+        ("mini-vero", .mkObj [("mode", "codeproof")])] do
+      let request? : Option Chat.Request := match Scripted.runOfConfig name agent with
+        | .ok run => match next run (Scripted.settle run (Scripted.opening task)) with
+          | .ask { op := .sample _ request, .. } => some request
+          | _ => none
+        | .error _ => none
+      let some request := request? | fail s!"{agent.compress} does not sample first"
+      let json := request.toJson .native
+      let .ok messages := json.getObjValAs? (Array Lean.Json) "messages"
+        | fail "serialized request is missing messages"
+      let .ok content := messages[1]!.getObjValAs? String "content"
+        | fail "serialized request is missing initial task"
+      check ((content.splitOn contents).length == 2) "the whole file must occur once in the first model input",
+
+  test "a field is set to a file's text, in order with --set, and the file must be readable UTF-8" do
+    let configuration (label : String) (result : Result String) (expected : String -> Bool) : TestM Unit :=
+      assertError label result fun
+        | .input m => expected m
+        | _ => false
+    assertEqual "text" (← assertOk (← task ["--set", "task=fix it"])) "fix it"
+    let path := (← scratch) / "task.md"
+    IO.FS.writeFile path "from the file"
+    let settings ← assertOk (← given ["--set", "task=first", "--set-file", s!"task={path}", "--set", "mode=proof"])
+    assertEqual "in the order given, across the two flags" (settings.map (·.render))
+      #["task=\"first\"", "task=\"from the file\"", "mode=\"proof\""]
+    let refused (label : String) (argv : List String) : TestM (Array String) :=
+      problemsOf label (givenSpec.parse argv)
+    check ((← refused "no path" ["--set-file", "TASK.md"])[0]!.endsWith "expects PATH=FILE, got 'TASK.md'") "no path"
+    check ((← refused "missing" ["--set-file"])[0]!.startsWith "--set-file needs a value") "missing value"
+    let missing := (← scratch) / "missing"
+    configuration "missing file" (← task ["--set-file", s!"task={missing}"]) (·.startsWith "--set-file task: cannot read")
+    IO.FS.writeBinFile missing ⟨#[255, 254]⟩
+    configuration "invalid UTF-8" (← task ["--set-file", s!"task={missing}"]) (·.endsWith "is not valid UTF-8")
+]
+
+def endpointSuite : Suite := suite "llm/providers" #[
+  test "the default endpoint is the Spark's own address" do
+    assertEqual "baseUrl" ({} : Provider.Dgx.Endpoint).baseUrl "http://10.42.0.1:8000/v1",
+
+  test "a URL fills in only what it specifies" do
+    assertEqual "full" ((endpoint "http://192.168.1.5:9000/v1").map (·.baseUrl))
+      (some "http://192.168.1.5:9000/v1")
+    assertEqual "host:port" ((endpoint "192.168.1.5:9000").map (·.baseUrl))
+      (some "http://192.168.1.5:9000/v1")
+    assertEqual "host only" ((endpoint "spark.local").map (·.baseUrl))
+      (some "http://spark.local:8000/v1")
+    assertEqual "https and path" ((endpoint "https://spark.local/openai/v1").map (·.baseUrl))
+      (some "https://spark.local:8000/openai/v1")
+    assertEqual "trailing slash" ((endpoint "http://spark.local:9000/").map (·.baseUrl))
+      (some "http://spark.local:9000/v1"),
+
+  test "a malformed URL is rejected" do
+    assertEqual "no host" (endpoint ":9000").isSome false
+    assertEqual "bad port" (endpoint "spark.local:http").isSome false
+    assertEqual "empty" (endpoint "  ").isSome false,
+
+  test "--port overrides the port from --url, and works on its own" do
+    assertEqual "port only" (← parsed "port" (baseUrlOf ["--port", "9001"]))
+      (some "http://10.42.0.1:9001/v1")
+    assertEqual "url and port" (← parsed "url" (baseUrlOf ["--url", "spark.local:9000", "--port", "7000"]))
+      (some "http://spark.local:7000/v1")
+    assertEqual "neither" (← parsed "neither" (baseUrlOf [])) none
+    let problems ← problemsOf "bad url" (baseUrlOf ["--url", ":9000"])
+    check (problems.size == 1 && problems[0]!.startsWith "--url is not an endpoint") s!"{problems}",
+
+  test "a provider serves a model under its own name, or the name its route gives" do
+    let route (provider model : String) : TestM (Except String Provider.Route) := do
+      let some p := Provider.named? provider | fail s!"no provider {provider}"
+      pure (p.route model)
+    let nameOf (provider model : String) : TestM (Option String) := do
+      pure ((← route provider model).toOption.map (·.name))
+    assertEqual "apiyi, its own name" (← nameOf "apiyi" "deepseek-v4.1-flash") (some "deepseek-v4.1-flash")
+    assertEqual "xmcp's name" (← nameOf "xmcp" "deepseek-v4.1-flash") (some "ds/deepseek-v4-flash")
+    assertEqual "fireworks' name" (← nameOf "fireworks" "deepseek-v4.1-flash")
+      (some "accounts/fireworks/models/deepseek-v4p1-flash")
+    match ← route "fireworks" "gpt-oss-120b" with
+    | .error m => check ((m.splitOn "does not serve gpt-oss-120b").length > 1) m
+    | .ok _ => fail "fireworks serves only its routes",
+
+  test "a route that cannot meet the recorded model refuses it before any request" do
+    let some dgx := Provider.named? "dgx" | fail "no dgx"
+    let spec : Models.Spec := { name := "m", echoReasoning := .text, contextTokens? := some 100000 }
+    let refused (label : String) (route : Provider.Route) (expected : String) : TestM Unit := do
+      match Provider.check dgx spec route with
+      | .error m => check ((m.splitOn expected).length > 1) s!"{label}: {m}"
+      | .ok _ => fail s!"{label}: accepted"
+    refused "echo rejected" { name := "m", reasoningEcho := .rejected } "rejects"
+    refused "short context" { name := "m", contextTokens? := some 32768 } "short of the run's 100000"
+    refused "text through Responses" { name := "m", api := .responses } "has no field for"
+    match Provider.check dgx { spec with echoReasoning := .items } { name := "m" } with
+    | .error m => check ((m.splitOn "need the Responses API").length > 1) m
+    | .ok _ => fail "items through Chat Completions"
+    check (Provider.check dgx { spec with echoReasoning := .items } { name := "m", api := .responses }).toOption.isSome
+      "items through Responses"
+    match Provider.check dgx { spec with echoReasoning := .none } { name := "m", reasoningEcho := .required } with
+    | .error m => check ((m.splitOn "needs m's earlier reasoning").length > 1) m
+    | .ok _ => fail "echo required but not sent"
+    check (Provider.check dgx spec { name := "m", contextTokens? := some 200000 }).toOption.isSome
+      "a route with room enough serves it",
+
+  test "echoed reasoning keeps every recorded trace, so a message reads the same on every request" do
+    let assistant (content : String) (reasoning? : Option String) : Lean.Json :=
+      Chat.Message.toJson (.assistant (some content) #[] reasoning?)
+    let user : Lean.Json := Chat.Message.toJson (.user "go on")
+    let payload (messages : Array Lean.Json) : Lean.Json := .mkObj [("messages", .arr messages)]
+    let traceOf (json : Lean.Json) : Option String := (json.getObjVal? "reasoning_content" >>= Lean.Json.getStr?).toOption
+    let early := #[user, assistant "a" (some "thought a"), user, assistant "b" none]
+    let later := early ++ #[user, assistant "c" (some "thought c"), user, assistant "d" (some "thought d")]
+    let messagesOf (json : Lean.Json) : Array Lean.Json := (json.getObjValAs? (Array Lean.Json) "messages").toOption.getD #[]
+    let echoed := messagesOf (Provider.ChatCompletions.echoReasoning (payload later))
+    assertEqual "traces as recorded, empty where none" (echoed.filterMap traceOf)
+      #["thought a", "", "thought c", "thought d"]
+    check (echoed.all fun m => (m.getObjVal? "role" >>= Lean.Json.getStr?).toOption != some "user" || traceOf m == none)
+      "a user message carries no reasoning"
+    let prefix_ := messagesOf (Provider.ChatCompletions.echoReasoning (payload early))
+    assertEqual "a stable prefix" ((prefix_.map (·.compress)).toList)
+      ((echoed.extract 0 prefix_.size).map (·.compress)).toList,
+
+  test "a served model's identity is its recorded spec, whoever serves it" do
+    let spec ← assertOk <| Models.fromJson (.mkObj [("name", "deepseek-v4.1-flash"),
+      ("params", .mkObj [("reasoning_effort", "high")])])
+    let some dgx := Provider.named? "dgx" | fail "no dgx"
+    let viaDgx ← assertOk <| Provider.serve dgx spec
+    let viaOther ← assertOk <| Provider.serve { dgx with name := "other", baseUrl := "http://elsewhere/v1" } spec
+    assertEqual "identity" viaDgx.identity.compress spec.toJson.compress
+    assertEqual "provider-independent" viaDgx.identity.compress viaOther.identity.compress
+    assertError "a missing key" (Provider.serve { dgx with keyVar := "ALAYA_TEST_UNSET_KEY", defaultKey? := none } spec) fun
+      | .environment m => (m.splitOn "ALAYA_TEST_UNSET_KEY is not set").length > 1
+      | _ => false,
+
+  test "a model's name alone is its defaults, and settings over an agent's model are checked" do
+    let defaults ← assertOk <| Models.fromJson "gpt-oss-120b"
+    assertEqual "context from the table" defaults.contextTokens? (some 131072)
+    let modelOf (config : Lean.Json) : TestM Models.Spec := assertOk <| Models.fromJson
+      ((config.getObjVal? "model").toOption.getD .null)
+    let set ← modelOf (← assertOk <| Catalog.resolve "mini-swe"
+      #[agentSet ["model"] "gpt-oss-120b", agentSet ["model", "params", "temperature"] (1 : Nat),
+        agentSet ["model", "context_tokens"] (65536 : Nat)])
+    assertEqual "params" set.params.compress "{\"temperature\":1}"
+    assertEqual "context" set.contextTokens? (some 65536)
+    for (label, settings, expected) in [
+        ("unknown", #[agentSet ["model", "temperature"] (1 : Nat)], "unknown field 'temperature'"),
+        ("protected", #[agentSet ["model", "params", "model"] "x"], "params cannot set 'model'"),
+        ("name", #[agentSet ["name"] "x"], "unknown field 'name'")] do
+      assertError label (Catalog.resolve "mini-swe" (#[agentSet ["model"] "gpt-oss-120b"] ++ settings)) fun
+        | .input m => (m.splitOn expected).length > 1
+        | _ => false
+    assertError "unknown model" (Models.fromJson (.mkObj [("name", "nope")])) fun
+      | .input m => m.startsWith "unknown model: nope"
+      | _ => false
+    match Settings.parse "model.params.reasoning_effort=high" with
+    | .ok s => check (s.path == ["model", "params", "reasoning_effort"] && s.value == "high") "parsed"
+    | .error m => fail m
+]
+
+private def compressed (json : Lean.Json) : String := json.compress
+
+def agentsSuite : Suite := suite "app/catalog" #[
+  test "a program's name alone is its complete defaults, and they read back as themselves" do
+    for definition in Catalog.all do
+      let defaults ← assertOk <| Catalog.resolve definition.name #[]
+      check (defaults.getObjVal? "name").toOption.isNone s!"{definition.name}: the name is the call's, not the configuration's"
+      let again ← assertOk <| Catalog.complete definition.name defaults
+      assertEqual s!"{definition.name} round-trips" (compressed again) (compressed defaults),
+
+  test "a configuration may leave fields out, but not misname or mistype one" do
+    let refused (label : String) (name : String) (json : Lean.Json) (expected : String) : TestM Unit :=
+      assertError label (Catalog.complete name json) fun
+        | .input m => (m.splitOn expected).length > 1
+        | _ => false
+    refused "unknown program" "mini-swf" (.mkObj []) "unknown program"
+    refused "a name in the configuration" "mini-swe" (.mkObj [("name", "mini-swe")]) "unknown field 'name'"
+    refused "typo" "mini-swe" (.mkObj [("step_limt", 1)]) "unknown field 'step_limt'"
+    refused "type" "mini-swe" (.mkObj [("recover_output", "yes")]) "must be true or false"
+    refused "mode" "mini-vero" (.mkObj [("mode", "both")]) "unknown mode"
+    refused "nested" "mini-swe" (.mkObj [("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
+    refused "own field, misnamed" "mini-vero" (.mkObj [("stepp", 1)]) "mask_observations, mode"
+    let built ← assertOk <| Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
+    assertEqual "tools follow the settings" ((built.getObjVal? "tools").toOption.map (·.compress))
+      (some "[\"bash\",\"submit\",\"time_budget\"]")
+    -- How commands run is in each command the agent asks for.
+    let nested ← assertOk <| Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]
+    let timeout? : Option Nat := match Scripted.runOfConfig "mini-swe" nested with
+      | .ok run =>
+        let asked := Scripted.respond run (Scripted.settle run Scripted.opening)
+          { toolCalls := #[{ id := "c", name := "bash", arguments := .mkObj [("command", "ls")] }] }
+        match next run asked with
+        | .ask { op := .exec _ config, .. } => some config.timeoutSeconds
+        | _ => none
+      | .error _ => none
+    assertEqual "a nested setting" timeout? (some 5)
+    assertError "the name is not a setting" (Catalog.resolve "mini-swe" #[agentSet ["name"] "mini-vero"]) fun
+      | .input m => (m.splitOn "unknown field 'name'").length > 1
+      | _ => false,
+
+  test "a run's configuration is the opening of its agent's call, and the tree names it" do
+    let agent ← assertOk <| Catalog.complete "mini-swe" (.mkObj [("model", "gpt-oss-120b"), ("context_reserve", 7)])
+    let run := Catalog.run
+    let rt ← Scripted.runtime noCommands none
+    let project := (← scratch) / "project"
+    IO.FS.createDirAll project
+    let root ← Scripted.begin rt.store rt.workspaces run project
+    let call : RoutineCall := { name := "mini-swe", arguments := agent, environment? := some Scripted.testEnvironment.toJson }
+    let (called, _) ← assertOk <| Driver.append rt.store run root call.event
+    -- The run reads the call and opens it; the agent's first read of its inbox takes nothing.
+    let log := Scripted.settle run (← Scripted.logAt rt called)
+    do
+      assertEqual "the configuration" ((argumentsAt? log { name := "mini-swe" }).map compressed) (some (compressed agent))
+      let mut tip := called
+      for event in log.extract 5 log.size do
+        tip := (← assertOk <| rt.store.put (← assertOk rt.store.forest) { parent? := some tip, event }).1
+      let forest ← assertOk rt.store.forest
+      let tree := Render.treeLines (← assertOk <| Render.rows rt.store forest run)
+      check (tree.any fun l => (l.splitOn "root  mini-swe, gpt-oss-120b").length > 1) s!"tree names the agent: {tree}"
+]
+
+private def view : Cli.Spec (Bool × String) :=
+  Prod.mk <$> Cli.switch "view" "show the view" <*> Cli.arg "ENTRY" .string "the entry"
+
+private def sample : Cli.Command where
+  name := "sample"
+  summary := "A command for the tests."
+  examples := #["alaya sample abc --count 3"]
+  spec := (fun (_ : String × Nat × Option String) (_ : Cli.Out) => (pure 0 : Result UInt32))
+    <$> (Prod.mk <$> Cli.arg "ENTRY" .string "the entry"
+      <*> (Prod.mk <$> Cli.flag "count" .nat "how many" <*> Cli.flag? "note" .string "a note"))
+
+private def app : Cli.App := { name := "alaya", summary := "Tests.", commands := #[sample] }
+
+def specSuite : Suite := suite "app/cli.spec" #[
+  test "a switch never takes the next token, wherever it stands" do
+    assertEqual "before" (← parsed "before" (view.parse ["--view", "abc"])) (true, "abc")
+    assertEqual "after" (← parsed "after" (view.parse ["abc", "--view"])) (true, "abc")
+    assertEqual "absent" (← parsed "absent" (view.parse ["abc"])) (false, "abc")
+    assertEqual "no value" (← problemsOf "value" (view.parse ["abc", "--view=yes"]))
+      #["--view is a switch and takes no value"],
+
+  test "a valued flag takes the next token or its value after =" do
+    let note := Cli.flag? "note" .string "a note"
+    assertEqual "next" (← parsed "next" (note.parse ["--note", "x y"])) (some "x y")
+    assertEqual "equals" (← parsed "equals" (note.parse ["--note=--x"])) (some "--x")
+    assertEqual "equals twice" (← parsed "equals twice" (note.parse ["--note=a=b"])) (some "a=b")
+    assertEqual "dash" (← parsed "dash" (note.parse ["--note", "-"])) (some "-")
+    assertEqual "absent" (← parsed "absent" (note.parse [])) none
+    for argv in [["--note", "--x"], ["--note"], ["--note="], ["--note", ""]] do
+      let problems ← problemsOf s!"{argv}" (note.parse argv)
+      check ((problems[0]?.getD "").startsWith "--note needs a value") s!"{argv}: {problems}",
+
+  test "an unknown option is refused with the nearest name, and a typo keeps its value" do
+    let temperature := Cli.flagD "temperature" .float 0.0 "the temperature"
+    assertEqual "typo" (← problemsOf "typo" (temperature.parse ["--temprature", "0.7"]))
+      #["unknown option --temprature (did you mean --temperature?)"]
+    assertEqual "far" (← problemsOf "far" (temperature.parse ["--zzz"])) #["unknown option --zzz"]
+    assertEqual "short" (← problemsOf "short" (temperature.parse ["-m", "x"]))
+      #["unknown option -m (an argument that begins with - goes after --)", "unexpected argument 'x'"]
+    assertEqual "typed" (← parsed "typed" (temperature.parse ["--temperature", "0.25"])) 0.25
+    assertEqual "default" (← parsed "default" (temperature.parse [])) 0.0
+    assertEqual "not a number" (← problemsOf "nan" (temperature.parse ["--temperature", "warm"]))
+      #["--temperature expects a number, got 'warm'"],
+
+  test "a flag given twice is refused unless it is declared repeatable" do
+    assertEqual "twice" (← problemsOf "twice" ((Cli.flag? "model" .string "").parse ["--model", "a", "--model", "b"]))
+      #["--model is given more than once"]
+    assertEqual "repeated" (← parsed "repeated" ((Cli.repeated "hide" .string "").parse ["--hide", "a", "--hide=b"]))
+      #["a", "b"],
+
+  test "positionals are matched in order, and a missing or extra one is refused" do
+    let two := Prod.mk <$> Cli.arg "A" .string "the first" <*> Cli.arg? "B" .string "the second"
+    assertEqual "missing" (← problemsOf "missing" (two.parse [])) #["missing A: the first"]
+    assertEqual "one" (← parsed "one" (two.parse ["a"])) ("a", none)
+    assertEqual "two" (← parsed "two" (two.parse ["a", "b"])) ("a", some "b")
+    assertEqual "extra" (← problemsOf "extra" (two.parse ["a", "b", "c"])) #["unexpected argument 'c'"],
+
+  test "after -- everything is positional, empty strings and flag-like tokens included" do
+    let reply := Prod.mk <$> Cli.arg "ENTRY" .string "" <*> Cli.arg "TEXT" .string ""
+    for answer in ["", "--data", "-m", "--", "--json", "  answer\n--data other\n原文  "] do
+      assertEqual s!"answer {answer}" (← parsed "reply" (reply.parse ["--", "q", answer])) ("q", answer),
+
+  test "a refined spec checks the whole value, after every item has parsed" do
+    let answer := (Prod.mk <$> Cli.arg? "TEXT" .string "" <*> Cli.switch "unavailable" "").refine
+      fun
+      | (some text, false) => .ok (some text)
+      | (none, true) => .ok none
+      | _ => .error "give the answer or --unavailable"
+    assertEqual "text" (← parsed "text" (answer.parse ["yes"])) (some "yes")
+    assertEqual "unavailable" (← parsed "unavailable" (answer.parse ["--unavailable"])) none
+    assertEqual "both" (← problemsOf "both" (answer.parse ["yes", "--unavailable"]))
+      #["give the answer or --unavailable"]
+    assertEqual "neither" (← problemsOf "neither" (answer.parse [])) #["give the answer or --unavailable"],
+
+  test "every failure has a class, and each class one exit status above every outcome" do
+    let cases : List (Error × String × UInt32) := [
+      (.input "no entry matches x", "input", 65), (.environment "cannot run docker", "environment", 69),
+      (.transport "timed out", "transient", 75), (.http 429 "slow down" (some 30000), "transient", 75),
+      (.http 503 "down", "transient", 75), (.http 400 "bad request", "model", 76),
+      (.http 401 "no key", "model", 76), (.protocol "not JSON", "model", 76),
+      (.structuredOutput "no field", "model", 76), (.provider "refused", "model", 76),
+      (.cache "unreadable", "storage", 74), (.storage "disk full", "storage", 74)]
+    for (error, name, code) in cases do
+      assertEqual s!"{error.describe} class" error.class.toString name
+      assertEqual s!"{error.describe} exit" (Cli.exitFor error.class) code
+      check (Cli.exitFor error.class > 4) "above every outcome status"
+    assertEqual "usage" Cli.exitUsage 64
+    assertEqual "an http failure's JSON" (Cli.errorJson (.http 429 "slow down" (some 30000))).compress
+      "{\"error\":\"transient\",\"message\":\"http 429: slow down\",\"retry_after_ms\":30000,\"status\":429}"
+    assertEqual "an input failure's JSON" (Cli.errorJson (.input "no entry matches x")).compress
+      "{\"error\":\"input\",\"message\":\"no entry matches x\"}",
+
+  test "every problem is reported at once" do
+    let spec := Prod.mk <$> Cli.flag "count" .nat "how many" <*> Cli.flag "model" (.string "P:M") "the model"
+    assertEqual "both" (← problemsOf "both" (spec.parse ["--count", "x"]))
+      #["--count expects a whole number, got 'x'", "--model P:M is required: the model"],
+
+  test "an environment variable fills an absent flag, and a flag wins over it" do
+    let data := Cli.flagD "data" (.path "DIR") "runs" "the data directory" (env? := some "ALAYA_DATA")
+    let env := fun var => if var == "ALAYA_DATA" then some "/runs" else none
+    assertEqual "default" (← parsed "default" (data.parse [])) "runs"
+    assertEqual "env" (← parsed "env" (data.parse [] env)) "/runs"
+    assertEqual "flag" (← parsed "flag" (data.parse ["--data", "d"] env)) "d",
+
+  test "a declaration mistake is found before anything runs" do
+    let twice := Prod.mk <$> Cli.switch "json" "" <*> Cli.switch "json" ""
+    assertEqual "twice" twice.check #["--json is declared twice"]
+    let order := Prod.mk <$> Cli.arg? "A" .string "" <*> Cli.arg "B" .string ""
+    assertEqual "order" order.check #["B is required but follows an optional argument"]
+    let groups := Prod.mk <$> Provider.endpointCli <*> Executor.Docker.RunOptions.cli
+    assertEqual "the shared groups are disjoint" groups.check #[],
+
+  test "a command takes --json and --help, and says what it accepts" do
+    let .ok (_, json) := sample.parse ["abc", "--count", "3", "--json"]
+      | fail "sample did not parse"
+    check json "--json is seen"
+    assertEqual "usage" (sample.usage app) "alaya sample ENTRY --count N [OPTIONS]"
+    let help := sample.help app
+    for line in ["usage: alaya sample ENTRY --count N [OPTIONS]", "  --count N    how many (required)",
+        "  --note TEXT  a note", "  alaya sample abc --count 3"] do
+      check ((help.splitOn line).length > 1) s!"help lacks '{line}':\n{help}"
+    let .ok commands := app.describe.getObjValAs? (Array Lean.Json) "commands" | fail "no commands"
+    let .ok items := commands[0]!.getObjValAs? (Array Lean.Json) "items" | fail "no items"
+    let names := items.filterMap fun i => (i.getObjValAs? String "name").toOption
+    assertEqual "described" names #["ENTRY", "count", "note", "json", "help"]
+]
+
+def suites : Array Suite := #[taskSuite, specSuite, endpointSuite, agentsSuite]
+
+end CliTests

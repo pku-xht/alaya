@@ -628,7 +628,7 @@ flowchart TD
   linkStyle default stroke-width:1px
 ```
 
-*Its log (`Test/Routines.lean`): the same tree, flat. Each frame is one stretch of rows, from
+*Its log (`Test/Runtime/Routines.lean`): the same tree, flat. Each frame is one stretch of rows, from
 its opening to its return.*
 
 ![The log of the workflow, its sub-agent and their tools](figures/agent-api/routines.svg)
