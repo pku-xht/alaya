@@ -480,13 +480,38 @@ Routine.Typed.within : Routine.Typed σ α β → Scope σ → Routine σ
 3. **Call it** with `r.call argument`, from a routine of that scope. A routine a model names is
    called by that name: `call name arguments` (§6).
 
-A routine's scope is lexical. A call looks its name up in the scope of the routine it is made
-in, and the routine it finds brings its own scope, as a closure brings its environment. So what
-a call inside a routine means is fixed where the routine is defined, not by its caller. What
-varies from call to call comes in the arguments, and so is data in the log.
+**How a call finds its routine.** Every frame runs the body of one routine: the run's own frame
+runs the run's routine, and every other frame runs the routine whose call opened it. When a body
+performs `call name arguments`, the name is looked up in the scope of the routine whose body
+that is. The routine found runs in a new frame. The calls its body makes are looked up in the
+found routine's own scope, not in the caller's.
 
-`Scope.fix` gives each routine the scope it builds, as `letrec` binds names. Routines defined
-together therefore call each other, and themselves, by name.
+So the routines a call can reach depend only on the routine the call is written in. They do not
+depend on who called that routine, or from where. This is lexical scoping: a routine carries
+its scope as a closure carries its environment. In Alaya's own run:
+
+| Routine | Its scope: the routines it can call |
+| --- | --- |
+| `session`, the run's routine | `mini-swe`, `mini-vero`, `grader`: the catalog |
+| `mini-swe` | `bash`, `ask_user`, `time_budget`, and `mini-swe` itself |
+| `bash`, `ask_user`, `time_budget` | none |
+| `grader` | `grader` itself, which it never calls |
+
+A call of `bash` made by `mini-swe` finds `bash` in `mini-swe`'s scope. The same call made by the
+run finds nothing, since the catalog has no `bash`, and fails with `no routine named bash`. A
+call of `grader` made by `mini-swe` fails the same way, so an agent cannot reach the grader.
+
+A scope is fixed when its routines are defined, so it holds no per-call data. What varies from
+call to call, such as an agent's configuration or a command's timeout, is in the call's
+arguments, and so is in the log.
+
+**Building a scope.** `Scope.of routines` is a scope of routines that already have their own
+scopes; the catalog is built this way. Routines that call each other need more. Each must have,
+as its own scope, the scope that contains all of them, and that scope exists only once they do.
+`Scope.fix make` resolves the circle, as `letrec` does. `make` receives the scope being built and
+returns the routines, each given that scope; the result contains them all. This is how
+`mini-swe`'s scope contains `mini-swe` itself, so that `subagent` can call it, and how the steps
+of a workflow call one another.
 
 The argument and the result cross the call as JSON, because that is how the log holds them: the
 argument on the opening, the result on the end. Each side reads what it is given, and fails in
