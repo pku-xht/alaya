@@ -106,16 +106,17 @@ def test_mode(args, mode):
     def create():
         """A run on the rendered source, and a call of MiniVero on its task; its two entries."""
         root = json_lines(alaya("new", source, "--json").stdout)
-        called = json_lines(alaya("call", root[0]["entry"], "mini-vero", "--set-file",
+        called = json_lines(alaya("call", root[-1]["entry"], "mini-vero", "--set-file",
                                   f"task={directory / 'MINIVERO_TASK.md'}", "--set", f"mode={mode}",
                                   "--set", "model=gpt-oss-120b", "--image", args.agent_image,
                                   "--workdir", "/testbed", "--json").stdout)
-        assert [r["event"]["type"] for r in root + called] == ["arrived", "arrived"], root + called
+        assert [r["event"]["type"] for r in root + called] == ["arrived", "arrived", "heard", "opened", "arrived"], \
+            root + called
         return root + called
 
     def configuration(rows):
         """The person's call: its configuration, and the environment it names."""
-        notice = rows[1]["event"]["notice"]
+        notice = rows[4]["event"]["notice"]
         return {"config": notice["call"]["arguments"], "environment": notice["call"]["environment"]}
 
     vero = f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader"
@@ -154,7 +155,8 @@ def test_mode(args, mode):
         return result
 
     rows = create()
-    root, called = rows[0]["entry"], rows[1]["entry"]
+    # The session waits at 3, before any call; the agent's call is at 4.
+    root, called = rows[3]["entry"], rows[4]["entry"]
     run_record = configuration(rows)
     assert run_record["environment"]["workdir"] == "/testbed"
     assert "sha256:" in run_record["environment"]["image"], run_record
@@ -182,12 +184,12 @@ def test_mode(args, mode):
     assert final["value"]["status"] == "Submitted", final
     correct = grade_at(final["entry"], "pass", 1)
     trace = log(final["entry"])
-    assert trace[1]["entry"] == called and trace[-1]["entry"] == final["entry"], trace
+    assert trace[4]["entry"] == called and trace[-1]["entry"] == final["entry"], trace
     # What the agent was called with is recorded on its opening.
     assert [r["position"] for r in trace if r["event"]["type"] == "opened"
-            and r["event"]["routine"]["name"] == "mini-vero"] == [3], trace
+            and r["event"]["routine"]["name"] == "mini-vero"] == [6], trace
     ended = [i for i, r in enumerate(trace)
-             if r["event"]["type"] == "returned" and r["frame"] == [0]]
+             if r["event"]["type"] == "returned" and r["frame"] == ["session", "mini-vero"]]
     assert len(ended) == 1, trace
     submitted, before_end = trace[ended[0]]["entry"], trace[ended[0] - 1]["entry"]
     # Every grading runs the grader again and records a new answer, on a fork.
@@ -224,7 +226,7 @@ def test_mode(args, mode):
     def shell_graded(command, expected, **options):
         """A new run on the same source, graded at its root by a shell grader."""
         rows = create()
-        return rows, grade_at(rows[0]["entry"], expected, 1 if expected == "pass" else 0,
+        return rows, grade_at(rows[3]["entry"], expected, 1 if expected == "pass" else 0,
                               1 if expected != "error" else 0, command=command, **options)
 
     # The grader runs at its call's workdir, as the agent's user: on Linux the host's, never

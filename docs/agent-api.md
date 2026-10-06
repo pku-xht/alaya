@@ -24,7 +24,7 @@ flowchart LR
   driver -- "carries out<br/>an operation" --> world
   world -- "its answer" --> driver
   driver -- "appends the answer,<br/>or a mark" --> log
-  person -- "appends a notice<br/>or a stop" --> log
+  person -- "appends a notice<br/>or a break" --> log
   linkStyle default stroke-width:1px
 ```
 
@@ -120,7 +120,7 @@ inductive Event (σ : Signature) where
   | opened    (frame : Frame) (call : RoutineCall)           -- a call begins
   | returned  (frame : Frame) (value : Json)                 -- … and ends with its value
   | failed    (frame : Frame) (error : String)               -- … or with its failure
-  | stopped   (reason : String)                              -- from outside: the agent ends
+  | broke     (frame : Frame) (reason : String)              -- from outside: the call open in `frame` ends
   | commented (text : String)                                -- for a reader only
 
 abbrev Log (σ : Signature) := Array (Event σ)
@@ -131,7 +131,7 @@ event:
 
 | Kind | Events | Appended |
 | --- | --- | --- |
-| from outside | `arrived`, `stopped` | by a person, at any time; it has no frame |
+| from outside | `arrived`, `broke` | by a person, at any time; it is in no frame |
 | answer | `answered` | by the driver, after it carried out an operation |
 | mark | `heard`, `asked`, `opened`, `returned`, `failed` | by the driver, where the computation did something that needs no world |
 | comment | `commented` | by the driver, for the computation, or by a person; it has no frame |
@@ -146,17 +146,18 @@ inductive Notice where
   | said     (message : String)                       -- a person's message
   | changed  (workspace : Snapshot) (summary : String)   -- the workspace, changed from outside
   | replied  (to : Frame) (reply : Reply)             -- an answer to the question asked in frame `to`
-  | called   (call : RoutineCall)                     -- a program the run is to call
+  | called   (call : RoutineCall)                     -- a call asked for from outside
 ```
 
 A **frame** says which call of a routine (`call name arguments`, §3.3) an event happened in. It
 lists, from the outermost call inward, each call by the routine's name and by how many calls of
-that name its caller made before it. `#[]` is the run itself, `mini-swe` the agent it calls, and
-`mini-swe/bash#2` the agent's third call of `bash`. It is written so, and `-` where there is none.
+that name its caller made before it. The run is itself a call, made from outside (§9): `session`
+is the run, `session/mini-swe` the agent it calls, and `session/mini-swe/bash#2` the agent's
+third call of `bash`. `#[]` is the outside, where nothing of the run runs; it is written `-`.
 
 A frame keeps its identity when a program changes around it: a call of one routine does not
 move the calls of another. An agent that comes to call `subagent` first still has its first
-`bash` in `mini-swe/bash`.
+`bash` in `session/mini-swe/bash`.
 
 *The log of the agent below.*
 
@@ -164,15 +165,16 @@ move the calls of another. An agent that comes to call `subagent` first still ha
 
 ```lean
 def agent (task : String) : Computation Agent Json := do
-  let _ ← inbox                                             -- 4: read what a person said
-  let response ← sample model (request task …)              -- 5
-  let ran ← exec "make"                                     -- 6
-  return "fixed"                                            -- 7
+  let _ ← inbox                                             -- 7: read what a person said
+  let response ← sample model (request task …)              -- 8
+  let ran ← exec "make"                                     -- 9
+  return "fixed"                                            -- 10
 ```
 
 Every log begins the same way. Position 0 is the **root**, `arrived (changed …)`: the
-**workspace**, the filesystem directory the agent works in, as the run starts. Position 1 is a
-person's call of the agent, a notice; position 2 the run's read of it, and position 3 the
+**workspace**, the filesystem directory the agent works in, as the run starts. Position 1 is the
+call of the run, a notice; position 2 the outside's read of it, and position 3 the opening of the
+run's call, `session`. A person's call of the agent follows, with the session's read of it and the
 opening of the agent's call (§9).
 
 ## 3. What each construct writes
@@ -208,7 +210,7 @@ the output. Only an answer the world could not give is a failure (§3.4).
 
 The log records every version of the workspace, by the name of its snapshot. A command runs on
 the version of the workspace the log has reached, and its answer names the version it left. A
-person's change is a notice that names a version too. So the workspace at any point of a run is
+person's change is a notice that names a version too, which no read takes (§3.2). So the workspace at any point of a run is
 the last version a command or a change left before it, and that point can be checked out,
 compared, or continued.
 
@@ -220,24 +222,26 @@ compared, or continued.
 nothing, and `await` waits until the notices it is for arrive.
 
 ```lean
-inbox : Computation σ (List Notice)                                   -- take what has arrived
-await : (Frame → Notice → Bool) → Computation σ (List Notice)     -- wait for the notices it is for
+inbox : Computation σ (List Notice)                                    -- take what has arrived
+await : (Frame → Notice → Bool) → (one := false) → Computation σ (List Notice)  -- wait for them
 ```
 
 1. A person appends a notice: `arrived notice`. No one has read it yet.
-2. `inbox` takes every notice not yet read that is addressed to no one: what a person said or
-   changed. The driver marks the read, `heard frame positions`, with the positions of what it
-   took, which may be none.
-3. `await accepts` takes the unread notices that `accepts frame notice` holds for. When none has
-   arrived, the read is not made: the run **waits**, and the driver stops. Once one arrives, the
-   read is made and marked like any other.
-4. A `replied` and a `called` notice are **addressed**: to the call that asked, and to the
-   run. Only an `await` for them takes them; a plain `inbox` leaves them.
+2. `inbox` takes every message not yet read: what a person said. The driver marks the read,
+   `heard frame positions`, with the positions of what it took, which may be none.
+3. `await accepts` takes the unread notices that `accepts frame notice` holds for; with `one`,
+   only the first of them, as a wait for a call takes one call. When none has arrived, the read
+   is not made: the run **waits**, and the driver stops. Once one arrives, the read is made and
+   marked like any other.
+4. A `replied` and a `called` notice are **addressed**: to the call that asked, and to whatever
+   waits for a call. Only an `await` for them takes them; a plain `inbox` leaves them.
+5. A `changed` notice is for no reader. What it says may be out of date by the time a read would
+   take it; it changes the files the next command runs on, which a computation sees by looking.
+   A person who wants the agent told says so in a message, as `alaya commit` does.
 
 ![Notices arrive from outside, and reads take them](figures/agent-api/inbox.svg)
 
-A notice is read once, by one read, and the mark says by which. The root is not a notice for
-the agent: no read takes it.
+A notice is read once, by one read, and the mark says by which.
 
 ### 3.3 Calls
 
@@ -250,7 +254,7 @@ call : (name : String) → (arguments : Json) → (environment? : Option Json :=
 1. The computation calls a routine by its name. The driver marks the call,
    `opened child ⟨name, arguments⟩`. The **child frame** is the caller's frame and a step for
    the call: the routine's name, and how many calls of it the caller made before, as in
-   `mini-swe/bash`, then `mini-swe/bash#1`.
+   `session/mini-swe/bash`, then `session/mini-swe/bash#1`.
 2. The routine the caller's scope has under that name (§5) runs in the child frame: its
    operations are performed there, and its own calls open frames nested in it.
 3. Its commands run in the environment the call names, when it names one: an image, and where
@@ -323,16 +327,18 @@ it appends. So comments can be added to an agent, reworded or removed, and every
 still a log of that agent. `alaya rebase` writes an agent's new comments into a copy of an
 existing log. A comment does not guard a loop.
 
-### 3.7 Stops
+### 3.7 Breaks
 
-A stop is not a construct of a computation. It comes from outside, `stopped reason`, appended by
-`alaya stop` where a call runs.
+A break is not a construct of a computation. It comes from outside, `broke frame reason`,
+appended where a call is open in `frame`; `alaya stop` appends one.
 
-1. Every frame of the call ends there, whatever the nesting, with no marks.
-2. Nothing in the call can catch it.
-3. The run goes on to wait for its next call (§9).
+1. The call open in `frame` ends there, and every call inside it, whatever the nesting, with no
+   marks.
+2. Nothing inside the call can catch it.
+3. Its caller goes on with `reason` as the call's failure, and may catch it. The session goes on
+   to wait for its next call (§9); a break of the run's own call ends the run.
 
-![A stop ends every frame of the call, and the run waits for the next](figures/agent-api/stop.svg)
+![A break ends the call open in its frame, and the session waits for the next](figures/agent-api/stop.svg)
 
 ### 3.8 Questions: `ask`
 
@@ -453,8 +459,8 @@ into a data directory of its own, as the changed computation makes it (`docs/cli
 A **routine** is a computation from its arguments to its result, both JSON, under a name, with
 a scope: the routines it can call. It is the one way to structure an agent: a tool, a step
 of a workflow, a sub-agent and the agent itself are routines, and each runs in a frame of its
-own (§3.3). A **scope** is a set of routines, by name. The run itself is a routine, whose
-computation runs in frame `#[]`, entered by no call (§9).
+own (§3.3). A **scope** is a set of routines, by name. The run itself is a call of a routine,
+made from outside (§9).
 
 ```lean
 structure Routine σ where
@@ -495,7 +501,7 @@ its scope as a closure carries its environment. In Alaya's own run:
 
 | Routine | Its scope: the routines it can call |
 | --- | --- |
-| `session`, the run's routine | `mini-swe`, `mini-vero`, `grader`: the catalog |
+| `session`, the run's | `mini-swe`, `mini-vero`, `grader`: the catalog |
 | `mini-swe` | `bash`, `ask_user`, `time_budget`, and `mini-swe` itself |
 | `bash`, `ask_user`, `time_budget` | none |
 | `grader` | `grader` itself, which it never calls |
@@ -605,8 +611,8 @@ routines of `scope`. -/
 def agent : Routine Agent :=
   (routine "agent" fun (config : Config) => workflow.call { goal := config.task }).within scope
 
-/-- The run: the run's routine, whose scope has the agent, so that a person's call of it finds it. -/
-def run : Routine Agent := { session with scope := Scope.of #[agent] }
+/-- The run: the session, whose scope has the agent, so that a person's call of it finds it. -/
+def run : Scope Agent := Scope.of #[Catalog.session (Scope.of #[agent])]
 ```
 
 *The calls made when this agent runs, as a tree of frames.*
@@ -766,7 +772,7 @@ results of its calls, and each malformed response. Each round builds its request
 state. The agent ends by returning its outcome, a status and a submission, as the value of its
 frame.
 
-A **program** is a routine of the catalog (`Agents.Catalog`), which a person calls by name, with
+A **program** is a routine of the catalog (`Alaya.App.Catalog`), which a person calls by name, with
 how its configuration is read: the agents, and the grader (`docs/log-schema.md` §4). The command
 line reads a configuration before any call is made: to print its defaults, apply `--set`, and
 check a call. The program reads only its configuration, from which `make` builds its
@@ -789,13 +795,19 @@ Catalog.check : RoutineCall → Except String Unit             -- whether a call
 
 ## 9. A run
 
-A run is a workspace, and the programs a person calls on it, one after another. It is the run
-of a routine, `session`, whose computation runs in frame `#[]`, entered by no call, as `main` is.
-It is a loop: it waits for a call, calls the program the call names in a frame of its own, and
-waits again. Its scope is the catalog.
+A run is a workspace and a call made from outside, of a routine of the scope the run is
+replayed in. Outside, in `#[]`, the run waits for its call, takes it, and makes it in a frame of
+its own; the run is over when that call is. The core knows nothing more of it.
+
+The command line starts every run as a call of `session`, a program of the app
+(`Alaya.App.Catalog`). It is a loop: it waits for a call, calls the program the call names in a
+frame of its own, and waits again. Its scope is the catalog. What a person may do at a point of
+a run — call a program, say something, stop a call — is the session's to say: the runtime takes
+anything the log can take.
 
 ```lean
-session : Routine Agent                             -- wait for a call, make it, wait again
+Catalog.session : Scope Agent → Routine Agent      -- wait for a call, make it, wait again
+Catalog.run     : Scope Agent                      -- what a run's call may name: the session, a program
 
 structure Environment where                         -- where a call's commands run, as the driver
   image   : String                                  --   reads a call's environment?, which the
@@ -803,22 +815,23 @@ structure Environment where                         -- where a call's commands r
 
 RoutineCall.event : RoutineCall → Event Agent      -- a person's call: arrived (called call)
 environmentOf : Log Agent → Frame → Result (Frame × Environment)  -- where a frame's commands run
-lastCall?      : Log Agent → Option (RoutineCall × Option CallEnd)   -- the last call, and how it ended
+lastCall?      : Log Agent → Option (RoutineCall × Option CallEnd)   -- the run's last call, and how it ended
 ```
 
-1. **The root.** A person provides the workspace: `arrived (changed …)`, at position 0. The run
-   waits for a call.
-2. **A person calls a program**: `alaya call` appends `arrived (called call)`, a call like any
+1. **The root.** A person provides the workspace: `arrived (changed …)`, at position 0.
+2. **The run's call.** `alaya new` appends the call of `session`; the outside reads it, `heard -
+   [1]`, and opens it, `opened session`. The session waits for a call.
+3. **A person calls a program**: `alaya call` appends `arrived (called call)`, a call like any
    other: the program's name, its configuration as its arguments, and the environment its
    commands run in, which a person's call always names.
-3. **The run reads it, and opens the call** as it is: `heard - [1]`, then `opened mini-swe
-   call`, so every later command builds the same program from the log alone.
-4. **The call runs**, in frame `mini-swe`, until it returns, fails, or is stopped. It calls the
-   routines of the program's scope, and its commands run in a container of the image its call
+4. **The session reads it, and opens the call** as it is: `heard session [4]`, then `opened
+   session/mini-swe call`, so every later command builds the same program from the log alone.
+5. **The call runs**, in frame `session/mini-swe`, until it returns, fails, or is broken. It calls
+   the routines of the program's scope, and its commands run in a container of the image its call
    named. A call inside it that names no environment, a sub-agent's or a tool's, runs in the
    same container; one that names its own runs in a container of that image.
-5. **The run waits for the next call.** A grader is called the same way, in frame `grader`, and its
-   value is its verdict.
+6. **The session waits for the next call.** A grader is called the same way, in frame
+   `session/grader`, and its value is its verdict.
 
 ![A whole run: the agent, then a grader, each in a frame of its own](figures/agent-api/run.svg)
 
@@ -828,8 +841,9 @@ The driver is the one part that touches the world. Lean code that uses Alaya as 
 a run with two functions:
 
 ```lean
-drive  : Runtime → Routine Agent → (tip : Hash) → Limits → OnEntry → Result (Hash × Stop)
-append : Store → Routine Agent → (tip : Hash) → Event Agent → Result (Hash × Entry)
+drive  : Runtime → Scope Agent → (tip : Hash) → Limits → OnEntry → Result (Hash × Stop)
+append : Store → Scope Agent → (tip : Hash) → Event Agent → Result (Hash × Entry)
+settle : Store → Scope Agent → (tip : Hash) → Result (Array (Hash × Entry))   -- the marks, with no world
 
 structure Runtime where          -- what a run is driven with
   store ; workspaces ; workDir ; outputsDir
@@ -841,8 +855,8 @@ structure Limits where           -- what one invocation allows; nothing of it is
   budgetMs? : Option Nat         -- the run's time, summed along its log, after which nothing starts
 
 inductive Stop where             -- why the driver stopped
-  | idle                                                 -- no call runs: the run waits for one
-  | waits (frame : Frame) (question? : Option Question)  -- a call's read waits for a person
+  | ended (result : Except String Json)                  -- the run's call is over
+  | waits (frame : Frame) (question? : Option Question)  -- a read waits for a notice
   | paused (reason : String)                             -- a limit was reached
 ```
 
@@ -856,17 +870,23 @@ A point of a run is an **entry**: one event and the entry before it, named by a 
    operation and appends the answer, or appends a mark, after the comments the computation made
    since its last event. Each event is a new entry after the last, and `OnEntry` is called with
    it.
-3. It stops when no call runs, when a call's read waits for a person, or at a limit. It gives
-   the last entry, and why it stopped.
+3. It stops when the run is over, when a read waits for a notice, or at a limit. It gives the
+   last entry, and why it stopped. The session waiting for a call is a wait like any other.
 
-`append` is how something from outside enters a log: a notice, or a stop, after `tip`. It
+`settle` appends the marks alone, with no world: a run whose call was just appended is at its
+first wait, so a person's next call finds it waiting.
+
+`append` is how something from outside enters a log: a notice, or a break, after `tip`. It
 replays the log first, and refuses what the log cannot take:
 
 | Event | Taken only |
 | --- | --- |
-| a stop, a message, a change | while a call runs |
-| a reply | where its question waits (`replyTo`, §3.8) |
-| a call | where no call runs and none is asked for yet, of a routine the run's scope has |
+| a break | where a call is open in its frame |
+| a notice | while the run is not over |
+
+What a person may append beyond that is the front end's to say. The command line takes a message,
+a change or a reply only while a call of the session runs, and a call only where the session
+waits for one (`Catalog.admitsNotice`, `Catalog.admitsCall`).
 
 Appending at an entry that already goes on is a fork: the entry has two continuations, and
 each is a log.
@@ -876,9 +896,10 @@ each is a log.
   kept if the run crashed after its model answered; and driving a point again takes a new draw.
 - **Time.** Each entry records how long its event took, and a run's time is the sum along its
   log. A response counts for the time its draw took, also when the cache gives it.
-- **Limits** are checked before an operation of a call and before a read of its inbox, so a
-  paused run stops where a message a person appends is heard at once. A limit writes nothing,
-  and holds every call, a grader's too.
+- **Limits** are checked before an operation and before a read of the inbox, so a paused run
+  stops where a message a person appends is heard at once. A read that takes calls alone is not
+  held: it starts no work of its own. A limit writes nothing, and holds every call, a grader's
+  too.
 - **Failures.** A failure that is not an answer (§3.4) stops `drive` with an error, and nothing is
   logged for the operation; the next `drive` asks for it again. So a command happens at least
   once: what it does beyond the workspace may happen twice.
@@ -888,11 +909,12 @@ each is a log.
 A data directory holds a forest of runs, their workspaces, and the model cache
 (`docs/log-schema.md` §5). `Alaya.Runtime.Data` and `Alaya.Runtime.Commands` give every command
 of `alaya` as a function over it. Each returns a typed value, and a front end only parses and
-prints. Each takes the run's routine, so the runtime knows no catalog of programs.
+prints. Each takes the scope the run's call is made in, so the runtime knows no catalog of
+programs, and a front end says with `admit` what a person may append beyond what the log takes.
 
 ```lean
 Data.with   : FilePath → (Data → Result α) → (write create : Bool) → Result α   -- holds the lock to write
-Data.create : FilePath → Source → Result Appended                               -- a new run
+Data.create : FilePath → Source → Scope Agent → RoutineCall → Result (Array Appended)  -- a new run
 Data.call / tell / stop / commit / reply / comment : … → Result Appended         -- what a person appends
 Data.withRuntime : Data → RunOptions → Option Provider → … → (Runtime → Result α) → Result α
 Data.resume : Data → Routine Agent → String → Runtime → Limits → … → Result (Hash × Stop × Log Agent)
