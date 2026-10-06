@@ -91,7 +91,7 @@ function summary(i) {
       return 'exec ' + flat(e.command, 60) + ' → ' + (given(e.exit) ? 'exit ' + e.exit : flat(e.failure, 30));
     case 'time': return given(e.error) ? 'time failed' : 'time ' + duration(e.spent) + (given(e.budget) ? ' of ' + duration(e.budget) : '');
     case 'open':
-      // A call the run makes is told by its program and model, not by its whole configuration.
+      // An agent's call is told by its routine and its model, not by its whole configuration.
       if (e.title) return 'open ' + e.title;
       return 'open ' + e.routine + ' “' + flat(e.summary, 60) + '”';
     case 'return': return 'return ' + (verdictOf(e.value) || flat(e.summary, 70));
@@ -155,10 +155,13 @@ function stateChip(i) {
 
 /* --- the run an entry belongs to --------------------------------------- */
 
-/** A run by its first call: the program and the model, and the task, along its first branch. */
+/** A run by its first call: the routine and the model, and the task, along its first branch. */
 function runTitle(root) {
-  for (let i = root; i !== undefined; i = children[i][0])
-    if (entries[i].config) return { name: entries[i].e.title, task: (entries[i].config || {}).task || '' };
+  for (let i = root; i !== undefined; i = children[i][0]) {
+    const x = entries[i];
+    if (x.e.k === 'open' && x.f && x.f.length === 1)
+      return { name: x.e.title || x.e.routine, task: ((x.e.arguments || {}).task) || '' };
+  }
   return { name: 'a run', task: '' };
 }
 
@@ -409,24 +412,87 @@ function whereOf(i) {
   return line;
 }
 
-/** The fields of what a call is given, or of a value it gave: a long text, such as a command or
-a question, as a block under its name, and the rest as facts. `title` goes before the first
-block's label. */
-function renderArguments(parent, title, args) {
-  if (typeof args === 'string') { block(parent, title || 'arguments', args); return; }
-  const entriesOf = args && typeof args === 'object' && !Array.isArray(args) ? Object.entries(args) : null;
-  if (!entriesOf) { block(parent, title || 'arguments', json(args)); return; }
-  const long = v => typeof v === 'string' && (v.includes('\n') || v.length > 60);
-  // The first text is what the call is about, however short: a command, a question, a message.
-  const first = entriesOf.find(([k, v]) => typeof v === 'string');
-  const texts = entriesOf.filter(pair => pair === first || long(pair[1]));
-  const rest = entriesOf.filter(pair => !texts.includes(pair));
+/* What a routine is called with, laid out by its shape, whatever the routine and wherever it is
+called: the texts the call is about first, as blocks; then its fields, a nested object as a
+group of its own, never as JSON. A few common shapes have a form of their own, recognised by
+their key and their content: a model, an executor, a list of NAME=value pairs. */
+
+/** Keys whose text is what a call is about: shown first, wrapped as prose or kept as code. */
+const PROSE_KEYS = ['task', 'message', 'question', 'goal'];
+const CODE_KEYS = ['command'];
+
+const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isPairs = v => Array.isArray(v) && v.length > 0 && v.every(p => Array.isArray(p) && p.length === 2);
+const isLongText = v => typeof v === 'string' && (v.includes('\n') || v.length > 80);
+
+/** A model's spec, in a line: its name, and the parameters it is sampled with. */
+function modelLine(spec) {
+  const params = Object.entries(spec.params || {}).map(([k, v]) => k + '=' + (typeof v === 'string' ? v : JSON.stringify(v)));
+  return [spec.name, ...params].join(' · ');
+}
+
+/** How a command runs, in a line: its timeout, its environment, and what it keeps. */
+function executorLine(config) {
+  const parts = [];
+  if (given(config.timeout_seconds)) parts.push(config.timeout_seconds ? 'timeout ' + config.timeout_seconds + ' s' : 'no timeout');
+  if (isPairs(config.env)) parts.push('env ' + config.env.map(([k, v]) => k + '=' + v).join(', '));
+  if (config.outputs) parts.push('outputs kept');
+  if (config.merge === false) parts.push('stderr apart');
+  return parts.join(' · ');
+}
+
+/** A field's value: a line of text, or a group of its own for a nested object. */
+function fieldValue(key, value) {
+  if (value === null || value === undefined) return 'none';
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return value;
+  if (key === 'model' && isObject(value) && typeof value.name === 'string') return modelLine(value);
+  if (key === 'executor' && isObject(value) && 'timeout_seconds' in value) return executorLine(value);
+  if (isPairs(value)) return value.map(([k, v]) => k + '=' + v).join('\n');
+  if (Array.isArray(value))
+    return value.length ? value.map(v => typeof v === 'string' || typeof v === 'number' ? String(v) : JSON.stringify(v)).join(', ') : 'none';
+  if (isObject(value)) {
+    const group = el('div', 'group');
+    fields(group, value);
+    const size = Object.keys(value).length;
+    if (size <= 6) return group;
+    const fold = el('details', 'more');
+    fold.append(el('summary', null, size + ' fields'), group);
+    return fold;
+  }
+  return JSON.stringify(value);
+}
+
+/** The fields of an object, a row each: their name, and their value. */
+function fields(parent, object) {
   const name = key => key.replace(/_/g, ' ');
-  texts.forEach(([key, value], n) => block(parent, n === 0 && title ? title + ' · ' + name(key) : name(key), value));
+  facts(parent, Object.entries(object).map(([key, value]) => [name(key), fieldValue(key, value)]));
+}
+
+/** What a call is called with. `title`, when given, labels the first block: `calls bash`. */
+function renderArguments(parent, title, args) {
+  if (!isObject(args)) {
+    if (typeof args === 'string') block(parent, title || 'arguments', args, isLongText(args) && !args.includes('\n') ? 'prose' : null);
+    else facts(parent, [[title || 'arguments', fieldValue('', args)]]);
+    return;
+  }
+  const name = key => key.replace(/_/g, ' ');
+  const entriesOf = Object.entries(args);
+  // The texts the call is about: the known keys first, then any other long text.
+  const isText = ([key, value]) => typeof value === 'string' &&
+    (PROSE_KEYS.includes(key) || CODE_KEYS.includes(key) || isLongText(value));
+  const rank = ([key]) => CODE_KEYS.includes(key) ? 0 : PROSE_KEYS.includes(key) ? 1 : 2;
+  const texts = entriesOf.filter(isText).sort((a, b) => rank(a) - rank(b));
+  // The model, where there is one, is the first of the rest: it says which agent this is.
+  const rest = Object.fromEntries(entriesOf.filter(pair => !texts.includes(pair))
+    .sort(([a], [b]) => (b === 'model') - (a === 'model')));
+  texts.forEach(([key, value], n) => {
+    const prose = PROSE_KEYS.includes(key) || (!CODE_KEYS.includes(key) && !value.includes('\n'));
+    block(parent, n === 0 && title ? title + ' · ' + name(key) : name(key), value, prose ? 'prose' : null);
+  });
   if (!texts.length && title) parent.append(el('div', 'label', title));
-  facts(parent, rest.map(([key, value]) => [name(key), typeof value === 'string' ? value
-    : Array.isArray(value) && value.every(v => typeof v === 'string') ? (value.length ? value.join('\n') : 'none')
-    : JSON.stringify(value)]));
+  fields(parent, rest);
 }
 
 /** A grader's verdict: its score, the checks that failed, and the rest folded. */
@@ -479,30 +545,6 @@ function renderValue(parent, value, kind) {
   else block(parent, 'value', json(value));
 }
 
-/** A call's configuration: the program's, an agent's model and task apart. */
-function settingRows(value, prefix = '') {
-  const out = [];
-  for (const [key, v] of Object.entries(value || {})) {
-    const path = prefix + key;
-    if (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length) out.push(...settingRows(v, path + '.'));
-    else if (Array.isArray(v) && v.length && v.every(p => Array.isArray(p) && p.length === 2))
-      out.push([path, v.map(([k, w]) => k + '=' + w).join('  ')]);
-    else if (Array.isArray(v) && v.every(s => typeof s === 'string')) out.push([path, v.length ? v.join(', ') : 'none']);
-    else out.push([path, v === null ? 'none' : typeof v === 'string' ? v : JSON.stringify(v)]);
-  }
-  return out;
-}
-
-function renderConfig(parent, config) {
-  const { model, task, ...program } = config || {};
-  for (const [title, value] of [['Program', program], ['Model', model]]) {
-    if (!value) continue;
-    section(parent, title);
-    facts(parent, settingRows(value), 'mono');
-  }
-  if (task) { section(parent, 'Task'); block(parent, null, task, 'prose'); }
-}
-
 /** What an entry holds. */
 function renderEvent(parent, i) {
   const x = entries[i], e = x.e;
@@ -526,9 +568,9 @@ function renderEvent(parent, i) {
       facts(parent, [['kind', e.form]].concat(e.options.map((o, k) => [String(k + 1), o])));
       break;
     case 'called': {
-      const program = e.arguments || {};
-      facts(parent, [['program', e.routine], ['model', (program.model || {}).name], ['image', (e.environment || {}).image]]);
-      if (program.task) block(parent, 'task', program.task, 'prose');
+      // A person's call: where its commands run, and what the routine is called with.
+      facts(parent, [['routine', e.routine], ['image', (e.environment || {}).image], ['workdir', (e.environment || {}).workdir]]);
+      renderArguments(parent, '', e.arguments);
       break;
     }
     case 'heard': {
@@ -572,10 +614,7 @@ function renderEvent(parent, i) {
     case 'time':
       facts(parent, [['time', took], ['run time', duration(e.spent)], ['budget', given(e.budget) ? duration(e.budget) : 'none']]);
       break;
-    case 'open':
-      // A call's arguments are its configuration, shown below.
-      if (!x.config) renderArguments(parent, '', e.arguments);
-      break;
+    case 'open': renderArguments(parent, '', e.arguments); break;
     case 'return': renderValue(parent, e.value, e.kind); break;
     case 'fail': block(parent, 'error', e.error, 'bad'); break;
     case 'stop': block(parent, 'reason', e.text, 'prose'); break;
@@ -761,7 +800,6 @@ function select(i) {
     page.append(note);
   }
   renderEvent(page, i);
-  if (x.config) renderConfig(page, x.config);
   renderRequest(page, i);
   renderChanges(page, i);
   renderStanding(page, i);
