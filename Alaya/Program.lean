@@ -32,15 +32,15 @@ structure Signature where
 
 /-- A frame is the path of calls from the root, each call being its ordinal among the calls its
 parent made. Nothing in a program states an ordinal: the interpreter assigns it. `#[]` is the
-frame of a run, `#[0]` in it that of the agent, and `#[1]`, `#[2]`, … those of what follows it. -/
+frame of a run, and `#[0]`, `#[1]`, … in it those of the programs the run calls, in order. -/
 abbrev Frame := Array Nat
 
 /-- A frame as a reader is shown it: `0.2.1`, or `-` for the run's own. -/
 def Frame.render (frame : Frame) : String :=
   if frame.isEmpty then "-" else ".".intercalate (frame.toList.map toString)
 
-/-- Whether the frame is the agent's or inside it. -/
-def Frame.inAgent (frame : Frame) : Bool := frame[0]? == some 0
+/-- Whether the frame is a call's, or inside one: not the run's own. -/
+def Frame.inCall (frame : Frame) : Bool := !frame.isEmpty
 
 /-- A call of a routine, by its name, with its arguments: what the log holds as the opening of
 the call. It holds no body, so it is data. -/
@@ -60,15 +60,14 @@ inductive Notice where
   | changed (workspace : Snapshot) (summary : String)
   /-- A person answered the question the call in frame `to` asked. -/
   | replied (to : Frame) (reply : Reply)
-  /-- A person assigned the run its grader, what grades it once its agent is over: the grader,
-  as JSON. What follows the agent waits for it. -/
-  | assigned (grader : Json)
+  /-- A person asked the run to call a program: its name, and its arguments. -/
+  | called (call : RoutineCall)
   deriving Inhabited
 
 /-- Whether a notice is for one reader, who waits for it: a reply, for the call that asked, and a
-grader, for what follows the agent. A plain read of the inbox leaves these. -/
+call, for the run. A plain read of the inbox leaves these. -/
 def Notice.addressed : Notice → Bool
-  | .replied .. | .assigned _ => true
+  | .replied .. | .called _ => true
   | _ => false
 
 /-- What a read that waits is for: the notices it takes, given the frame the read is made in,
@@ -217,13 +216,21 @@ def routine [ToJson α] [FromJson α] [ToJson β] [FromJson β] (name : String)
     | .ok b => pure b
     | .error problem => throw s!"{name}: its result cannot be read: {problem}"
 
-/-- A run: the routines it has, the call of the agent among them, and what follows the agent.
-What follows is given what the agent returned, or the error when it failed or was stopped; if it
-returns, that is the result of the run. -/
+/-- The programs a run can call from its own frame, by name: each one's body and the routines
+the calls inside it enter, both built from the call's arguments, or why they cannot be. -/
+abbrev Programs (σ : Signature) := String → Option (Json → Except String (Program σ Json × Routines σ))
+
+/-- The programs of a table of routines: each routine, entering the same table. -/
+def Programs.ofRoutines (routines : Routines σ) : Programs σ :=
+  fun name => (routines name).map fun body arguments => .ok (body arguments, routines)
+
+/-- A run: its own program, in frame `#[]`, and the programs it calls. A call from the run's own
+frame enters one of `programs`, and a call inside it the routines that program came with. -/
 structure Run (σ : Signature) where
-  routines : Routines σ
-  call : RoutineCall
-  after : Except String Json → Program σ Json
+  programs : Programs σ
+  top : Program σ Json
+  /-- Whether a stop from outside may end the call the run's own program made `n`-th, from 0. -/
+  stops : Nat → Bool := fun _ => true
 
 /-- What the driver is asked to do: an operation, and the frame that asked. -/
 structure Call (σ : Signature) where

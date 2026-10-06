@@ -50,7 +50,7 @@ def suite : Suite := Testing.suite "render" #[
     assertEqual "a long value is cut" (Render.valueSummary (.str (String.ofList (List.replicate 200 'x')))).length 80,
 
   test "an event reads in a line" do
-    let config := testConfig testAgent
+    let swe : CallConfig := { testCall with program := testCall.program.setObjVal! "name" "mini-swe" }
     let lines : Array (Event Agent × String) := #[
       (.arrived (.said "the task\nwith a second line"), "said \"the task with a second line\""),
       (.arrived (.changed (snapshot 'a') "  M a.txt\nfixed"), "changed → aaaaaaaaaaaa:   M a.txt fixed"),
@@ -58,13 +58,14 @@ def suite : Suite := Testing.suite "render" #[
       (.arrived (.replied #[0, 3] .unavailable), "replied to 0.3: unavailable"),
       (.arrived (.replied #[0, 3] .yes), "replied to 0.3: yes"),
       (.asked #[0, 3] { text := "Keep the old API?", form := .yesNo }, "ask \"Keep the old API?\""),
-      (assignment { command := "python3 /grader/grade.py", image := "img" }, "assigned grader \"python3 /grader/grade.py\""),
+      (Call.event swe, "call mini-swe, gpt-oss-120b"),
+      (Call.event (graderCall "python3 /grader/grade.py"), "call grader"),
       (.heard #[0] #[], "inbox: nothing"),
       (.heard #[0] #[2, 5], "inbox: takes [2, 5]"),
-      (.answered #[0] (.sample (snapshot 'b')) (.error "too long"), "failed: too long"),
-      (.answered #[0] (.sample (snapshot 'b')) (.ok (.response { toolCalls := #[call "c" "bash" "ls -la", submitCall "s" "done"] })),
+      (.answered #[0] (.sample testModelSpec.toJson (snapshot 'b')) (.error "too long"), "failed: too long"),
+      (.answered #[0] (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response { toolCalls := #[call "c" "bash" "ls -la", submitCall "s" "done"] })),
         "sample → bash ls -la; submit done"),
-      (.answered #[0] (.sample (snapshot 'b')) (.ok (.response { content? := some "hello\nthere" })),
+      (.answered #[0] (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response { content? := some "hello\nthere" })),
         "sample → says \"hello there\""),
       (.answered #[0, 1] (.exec "ls -la" {}) (.ok (.execution { output := { output := "x", exitCode? := some 2 }, workspace := snapshot 'c' })),
         "exec ls -la → exit 2, cccccccccccc"),
@@ -72,13 +73,8 @@ def suite : Suite := Testing.suite "render" #[
         "exec sleep 9 → timed out, cccccccccccc"),
       (.answered #[0, 2] .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })), "time 1.2 s of 60.0 s"),
       (.answered #[0, 2] .time (.ok (.timing { spentMs := 1200 })), "time 1.2 s"),
-      (.answered #[1] (.external "sh /grader/g.sh" "img@sha256:1" none 900)
-        (.ok (.external { exitCode? := some 1, stdout := "", stderr := "", checkout := snapshot 'e', elapsedMs := 3 })),
-        "external sh /grader/g.sh in img@sha256:1 → exit 1"),
-      (.answered #[1] (.external "sh" "img" none 1)
-        (.ok (.external { stdout := "", stderr := "", checkout := snapshot 'e', elapsedMs := 3, error? := some "timed out after 1 seconds" })),
-        "external sh in img → timed out after 1 seconds"),
-      (.opened #[0] ⟨agentRoutine, config.toJson⟩, "open agent: mini-swe, gpt-oss-120b"),
+      (.opened #[0] ⟨swe.name, swe.toJson⟩, "open mini-swe, gpt-oss-120b"),
+      (.opened #[1] ⟨"grader", (graderCall "sh g.sh").toJson⟩, "open grader"),
       (.opened #[0, 1] ⟨"bash", .mkObj [("command", "ls")]⟩, "open bash \"ls\""),
       (.opened #[0, 1] ⟨"ask_user", (askCall "q" "Keep it?").arguments⟩, "open ask_user \"Keep it?\""),
       (.opened #[0, 1] ⟨"time_budget", .mkObj []⟩, "open time_budget"),
@@ -102,11 +98,10 @@ def suite : Suite := Testing.suite "render" #[
       (none, .raised "it broke", "failed: it broke"),
       (some question, .waits #[0, 0] (some question), "waits for a reply: Keep the old API?"),
       (none, .waits #[0] none, "waits for a notice in 0"),
-      (none, .waits #[] none, "waits for a workspace"),
-      (none, .ask { frame := #[0], op := .sample request }, "next: sample a request of 2 messages"),
+      (none, .waits #[] none, "waits for a call"),
+      (none, .ask { frame := #[0], op := .sample testModelSpec request }, "next: sample gpt-oss-120b on a request of 2 messages"),
       (none, .ask { frame := #[0, 1], op := .exec "make" {} }, "next: run make"),
       (none, .ask { frame := #[0, 1], op := .time }, "next: time the run"),
-      (none, .ask { frame := #[1], op := .external "sh g.sh" "img" none 9 }, "next: run sh g.sh in img"),
       (none, .hears #[0] #[2], "next: a read of the inbox in 0"),
       (none, .opens #[0, 1] ⟨"bash", .null⟩, "next: open bash"),
       (none, .returns #[0, 1] .null, "next: the return of 0.1"),
@@ -115,20 +110,19 @@ def suite : Suite := Testing.suite "render" #[
       (none, .unguarded #[0], "broken: a loop in 0 reads no event")]
     for (question?, next, line) in lines do
       assertEqual line (Render.nextSummary question? none next) line
-    -- Once the agent is over, the run waits for a grader, and then ends with its verdict: how it
-    -- stands is how the agent ended, and the verdict once there is one.
+    -- Where no call runs, the run stands as its last call ended: an agent with its outcome, a
+    -- grader with its verdict.
     let outcome := json "{\"status\":\"Submitted\",\"submission\":\"all done\"}"
     let fail := json "{\"status\":\"fail\",\"passed\":352,\"total\":464,\"checks\":[]}"
-    let pass := json "{\"status\":\"pass\",\"passed\":2,\"total\":2,\"checks\":[]}"
-    let standings : Array (AgentEnd × Next Agent × String) := #[
-      (.returned outcome, .waits #[] none, "done: Submitted: all done"),
-      (.returned outcome, .done fail, "done: fail 352/464"),
-      (.stopped "to grade this point", .waits #[] none, "stopped: to grade this point"),
-      (.stopped "to grade this point", .done pass, "stopped: pass 2/2"),
-      (.failed "it broke", .waits #[] none, "failed: it broke"),
-      (.failed "it broke", .done fail, "failed: fail 352/464")]
-    for (agent, next, line) in standings do
-      assertEqual line (Render.nextSummary none (some agent) next) line,
+    let standings : Array (CallEnd × String) := #[
+      (.returned outcome, "done: Submitted: all done"),
+      (.returned fail, "done: fail 352/464"),
+      (.stopped "to grade this point", "stopped: to grade this point"),
+      (.failed "it broke", "failed: it broke")]
+    for (ended, line) in standings do
+      assertEqual line (Render.nextSummary none (some ended) (.waits #[] none)) line
+    assertEqual "a call that waits is no ending" (Render.nextSummary none (some (.returned outcome)) (.waits #[1] none))
+      "waits for a notice in 1",
 
   test "a response's usage is read in either API's names, and summed where both report" do
     let completions := json ("{\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120," ++
@@ -156,13 +150,13 @@ def suite : Suite := Testing.suite "render" #[
         { (responseWith #[submitCall "s"]) with usage? := some { input? := some 150, output? := some 5 } }]
       let (rt, last, _) ← drive run echoing (← scriptedModel responses)
       let forest ← assertOk rt.store.forest
-      let usages ← assertOk <| walk rt.store forest (#[] : Array (Event Agent × Chat.TokenUsage)) fun seen visit =>
+      let usages ← assertOk <| walk (run := run) rt.store forest (#[] : Array (Event Agent × Chat.TokenUsage)) fun seen visit =>
         pure (seen.push (visit.entry.event, visit.usage))
       assertEqual "an entry each" usages.size (forest.path last).size
       assertEqual "at the end" (stored (usages.back?.map (·.2)))
         (stored (some { input? := some 250, output? := some 25, cached? := some 60 }))
       let afterFirst := usages.findSome? fun (event, usage) =>
-        if event matches .answered _ (.sample _) _ then some usage else none
+        if event matches .answered _ (.sample ..) _ then some usage else none
       assertEqual "after the first response" (stored afterFirst)
         (stored (some { input? := some 100, output? := some 20, cached? := some 60 }))
       assertEqual "before any" (stored (usages[0]?.map (·.2))) (stored (some {})),
@@ -177,17 +171,17 @@ def suite : Suite := Testing.suite "render" #[
       let (first, _) ← assertOk <| Driver.drive rt run (← start rt run "the task")
       let log ← logAt rt first
       let samples := log.zipIdx.filterMap fun (event, i) =>
-        if event matches .answered _ (.sample _) _ then some i else none
+        if event matches .answered _ (.sample ..) _ then some i else none
       -- A fork from just before the second sample: the same request, drawn again.
       let forest ← assertOk rt.store.forest
       let path := forest.path first
       let at' := samples[1]! - 1
       let (second, _) ← assertOk <| Driver.drive rt run path[at']!
       let forest ← assertOk rt.store.forest
-      let lines := Render.treeLines (← assertOk <| Render.rows rt.store forest)
+      let lines := Render.treeLines (← assertOk <| Render.rows rt.store forest run)
       let short := Render.short
       assertEqual "a root, the stretch up to the fork, and one for each branch" lines.size 4
-      assertEqual "the root is named by its run" lines[0]! s!"{short path[0]!}  root  mini-swe, gpt-oss-120b"
+      assertEqual "the root is named by its first call" lines[0]! s!"{short path[0]!}  root  agent, gpt-oss-120b"
       assertEqual "the shared stretch, with its last event and no status" lines[1]!
         s!"  {short path[1]!}..{short path[at']!}  1-{at'}  {Render.eventSummary log[at']!}"
       let ends := (forest.path second)
@@ -199,33 +193,32 @@ def suite : Suite := Testing.suite "render" #[
       -- A comment on an entry that goes on is no branch: a line under the stretch its entry is in.
       let (note, _) ← assertOk <| Notices.comment rt.store path[2]! "look here"
       let forest ← assertOk rt.store.forest
-      let noted := Render.treeLines (← assertOk <| Render.rows rt.store forest)
+      let noted := Render.treeLines (← assertOk <| Render.rows rt.store forest run)
       assertEqual "one line more" noted.size 5
       assertEqual "the same stretch" noted[1]! lines[1]!
       assertEqual "the annotation, under it" noted[2]! s!"    {short note}  3  # look here"
       -- At the end of a log, a comment is the end of that log, and the log stands as it stood.
       let (last, _) ← assertOk <| Notices.comment rt.store first "all done"
       let forest ← assertOk rt.store.forest
-      let ended := Render.treeLines (← assertOk <| Render.rows rt.store forest)
+      let ended := Render.treeLines (← assertOk <| Render.rows rt.store forest run)
       check (ended.any fun line => contains line s!"..{short last}" && contains line "# all done" &&
         contains line "[done: Submitted: the first]") s!"the comment ends its log: {ended}",
 
-  test "a log whose run cannot be built is still shown, and says so" do
+  test "a log that calls a program this version does not have is still shown, its call failing" do
     let store ← assertOk <| Store.create ((← scratch) / "entries")
-    let unknown := testConfig (.mkObj [("name", "an-agent-of-another-build")])
+    let unknown : CallConfig := { testCall with program := testCall.program.setObjVal! "name" "an-agent-of-another-version" }
+    let call : RoutineCall := ⟨unknown.name, unknown.toJson⟩
     let mut forest ← assertOk store.forest
     let mut parent? : Option Hash := none
-    for event in #[.arrived (.changed (snapshot 'a') "the project"), .opened #[0] ⟨agentRoutine, unknown.toJson⟩,
-        (.arrived (.said "the task") : Event Agent)] do
+    for event in #[.arrived (.changed (snapshot 'a') "the project"), .arrived (.called call), .heard #[] #[1],
+        (.opened #[0] call : Event Agent)] do
       let (hash, grown) ← assertOk <| store.put forest { parent?, event }
       forest := grown
       parent? := some hash
     let rows ← assertOk <| Render.rows store forest
-    assertEqual "every entry" rows.size 3
-    assertEqual "the run is named by what its configuration says" (rows[0]!.title?) (some "an-agent-of-another-build, gpt-oss-120b")
-    assertEqual "and its end says it cannot be read" (rows.map (·.status?)) #[none, none, some "the run cannot be read"]
-    let lines := Render.treeLines rows
-    check (lines.back?.any (contains · "[the run cannot be read]")) s!"the tree says so: {lines}"
+    assertEqual "every entry" rows.size 4
+    assertEqual "the run is named by its call" (rows[0]!.title?) (some "an-agent-of-another-version, gpt-oss-120b")
+    assertEqual "and its end says the call fails" (rows.back?.bind (·.status?)) (some "next: the failure of 0")
 ]
 
 end RenderTests

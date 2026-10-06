@@ -24,8 +24,8 @@ structure Divergence (σ : Signature) where
   /-- The position of the first event of the old log that the new one does not take. -/
   position : Nat
   found : Event σ
-  /-- What the program does there; `none` where the event is one it is not to take. -/
-  expected? : Option (Next σ)
+  /-- What the program does there. -/
+  expected : Next σ
 
 /-- A log made again by a program: the events of the new log, each with the position in the old
 one it was taken from, none for a comment of the program; where the old log stopped being a
@@ -45,11 +45,9 @@ def Event.fromOutside : Event σ → Bool
 
 /-- The log `old` as `run` makes it: the longest prefix that is a trace of `run`. Its comments
 are `run`'s, each written before the event the program comes to after it, as the driver writes
-them; the comments of `old` are left out. An event `takes` refuses ends the prefix, as one the
-program does not make there would. A read of the inbox is matched by the notices it takes,
-which the new log has at positions of their own. -/
-partial def rebase (run : Run σ) (old : Log σ) (takes : Event σ → Bool := fun _ => true) :
-    Rebased σ :=
+them; the comments of `old` are left out. A read of the inbox is matched by the notices it
+takes, which the new log has at positions of their own. -/
+partial def rebase (run : Run σ) (old : Log σ) : Rebased σ :=
   go 0 (Replayer.start run) #[] {}
 where
   go (i : Nat) (r : Replayer σ) (new : Array (Event σ × Option Nat))
@@ -57,16 +55,15 @@ where
     match old[i]? with
     | none => { log := new }
     | some event =>
-      let diverge (expected? : Option (Next σ)) : Rebased σ :=
-        { log := new, divergence? := some { position := i, found := event, expected? }
+      let diverge (expected : Next σ) : Rebased σ :=
+        { log := new, divergence? := some { position := i, found := event, expected }
           dropped := (old.zipIdx.extract i old.size).filterMap fun (event, position) =>
             if event.fromOutside then some (position, event) else none }
       let take (event : Event σ) : Rebased σ :=
-        if !takes event then diverge none else
         -- An event of the program comes after the comments it made since its last one.
         let comments := if event.frame?.isSome then r.comments.map fun text => (.commented text, none) else #[]
         let fed := (comments.foldl (fun r (comment, _) => r.feed comment) r).feed event
-        if fed.broken?.isSome then diverge (some r.next) else
+        if fed.broken?.isSome then diverge r.next else
         let new := new ++ comments
         let moved := if event matches .arrived _ then moved.insert i new.size else moved
         go (i + 1) fed (new.push (event, some i)) moved
@@ -75,44 +72,57 @@ where
       | .heard frame notices =>
         match notices.mapM moved.get? with
         | some notices => take (.heard frame notices)
-        | none => diverge (some r.next)
+        | none => diverge r.next
       | event => take event
 
 namespace Rebase
 
 open Alaya (Result Error)
 
-/-- The configuration a run has once rebased: the one its log records, read by the current version of its agent, with
-`settings` over it, every field complete; and the model's spec. -/
-def configure (log : Log Agent) (settings : Array Settings.Setting) : Result (RunConfig × Models.Spec) := do
-  let config ← configOf log
-  let explain (message : String) := s!"the run's configuration, as the current version of its agent reads it: {message}"
-  let agent ← match Settings.apply .agent config.agent settings with
-    | .ok agent => tryCatch (Agents.Catalog.complete agent) fun
-      | .input message => throw <| .input (explain message)
-      | error => throw error
-    | .error message => throw <| .input message
-  let model ← match Settings.apply .model config.model settings with
-    | .ok model => tryCatch (Models.fromJson model) fun
-      | .input message => throw <| .input (explain message)
-      | error => throw error
-    | .error message => throw <| .input message
-  pure ({ config with agent, model := model.toJson }, model)
+/-- `action`, an input error in it said to be about reading the call of `name`. -/
+private def reading (name : String) (action : Result α) : Result α :=
+  tryCatch action fun
+    | .input message => throw <| .input s!"the call of {name}, as the current version reads it: {message}"
+    | error => throw error
 
-/-- `log` rebased onto `run`, a run of the current version of its agent: the opening of the agent's call
-is `run`'s, whose configuration may differ from the log's. A response of the model is taken only
-when `sameModel`, the model being the one the log was written with. -/
-def plan (run : Run Agent) (log : Log Agent) (sameModel : Bool) : Rebased Agent :=
-  let takes : Event Agent → Bool
-    | .answered _ (.sample _) _ => sameModel
-    | _ => true
-  rebase run (log.set! 1 (.opened #[0] run.call)) takes
+/-- A call's configuration as the current version of its program reads it, with the settings
+of `settings` its program takes over it, every field complete; and which of `settings` it takes. -/
+private def reconfigureCall (call : RoutineCall) (settings : Array Settings.Setting) :
+    Result (RoutineCall × Array Bool) := do
+  let config ← Result.fromExcept (fun m => .storage s!"the call of {call.name}: {m}") (CallConfig.fromJson call.arguments)
+  let mut program ← reading call.name (Agents.Catalog.complete config.program)
+  let mut taken := #[]
+  -- A setting fits a call when its program takes it.
+  for setting in settings do
+    match ← tryCatch (some <$> Agents.Catalog.applying program #[setting]) (fun _ => pure none) with
+    | some applied => program := applied; taken := taken.push true
+    | none => taken := taken.push false
+  pure (⟨call.name, { config with program }.toJson⟩, taken)
+
+/-- The log with every call configured as the current version of its program reads it, with
+`settings` over each call they fit, both where the call is asked for and where it opens. A
+setting that fits no call is an error. -/
+def reconfigure (log : Log Agent) (settings : Array Settings.Setting) : Result (Log Agent) := do
+  let mut events := #[]
+  let mut accepted := settings.map fun _ => false
+  for event in log do
+    match event with
+    | .arrived (.called call) =>
+      let (call, _) ← reconfigureCall call settings
+      events := events.push (.arrived (.called call))
+    | .opened #[i] call =>
+      let (call, fits) ← reconfigureCall call settings
+      accepted := (accepted.zip fits).map fun (a, b) => a || b
+      events := events.push (.opened #[i] call)
+    | event => events := events.push event
+  if let some (setting, _) := (settings.zip accepted).find? (!·.2) then
+    throw <| .input s!"--set {setting.render} fits no call of the log"
+  pure events
 
 /-- What the agent does where the log stops being a trace of it, in a few words. -/
-def expectedSummary : Option (Next Agent) → String
-  | none => "no response of another model"
-  | some (.ask call) => call.op.describe
-  | some next =>
+def expectedSummary : Next Agent → String
+  | .ask call => call.op.describe
+  | next =>
     let line := Render.nextSummary none none next
     if line.startsWith "next: " then (line.drop 6).toString else line
 
@@ -121,11 +131,9 @@ def summary (rebased : Rebased Agent) (total : Nat) : String :=
   match rebased.divergence? with
   | none => s!"all {total} events hold"
   | some divergence =>
-    let found := s!"{divergence.position} of {total} events hold; at {divergence.position} the log has " ++
-      (Render.eventSummary divergence.found).quote
-    match divergence.expected? with
-    | some _ => s!"{found}, where the revised agent goes on with: {expectedSummary divergence.expected?}"
-    | none => s!"{found}: the revised agent takes {expectedSummary none}"
+    s!"{divergence.position} of {total} events hold; at {divergence.position} the log has " ++
+      s!"{(Render.eventSummary divergence.found).quote}, where the revised agent goes on with: " ++
+      expectedSummary divergence.expected
 
 /-- The events from outside a rebase left out, in a line each. -/
 def droppedLines (rebased : Rebased Agent) : Array String :=

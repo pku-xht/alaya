@@ -79,7 +79,7 @@ function summary(i) {
     case 'changed': return entries[i].p === null ? 'the workspace the run starts from'
       : 'workspace changed: ' + flat(e.text, 70);
     case 'replied': return 'replied to ' + e.to.join('.') + ': ' + flat(e.text, 60);
-    case 'assigned': return 'assigned grader “' + flat(e.summary, 60) + '”';
+    case 'called': return 'call ' + e.title;
     case 'heard': return e.notices.length ? 'inbox: takes ' + e.notices.join(', ') : 'inbox: nothing';
     case 'asked': return 'ask “' + flat(e.text, 70) + '”';
     case 'sample':
@@ -90,14 +90,9 @@ function summary(i) {
       if (given(e.error)) return 'exec failed: ' + flat(e.error, 70);
       return 'exec ' + flat(e.command, 60) + ' → ' + (given(e.exit) ? 'exit ' + e.exit : flat(e.failure, 30));
     case 'time': return given(e.error) ? 'time failed' : 'time ' + duration(e.spent) + (given(e.budget) ? ' of ' + duration(e.budget) : '');
-    case 'external':
-      if (given(e.error)) return 'external failed: ' + flat(e.error, 70);
-      return 'external ' + flat(e.command, 50) + ' → ' + (given(e.exit) ? 'exit ' + e.exit : flat(e.failure, 30));
     case 'open':
-      if (e.routine === 'agent') {
-        const a = (e.arguments || {}).agent || {}, m = (e.arguments || {}).model || {};
-        return 'open agent: ' + (a.name || '?') + ', ' + (m.name || '?');
-      }
+      // A call the run makes is told by its program and model, not by its whole configuration.
+      if (e.title) return 'open ' + e.title;
       return 'open ' + e.routine + ' “' + flat(e.summary, 60) + '”';
     case 'return': return 'return ' + (verdictOf(e.value) || flat(e.summary, 70));
     case 'fail': return 'fail: ' + flat(e.error, 70);
@@ -113,12 +108,11 @@ const GLYPHS = {
   said: '<path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/>',
   changed: '<path d="M7 1.6L12.4 7 7 12.4 1.6 7z" fill="none"/>',
   replied: '<path d="M6 3.5L2.5 7 6 10.5" fill="none"/><path d="M2.5 7h5.5a3 3 0 0 1 3 3v1.5" fill="none"/>',
-  assigned: '<path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/>',
+  called: '<path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/>',
   heard: '<path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/>',
   sample: '<path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/>',
   exec: '<path d="M4 2.5l7 4.5-7 4.5z" fill="none"/>',
   time: '<circle cx="7" cy="7" r="5.2" fill="none"/><path d="M7 4v3.2l2.2 1.4" fill="none"/>',
-  external: '<rect x="2" y="3.5" width="10" height="8" rx="1" fill="none"/><path d="M4.5 3.5V2h5v1.5" fill="none"/>',
   open: '<path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/>',
   return: '<path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/>',
   fail: '<path d="M3.2 3.2l7.6 7.6M10.8 3.2l-7.6 7.6" fill="none"/>',
@@ -131,7 +125,7 @@ function glyphOf(i) {
   const e = entries[i].e;
   if (entries[i].p === null) return 'root';
   if (e.k === 'asked') return 'question';
-  if (['sample', 'exec', 'time', 'external'].includes(e.k) && given(e.error)) return 'fail';
+  if (['sample', 'exec', 'time'].includes(e.k) && given(e.error)) return 'fail';
   return GLYPHS[e.k] ? e.k : 'open';
 }
 
@@ -144,8 +138,8 @@ function icon(i) {
   return holder;
 }
 
-/** How a log ends, on the entry that ends it: its verdict when the run is graded, or how its
-agent ended, or what it waits for. */
+/** How a log ends, on the entry that ends it: the verdict when its last call was a grader, or how
+its last call ended, or what it waits for. */
 function stateChip(i) {
   const x = entries[i];
   if (!x.state) return null;
@@ -161,18 +155,11 @@ function stateChip(i) {
 
 /* --- the run an entry belongs to --------------------------------------- */
 
-/** The task of a run: the first thing a person said, right after the agent is opened. */
-function taskOf(opening) {
-  if (opening === null) return null;
-  for (const c of children[opening]) if (entries[c].e.k === 'said') return entries[c].e.text;
-  return null;
-}
-
+/** A run by its first call: the program and the model, and the task, along its first branch. */
 function runTitle(root) {
-  const opening = children[root].find(c => entries[c].config);
-  if (opening === undefined) return { name: 'a run', task: '' };
-  const config = entries[opening].config;
-  return { name: (config.agent.name || '?') + ', ' + (config.model.name || '?'), task: taskOf(opening) || '' };
+  for (let i = root; i !== undefined; i = children[i][0])
+    if (entries[i].config) return { name: entries[i].e.title, task: entries[i].config.task || '' };
+  return { name: 'a run', task: '' };
 }
 
 /* --- state ------------------------------------------------------------- */
@@ -394,8 +381,8 @@ function callsAround(i) {
 function titleOf(i) {
   const x = entries[i], e = x.e;
   if (x.p === null) return 'root';
-  if (['sample', 'exec', 'time', 'external'].includes(e.k) && given(e.error)) return e.k + ' failed';
-  return { said: 'said', changed: 'changed', replied: 'replied', assigned: 'assigned grader', heard: 'inbox',
+  if (['sample', 'exec', 'time'].includes(e.k) && given(e.error)) return e.k + ' failed';
+  return { said: 'said', changed: 'changed', replied: 'replied', called: 'call', heard: 'inbox',
     asked: 'ask',
     open: 'open ' + e.routine, return: 'return', fail: 'fail', stop: 'stopped', comment: 'comment' }[e.k] || e.k;
 }
@@ -506,20 +493,22 @@ function settingRows(value, prefix = '') {
 }
 
 function renderConfig(parent, config) {
-  for (const [title, value] of [['Agent', config.agent], ['Model', config.model], ['Environment', config.environment]]) {
+  for (const [title, value] of [['Program', config.program], ['Model', config.model], ['Environment', config.environment]]) {
+    if (!value) continue;
     section(parent, title);
     facts(parent, settingRows(value), 'mono');
   }
+  if (config.task) { section(parent, 'Task'); block(parent, null, config.task, 'prose'); }
 }
 
 /** What an entry holds. */
 function renderEvent(parent, i) {
   const x = entries[i], e = x.e;
   // An operation always says how long it took; a mark only when that is worth saying.
-  const took = ['sample', 'exec', 'time', 'external'].includes(e.k) || x.t >= 50 ? duration(x.t) : null;
+  const took = ['sample', 'exec', 'time'].includes(e.k) || x.t >= 50 ? duration(x.t) : null;
   if (given(e.error)) {
     facts(parent, [['time', took]]);
-    if (e.k === 'exec' || e.k === 'external') block(parent, 'command', e.command);
+    if (e.k === 'exec') block(parent, 'command', e.command);
     block(parent, 'the world could not answer', e.error, 'bad');
     return;
   }
@@ -534,11 +523,10 @@ function renderEvent(parent, i) {
       block(parent, 'question', e.text, 'prose');
       facts(parent, [['kind', e.form]].concat(e.options.map((o, k) => [String(k + 1), o])));
       break;
-    case 'assigned': {
-      const g = e.grader || {};
-      block(parent, 'command', g.command || '');
-      facts(parent, [['image', g.image], ['input', g.input ? snapshot(g.input) : 'none'],
-        ['time limit', g.timeout_seconds ? duration(1000 * g.timeout_seconds) : 'none']]);
+    case 'called': {
+      const a = e.arguments || {};
+      facts(parent, [['program', e.routine], ['model', (a.model || {}).name], ['image', (a.environment || {}).image]]);
+      if (a.task) block(parent, 'task', a.task, 'prose');
       break;
     }
     case 'heard': {
@@ -576,23 +564,15 @@ function renderEvent(parent, i) {
         ['failure', e.failure, 'bad'], ['time limit', e.timeout ? duration(1000 * e.timeout) : 'none'],
         ['workspace', snapshot(e.workspace)], ['whole output', e.file]]);
       block(parent, 'command', e.command);
-      block(parent, 'output', e.output || '(no output)');
+      block(parent, e.stderr === null ? 'output' : 'stdout', e.output || '(no output)');
+      if (e.stderr) block(parent, 'stderr', e.stderr);
       break;
     case 'time':
       facts(parent, [['time', took], ['run time', duration(e.spent)], ['budget', given(e.budget) ? duration(e.budget) : 'none']]);
       break;
-    case 'external':
-      facts(parent, [['time', took ? took + ', the program ' + duration(e.elapsed) : null],
-        ['exit status', given(e.exit) ? String(e.exit) : 'none', e.exit === 0 ? 'ok' : 'bad'],
-        ['failure', e.failure, 'bad'], ['image', e.image],
-        ['input', e.input ? snapshot(e.input) : 'none'], ['checkout', snapshot(e.checkout)]]);
-      block(parent, 'command', e.command);
-      block(parent, 'stdout', e.stdout || '(empty)');
-      if (e.stderr) block(parent, 'stderr', e.stderr);
-      break;
     case 'open':
-      // The agent's arguments are the run's configuration, shown below.
-      if (e.routine !== 'agent') renderArguments(parent, '', e.arguments);
+      // A call's arguments are its configuration, shown below.
+      if (!x.config) renderArguments(parent, '', e.arguments);
       break;
     case 'return': renderValue(parent, e.value, e.kind); break;
     case 'fail': block(parent, 'error', e.error, 'bad'); break;
@@ -708,7 +688,7 @@ function renderDiff(lines) {
 function renderChanges(parent, i) {
   const changes = entries[i].changes;
   if (!changes || !changes.count) return;
-  section(parent, entries[i].e.k === 'external' ? 'Left in the grader’s checkout' : 'Files changed',
+  section(parent, 'Files changed',
     changes.count + (changes.count === 1 ? ' path' : ' paths'));
   for (const change of changes.changes) {
     const sign = el('span', 'sign ' + change.kind, change.kind === 'added' ? '+' : change.kind === 'removed' ? '−' : '~');

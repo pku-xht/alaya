@@ -119,15 +119,15 @@ def eventJson : Event Agent → Json
     .mkObj [("k", "changed"), ("workspace", workspace.hex), ("text", summary)]
   | .arrived (.replied to reply) =>
     .mkObj [("k", "replied"), ("to", to.toJson), ("text", reply.line)]
-  | .arrived (.assigned grader) =>
-    .mkObj [("k", "assigned"), ("grader", grader), ("summary", Render.argumentsSummary grader)]
+  | .arrived (.called call) =>
+    .mkObj [("k", "called"), ("routine", call.name), ("arguments", call.arguments), ("title", Render.callTitle call)]
   | .heard _ notices => .mkObj [("k", "heard"), ("notices", .arr (notices.map fun (n : Nat) => (n : Json)))]
   | .asked _ question =>
     .mkObj [("k", "asked"), ("text", question.text), ("form", question.form.name),
       ("options", .arr (question.form.options.map Json.str))]
   | .answered _ key (.error error) =>
     let op := match key with
-      | .sample _ => "sample" | .exec .. => "exec" | .time => "time" | .external .. => "external"
+      | .sample .. => "sample" | .exec .. => "exec" | .time => "time"
     .mkObj [("k", op), ("error", error)]
   | .answered _ _ (.ok (.response r)) =>
     .mkObj [("k", "sample"), ("content", orNull r.content? .str), ("reasoning", orNull r.reasoning? .str),
@@ -139,19 +139,13 @@ def eventJson : Event Agent → Json
       | _ => ("", 0)
     .mkObj [("k", "exec"), ("command", command), ("timeout", timeout), ("output", e.output.output),
       ("exit", orNull e.output.exitCode? fun c => (c.toNat : Json)), ("failure", orNull e.output.failure? .str),
-      ("workspace", e.workspace.hex), ("file", orNull e.file? .str)]
+      ("stderr", orNull e.output.stderr? .str), ("workspace", e.workspace.hex), ("file", orNull e.file? .str)]
   | .answered _ _ (.ok (.timing t)) =>
     .mkObj [("k", "time"), ("spent", t.spentMs), ("budget", orNull t.budgetMs? fun n => (n : Json))]
-  | .answered _ key (.ok (.external e)) =>
-    let (command, image, input?) := match key with
-      | .external command image input? _ => (command, image, input?)
-      | _ => ("", "", none)
-    .mkObj [("k", "external"), ("command", command), ("image", image), ("input", orNull input? (Json.str ·.hex)),
-      ("exit", orNull e.exitCode? fun c => (c : Json)), ("stdout", e.stdout), ("stderr", e.stderr),
-      ("checkout", e.checkout.hex), ("elapsed", e.elapsedMs), ("failure", orNull e.error? .str)]
-  | .opened _ call =>
+  | .opened frame call =>
     .mkObj [("k", "open"), ("routine", call.name), ("arguments", call.arguments),
-      ("summary", Render.argumentsSummary call.arguments)]
+      ("summary", Render.argumentsSummary call.arguments),
+      ("title", if frame.size == 1 then .str (Render.callTitle call) else .null)]
   | .returned _ value =>
     .mkObj [("k", "return"), ("value", value), ("summary", Render.valueSummary value),
       ("kind", orNull (Render.valueKind? value) (Json.str ·.name))]
@@ -182,37 +176,38 @@ private def envelope (request : Chat.Request) : Json :=
 
 /-- Everything the page renders, as one JSON document. -/
 def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title : String)
-    (hidden : Array String := #[]) : Result Json := do
+    (hidden : Array String := #[]) (run : Run Agent := Run.alaya) : Result Json := do
   let hidden := hidden.map fun prefix' =>
     if prefix'.endsWith "/" then (prefix'.dropEnd 1).toString else prefix'
-  let acc ← walk store forest ({} : Acc) fun acc visit => do
+  let acc ← walk (run := run) store forest ({} : Acc) fun acc visit => do
     let i := acc.rows.size
     let parent? := visit.entry.parent?.bind acc.index.get?
     let event := visit.entry.event
     let leaf := (forest.childrenOf visit.hash).isEmpty
+    let ended? := visit.last?.bind (·.2)
     let next? : Option String := if leaf then
-        some ((visit.next?.map (Render.nextSummary visit.question? visit.agent?)).getD "the run cannot be read")
+        some ((visit.next?.map (Render.nextSummary visit.question? ended?)).getD "the run cannot be read")
       else none
-    -- A run whose agent is over, graded or waiting for a grader, stands as its agent ended.
-    let over := match visit.next? with
+    -- A run that calls nothing stands as its last call ended.
+    let idle := match visit.next? with
       | some (.done _) | some (.raised _) | some (.waits #[] _) => true
       | _ => false
-    let state : Option String := if !leaf then none else match visit.next?, visit.agent? with
+    let state : Option String := if !leaf then none else match visit.next?, ended? with
       | some (.mismatch _), _ | some (.unguarded _), _ | none, _ => some "broken"
-      | some _, some (.returned _) => if over then some "done" else some "paused"
-      | some _, some (.failed _) => if over then some "failed" else some "paused"
-      | some _, some (.stopped _) => if over then some "stopped" else some "paused"
-      | some (.done _), none => some "done" | some (.raised _), none => some "failed"
-      | some (.waits _ _), none => some (if visit.question?.isSome then "question" else "waits")
-      | _, none => some "paused"
-    -- On an entry that ends a graded log: the verdict, in a line.
-    let graded : Option String := if !leaf then none else match visit.next? with
-      | some (.done verdict) => some (Render.valueSummary verdict)
-      | some (.raised error) => some s!"error: {Render.flatten error 40}"
+      | some (.waits frame _), _ =>
+        if frame.inCall then some (if visit.question?.isSome then "question" else "waits")
+        else some (match ended? with
+          | some (.returned _) => "done" | some (.failed _) => "failed" | some (.stopped _) => "stopped"
+          | none => "waits")
+      | _, _ => if idle then some "done" else some "paused"
+    -- On an entry that ends a log whose last call was a grader: its verdict, in a line.
+    let graded : Option String := if !leaf || !idle then none else match ended? with
+      | some (.returned value) =>
+        if Render.valueKind? value == some .verdict then some (Render.valueSummary value) else none
       | _ => none
-    let config := match visit.config?, event with
-      | some config, .opened #[0] _ => config.toJson
-      | _, _ => .null
+    let config := match event with
+      | .opened #[_] call => call.arguments
+      | _ => .null
     let row := Json.mkObj [
       ("h", visit.hash.hex), ("p", orNull parent? fun n => (n : Json)), ("pos", visit.position),
       ("f", orNull event.frame? Frame.toJson), ("e", eventJson event),
@@ -222,13 +217,15 @@ def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title 
       ("question", orNull visit.question? fun q => .mkObj [("text", q.text), ("form", q.form.name),
         ("options", .arr (q.form.options.map Json.str))])]
     let request? := match visit.asked? with
-      | some { op := .sample request, .. } => some request
+      | some { op := .sample _ request, .. } => some request
       | _ => none
-    let diff? : Option (Snapshot × Snapshot) := match event, visit.before?, visit.workspace? with
-      | .answered _ _ (.ok (.external ran)), _, some workspace => some (workspace, ran.checkout)
-      | _, some before, some after => some (before, after)
-      | _, _, _ => none
-    let contextSize? := visit.config?.bind (Models.read ·.model |>.toOption) |>.bind (·.contextTokens?)
+    let diff? : Option (Snapshot × Snapshot) := match visit.before?, visit.workspace? with
+      | some before, some after => some (before, after)
+      | _, _ => none
+    -- The context of the model a sample asked.
+    let contextSize? := match visit.asked? with
+      | some { op := .sample model _, .. } => model.contextTokens?
+      | _ => none
     pure { acc with
       rows := acc.rows.push row, index := acc.index.insert visit.hash i
       requests := acc.requests.push request?, parents := acc.parents.push parent?
@@ -314,7 +311,7 @@ def page (title : String) (data : Json) : String :=
 rather than listed, so a directory that changes constantly and means nothing — a virtual
 environment, a bytecode cache — is reported without burying the rest. -/
 def report (store : Store) (workspaces : Workspaces) (forest : Forest) (title : String)
-    (hidden : Array String := #[]) : Result String := do
-  pure (page title (← dataJson store workspaces forest title hidden))
+    (hidden : Array String := #[]) (run : Run Agent := Run.alaya) : Result String := do
+  pure (page title (← dataJson store workspaces forest title hidden run))
 
 end Alaya.Html

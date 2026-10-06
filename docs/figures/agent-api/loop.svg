@@ -6,7 +6,7 @@
 <text x="304" y="14" class="s">carried out by</text>
 <text x="447" y="14" class="s">log</text>
 <rect x="440.5" y="22.5" width="474" height="397" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
-<path fill="#fafbfc" d="M12.5,407.5V58.5Q12.5,52.5 18.5,52.5H291.5Q297.5,52.5 297.5,58.5V407.5Q297.5,413.5 291.5,413.5H18.5Q12.5,413.5 12.5,407.5Z"/><path class="bx" d="M12.5,407.5V58.5Q12.5,52.5 18.5,52.5H291.5Q297.5,52.5 297.5,58.5V407.5Q297.5,413.5 291.5,413.5H18.5Q12.5,413.5 12.5,407.5"/>
+<path fill="#fafbfc" d="M12.5,407.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V407.5Q297.5,413.5 291.5,413.5H18.5Q12.5,413.5 12.5,407.5Z"/><path class="bx" d="M12.5,407.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V407.5Q297.5,413.5 291.5,413.5H18.5Q12.5,413.5 12.5,407.5"/>
 <path fill="#fff" d="M26.5,227.5V172.5Q26.5,166.5 32.5,166.5H287.5Q293.5,166.5 293.5,172.5V227.5Q293.5,233.5 287.5,233.5H32.5Q26.5,233.5 26.5,227.5Z"/><path class="bx" d="M26.5,227.5V172.5Q26.5,166.5 32.5,166.5H287.5Q293.5,166.5 293.5,172.5V227.5Q293.5,233.5 287.5,233.5H32.5Q26.5,233.5 26.5,227.5"/>
 <path fill="#fff" d="M26.5,341.5V286.5Q26.5,280.5 32.5,280.5H287.5Q293.5,280.5 293.5,286.5V341.5Q293.5,347.5 287.5,347.5H32.5Q26.5,347.5 26.5,341.5Z"/><path class="bx" d="M26.5,341.5V286.5Q26.5,280.5 32.5,280.5H287.5Q293.5,280.5 293.5,286.5V341.5Q293.5,347.5 287.5,347.5H32.5Q26.5,347.5 26.5,341.5"/>
 <text x="460" y="42" class="f n" text-anchor="end">0</text>
@@ -18,31 +18,31 @@
 <path class="a" d="M307,43.5H432"/><path fill="#a3abb5" d="M436,43.5l-5,-2.5v5z"/>
 <circle cx="307" cy="43.5" r="2.5" fill="#7556a3"/>
 <text x="460" y="66" class="f n" text-anchor="end">1</text>
-<text x="468" y="66" class="fr">0</text>
-<g transform="translate(527,55.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="546" y="66.5">open agent</text>
-<text x="898" y="66" class="f" text-anchor="end">opened</text>
-<text x="20.5" y="66" class="s b">agent · 0</text>
-<path class="a" d="M298.5,62.5H432"/><path fill="#a3abb5" d="M436,62.5l-5,-2.5v5z"/>
+<text x="468" y="66" class="fr">-</text>
+<g transform="translate(527,55.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
+<text x="546" y="66.5" style="fill:#7556a3">call agent “fix the build”</text>
+<text x="898" y="66" class="f" text-anchor="end">arrived</text>
+<text x="304" y="59.5" class="s">a person</text>
+<path class="a" d="M307,67.5H432"/><path fill="#a3abb5" d="M436,67.5l-5,-2.5v5z"/>
+<circle cx="307" cy="67.5" r="2.5" fill="#7556a3"/>
 <text x="460" y="90" class="f n" text-anchor="end">2</text>
 <text x="468" y="90" class="fr">-</text>
-<g transform="translate(527,79.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
-<text x="546" y="90.5" style="fill:#7556a3">said “fix the build”</text>
-<text x="898" y="90" class="f" text-anchor="end">arrived</text>
-<text x="304" y="83.5" class="s">a person</text>
-<path class="a" d="M307,91.5H432"/><path fill="#a3abb5" d="M436,91.5l-5,-2.5v5z"/>
-<circle cx="307" cy="91.5" r="2.5" fill="#7556a3"/>
+<g transform="translate(527,79.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="546" y="90.5">inbox: takes 1</text>
+<text x="898" y="90" class="f" text-anchor="end">heard</text>
+<rect x="12.5" y="77.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
+<text x="18.5" y="90" class="ch">await</text>
+<path class="a" d="M65.3,81.5H432"/><path fill="#a3abb5" d="M436,81.5l-5,-2.5v5z"/>
+<rect x="346.9" y="75.0" width="44.1" height="13" fill="#fff"/>
+<text x="369" y="85" class="s" text-anchor="middle">the log</text>
+<path class="a d" d="M436,91.5H69.3"/><path fill="#a3abb5" d="M65.3,91.5l5,-2.5v5z"/>
 <text x="460" y="114" class="f n" text-anchor="end">3</text>
 <text x="468" y="114" class="fr">0</text>
-<g transform="translate(527,103.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
-<text x="546" y="114.5">inbox: takes 2</text>
-<text x="898" y="114" class="f" text-anchor="end">heard</text>
-<rect x="21.0" y="101.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
-<text x="27" y="114" class="ch">await</text>
-<path class="a" d="M73.8,105.5H432"/><path fill="#a3abb5" d="M436,105.5l-5,-2.5v5z"/>
-<rect x="346.9" y="99.0" width="44.1" height="13" fill="#fff"/>
-<text x="369" y="109" class="s" text-anchor="middle">the log</text>
-<path class="a d" d="M436,115.5H77.8"/><path fill="#a3abb5" d="M73.8,115.5l5,-2.5v5z"/>
+<g transform="translate(527,103.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="546" y="114.5">open agent</text>
+<text x="898" y="114" class="f" text-anchor="end">opened</text>
+<text x="20.5" y="114" class="s b">agent · 0</text>
+<path class="a" d="M298.5,110.5H432"/><path fill="#a3abb5" d="M436,110.5l-5,-2.5v5z"/>
 <text x="20.5" y="135" class="s">round 1 · state: 2 messages</text>
 <text x="460" y="156" class="f n" text-anchor="end">4</text>
 <text x="468" y="156" class="fr">0</text>

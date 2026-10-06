@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 81" width="920" height="81">
-<title>reply: a reply is appended after the question that waits for it, and the next run goes on from it</title>
+<title>reply: a reply is appended after the question that waits for it, and the next resume goes on from it</title>
 <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
 <rect width="920" height="81" fill="#fff"/>
 <circle cx="15" cy="36.5" r="0.9" fill="#a3abb5"/>
@@ -28,5 +28,5 @@
 <g transform="translate(632,30) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
 <text x="651" y="40.5" class="c" style="fill:#6f7985">return yes</text>
 <rect x="170" y="55" width="103" height="18" rx="9" fill="#fbe9cf"/><text x="221.5" y="68" class="s n" style="fill:#7a4a08" text-anchor="middle">waits for a reply</text>
-<text x="496" y="68.5" class="s">the next run goes on from the reply</text>
+<text x="496" y="68.5" class="s">the next resume goes on from the reply</text>
 </svg>

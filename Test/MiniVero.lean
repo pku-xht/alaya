@@ -26,14 +26,13 @@ private def openingText (task : String) (mode : MiniVero.Mode := .codeproof) : T
 
 /-- Runs `k` with MiniVero's run, configured by `config`. -/
 private def withVero (config : MiniVero.Config) (k : Run Agent → TestM Unit) : TestM Unit :=
-  match (Scripted.testConfig config.toJson).run Scripted.testModelSpec with
-  | .ok run => k run
-  | .error problem => fail problem
+  k (Scripted.runOf (MiniVero.program config Scripted.testModelSpec Scripted.testUname)
+    (config.base.offered.map (·.entry)))
 
 /-- The log after the world answered what the agent asked with `answers`, in order: settled at
 what it asks next. -/
 private def after (run : Run Agent) (answers : Array Stored) : Log Agent :=
-  answers.foldl (Scripted.answer run) (Scripted.settle run (Scripted.opening run))
+  answers.foldl (Scripted.answer run) (Scripted.settle run Scripted.opening)
 
 def suite : Suite := Testing.suite "mini-vero" #[
   test "the opening message quotes Vero's framing and rule sections" do
@@ -135,7 +134,7 @@ def suite : Suite := Testing.suite "mini-vero" #[
       let ran := after run #[.response { toolCalls := #[call] },
         .execution { output := { output := "Lean type mismatch", exitCode? := some 1 }, workspace := default }]
       match next run ran with
-      | .ask { op := .sample request, .. } =>
+      | .ask { op := .sample _ request, .. } =>
         match request.messages.back? with
         | some (Chat.Message.tool "c" (Json.str text)) => check (contains text "\"exit_code\": 1") "exit code shown"
         | _ => fail "missing the output"
@@ -244,7 +243,7 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
         check ((stop matches .paused _) && again == paused) "spent: nothing more"
         assertEqual "no entry written" (← assertOk rt.store.forest).entries.size count
         let (final, stop) ← assertOk <| Driver.drive rt run paused
-        check (stop matches .over (.returned _) _) "without a budget it runs on"
+        check (stop matches .idle) "without a budget it runs on"
         assertEqual "submitted" (Scripted.agentStatus (← Scripted.logAt rt final)) "Submitted"
       finally executor.close
 ]

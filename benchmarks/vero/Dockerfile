@@ -124,7 +124,8 @@ RUN set -eux; \
 # the image do not appear there automatically.  The agent and grader targets
 # carry prepare.py as /opt/alaya-vero/prepare.py: it validates the workspace
 # lock against the image cohort, then creates only the missing Lake package
-# symlinks.  Run it once after rendering and before `alaya new`.
+# symlinks.  Run it once after rendering and before `alaya new`. A task's grader
+# image adds its trusted benchmark at /grader to the grader target (README.md).
 
 # Record the actual system package and tool versions in the image.  Remove the
 # trusted benchmark trees after their dependency cache has been prepared. Alaya

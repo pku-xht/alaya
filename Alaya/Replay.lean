@@ -25,15 +25,21 @@ namespace Alaya
 open Lean (Json)
 
 /-- What waits for the value of the program being run: the rounds of loops, and the calls it is
-in, each with the frame and the counter of the caller to go back to. The bottom is the run's own
-frame, whose value is the result of the run. -/
+in, each with the frame and the counter of the caller to go back to, and the routines the calls
+inside it enter. The bottom is the run's own frame, whose value is the result of the run. -/
 inductive Stack (σ : Signature) : Type → Type 1 where
   | top : Stack σ Json
   /-- A round of a loop; `start` is how many events the machine had read when it began. -/
   | round {S β α : Type} (step : S → Program σ (S ⊕ β)) (k : β → Program σ α) (start : Nat)
       (rest : Stack σ α) : Stack σ (S ⊕ β)
   | call {α : Type} (parent : Frame) (opened : Nat) (k : Except String Json → Program σ α)
-      (rest : Stack σ α) : Stack σ Json
+      (routines : Routines σ) (rest : Stack σ α) : Stack σ Json
+
+/-- The routines a call enters from inside the innermost call; none in the run's own frame. -/
+def Stack.routines? : Stack σ α → Option (Routines σ)
+  | .top => none
+  | .round _ _ _ rest => rest.routines?
+  | .call _ _ _ routines _ => some routines
 
 /-- The interpreter between two events: the program it runs, what waits for its value, the frame
 it runs in and how many calls that frame has opened, and how many events it has read. -/
@@ -62,35 +68,34 @@ instance : Inhabited (Demand σ) := ⟨.unguarded #[]⟩
 
 namespace Machine
 
-/-- The machine at the start of a run: the agent is called in `#[0]`, and what follows it is the
-continuation of that call, in the run's own frame. -/
+/-- The machine at the start of a run: the run's own program, in `#[]`. -/
 def start (run : Run σ) : Machine σ :=
-  { α := Json, program := .call run.call run.after, stack := .top, frame := #[], opened := 0
-    read := 0 }
+  { α := Json, program := run.top, stack := .top, frame := #[], opened := 0, read := 0 }
 
-/-- Runs the machine until it needs something from the log. -/
-partial def advance (routines : Routines σ) (m : Machine σ) : Demand σ :=
+/-- Runs the machine until it needs something from the log. A call from the run's own frame
+enters one of `programs`; a call inside it, the routines that program came with. -/
+partial def advance (programs : Programs σ) (m : Machine σ) : Demand σ :=
   if let some result := m.result? then .finished result else
   match m with
   | ⟨_, .pure a, .top, frame, _, read, _⟩ =>
     .mark (.returned frame a) { m with result? := some (.ok a), read := read + 1 }
   | ⟨_, .fail error, .top, frame, _, read, _⟩ =>
     .mark (.failed frame error) { m with result? := some (.error error), read := read + 1 }
-  | ⟨_, .pure value, .call parent opened k rest, frame, _, read, _⟩ =>
+  | ⟨_, .pure value, .call parent opened k _ rest, frame, _, read, _⟩ =>
     .mark (.returned frame value)
       { α := _, program := k (.ok value), stack := rest, frame := parent, opened := opened + 1
         read := read + 1 }
-  | ⟨_, .fail error, .call parent opened k rest, frame, _, read, _⟩ =>
+  | ⟨_, .fail error, .call parent opened k _ rest, frame, _, read, _⟩ =>
     .mark (.failed frame error)
       { α := _, program := k (.error error), stack := rest, frame := parent, opened := opened + 1
         read := read + 1 }
   | ⟨_, .pure (.inl s), .round step k start rest, frame, opened, read, _⟩ =>
     if read == start then .unguarded frame
-    else advance routines { α := _, program := step s, stack := .round step k read rest, frame, opened, read }
+    else advance programs { α := _, program := step s, stack := .round step k read rest, frame, opened, read }
   | ⟨_, .pure (.inr b), .round _ k _ rest, frame, opened, read, _⟩ =>
-    advance routines { α := _, program := k b, stack := rest, frame, opened, read }
+    advance programs { α := _, program := k b, stack := rest, frame, opened, read }
   | ⟨_, .fail error, .round _ _ _ rest, frame, opened, read, _⟩ =>
-    advance routines { α := _, program := .fail error, stack := rest, frame, opened, read }
+    advance programs { α := _, program := .fail error, stack := rest, frame, opened, read }
   | ⟨α, .perform op k, stack, frame, opened, read, _⟩ =>
     .ask { frame, op } fun answer => ⟨α, k answer, stack, frame, opened, read + 1, none⟩
   | ⟨α, .inbox wait k, stack, frame, opened, read, _⟩ =>
@@ -106,32 +111,39 @@ partial def advance (routines : Routines σ) (m : Machine σ) : Demand σ :=
     .mark (.asked frame question) ⟨α, .inbox (some wait) answered, stack, frame, opened, read + 1, none⟩
   | ⟨_, .call routine k, stack, frame, opened, read, _⟩ =>
     let child := frame.push opened
-    let body : Program σ Json := match routines routine.name with
-      | some body => body routine.arguments
-      | none => .fail s!"no routine named {routine.name}"
+    let made : Except String (Program σ Json × Routines σ) := match stack.routines? with
+      | none => match programs routine.name with
+        | some make => make routine.arguments
+        | none => .error s!"no program named {routine.name}"
+      | some routines => match routines routine.name with
+        | some body => .ok (body routine.arguments, routines)
+        | none => .error s!"no routine named {routine.name}"
+    let (body, routines) : Program σ Json × Routines σ := match made with
+      | .ok made => made
+      | .error problem => (.fail problem, fun _ => none)
     .mark (.opened child routine)
-      { α := _, program := body, stack := .call frame opened k stack, frame := child, opened := 0
-        read := read + 1 }
+      { α := _, program := body, stack := .call frame opened k routines stack, frame := child
+        opened := 0, read := read + 1 }
   | ⟨_, .iter step s k, stack, frame, opened, read, _⟩ =>
-    advance routines { α := _, program := step s, stack := .round step k read stack, frame, opened, read }
+    advance programs { α := _, program := step s, stack := .round step k read stack, frame, opened, read }
   -- A comment reads no event: a round that only comments is no guarded round.
   | ⟨α, .comment text k, stack, frame, opened, read, _⟩ =>
     .comment text ⟨α, k, stack, frame, opened, read, none⟩
 
-/-- The machine after a stop from outside: every frame of the agent ends, whatever the nesting,
-without a mark, and what follows the agent is given the error. Nothing in the agent can catch
-it. `none` when the agent is over, where a stop has no place. -/
+/-- The machine after a stop from outside: every frame of the call the run made ends, whatever
+the nesting, without a mark, and the run's own program is given the error. Nothing in the call
+can catch it. `none` when no call is running, where a stop has no place. -/
 def stop (m : Machine σ) : Option (Machine σ) :=
   let rec unwind {α : Type} : Stack σ α → Option (Machine σ)
     | .top => none
     | .round _ _ _ rest => unwind rest
-    | .call parent opened k rest =>
+    | .call parent opened k _ rest =>
       if parent.isEmpty then
         some { α := _, program := k (.error "stopped"), stack := rest, frame := parent
                opened := opened + 1, read := m.read + 1 }
       else unwind rest
   match m with
-  -- the agent is about to be opened
+  -- the first call is about to be opened
   | ⟨_, .call _ k, stack, #[], opened, read, none⟩ =>
     if opened == 0 then
       some { α := _, program := k (.error "stopped"), stack, frame := #[], opened := 1
@@ -146,7 +158,7 @@ end Machine
 inductive Next (σ : Signature) where
   /-- The run is over, with this result. -/
   | done (value : Json)
-  /-- The run is over, and what follows the agent failed. -/
+  /-- The run is over, and its own program failed. -/
   | raised (error : String)
   /-- The first operation the log has no answer to. -/
   | ask (call : Call σ)
@@ -170,7 +182,8 @@ instance : Inhabited (Next σ) := ⟨.mismatch 0⟩
 /-- Where replay has got to in a log: the machine and what it needs, how many events it has
 passed, and the notices it has passed that no read took, each with its position. -/
 structure Replayer (σ : Signature) where
-  routines : Routines σ
+  programs : Programs σ
+  stops : Nat → Bool := fun _ => true
   machine : Machine σ
   demand : Demand σ
   position : Nat := 0
@@ -189,12 +202,12 @@ namespace Replayer
 private partial def settle (r : Replayer σ) : Replayer σ :=
   match r.demand with
   | .comment text machine =>
-    settle { r with machine, demand := machine.advance r.routines, comments := r.comments.push text }
+    settle { r with machine, demand := machine.advance r.programs, comments := r.comments.push text }
   | _ => r
 
 def start (run : Run σ) : Replayer σ :=
   let machine := Machine.start run
-  settle { routines := run.routines, machine, demand := machine.advance run.routines }
+  settle { programs := run.programs, stops := run.stops, machine, demand := machine.advance run.programs }
 
 /-- What a read takes, and what it leaves unread. A read that waits takes the notices it is for,
 among those not yet read; any other takes all that are not yet read and addressed to no one. -/
@@ -228,7 +241,7 @@ def next (r : Replayer σ) : Next σ :=
 /-- The replayer with the machine gone on to `machine`, the event at its position read: the
 comments made before that event are behind it. -/
 private def resume (r : Replayer σ) (machine : Machine σ) : Replayer σ :=
-  settle { r with machine, demand := machine.advance r.routines, position := r.position + 1, comments := #[] }
+  settle { r with machine, demand := machine.advance r.programs, position := r.position + 1, comments := #[] }
 
 private def broken (r : Replayer σ) (next : Next σ) : Replayer σ :=
   { r with broken? := some next }
@@ -253,8 +266,8 @@ def feed (r : Replayer σ) (event : Event σ) : Replayer σ :=
   | .commented _ => { r with position := position + 1 }
   | .arrived notice => { r with unread := r.unread.push (position, notice), position := position + 1 }
   | .stopped _ =>
-    let inAgent := (demandFrame? r.demand).any (·.inAgent)
-    match inAgent, r.machine.stop with
+    let inCall := (demandFrame? r.demand).any fun frame => frame.inCall && r.stops (frame[0]?.getD 0)
+    match inCall, r.machine.stop with
     | true, some machine => r.resume machine
     | _, _ => r.broken (.mismatch position)
   | event =>

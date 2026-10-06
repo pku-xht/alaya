@@ -62,14 +62,42 @@ def workDir : TestM System.FilePath := do
 /-- The model a run records when the test does not care which, and its spec. -/
 def testModelSpec : Models.Spec := { name := "gpt-oss-120b" }
 
-/-- The configuration of a run of `agent` in the test's recorded image. -/
-def testConfig (agent : Json) : RunConfig :=
-  { agent, model := testModelSpec.toJson
-    environment := { image := recordedImage, workdir := recordedWorkdir, uname := testUname } }
+/-- Where a test's calls run: the test's recorded image and workdir, and a fixed `uname`. -/
+def testEnvironment : Environment :=
+  { image := recordedImage, workdir := recordedWorkdir, uname := testUname }
 
-/-- A run of MiniSwe with `config`, for the test model. -/
+/-- The call of the test's agent, `agent`, on `task`, with the test model. -/
+def testCall (task : String := "t") (environment : Environment := testEnvironment) : CallConfig :=
+  { program := .mkObj [("name", "agent"), ("model", testModelSpec.toJson)], task? := some task
+    environment }
+
+/-- The notice that calls the test's agent on `task`. -/
+def callAgent (task : String := "t") (environment : Environment := testEnvironment) : Event Agent :=
+  Call.event (testCall task environment)
+
+/-- A run of Alaya whose program `agent` is `make`'s program for the call's task, with
+`routines`; every program of the catalog is there too, the grader among them. -/
+def runOf (make : String → Program Agent Json) (routines : Array (Routine.Entry Agent) := #[]) : Run Agent :=
+  { programs := fun name =>
+      if name == "agent" then some fun arguments => match CallConfig.fromJson arguments with
+        | .ok call => .ok (make (call.task?.getD ""), Routines.of routines)
+        | .error problem => .error problem
+      else Agents.Catalog.programs name
+    top := session }
+
+/-- A run whose `agent` is the program the catalog builds from `config`, a program's
+configuration, with `model` as its model. -/
+def runOfConfig (config : Json) (model : Models.Spec := testModelSpec) : Except String (Run Agent) :=
+  match Agents.Catalog.build (config.setObjVal! "model" model.toJson) with
+  | .ok built =>
+    .ok (runOf (fun task => match built.program (some task) testUname with
+      | .ok program => program
+      | .error problem => .fail problem) built.routines)
+  | .error problem => .error problem
+
+/-- A run of MiniSwe with `config`, as the program `agent`, for the test model. -/
 def miniRun (config : Agents.MiniSwe.Config := {}) : Except String (Run Agent) :=
-  (testConfig config.toJson).run testModelSpec
+  .ok (runOf (Agents.MiniSwe.program config testModelSpec testUname) (config.offered.map (·.entry)))
 
 /-- A runtime over a store and directory workspaces of the test's own, with `executor` and
 `model`. Each call has a store of its own; the work directory is the test's. -/
@@ -78,7 +106,10 @@ def runtime (executor : Executor) (model? : Option Model) : TestM Driver.Runtime
   let work ← workDir
   let store ← assertOk <| Store.create (base / "entries")
   pure { store, workspaces := ← workspaces, workDir := work, outputsDir := base / "outputs"
-         scratch := base / "external", executor, workdir := recordedWorkdir, model? }
+         executor := fun _ => pure executor
+         model := fun _ => match model? with
+           | some model => pure model
+           | none => throw <| .input "a call samples its model: name a --provider" }
 
 /-- A runtime whose commands run in the test container, with the outputs directory mounted where
 a command finds the whole output of an earlier one. -/
@@ -95,18 +126,18 @@ the first. -/
 def cached (model : Model) : TestM Model := do
   assertOk <| Cache.persistent model { directory := (← scratch) / s!"cache-{← IO.monoNanosNow}" }
 
-/-- Creates a run over `project` (an empty one when none), with `task`, in `rt`'s store. Gives
-the entry the log ends at. -/
+/-- Creates a run over `project` (an empty one when none), in `rt`'s store, and calls the test's
+agent on `task`. Gives the entry the log ends at. -/
 def start (rt : Driver.Runtime) (run : Run Agent) (task : String := "t")
-    (project? : Option System.FilePath := none) : TestM Hash := do
+    (project? : Option System.FilePath := none) (environment : Environment := testEnvironment) : TestM Hash := do
   let project ← match project? with
     | some project => pure project
     | none =>
       let project := rt.outputsDir.withFileName s!"project-{← IO.monoNanosNow}"
       IO.FS.createDirAll project
       pure project
-  let made ← assertOk <| Notices.create rt.store rt.workspaces run project task
-  let some (tip, _) := made.back? | fail "no entries were made"
+  let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
+  let (tip, _) ← assertOk <| Driver.append rt.store run root (callAgent task environment)
   pure tip
 
 /-- Drives `run` from a new log, with `task`, until it is over, waits, or reaches `limits`. -/
@@ -122,17 +153,24 @@ def logAt (rt : Driver.Runtime) (hash : Hash) : TestM (Log Agent) := do
   let forest ← assertOk rt.store.forest
   assertOk <| rt.store.log forest hash
 
-/-- Grades the point `tip` of a run with `grader`, as `alaya grade` does: stops the agent there
-if it is still running, assigns the grader, and drives the run to its end. Gives the entry the
-log ends at, and the verdict. -/
-def grade (rt : Driver.Runtime) (run : Run Agent) (tip : Hash) (grader : Grader) :
+/-- The call of the grader with `command`, in `image`. -/
+def graderCall (command : String) (image : String := recordedImage) (timeoutSeconds : Nat := 900)
+    (workdir : String := recordedWorkdir) : CallConfig :=
+  { program := .mkObj [("name", "grader"), ("command", command), ("timeout_seconds", timeoutSeconds)]
+    environment := { testEnvironment with image, workdir } }
+
+/-- Grades the point `tip` of a run with the grader `call`, as a person does: stops the call
+running there, if one is, calls the grader, and drives it to its end. Gives the entry the log
+ends at, and the verdict. -/
+def grade (rt : Driver.Runtime) (run : Run Agent) (tip : Hash) (call : CallConfig) :
     TestM (Hash × Json) := do
   let mut tip := tip
   if Driver.running (next run (← logAt rt tip)) then
     tip := (← assertOk <| Driver.append rt.store run tip (.stopped "to grade this point")).1
-  tip := (← assertOk <| Driver.append rt.store run tip (assignment grader)).1
+  tip := (← assertOk <| Driver.append rt.store run tip (Call.event call)).1
   let (graded, stop) ← assertOk <| Driver.drive rt run tip
-  let .over _ (some verdict) := stop | fail "the run did not come to its verdict"
+  check (stop matches .idle) "the grader is over"
+  let some (_, some (.returned verdict)) := lastCall? (← logAt rt graded) | fail "the grader gave no verdict"
   pure (graded, verdict)
 
 /-- Every sample of a log: the request replay says it answers, and the response. -/
@@ -140,7 +178,7 @@ def samplesOf (run : Run Agent) (log : Log Agent) : Array (Chat.Request × Chat.
   let step := fun (state : Replayer Agent × Array (Chat.Request × Chat.Response)) (event : Event Agent) =>
     let (replayer, found) := state
     let found := match replayer.next, event with
-      | .ask { op := .sample request, .. }, .answered _ _ (.ok (.response response)) =>
+      | .ask { op := .sample _ request, .. }, .answered _ _ (.ok (.response response)) =>
         found.push (request, response)
       | _, _ => found
     (replayer.feed event, found)
@@ -184,9 +222,12 @@ def answer (run : Run Agent) (log : Log Agent) (stored : Stored) : Log Agent :=
 def respond (run : Run Agent) (log : Log Agent) (response : Chat.Response) : Log Agent :=
   answer run log (.response response)
 
-/-- The start of a log of `run`: its root, the opening of its agent, and `task`. -/
-def opening (run : Run Agent) (task : String := "t") : Log Agent :=
-  #[.arrived (.changed default "the project"), .opened #[0] run.call, .arrived (.said task)]
+/-- The start of a log of the test's agent: its root, the call of the agent on `task`, the run's
+read of it, and the opening of the call. -/
+def opening (task : String := "t") : Log Agent :=
+  let call := testCall task
+  #[.arrived (.changed default "the project"), callAgent task, .heard #[] #[1],
+    .opened #[0] ⟨call.name, call.toJson⟩]
 
 /-- How the agent of a log ended: the value its frame returned, or its error. -/
 def agentResult (log : Log Agent) : Option (Except String Json) :=

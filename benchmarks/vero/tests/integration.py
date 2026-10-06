@@ -14,7 +14,7 @@ import sys
 import threading
 import uuid
 
-from _harness import FIXTURE, ROOT, entry, grader_answer, json_lines, run
+from _harness import FIXTURE, ROOT, entry, grade, grader_answer, json_lines, run, task_grader
 
 EDIT = """from pathlib import Path
 import re
@@ -91,6 +91,9 @@ def test_mode(args, mode):
            mounts=((source, "/workspace"),))
     docker(args.agent_image, "sh", "-c", "test ! -e /opt/vero && test ! -e /grader")
 
+    # The task's grader: the Vero grader image with the trusted benchmark at /grader.
+    grader_image = task_grader(args.grader_image, FIXTURE, f"alaya-vero-grader-test-{mode}")
+
     def alaya(*command, **kwargs):
         return run(args.alaya, *command, "--data", data, **kwargs)
 
@@ -101,84 +104,67 @@ def test_mode(args, mode):
         return rows[:-1]
 
     def create():
-        """A run on the rendered source; its three entries: root, the agent's opening, the task."""
-        rows = json_lines(alaya("new", source, "--task-file", directory / "MINIVERO_TASK.md",
-                                "--agent", "mini-vero", "--set", f"agent.mode={mode}",
-                                "--model", "gpt-oss-120b", "--image", args.agent_image,
-                                "--workdir", "/testbed", "--json").stdout)
-        assert [r["position"] for r in rows] == [0, 1, 2], rows
-        assert rows[1]["event"]["type"] == "opened", rows
-        return rows
+        """A run on the rendered source, and a call of MiniVero on its task; its two entries."""
+        root = json_lines(alaya("new", source, "--json").stdout)
+        called = json_lines(alaya("call", root[0]["entry"], "mini-vero", "--task-file",
+                                  directory / "MINIVERO_TASK.md", "--set", f"mode={mode}",
+                                  "--set", "model=gpt-oss-120b", "--image", args.agent_image,
+                                  "--workdir", "/testbed", "--json").stdout)
+        assert [r["event"]["type"] for r in root + called] == ["arrived", "arrived"], root + called
+        return root + called
 
     def configuration(rows):
-        return rows[1]["event"]["routine"]["arguments"]
+        return rows[1]["event"]["notice"]["call"]["arguments"]
 
-    vero = ["--grader", f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader",
-            "--grader-input", FIXTURE, "--grader-image", args.grader_image]
+    vero = f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader"
 
     def drive(at, *options, code=0):
-        """`alaya run` from an entry; the appended entries and the final status object."""
-        rows = json_lines(alaya("run", at, *options, "--json", codes=(code,)).stdout)
+        """`alaya resume` from an entry; the appended entries and the final status object."""
+        rows = json_lines(alaya("resume", at, *options, "--json", codes=(code,)).stdout)
         assert rows and "status" in rows[-1], rows
         return rows[:-1], rows[-1]
 
-    def graded(final, expected, passed, total=1):
-        """Check a graded point: its verdict, the notice that assigned the grader, the grader's
-        operation, and its report."""
-        assert final["status"] in ("done", "stopped"), final
-        record = final["verdict"]
+    def grade_at(at, expected, passed, total=1, command=vero, image=grader_image, **options):
+        """Grade a point of a run, with Vero's grader unless another command is given: a stop
+        there if a call runs, a call of the grader, and `resume`, which exits with the verdict."""
+        code = {"pass": 0, "fail": 1, "error": 2}[expected]
+        final = grade(args.alaya, data, at, image, command, codes=(code,), **options)
+        record = final["value"]
         assert record["status"] == expected, record
         assert len(record["checks"]) == total, record
         assert sum(c["ok"] for c in record["checks"]) == passed, record
         trace = log(final["entry"])
-        [assigned] = [r["event"]["notice"] for r in trace if r["event"]["type"] == "arrived"
-                      and r["event"]["notice"]["type"] == "assigned"]
+        [call] = [r["event"]["routine"] for r in trace if r["event"]["type"] == "opened"
+                  and r["event"]["routine"]["name"] == "grader"][-1:]
         answer = grader_answer(trace)
-        operation = answer["event"]["op"]
         return {"entry": final["entry"], "answer": answer["entry"], "record": record,
-                "grader": assigned["grader"],
-                "image": operation["image"], "input": operation["input"],
-                "checkout": answer["event"]["answer"]["checkout"]}
-
-    def grade_at(at, expected, passed, total=1, grader=None):
-        """Grade a point of a run, with Vero's grader unless another is given: `grade` stops a
-        fork there if the agent still runs, assigns the grader, runs it, and exits with the
-        verdict."""
-        code = {"pass": 0, "fail": 1, "error": 2}[expected]
-        rows = json_lines(alaya("grade", at, *(grader or vero), "--json", codes=(code,)).stdout)
-        return graded(rows[-1], expected, passed, total)
+                "image": call["arguments"]["environment"]["image"],
+                "workspace": answer["event"]["answer"]["workspace"]}
 
     def vero_graded(at, expected, passed):
         result = grade_at(at, expected, passed)
         assert "sha256:" in result["image"]
-        assert result["input"]
-        # The report is in the checkout as the grader left it, read at its answer's entry.
+        # The report is in the workspace as the grader left it, read at its command's answer.
         assert ".grade/report.md" in alaya("ls", result["answer"], ".grade").stdout
         assert alaya("cat", result["answer"], ".grade/report.md").stdout.strip()
         return result
 
     rows = create()
-    task = rows[-1]["entry"]
+    root, called = rows[0]["entry"], rows[1]["entry"]
     run_record = configuration(rows)
     assert run_record["environment"]["workdir"] == "/testbed"
     assert "sha256:" in run_record["environment"]["image"], run_record
-    # A grader is no part of a run: `new` takes none, and the configuration names none.
-    assert "graders" not in run_record, run_record
-    refused = alaya("new", source, "--task", "t", "--agent", "mini-vero", "--model", "gpt-oss-120b",
-                    "--image", args.agent_image, *vero, codes=(64,))
-    assert "unknown option --grader" in refused.stderr, refused.stderr
+    assert run_record["program"]["mode"] == mode and run_record["task"], run_record
 
-    # The untouched source, graded where the task arrives. No task file is in the snapshot.
-    blank = vero_graded(task, "fail", 0)
-    # The notice records the grader as it was assigned: its image pinned, its input snapshotted.
-    assert "sha256:" in blank["grader"]["image"] and blank["grader"]["input"], blank["grader"]
+    # The untouched source, graded at the root, before any call. No task file is in the snapshot.
+    blank = vero_graded(root, "fail", 0)
     ScriptedModel.mode, ScriptedModel.requests = mode, []
     server = ThreadingHTTPServer(("127.0.0.1", 0), ScriptedModel)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         model = ["--provider", "dgx", "--url", f"http://127.0.0.1:{server.server_port}/v1"]
-        partial = alaya("run", task, *model, "--time-budget", "1", "--json", codes=(4,))
+        partial = alaya("resume", called, *model, "--time-budget", "1", "--json", codes=(4,))
         paused = json_lines(partial.stdout)[-1]
         assert paused["status"] == "paused", paused
         appended, final = drive(paused["entry"], *model, "--time-budget", "300")
@@ -188,25 +174,24 @@ def test_mode(args, mode):
         thread.join()
     assert len(ScriptedModel.requests) == 3
     # The agent is over, and nothing has graded the run yet; graded at its end, it passes.
-    assert final["status"] == "done" and final["verdict"] is None, final
+    assert final["call"] == "mini-vero" and final["status"] == "done", final
+    assert final["value"]["status"] == "Submitted", final
     correct = grade_at(final["entry"], "pass", 1)
     trace = log(final["entry"])
-    assert trace[2]["entry"] == task and trace[-1]["entry"] == final["entry"], trace
-    # What the run was created with is recorded on its opening alone.
+    assert trace[1]["entry"] == called and trace[-1]["entry"] == final["entry"], trace
+    # What the agent was called with is recorded on its opening.
     assert [r["position"] for r in trace if r["event"]["type"] == "opened"
-            and r["event"]["routine"]["name"] == "agent"] == [1], trace
+            and r["event"]["routine"]["name"] == "mini-vero"] == [3], trace
     ended = [i for i, r in enumerate(trace)
              if r["event"]["type"] == "returned" and r["frame"] == [0]]
     assert len(ended) == 1, trace
-    assert trace[ended[0]]["event"]["value"]["status"] == "Submitted", trace[ended[0]]
     submitted, before_end = trace[ended[0]]["entry"], trace[ended[0] - 1]["entry"]
-    assert ".grade/report.md" in alaya("ls", correct["answer"], ".grade").stdout
     # Every grading runs the grader again and records a new answer, on a fork.
     again = grade_at(submitted, "pass", 1)
     assert again["answer"] != correct["answer"] and again["entry"] != correct["entry"]
-    # Once the agent is over, the run cannot be stopped.
+    # Where no call runs, there is nothing to stop.
     refused = alaya("stop", final["entry"], codes=(65,))
-    assert "over" in refused.stderr, refused.stderr
+    assert "no call is running" in refused.stderr, refused.stderr
 
     # A hand-edited workspace, committed where the agent was about to end, then graded.
     branch = directory / "tampered"
@@ -232,31 +217,30 @@ def test_mode(args, mode):
         symlink_rejection = vero_graded(linked_entry, "fail", 0)
         assert "anti-cheat" in symlink_rejection["record"]["checks"][0]["name"]
 
-    def shell_graded(command, expected, *options):
-        """A run on the same source, graded where its task arrives by a shell grader."""
+    def shell_graded(command, expected, **options):
+        """A new run on the same source, graded at its root by a shell grader."""
         rows = create()
-        return rows, grade_at(rows[-1]["entry"], expected, 1 if expected == "pass" else 0,
-                              1 if expected != "error" else 0, grader=["--grader", command, *options])
+        return rows, grade_at(rows[0]["entry"], expected, 1 if expected == "pass" else 0,
+                              1 if expected != "error" else 0, command=command, **options)
 
-    # Trusted mount is read-only; grader shares the agent's user and working directory. On
-    # Linux that user is the host's, never root; Docker Desktop keeps the image's own.
-    non_root = "test \"$(id -u)\" != 0 && " if sys.platform == "linux" else ""
-    shell_graded("test \"$PWD\" = /testbed && " + non_root +
-                 "! touch /grader/should-not-exist 2>/dev/null && "
-                 "printf '1..1\\nok 1 - execution contract\\n'", "pass", "--grader-input", FIXTURE)
+    # The grader runs at its call's workdir, as the agent's user: on Linux the host's, never
+    # root, for which its image's trusted files are read-only; Docker Desktop keeps the image's
+    # own user.
+    contract = ("test \"$PWD\" = /testbed && test \"$(id -u)\" != 0 && "
+                "! touch /grader/should-not-exist 2>/dev/null && "
+                if sys.platform == "linux" else "test \"$PWD\" = /testbed && ")
+    shell_graded(contract + "printf '1..1\\nok 1 - execution contract\\n'", "pass", workdir="/testbed")
 
-    # A grader runs in the run's image unless it names its own, pinned by digest when assigned.
+    # A grader runs in the image its call names, pinned by digest when it is called.
     cache_command = "printf '1..1\\nok 1 - image identity\\n'"
-    own_rows, first_image = shell_graded(cache_command, "pass")
-    _, second_image = shell_graded(cache_command, "pass",
-                                             "--grader-image", args.grader_image)
+    _, first_image = shell_graded(cache_command, "pass", image=args.agent_image)
+    _, second_image = shell_graded(cache_command, "pass")
     assert first_image["image"] != second_image["image"]
-    assert first_image["image"] == configuration(own_rows)["environment"]["image"]
-    assert configuration(own_rows)["environment"]["image"] == run_record["environment"]["image"]
-    assert second_image["image"] == correct["image"] == second_image["grader"]["image"]
+    assert first_image["image"] == run_record["environment"]["image"]
+    assert second_image["image"] == correct["image"]
 
     _, timeout = shell_graded("echo 1..1; sleep 20; echo stale > stale.txt; echo 'ok 1 - late'",
-                              "error", "--grader-timeout", "1")
+                              "error", timeout=1)
     assert "timed out" in timeout["record"]["reason"], timeout["record"]
     for container in run("docker", "ps", "-aq").stdout.split():
         mounts = run("docker", "inspect", "--format", "{{json .Mounts}}", container,
@@ -264,13 +248,14 @@ def test_mode(args, mode):
         if mounts.returncode == 0:
             assert not any(m["Source"].startswith(str(data / "tmp") + "/")
                            for m in json.loads(mounts.stdout)), "grader container survived timeout"
-    # What the grader wrote is in its checkout, never in the run's workspace.
-    assert "stale.txt" not in alaya("ls", timeout["entry"]).stdout
+    # A grader stopped at its time limit left nothing after it.
+    assert "stale.txt" not in alaya("ls", timeout["answer"]).stdout
     _, retried = shell_graded("test ! -e stale.txt && printf '1..1\\nok 1 - clean retry\\n'", "pass")
-    # Every command's scratch, a grader's checkout included, is gone when the command ends.
+    # Every command's scratch is gone when the command ends.
     assert not list((data / "tmp").iterdir())
     alaya("html", directory / "report.html")
-    result = {"mode": mode, "task": task, "agent_image": run_record["environment"]["image"],
+    result = {"mode": mode, "root": root, "agent_image": run_record["environment"]["image"],
+              "grader_image": correct["image"],
               "blank": blank, "correct": correct, "again": again, "tampered": rejected,
               "budget_exit": partial.returncode, "model_requests": len(ScriptedModel.requests),
               "timeout": timeout["entry"], "retry": retried["entry"]}

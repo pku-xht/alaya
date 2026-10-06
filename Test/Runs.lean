@@ -66,7 +66,7 @@ private def filing (outputs : System.FilePath) : Executor :=
 /-- A runtime whose commands are `filing`'s, over a store and workspaces of the test's own. -/
 private def filingRuntime (model : Model) : TestM Driver.Runtime := do
   let rt ← runtime (echoing) (some model)
-  pure { rt with executor := filing rt.outputsDir }
+  pure { rt with executor := fun _ => pure (filing rt.outputsDir) }
 
 /-- What the command `command` printed, in a log. -/
 private def printed (log : Log Agent) (command : String) : Option String :=
@@ -76,15 +76,11 @@ private def printed (log : Log Agent) (command : String) : Option String :=
 
 /-- A run whose agent comments on what it does: before a command, and on what it printed. -/
 private def commenting : Run Agent :=
-  { routines := fun name =>
-      if name == agentRoutine then some fun _ => do
-        comment "before the command"
-        let ran ← exec "echo one"
-        comment s!"it printed {ran.output.output}"
-        return "done"
-      else none
-    call := ⟨agentRoutine, (testConfig testAgent).toJson⟩
-    after := grading }
+  runOf fun _ => do
+    comment "before the command"
+    let ran ← exec "echo one"
+    comment s!"it printed {ran.output.output}"
+    return "done"
 
 /-- The comments of a log, in order. -/
 private def comments (log : Log Agent) : Array String :=
@@ -109,32 +105,30 @@ private def script : Array Chat.Response := #[
   responseWith #[submitCall "s" "done"]]
 
 def suite : Suite := Testing.suite "runs" #[
-  test "new writes the root, the agent's call with the run's configuration, and the task" do
+  test "new writes the root, and a call of the agent is a notice with its configuration and its task" do
     withMini {} fun run => do
       let rt ← runtime (echoing) none
       let tip ← start rt run "the task"
       let log ← logAt rt tip
-      assertEqual "three entries" log.size 3
+      assertEqual "the root and the call" log.size 2
       check (log[0]! matches .arrived (.changed ..)) "the root is the workspace"
-      check (log[2]! matches .arrived (.said "the task")) "the task is a notice"
-      let config ← assertOk <| configOf log
-      assertEqual "the configuration reads back" config.toJson.compress
-        (testConfig ({} : Agents.MiniSwe.Config).toJson).toJson.compress
+      check (log[1]! matches .arrived (.called _)) "the call is a notice"
       match next run log with
-      | .hears #[0] notices => assertEqual "the agent's read takes the task" notices #[2]
-      | _ => fail "the agent reads its task next",
+      | .hears #[] notices => assertEqual "the run's read takes the call" notices #[1]
+      | _ => fail "the run reads its call next"
+      let settled := settle run log
+      assertEqual "the call opens with its configuration" ((callAt? settled 0).map (·.toJson.compress))
+        (some (testCall "the task").toJson.compress)
+      check (settled[3]? matches some (Event.opened #[0] _)) "in a frame of its own",
 
   test "the driver appends an entry an event, and replay agrees with the log at every prefix" do
     withMini {} fun run => do
       let (rt, last, stop) ← drive run (echoing) (← scriptedModel script)
-      match stop with
-      | .over (.returned value) verdict? =>
-        assertEqual "the agent's outcome" (value.getObjVal? "status" >>= Json.getStr? |>.toOption) (some "Submitted")
-        check verdict?.isNone "no grader was assigned"
-      | _ => fail "the agent is over"
+      check (stop matches .idle) "the agent is over"
       let log ← logAt rt last
+      assertEqual "the agent's outcome" (agentStatus log) "Submitted"
       -- Wherever the driver went on, replay of the log before says what it then logged.
-      for i in [3:log.size] do
+      for i in [2:log.size] do
         let agrees := match log[i]!, next run (log.extract 0 i) with
           | .answered frame key _, .ask asked => frame == asked.frame && key == asked.op.key
           | .heard frame notices, .hears reader taken => frame == reader && notices == taken
@@ -143,14 +137,14 @@ def suite : Suite := Testing.suite "runs" #[
           | .failed frame error, .fails ended given => frame == ended && error == given
           | _, _ => false
         check agrees s!"replay disagrees at {i}: {Render.eventSummary log[i]!}"
-      -- What follows the agent waits for a grader: the run ends with its verdict, not before.
+      -- Once the agent is over, the run waits for the next call.
       match next run log with
-      | .waits #[] _ => pure ()
-      | _ => fail "the agent is over, and the run waits for a grader"
+      | .waits #[] none => pure ()
+      | _ => fail "the agent is over, and the run waits for a call"
       -- Driven again from its end, a run whose agent is over stays as it is: nothing is appended.
       let count := (← assertOk rt.store.forest).entries.size
       let (again, stop) ← assertOk <| Driver.drive rt run last
-      check ((stop matches .over (.returned _) _) && again == last) "the run is still over"
+      check ((stop matches .idle) && again == last) "the run is still over"
       assertEqual "no entry written" (← assertOk rt.store.forest).entries.size count
       -- Three commands, each in a frame of its own under the agent's.
       let frames := log.filterMap fun | .opened frame ⟨"bash", _⟩ => some frame | _ => none
@@ -165,10 +159,10 @@ def suite : Suite := Testing.suite "runs" #[
         Result.fromIO Error.storage (seen.modify (·.push (hash, entry.elapsedMs)))
       let forest ← assertOk rt.store.forest
       let path := forest.path last
-      assertEqual "every entry after the start" ((← seen.get).map (·.1)) (path.extract 3 path.size)
+      assertEqual "every entry after the start" ((← seen.get).map (·.1)) (path.extract 2 path.size)
       let entries ← assertOk <| rt.store.entries forest last
       assertEqual "each with the time the store keeps" ((← seen.get).map (·.2))
-        ((entries.extract 3 entries.size).map (·.elapsedMs)),
+        ((entries.extract 2 entries.size).map (·.elapsedMs)),
 
   test "a run paused at a limit goes on where it stopped, to the log an uninterrupted run makes" do
     withMini {} fun run => do
@@ -197,7 +191,7 @@ def suite : Suite := Testing.suite "runs" #[
       let log ← logAt rt after[0]!
       check (!(log.any fun | .answered .. => true | _ => false)) "no answer was logged"
       let (finished, stop) ← assertOk <| Driver.drive rt run after[0]!
-      check (stop matches .over (.returned _) _) "the run finishes"
+      check (stop matches .idle) "the run finishes"
       assertEqual "the run is whole" (agentStatus (← logAt rt finished)) "Submitted",
 
   test "a failure of the provider that is no refusal for length stops the driver, with nothing logged" do
@@ -234,7 +228,7 @@ def suite : Suite := Testing.suite "runs" #[
       let log ← logAt rt forest.leaves[0]!
       check (log.back? matches some (.opened #[0, 0] _)) "the log ends with the call that asked for the command"
       let (finished, stop) ← assertOk <| Driver.drive rt run forest.leaves[0]!
-      check (stop matches .over (.returned _) _) "the run finishes"
+      check (stop matches .idle) "the run finishes"
       assertEqual "the command ran once in the log" ((← logAt rt finished).filter fun
         | .answered _ (.exec "echo one" _) _ => true
         | _ => false).size 1,
@@ -245,7 +239,7 @@ def suite : Suite := Testing.suite "runs" #[
       let model ← cached (← scriptedModel script)
       let (first, firstEnd, _) ← drive run (echoing) model
       let (second, secondEnd, stop) ← drive run (echoing) model
-      check (stop matches .over (.returned _) _) "the run finishes on what the cache kept"
+      check (stop matches .idle) "the run finishes on what the cache kept"
       assertEqual "the same events" (describe (← logAt second secondEnd)) (describe (← logAt first firstEnd)),
 
   test "a response costs the time its draw took, in every log that holds it" do
@@ -261,7 +255,7 @@ def suite : Suite := Testing.suite "runs" #[
       let sampleTimes (rt : Driver.Runtime) (tip : Hash) : TestM (Array Nat) := do
         let entries ← assertOk <| rt.store.entries (← assertOk rt.store.forest) tip
         pure <| entries.filterMap fun entry => match entry.event with
-          | .answered _ (.sample _) (.ok _) => some entry.elapsedMs
+          | .answered _ (.sample ..) (.ok _) => some entry.elapsedMs
           | _ => none
       let (first, firstEnd, _) ← drive run (echoing) (← assertOk <| Cache.persistent slow { directory })
       let times ← sampleTimes first firstEnd
@@ -270,7 +264,7 @@ def suite : Suite := Testing.suite "runs" #[
       -- passes, and every sample costs what its draw took.
       let (second, secondEnd, stop) ← drive run (echoing)
         (← assertOk <| Cache.persistent (← scriptedModel #[]) { directory })
-      check (stop matches .over (.returned _) _) "the run finishes on what the cache kept"
+      check (stop matches .idle) "the run finishes on what the cache kept"
       assertEqual "the times of the draws, not of the reads" (← sampleTimes second secondEnd) times
       -- The cache keeps a draw's time beside its response; a response as stored holds none.
       let mut kept := #[]
@@ -292,7 +286,7 @@ def suite : Suite := Testing.suite "runs" #[
       let (first, _) ← assertOk <| Driver.drive rt run tip
       -- The point before the first sample: the agent has read its task and the inbox.
       let log ← logAt rt first
-      let found := log.findIdx? (fun | .answered _ (.sample _) _ => true | _ => false)
+      let found := log.findIdx? (fun | .answered _ (.sample ..) _ => true | _ => false)
       let some sampleAt := found | fail "no sample"
       let forest ← assertOk rt.store.forest
       let point := (forest.path first)[sampleAt - 1]!
@@ -331,11 +325,9 @@ def suite : Suite := Testing.suite "runs" #[
       let (paused, _) ← assertOk <| Driver.drive rt run tip { samples? := some 2 }
       let (stopped, _) ← assertOk <| Driver.append rt.store run paused (.stopped "enough")
       let (ended, stop) ← assertOk <| Driver.drive rt run stopped
-      match stop with
-      | .over (.stopped reason) verdict? =>
-        assertEqual "the reason the stop gave" reason "enough"
-        check verdict?.isNone "no grader was assigned"
-      | _ => fail "the agent is over, stopped"
+      check (stop matches .idle) "the agent is over"
+      assertEqual "stopped, with the reason the stop gave"
+        ((lastCall? (← logAt rt ended)).bind (·.2) |>.map Render.endingSummary) (some "stopped: enough")
       check (!(← logAt rt ended).any fun | .returned #[0] _ | .failed #[0] _ => true | _ => false)
         "a stop marks no end of the agent's frames"
       assertError "a stop after the end" (Driver.append rt.store run ended (.stopped "again")) fun
@@ -344,35 +336,37 @@ def suite : Suite := Testing.suite "runs" #[
       assertError "a message after the end" (Driver.append rt.store run ended (.arrived (.said "late"))) fun
         | .input _ => true
         | _ => false
-      -- A grader is assigned once the agent is over, and not before; one that can be read.
-      let grader : Grader := { command := "true", image := recordedImage }
-      assertError "a grader while the agent runs" (Driver.append rt.store run paused (assignment grader)) fun
-        | .input message => contains message "still running"
+      -- A program is called once no call runs, and only one the run can build.
+      let grader := Call.event (graderCall "true")
+      assertError "a call while the agent runs" (Driver.append rt.store run paused grader) fun
+        | .input message => contains message "a call is running"
         | _ => false
-      assertError "a grader that cannot be read" (Driver.append rt.store run ended (.arrived (.assigned (.mkObj [])))) fun
-        | .input message => contains message "cannot be read"
+      assertError "a call of no program" (Driver.append rt.store run ended (Call.event { testCall with program := .mkObj [("name", "nothing")] })) fun
+        | .input message => contains message "no program named nothing"
         | _ => false
-      let (asked, _) ← assertOk <| Driver.append rt.store run ended (assignment grader)
+      assertError "a grader with no command" (Driver.append rt.store run ended (Call.event (graderCall ""))) fun
+        | .input message => contains message "needs its command"
+        | _ => false
+      let (asked, _) ← assertOk <| Driver.append rt.store run ended grader
       let log ← logAt rt asked
-      check ((next run log) matches .hears #[] _) "what follows the agent takes the grader"
-      -- While a grader runs, the agent is over too: a stop has no place, nor a message.
+      check ((next run log) matches .hears #[] _) "the run takes the call"
+      assertError "a second call, before the first is made" (Driver.append rt.store run asked grader) fun
+        | .input message => contains message "a call to make here already"
+        | _ => false
+      -- The grader is a call of its own: its command is asked for in its frame, and a stop ends it.
       let grading := settle run log
-      check ((next run grading) matches .ask { frame := #[], op := .external .., .. }) "the grader's program is asked for, in the run's own frame"
-      let forest ← assertOk rt.store.forest
+      check ((next run grading) matches .ask { frame := #[1], op := .exec .., .. }) "the grader's command, in its own frame"
       let mut during := asked
-      let mut forest := forest
+      let mut forest ← assertOk rt.store.forest
       for event in grading.extract log.size grading.size do
         let (hash, grown) ← assertOk <| rt.store.put forest { parent? := some during, event }
         during := hash
         forest := grown
-      assertError "a stop while a grader runs" (Driver.append rt.store run during (.stopped "again")) fun
-        | .input message => contains message "the agent is over"
+      assertError "a call while the grader runs" (Driver.append rt.store run during grader) fun
+        | .input message => contains message "a call is running"
         | _ => false
-      -- A log has one grader: a second has no place, while the first runs or after.
-      for (label, at') in [("where a grader is assigned", asked), ("while it runs", during)] do
-        assertError s!"a second grader {label}" (Driver.append rt.store run at' (assignment grader)) fun
-          | .input message => contains message "has its grader"
-          | _ => false,
+      let (halted, _) ← assertOk <| Driver.append rt.store run during (.stopped "no need")
+      check ((next run (← logAt rt halted)) matches .waits #[] none) "a stop ends the grader, and the run waits for a call",
 
   test "a log that is no trace of the run is refused, not driven" do
     withMini {} fun run => do
@@ -396,7 +390,7 @@ def suite : Suite := Testing.suite "runs" #[
     check (stop matches .paused _) "paused at the budget"
     assertEqual "nothing written while paused" (comments (← logAt rt paused)) #[]
     let (first, stop) ← assertOk <| Driver.drive rt run paused
-    check (stop matches .over (.returned _) none) "the agent is over"
+    check (stop matches .idle) "the agent is over"
     let log ← logAt rt first
     assertEqual "the program's comments, once each" (comments log) #["before the command", "it printed ok"]
     let at' := log.findIdx? fun | .commented "before the command" => true | _ => false
@@ -411,7 +405,7 @@ def suite : Suite := Testing.suite "runs" #[
       let (noted, entry) ← assertOk <| Notices.comment rt.store tip text
       check (entry.event matches .commented _) "a comment"
       let (second, stop) ← assertOk <| Driver.drive rt run noted
-      check (stop matches .over (.returned _) none) "the agent is over, from the comment too"
+      check (stop matches .idle) "the agent is over, from the comment too"
       assertEqual "that comment, then the program's" (comments (← logAt rt second))
         #[text, "before the command", "it printed ok"]
     -- A comment is taken at any entry, with nothing to check: where the agent is over, where a
@@ -434,7 +428,7 @@ def suite : Suite := Testing.suite "runs" #[
     assertStringEq "a change" (told (.changed default "  M a.txt\nI fixed it"))
       (Chat.Message.user "<intervention>\nA person changed the workspace while you were paused:\n  M a.txt\nI fixed it\n</intervention>").toStored.compress
     assertStringEq "a reply is the asking call's, not the model's to be told" (told (.replied #[0, 0] .yes)) "nothing"
-    assertStringEq "nor a grader" (told (.assigned .null)) "nothing",
+    assertStringEq "nor a call" (told (.called ⟨"grader", .null⟩)) "nothing",
 
   test "a commit appends the files and what changed, and the next command runs on them" do
     withMini {} fun run => do
@@ -501,7 +495,7 @@ def suite : Suite := Testing.suite "runs" #[
         let reached := (workspace? log).getD default
         assertEqual "no output reaches the workspace"
           ((← assertOk <| rt.workspaces.listEntries reached "").map (·.name)) #[]
-      finally rt.executor.close,
+      finally pure (),
 
   test "an output's file is named by its content, so a comment before the command changes no request" do
     withMini { recoverOutput := true } fun run => do
@@ -544,7 +538,7 @@ def suite : Suite := Testing.suite "runs" #[
       assertEqual "the first log's files" (printed log "ls") (some "work: a.txt b.txt; outputs: ")
       -- From the point after the first command, before the second sample.
       let samples := log.zipIdx.filterMap fun (event, i) =>
-        if event matches .answered _ (.sample _) _ then some i else none
+        if event matches .answered _ (.sample ..) _ then some i else none
       let forest ← assertOk rt.store.forest
       let (forked, _) ← assertOk <| Driver.drive rt run (forest.path first)[samples[1]! - 1]!
       assertEqual "the fork's files" (printed (← logAt rt forked) "ls") (some "work: a.txt; outputs: ")
@@ -561,7 +555,7 @@ def suite : Suite := Testing.suite "runs" #[
       let _ ← assertOk <| Driver.drive rt run (← start rt run)
       let forest ← assertOk rt.store.forest
       -- The directory to fold is given as a person types it, with its slash.
-      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" #[".venv/"]
+      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" #[".venv/"] run
       let entries ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "entries" >>= Json.getArr?)
       let changesOf (command : String) : TestM Json := do
         let some row := entries.find? fun row =>
@@ -600,11 +594,11 @@ def suite : Suite := Testing.suite "runs" #[
       -- A fork from just before the last sample, so the forest has two branches.
       let log ← logAt rt first
       let forest ← assertOk rt.store.forest
-      let some lastSample := (log.zipIdx.filter fun (e, _) => e matches .answered _ (.sample _) _).back?
+      let some lastSample := (log.zipIdx.filter fun (e, _) => e matches .answered _ (.sample ..) _).back?
         | fail "no sample"
       let _ ← assertOk <| Driver.drive rt run (forest.path first)[lastSample.2 - 1]!
       let forest ← assertOk rt.store.forest
-      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t"
+      let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (run := run)
       let entries ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "entries" >>= Json.getArr?)
       assertEqual "every entry once" entries.size forest.entries.size
       let envelopes ← assertOk <| Result.fromExcept Error.storage (page.getObjVal? "envelopes" >>= Json.getArr?)
@@ -622,7 +616,7 @@ def suite : Suite := Testing.suite "runs" #[
       for (request, _) in samplesOf run log do
         let digest := Model.requestDigest request
         -- The entry that answered this request, in the first branch.
-        let found := log.findIdx? (fun | .answered _ (.sample d) _ => d == digest | _ => false)
+        let found := log.findIdx? (fun | .answered _ (.sample _ d) _ => d == digest | _ => false)
         let some position := found | fail "no answer for a request"
         let some (_, i) := byHash.find? (·.1 == ((forest.path first)[position]!).hex) | fail "entry missing"
         let row := entries[i]!.getObjVal? "request" |>.toOption.getD .null

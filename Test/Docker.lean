@@ -4,7 +4,7 @@ import Test.Container
 import Test.Scripted
 import Alaya
 
-/-! The container executor and the grader's container, against a real docker daemon. -/
+/-! The container executor, and the containers of a run's calls, against a real docker daemon. -/
 
 namespace DockerTests
 
@@ -33,42 +33,47 @@ private def workspace : TestM System.FilePath := do
   assertOk <| Result.fromIO Error.storage (IO.FS.createDirAll work)
   pure work
 
-/-- A runtime whose commands run in a container of `settings`, with the outputs directory
-mounted where a command finds it, over the test's store and directory workspaces. -/
+/-- A runtime whose calls run their commands in a container of their own image and workdir, run
+as `settings` say, with the outputs directory mounted where a command finds it, over the test's
+store and directory workspaces. -/
 private def runtime (settings : Docker.Settings) (model? : Option Model)
     (outputsDir? : Option System.FilePath := none) : TestM Driver.Runtime := do
   let work ← workspace
   let outputsDir := outputsDir?.getD ((← scratch) / s!"outputs-{← IO.monoNanosNow}")
   IO.FS.createDirAll outputsDir
   let mounts := #[{ host := ← IO.FS.realPath outputsDir, container := Driver.outputsDir, readOnly := true }]
-  let executor ← assertOk (Docker.executor { settings with mounts })
   let store ← assertOk <| Store.create ((← scratch) / "entries")
-  pure { store, workspaces := ← workspaces, workDir := work, outputsDir, executor
-         scratch := (← scratch) / "external", workdir := settings.workdir, model?
-         graderUser? := settings.user? }
+  pure { store, workspaces := ← workspaces, workDir := work, outputsDir
+         executor := fun environment =>
+           Docker.executor { settings with image := environment.image, workdir := environment.workdir, mounts }
+         model := fun _ => match model? with
+           | some model => pure model
+           | none => throw <| .input "a call samples its model: name a --provider" }
 
-/-- Runs `k` with MiniSwe's run in `image` at `workdir`, its uname. -/
-private def withRun (image workdir : String)
-    (agent : Agents.MiniSwe.Config := miniConfig) (k : Run Agent → TestM Unit) : TestM Unit := do
-  let config : RunConfig := { Scripted.testConfig agent.toJson with
-    environment := { image, workdir, uname := Scripted.testUname } }
-  match config.run Scripted.testModelSpec with
+/-- Runs `k` with MiniSwe's run, configured by `agent`. -/
+private def withRun (agent : Agents.MiniSwe.Config := miniConfig) (k : Run Agent → TestM Unit) : TestM Unit :=
+  match Scripted.runOfConfig agent.toJson with
   | .ok run => k run
   | .error problem => fail problem
 
-/-- A grader that runs `command` in `image`, with `input?` its trusted files. -/
-private def grader (image command : String) (input? : Option Snapshot := none) (timeout : Nat := 900) :
-    Grader :=
-  { command, image, input?, timeoutSeconds := timeout }
+/-- Creates a run and calls its agent in `settings`' image, at its workdir. -/
+private def startIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Run Agent) : TestM Hash :=
+  Scripted.start rt run "t" none { image := settings.image, workdir := settings.workdir, uname := Scripted.testUname }
 
-/-- Grades the point `tip` of a run with `grader`: the agent stopped there, the grader assigned.
-Gives its verdict, and what its program left: the answer of the external operation. -/
-private def gradeAt (rt : Driver.Runtime) (run : Run Agent) (tip : Hash)
-    (grader : Grader) : TestM (Json × External) := do
-  let (graded, verdict) ← Scripted.grade rt run tip grader
+/-- Creates a run, calls its agent in `settings`' image, and drives it until the agent is about to
+read its inbox: the agent runs, and nothing has been asked of a model. -/
+private def openIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Run Agent) : TestM Hash := do
+  let (tip, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 0 }
+  pure tip
+
+/-- Grades the point `tip` of a run with the grader `call`: the agent stopped there, the grader
+called. Gives its verdict, and what its command left: its output and the workspace after it. -/
+private def gradeAt (rt : Driver.Runtime) (run : Run Agent) (tip : Hash) (call : CallConfig) :
+    TestM (Json × Execution) := do
+  let (graded, verdict) ← Scripted.grade rt run tip call
   let log ← Scripted.logAt rt graded
-  let some ran := log.findSome? fun | .answered _ _ (.ok (.external e)) => some e | _ => none
-    | fail "the grader ran no program"
+  let some ran := log.findSome? fun | .answered #[_] _ (.ok (.execution e)) => some e | _ => none
+    | fail "the grader ran no command"
   pure (verdict, ran)
 
 private def status (verdict : Json) : String := (verdict.getObjVal? "status" >>= Json.getStr?).toOption.getD "?"
@@ -166,17 +171,17 @@ def suite : Suite := Testing.suite "docker" #[
 
   test "a command runs in the container and the driver snapshots what it wrote" <| withDocker
     fun settings => do
-      withRun settings.image settings.workdir miniConfig fun run => do
+      withRun miniConfig fun run => do
         let rt ← runtime settings (some (← Scripted.scriptedModel #[toolResponse "echo made-in-container > made.txt"]))
         try
-          let (paused, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run) { samples? := some 1 }
+          let (paused, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 1 }
           let log ← Scripted.logAt rt paused
-          assertEqual "the run's image, from its configuration" (← assertOk <| configOf log).environment.image settings.image
+          assertEqual "the call's image, from its configuration" ((callAt? log 0).map (·.environment.image)) (some settings.image)
           -- The container wrote it, the host snapshotted it.
           assertEqual "snapshot"
             ((← assertOk ((← workspaces).readFile? ((workspace? log).getD default) "made.txt")).map (String.fromUTF8? ·))
             (some (some "made-in-container\n"))
-        finally rt.executor.close,
+        finally pure (),
 
   test "seeds a workspace from a path inside the image" <| withDocker
     fun settings => do
@@ -202,26 +207,25 @@ def suite : Suite := Testing.suite "docker" #[
     fun settings => do
       -- The image's own file shows the grader is in the container, not on the host.
       let check := "test -f /etc/alpine-release && echo 1..1 && echo \"ok 1 - $(cat made.txt)\""
-      withRun settings.image settings.workdir miniConfig fun run => do
+      withRun miniConfig fun run => do
         let rt ← runtime settings (some (← Scripted.scriptedModel #[toolResponse "echo made-in-container > made.txt"]))
         try
-          let (paused, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run) { samples? := some 1 }
-          let (verdict, _) ← gradeAt rt run paused (grader settings.image check)
+          let (paused, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 1 }
+          let (verdict, _) ← gradeAt rt run paused (Scripted.graderCall check settings.image)
           assertEqual "status" (status verdict) "pass"
           assertEqual "checks" ((verdict.getObjVal? "checks").toOption.map (·.compress))
             (some "[{\"directive\":\"\",\"name\":\"made-in-container\",\"ok\":true}]")
-        finally rt.executor.close,
+        finally pure (),
 
   test "a cut output is readable, read-only, in a recreated container, and stays out of the workspace" <| withDocker
     fun settings => do
       let recover := { miniConfig with recoverOutput := true }
-      withRun settings.image settings.workdir recover fun run => do
+      withRun recover fun run => do
         let model ← Scripted.scriptedModel #[
           toolResponse "awk 'BEGIN {for(i=0;i<6000;i++) printf \"a\"; printf \"MIDDLE\"; for(i=0;i<6000;i++) printf \"z\"}'",
           toolResponse "grep -c MIDDLE /alaya/outputs/*.txt; touch /alaya/outputs/x 2>/dev/null || echo read-only; ls -A"]
         let first ← runtime settings (some model)
-        let (saved, _) ← try assertOk <| Driver.drive first run (← Scripted.start first run) { samples? := some 1 }
-          finally first.executor.close
+        let (saved, _) ← assertOk <| Driver.drive first run (← startIn settings first run) { samples? := some 1 }
         -- A later command: a new container, a wiped workdir, and outputs written afresh from the log.
         IO.FS.removeDirAll (← workspace)
         let second ← runtime settings (some model)
@@ -239,62 +243,50 @@ def suite : Suite := Testing.suite "docker" #[
           IO.FS.createDirAll checkout
           assertOk <| (← workspaces).materialize ((workspace? log).getD default) checkout
           assertEqual "snapshot" ((← checkout.readDir).map (·.fileName)) #[]
-        finally second.executor.close,
+        finally pure (),
 
-  test "a grader has no network, reads its input at /grader and cannot write it, and keeps stderr apart" <| withDocker
+  test "a grader runs in a container of its own, with no network, keeps stderr apart, and writes in the workspace" <| withDocker
     fun settings => do
-      let input := (← scratch) / "input"
-      writeSpec input #[("data.txt", "trusted")]
-      let inputId ← assertOk <| (← workspaces).snapshot input
       -- Without network the routing table has its header line and nothing else.
       let command := "echo noise >&2; test \"$(wc -l < /proc/net/route)\" = 1 && " ++
-        "test \"$(pwd)\" = /workspace && test \"$(cat /grader/data.txt)\" = trusted && " ++
-        "! touch /grader/written 2>/dev/null && echo checked > graded.txt && " ++
+        "test \"$(pwd)\" = /workspace && test ! -e left-by-agent.txt && echo checked > graded.txt && " ++
         "printf '1..1\\nok 1 - isolated\\n'"
-      withRun settings.image settings.workdir miniConfig fun run => do
-        let rt ← runtime settings none
+      withRun miniConfig fun run => do
+        let rt ← runtime settings (some (← Scripted.scriptedModel #[toolResponse "touch /tmp/left-by-agent.txt"]))
         try
-          let (verdict, ran) ← gradeAt rt run (← Scripted.start rt run) (grader settings.image command (some inputId))
+          let (paused, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 1 }
+          let (verdict, ran) ← gradeAt rt run paused (Scripted.graderCall command settings.image)
           assertEqual "status" (status verdict, (verdict.getObjVal? "reason" >>= Json.getStr?).toOption) ("pass", some "")
-          assertEqual "stdout is the TAP" ran.stdout "1..1\nok 1 - isolated\n"
-          assertEqual "stderr apart" ran.stderr "noise\n"
-          check (!(← (input / "written").pathExists)) "the input stays as it was"
-          check (← assertOk ((← workspaces).readFile? ran.checkout "graded.txt")).isSome
-            "the checkout as the grader left it"
-        finally rt.executor.close,
+          assertEqual "stdout is the TAP" ran.output.output "1..1\nok 1 - isolated\n"
+          assertEqual "stderr apart" ran.output.stderr? (some "noise\n")
+          check (← assertOk ((← workspaces).readFile? ran.workspace "graded.txt")).isSome
+            "the workspace as the grader left it"
+        finally pure (),
 
-  test "a failing check is a fail with its score, whatever the exit status, and the run's workspace stays" <| withDocker
+  test "a failing check is a fail with its score, whatever the exit status" <| withDocker
     fun settings => do
       let failing := "echo junk > graded.txt; printf '1..3\\nok 1 - builds\\nnot ok 2 - parses\\nok 3 - reports\\n'"
       let passing := "printf '1..1\\nok 1 - alone\\n'; exit 7"
-      withRun settings.image settings.workdir miniConfig fun run => do
+      withRun miniConfig fun run => do
         let rt ← runtime settings none
         try
-          let tip ← Scripted.start rt run
-          let some before := workspace? (← Scripted.logAt rt tip) | fail "the run has a workspace"
+          let tip ← openIn settings rt run
           -- The same point, graded by two graders: each on a fork of its own.
-          let (graded, failed) ← Scripted.grade rt run tip (grader settings.image failing)
-          let (other, passed) ← Scripted.grade rt run tip (grader settings.image passing)
+          let (graded, failed) ← Scripted.grade rt run tip (Scripted.graderCall failing settings.image)
+          let (other, passed) ← Scripted.grade rt run tip (Scripted.graderCall passing settings.image)
           check (graded != other) "a point graded again is another log"
           let field (verdict : Json) (name : String) : String :=
             ((verdict.getObjVal? name).toOption.getD .null).compress
           let read (verdict : Json) := #["status", "passed", "total", "exit_code", "reason"].map (field verdict)
           assertEqual "a failing check" (read failed) #["\"fail\"", "2", "3", "0", "\"failed: parses\""]
           assertEqual "the exit status decides nothing" (read passed) #["\"pass\"", "1", "1", "7", "\"\""]
-          let log ← Scripted.logAt rt graded
-          assertEqual "the run's workspace is where it was" ((workspace? log).map (·.hex)) (some before.hex)
-          let some ran := log.findSome? fun | .answered _ _ (.ok (.external e)) => some e | _ => none
-            | fail "the grader ran no program"
-          check (← assertOk ((← workspaces).readFile? ran.checkout "graded.txt")).isSome "what the grader wrote is in its checkout"
-          check (← assertOk ((← workspaces).readFile? before "graded.txt")).isNone "and not in the run's workspace"
-          check (!(← (rt.scratch / "checkout").pathExists) && !(← (rt.scratch / "input").pathExists))
-            "the grader's checkout and input are removed"
-          -- The report shows what a grader left in its checkout, on the answer of its program.
+          -- The report shows what a grader's command changed, as any command's.
           let forest ← assertOk rt.store.forest
-          let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t"
+          let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (run := run)
           let rows := ((page.getObjVal? "entries" >>= Json.getArr?).toOption.getD #[]).filter fun row =>
-            (row.getObjVal? "e" >>= (·.getObjVal? "k") >>= Json.getStr?).toOption == some "external"
-          assertEqual "the graders' answers" rows.size 2
+            (row.getObjVal? "f").toOption.any (·.compress == "[1]") &&
+            (row.getObjVal? "e" >>= (·.getObjVal? "k") >>= Json.getStr?).toOption == some "exec"
+          assertEqual "the graders' commands" rows.size 2
           let changed (row : Json) : Array String :=
             ((row.getObjVal? "changes" >>= (·.getObjVal? "changes") >>= Json.getArr?).toOption.getD #[]).map fun change =>
               (change.getObjVal? "path" >>= Json.getStr?).toOption.getD "?"
@@ -302,82 +294,65 @@ def suite : Suite := Testing.suite "docker" #[
             ((row.getObjVal? "e" >>= (·.getObjVal? "command") >>= Json.getStr?).toOption.getD "").startsWith "echo junk"
           assertEqual "what the first wrote" ((rows.filter wrote).map changed) #[#["graded.txt"]]
           assertEqual "the second wrote nothing" ((rows.filter (!wrote ·)).map changed) #[#[]]
-        finally rt.executor.close,
+        finally pure (),
 
-  test "a limit pauses the agent, and never a grader" <| withDocker
+  test "a limit pauses a grader as it does an agent, and the next resume goes on" <| withDocker
     fun settings => do
-      withRun settings.image settings.workdir miniConfig fun run => do
+      withRun miniConfig fun run => do
         let rt ← runtime settings none
         try
-          let tip ← Scripted.start rt run
+          let tip ← openIn settings rt run
           -- The budget is spent before the agent's first read: the run pauses there.
           let spent : Driver.Limits := { budgetMs? := some 0 }
           let (paused, stop) ← assertOk <| Driver.drive rt run tip spent
-          check ((stop matches .paused _) && paused == tip) "paused before anything"
-          -- Stopped there and assigned, a grader runs under the same limit, budget or not.
+          check (stop matches .paused _) "paused before the agent's first read"
           let (stopped, _) ← assertOk <| Driver.append rt.store run paused (.stopped "out of time")
           let (asked, _) ← assertOk <| Driver.append rt.store run stopped
-            (assignment (grader settings.image "sleep 0.3; printf '1..1\\nok 1\\n'"))
-          let (graded, stop) ← assertOk <| Driver.drive rt run asked spent
-          let .over (.stopped "out of time") (some verdict) := stop | fail "the agent is stopped, and the grader gives its verdict"
+            (Call.event (Scripted.graderCall "printf '1..1\\nok 1\\n'" settings.image))
+          let (held, stop) ← assertOk <| Driver.drive rt run asked spent
+          check (stop matches .paused _) "the grader pauses before its command"
+          let (graded, stop) ← assertOk <| Driver.drive rt run held
+          check (stop matches .idle) "and runs on without the budget"
+          let some (_, some (.returned verdict)) := lastCall? (← Scripted.logAt rt graded) | fail "the grader's verdict"
           assertEqual "status" (status verdict) "pass"
-          let forest ← assertOk rt.store.forest
-          let entries ← assertOk <| rt.store.entries forest graded
-          let took := entries.foldl (fun ms entry => match entry.event with
-            | .answered _ (.external ..) _ => ms + entry.elapsedMs
-            | _ => ms) 0
-          check (took >= 300) s!"the grader ran its course, past the budget: {took} ms"
-        finally rt.executor.close,
+        finally pure (),
 
-  test "a grader past its timeout is an error, and its container is removed" <| withDocker
+  test "a grader past its timeout is an error, with what it printed before" <| withDocker
     fun settings => do
       -- Complete TAP before the timeout does not make it a pass.
-      withRun settings.image settings.workdir miniConfig fun run => do
+      withRun miniConfig fun run => do
         let rt ← runtime settings none
         try
-          let (verdict, ran) ← gradeAt rt run (← Scripted.start rt run)
-            (grader settings.image "printf '1..1\\nok 1\\n'; sleep 30" none 1)
+          let (verdict, ran) ← gradeAt rt run (← openIn settings rt run)
+            (Scripted.graderCall "printf '1..1\\nok 1\\n'; sleep 30" settings.image 1)
           assertEqual "status" (status verdict) "error"
-          assertEqual "no exit status" ran.exitCode? none
-          assertEqual "reason" ((verdict.getObjVal? "reason" >>= Json.getStr?).toOption) (some "timed out after 1 seconds")
-          assertEqual "what it printed before is kept" ran.stdout "1..1\nok 1\n"
-          let left ← IO.Process.output {
-            cmd := "docker", args := #["ps", "--all", "--quiet", "--filter", "name=alaya-once-"] }
-          assertEqual "no grader container left" left.stdout.trimAscii.toString ""
-        finally rt.executor.close,
+          assertEqual "no exit status" ran.output.exitCode? none
+          check (Scripted.contains ((verdict.getObjVal? "reason" >>= Json.getStr?).toOption.getD "") "timed out after 1 seconds")
+            "the reason says it timed out"
+          assertEqual "what it printed before is kept" ran.output.output "1..1\nok 1\n"
+        finally pure (),
 
-  test "a grader in another image than the run's, and one whose image cannot start" <| withDocker
+  test "a grader in another image than the agent's, at another workdir; one whose image cannot start stops resume" <| withDocker
     fun settings => do
-      -- The run's own image does not exist, so only the grader's can run it.
-      withRun recordedImage settings.workdir miniConfig fun run => do
+      withRun miniConfig fun run => do
         let rt ← runtime settings none
         try
-          let tip ← Scripted.start rt run
+          -- The agent's own image does not exist: only the grader's runs anything.
+          let (tip, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run) { samples? := some 0 }
           let (_, own) ← Scripted.grade rt run tip
-            (grader settings.image "test -f /etc/alpine-release && printf '1..1\\nok 1\\n'")
-          assertEqual "in its own image" (status own) "pass"
-          -- A grader that cannot be started is an error verdict.
-          let (_, missing) ← Scripted.grade rt run tip (grader "alaya.invalid/nope@sha256:0" "true")
-          assertEqual "cannot start" (status missing) "error"
-        finally rt.executor.close,
+            (Scripted.graderCall "test -f /etc/alpine-release && test \"$(pwd)\" = /testbed && printf '1..1\\nok 1\\n'"
+              settings.image (workdir := "/testbed"))
+          assertEqual "in its own image, at its workdir" (status own) "pass"
+          -- A grader whose image cannot start is no verdict: nothing is logged for its command.
+          let (stopped, _) ← assertOk <| Driver.append rt.store run tip (.stopped "to grade this point")
+          let (asked, _) ← assertOk <| Driver.append rt.store run stopped
+            (Call.event (Scripted.graderCall "true" "alaya.invalid/nope@sha256:0"))
+          assertError "cannot start" (Driver.drive rt run asked) fun
+            | .environment _ => true
+            | _ => false
+        finally pure (),
 
-  test "a run at another workdir runs its commands there, and its grader finds the checkout there" <| withDocker
-    fun settings => do
-      let settings := { settings with workdir := "/testbed" }
-      let command := "test \"$(pwd)\" = /testbed && test \"$(cat where.txt)\" = /testbed && printf '1..1\\nok\\n'"
-      withRun settings.image "/testbed" miniConfig fun run => do
-        let rt ← runtime settings (some (← Scripted.scriptedModel #[toolResponse "pwd > where.txt"]))
-        try
-          let (paused, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run) { samples? := some 1 }
-          let log ← Scripted.logAt rt paused
-          assertEqual "the command ran there"
-            ((← assertOk ((← workspaces).readFile? ((workspace? log).getD default) "where.txt")).map (String.fromUTF8? ·))
-            (some (some "/testbed\n"))
-          let (verdict, _) ← gradeAt rt run paused (grader settings.image command)
-          assertEqual "graded there" (status verdict) "pass"
-        finally rt.executor.close,
-
-  test "a workdir is an absolute, clean path, and not one the grader mounts" <| withDocker
+  test "a workdir is an absolute, clean path, and not one alaya mounts" <| withDocker
     fun _ => do
       for good in ["/workspace", "/testbed", "/home/user/project"] do
         assertOk <| Docker.checkWorkdir good #["/grader", "/out"]

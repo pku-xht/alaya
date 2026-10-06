@@ -86,7 +86,7 @@ private def shaped (value : Json) (required : List (String × (Json → Bool)))
 
 def valueKind? (value : Json) : Option ValueKind :=
   if shaped value [("status", isText), ("passed", isNumber), ("total", isNumber), ("checks", isArray)]
-      ["reason", "exit_code", "elapsed_ms"] then some .verdict
+      ["reason", "exit_code"] then some .verdict
   else if shaped value [("output", isText), ("exit_code", orNull isNumber), ("error", orNull isText),
       ("file", orNull isText)] then some .command
   else if shaped value [("status", isText), ("submission", isText)] ["reason"] then some .outcome
@@ -136,11 +136,18 @@ def tokens (usage : Chat.TokenUsage) : String :=
 /-- Milliseconds as seconds with one decimal: `12.3 s`. -/
 def seconds (ms : Nat) : String := s!"{ms / 1000}.{(ms % 1000) / 100} s"
 
+/-- A call of a program, by its name and, for an agent, its model's: `mini-swe, gpt-6-luna`. -/
+def callTitle (call : RoutineCall) : String :=
+  match (call.arguments.getObjVal? "program" >>= (·.getObjVal? "model") >>= (·.getObjVal? "name") >>=
+      Json.getStr?).toOption with
+  | some model => s!"{call.name}, {model}"
+  | none => call.name
+
 def noticeSummary : Notice → String
   | .said message => s!"said {(flatten message 70).quote}"
   | .changed workspace summary => s!"changed → {short workspace}: {flatten summary 60}"
   | .replied to reply => s!"replied to {to.render}: {flatten reply.line 60}"
-  | .assigned grader => s!"assigned grader {(flatten (argumentsSummary grader) 60).quote}"
+  | .called call => s!"call {callTitle call}"
 
 /-- An event in a line. -/
 def eventSummary : Event Agent → String
@@ -149,7 +156,7 @@ def eventSummary : Event Agent → String
     if notices.isEmpty then "inbox: nothing" else s!"inbox: takes {notices.toList}"
   | .asked _ question => s!"ask {(flatten question.text 70).quote}"
   | .answered _ _ (.error error) => s!"failed: {flatten error}"
-  | .answered _ (.sample _) (.ok (.response response)) =>
+  | .answered _ (.sample ..) (.ok (.response response)) =>
     if response.toolCalls.isEmpty then s!"sample → says {(flatten (response.content?.getD "") 60).quote}"
     else s!"sample → " ++ "; ".intercalate (response.toolCalls.map callSummary).toList
   | .answered _ (.exec command _) (.ok (.execution e)) =>
@@ -160,18 +167,10 @@ def eventSummary : Event Agent → String
     s!"exec {flatten command 60} → {status}, {short e.workspace}"
   | .answered _ .time (.ok (.timing t)) =>
     s!"time {seconds t.spentMs}" ++ (t.budgetMs?.map (s!" of {seconds ·}") |>.getD "")
-  | .answered _ (.external command image ..) (.ok (.external e)) =>
-    let status := match e.exitCode?, e.error? with
-      | some code, _ => s!"exit {code}"
-      | none, some error => flatten error 40
-      | none, none => "no status"
-    s!"external {flatten command 50} in {flatten image 30} → {status}"
   | .answered .. => "answered"
-  | .opened _ call =>
-    if call.name == agentRoutine then
-      let name (field : String) := (call.arguments.getObjVal? field >>= (·.getObjVal? "name") >>=
-        Json.getStr?).toOption.getD "?"
-      s!"open agent: {name "agent"}, {name "model"}"
+  | .opened frame call =>
+    -- A call the run makes is told by its program and model, not by its whole configuration.
+    if frame.size == 1 then s!"open {callTitle call}"
     else
       let arguments := argumentsSummary call.arguments
       labelled s!"open {call.name}" (if arguments.isEmpty then "" else (flatten arguments 60).quote)
@@ -180,29 +179,23 @@ def eventSummary : Event Agent → String
   | .stopped reason => s!"stopped: {flatten reason}"
   | .commented text => s!"# {flatten text}"
 
-/-- How a run whose agent is over stands, in a line: how the agent ended, and the verdict once
-the run is graded — `done: fail 352/464`, `stopped: pass 2/2` — or what the agent gave, or why
-it ended, while it is not. -/
-def endingSummary (agent : AgentEnd) (verdict? : Option Json) : String :=
-  let graded := verdict?.map valueSummary
-  match agent with
-  | .returned value => s!"done: {graded.getD (valueSummary value)}"
-  | .failed error => s!"failed: {graded.getD (flatten error)}"
-  | .stopped reason => s!"stopped: {graded.getD (flatten reason)}"
+/-- How a call ended, in a line: what it gave — `done: pass 48/48`, `done: Submitted` — or why it
+ended. -/
+def endingSummary : CallEnd → String
+  | .returned value => s!"done: {valueSummary value}"
+  | .failed error => s!"failed: {flatten error}"
+  | .stopped reason => s!"stopped: {flatten reason}"
 
-/-- What a run does next, in a line: how it is over, what it waits for, or what it asks. `agent?`
-is how the agent ended, once it has. -/
-def nextSummary (question? : Option Question) (agent? : Option AgentEnd) : Next Agent → String
-  | .done value =>
-    match agent? with
-    | some agent => endingSummary agent (some value)
-    | none => s!"done: {valueSummary value}"
+/-- What a run does next, in a line: what it waits for, or what it asks. `ended?` is how its last
+call ended, once it has: a run that calls nothing stands as that call ended. -/
+def nextSummary (question? : Option Question) (ended? : Option CallEnd) : Next Agent → String
+  | .done value => s!"done: {valueSummary value}"
   | .raised error => s!"failed: {flatten error}"
   | .waits frame _ =>
-    match question?, agent? with
+    match question?, ended? with
     | some question, _ => s!"waits for a reply: {flatten question.text 70}"
-    | none, some agent => if frame.isEmpty then endingSummary agent none else s!"waits for a notice in {frame.render}"
-    | none, none => if frame.isEmpty then "waits for a workspace" else s!"waits for a notice in {frame.render}"
+    | none, some ended => if frame.isEmpty then endingSummary ended else s!"waits for a notice in {frame.render}"
+    | none, none => if frame.isEmpty then "waits for a call" else s!"waits for a notice in {frame.render}"
   | .ask call => s!"next: {call.op.describe}"
   | .hears frame _ => s!"next: a read of the inbox in {frame.render}"
   | .questions frame _ => s!"next: a question in {frame.render}"
@@ -226,30 +219,30 @@ structure Row where
   summary : String
   /-- What the run does next, on an entry that ends a log. -/
   status? : Option String := none
-  /-- On a root: the agent, the model, and the task, once the log has them. -/
+  /-- On a root: the program its first call names, and the model, once the log has them. -/
   title? : Option String := none
   /-- Whether the entry is a comment. -/
   comment : Bool := false
   deriving Inhabited
 
 /-- Every entry of the forest, as the tree shows it: what each log does next at its end, and on
-each root the agent and the model of its run. -/
-def rows (store : Store) (forest : Forest) : Result (Array Row) := do
-  let rows ← walk store forest (#[] : Array Row) fun rows visit => do
+each root the program and the model of its first call. -/
+def rows (store : Store) (forest : Forest) (run : Run Agent := Run.alaya) : Result (Array Row) := do
+  let rows ← walk (run := run) store forest (#[] : Array Row) fun rows visit => do
     let isLeaf := (forest.childrenOf visit.hash).isEmpty
     let status? := if !isLeaf then none else match visit.next? with
-      | some next => some (nextSummary visit.question? visit.agent? next)
+      | some next => some (nextSummary visit.question? (visit.last?.bind (·.2)) next)
       | none => some "the run cannot be read"
     pure (rows.push { hash := visit.hash, parent? := visit.entry.parent?, position := visit.position
                       summary := eventSummary visit.entry.event, status?
                       comment := visit.entry.event matches .commented ..
-                      title? := if visit.position == 1 then visit.config?.map fun config =>
-                        let name (json : Json) := (json.getObjVal? "name" >>= Json.getStr?).toOption.getD "?"
-                        s!"{name config.agent}, {name config.model}" else none })
-  -- A run's title is its root's.
+                      title? := match visit.entry.event with
+                        | .opened #[0] call => some (callTitle call)
+                        | _ => none })
+  -- A run's title is its first call's, on its root.
   let titles : Std.HashMap Hash String := rows.foldl (init := {}) fun titles row =>
-    match row.title?, row.parent? with
-    | some title, some root => titles.insert root title
+    match row.title?, (forest.path row.hash)[0]? with
+    | some title, some root => if titles.contains root then titles else titles.insert root title
     | _, _ => titles
   pure <| rows.map fun row =>
     if row.parent?.isNone then { row with title? := titles.get? row.hash } else { row with title? := none }

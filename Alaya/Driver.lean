@@ -3,14 +3,14 @@ import Alaya.Store
 import Alaya.Cache
 import Alaya.Provider
 import Alaya.Workspaces
-import Alaya.Executor.Docker
 
 /-! The driver: the only part that carries out what a program asks. It keeps the interpreter
 live, asks it what is next after the log, and either carries out the operation it asks for and
-appends the answer, or appends the mark it makes, an entry at a time, until the agent is over and no grader is assigned,
-the run is graded, it waits for a person, or this invocation reaches a limit. "Execution is an external operation
-rather than a constant within type theory" (Hancock and Setzer 2000): this is the one loop that
-need not end. See `docs/agent-api.md` §10.
+appends the answer, or appends the mark it makes, an entry at a time, until no call is running,
+a call waits for a person, or this invocation reaches a limit. Each call's commands run in a
+container of the call's own image, and each sample is drawn from the model it names.
+"Execution is an external operation rather than a constant within type theory" (Hancock and
+Setzer 2000): this is the one loop that need not end. See `docs/agent-api.md` §10.
 
 Resuming after a crash is no different from going on: the operation that was being carried out
 when the driver stopped is asked for again. A command runs on the version of the workspace the
@@ -37,7 +37,7 @@ def buildModel (spec : Models.Spec) (provider : Provider.Provider) (cacheDir : S
 /-! ## The world a run is driven in -/
 
 /-- What a run is driven with: where its entries and snapshots are kept, the directory its
-workspace is restored to, where its commands run, the model, and how graders' containers run. -/
+workspace is restored to, where a call's commands run, and the models its samples name. -/
 structure Runtime where
   store : Store
   workspaces : Workspaces
@@ -47,22 +47,16 @@ structure Runtime where
   /-- Where the whole output of each command is written, for the executor to mount at
   `outputsDir`; derived from the log, and holding nothing durable. -/
   outputsDir : System.FilePath
-  /-- Where a grader's checkout and input are restored. -/
-  scratch : System.FilePath
-  executor : Executor
-  /-- Where the workspace is mounted in a container. -/
-  workdir : String
-  /-- None when no provider was named: a run that needs a sample then stops with an error. -/
-  model? : Option Model := none
-  /-- The user a grader's container runs as. -/
-  graderUser? : Option String := none
+  /-- An executor for a call that runs in `environment`: a container of its image, started on
+  the work directory at its first command, and closed by the driver. -/
+  executor : Environment → Result Executor
+  /-- The model of a spec, which a sample names. It fails when no provider was named: a run that
+  samples then stops with an error. -/
+  model : Models.Spec → Result Model
 
 /-- Where a command finds the whole output of an earlier command, read-only, outside any
 workdir. -/
 def outputsDir : String := "/alaya/outputs"
-
-/-- Where a grader finds its trusted input, read-only. -/
-def graderInput : String := "/grader"
 
 /-- What one invocation allows. Neither limit is recorded, and a run paused at one goes on with
 the next `run`. -/
@@ -74,12 +68,11 @@ structure Limits where
 
 /-- Why the driver stopped. -/
 inductive Stop where
-  /-- The agent is over, however it ended: the run waits for a grader, or, graded, has ended
-  with its verdict. -/
-  | over (agent : AgentEnd) (verdict? : Option Json)
-  /-- The program waits for a notice: a reply to `question?`, or, without one, the task. -/
+  /-- No call is running: the run waits for a person to call a program. -/
+  | idle
+  /-- A call waits for a notice: a reply to `question?`, or, without one, any. -/
   | waits (frame : Frame) (question? : Option Question)
-  /-- This invocation reached a limit; the next `run` goes on from here. -/
+  /-- This invocation reached a limit; the next `resume` goes on from here. -/
   | paused (reason : String)
   deriving Inhabited
 
@@ -89,13 +82,6 @@ abbrev OnEntry := Hash → Entry → Result Unit
 private def nowMs : Result Nat := Result.fromIO Error.storage IO.monoMsNow
 
 private def io (action : IO α) : Result α := Result.fromIO Error.storage action
-
-/-- Empties `dir`, creating it if needed. -/
-private def emptyDir (dir : System.FilePath) : Result Unit := do
-  Workspaces.makeWritable dir
-  io do
-    if ← dir.pathExists then IO.FS.removeDirAll dir
-    IO.FS.createDirAll dir
 
 /-- The file of `outputsDir` that holds `output`, named by its content alone: the first twelve
 hex digits of its SHA-256. An agent is shown the name, so it says nothing of where in a log the
@@ -123,11 +109,9 @@ private structure Checkout where
 context is the program's to deal with: it is the answer, an error in the provider's own words,
 and trying again would not help. Anything else — a provider that cannot be reached, a key it
 rejects, a response it garbles, a full disk — stops the driver with nothing logged, and the
-next `run` asks again. -/
-private def modelAnswer (rt : Runtime) (draw : Nat) (request : Chat.Request) :
+next `resume` asks again. -/
+private def modelAnswer (model : Model) (draw : Nat) (request : Chat.Request) :
     Result (Except String Chat.Response) := do
-  let some model := rt.model?
-    | throw <| .input "the run asks the model for a response: name a --provider"
   tryCatch (do
       let responses ← (← model.sample request).nextN (draw + 1)
       let some response := responses[draw]?
@@ -137,46 +121,29 @@ private def modelAnswer (rt : Runtime) (draw : Nat) (request : Chat.Request) :
       | .contextExceeded message => pure (.error message)
       | error => throw error
 
-/-- Runs a grader's program: a fresh checkout of the workspace, the input at `graderInput`, a
-container of its image with no network, and a snapshot of the checkout as it left it. -/
-private def runExternal (rt : Runtime) (version : Snapshot) (command image : String)
-    (input? : Option Snapshot) (timeoutSeconds : Nat) : Result External := do
-  let checkout := rt.scratch / "checkout"
-  let input := rt.scratch / "input"
-  emptyDir checkout
-  emptyDir input
-  try
-    rt.workspaces.materialize version checkout
-    if let some id := input? then rt.workspaces.materialize id input
-    let checkoutPath ← io (IO.FS.realPath checkout)
-    let inputPath ← io (IO.FS.realPath input)
-    let mounts := #[{ host := checkoutPath, container := rt.workdir : Executor.Docker.Mount }] ++
-      (if input?.isSome then #[{ host := inputPath, container := graderInput, readOnly := true }]
-       else #[])
-    let started ← nowMs
-    let captured ← io <| Executor.Docker.runOnce { image, user? := rt.graderUser? } mounts rt.workdir
-      command timeoutSeconds
-    let elapsedMs := (← nowMs) - started
-    pure { exitCode? := captured.exitCode?.map fun c => Int.ofNat c.toNat
-           stdout := captured.stdout, stderr := captured.stderr
-           checkout := ← rt.workspaces.snapshot checkout, elapsedMs, error? := captured.stopped? }
-  finally
-    Workspaces.makeWritable rt.scratch
-    io do
-      if ← checkout.pathExists then IO.FS.removeDirAll checkout
-      if ← input.pathExists then IO.FS.removeDirAll input
-
 /-- Whether the event is a response of the model: a draw taken. A refusal took none. -/
 private def sampled : Event Agent → Bool
-  | .answered _ (.sample _) (.ok _) => true
+  | .answered _ (.sample ..) (.ok _) => true
   | _ => false
 
+/-- The executor of the call in `#[index]`, the one the driver holds when it is that call's, or
+a new one when it is another's, which is closed first: a call's commands share its container,
+and no two calls share one. -/
+private def executorFor (rt : Runtime) (held : IO.Ref (Option (Nat × Executor))) (log : Log Agent)
+    (frame : Frame) : Result (Executor × Bool) := do
+  let index := frame[0]?.getD 0
+  match ← io held.get with
+  | some (at', executor) => if at' == index then return (executor, false) else io executor.close
+  | none => pure ()
+  let executor ← rt.executor (← callOf log frame).environment
+  io (held.set (some (index, executor)))
+  pure (executor, true)
+
 /-- Drives `run` on from the entry `tip`, appending each event as an entry and calling `onEntry`
-with it, until its agent is over and it waits for a grader, it is graded, it waits for a person,
-or it reaches one of `limits`. Gives the last entry and why
-it stopped. A sample takes the next draw of its request: the first when the tip has no other
-continuation that sampled, so a run that crashed takes the response the cache kept, and the
-next one when it has, so running a point again is a new draw. -/
+with it, until no call is running, a call waits for a person, or it reaches one of `limits`.
+Gives the last entry and why it stopped. A sample takes the next draw of its request: the first
+when the tip has no other continuation that sampled, so a run that crashed takes the response
+the cache kept, and the next one when it has, so running a point again is a new draw. -/
 partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits := {})
     (onEntry : OnEntry := fun _ _ => pure ()) : Result (Hash × Stop) := do
   let forest ← rt.store.forest
@@ -186,12 +153,13 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
   -- Another log's files may be there; this one's are written afresh.
   io do if ← rt.outputsDir.pathExists then IO.FS.removeDirAll rt.outputsDir
   let started ← nowMs
+  let held ← io (IO.mkRef (none : Option (Nat × Executor)))
   let rec loop (forest : Forest) (tip : Hash) (log : Log Agent) (replayer : Replayer Agent)
       (spent stamp samples : Nat) (checkout : Checkout) : Result (Hash × Stop) := do
     -- Which limit, if any, keeps the driver from going on in `frame`: the time budget, before
-    -- anything; the samples, before a sample or a read of the agent's inbox.
+    -- anything; the samples, before a sample or a read of a call's inbox.
     let limit? (now : Nat) (frame : Frame) (sampling : Bool) : Option String :=
-      if !frame.inAgent then none
+      if !frame.inCall then none
       else if limits.budgetMs?.any (spent + (now - stamp) ≥ ·) then some "the time budget is spent"
       else if sampling && limits.samples?.any (samples ≥ ·) then some s!"{samples} response(s) sampled"
       else none
@@ -215,22 +183,16 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
         (spent + entry.elapsedMs) now samples checkout
     let append := appendTook none
     match replayer.next with
-    -- The run has ended: with its verdict, or, when its grading failed, an error.
-    | .done value => pure (tip, .over ((agentEnd? log).getD (.returned .null)) (some value))
-    | .raised error =>
-      pure (tip, .over ((agentEnd? log).getD (.failed error))
-        (some (.mkObj [("status", "error"), ("reason", .str error)])))
-    | .waits frame question? =>
-      match frame.isEmpty, agentEnd? log with
-      | true, some agent => pure (tip, .over agent none)
-      | _, _ => pure (tip, .waits frame question?)
+    -- The run's own program never ends; a run that did is no longer calling anything.
+    | .done _ | .raised _ => pure (tip, .idle)
+    | .waits frame question? => pure (tip, if frame.inCall then .waits frame question? else .idle)
     | .mismatch position =>
       throw <| .input <| s!"the log is no trace of its run's program: the event at {position} is not what it does; " ++
         "`alaya rebase` copies the part that is into a new data directory"
     | .unguarded frame =>
       throw <| .input s!"a loop in frame {frame.render} went round without reading an event"
     | .hears frame notices =>
-      -- A limit is checked before a read of the agent's inbox too, so that what a person adds
+      -- A limit is checked before a read of a call's inbox too, so that what a person adds
       -- where the run paused is read before the next sample, not after it.
       if let some reason := limit? (← nowMs) frame (sampling := true) then
         return (tip, .paused reason)
@@ -242,24 +204,26 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
     | .ask call =>
       let now ← nowMs
       let timeSpent := spent + (now - stamp)
-      if let some reason := limit? now call.frame (call.op matches .sample _) then
+      if let some reason := limit? now call.frame (call.op matches .sample ..) then
         return (tip, .paused reason)
       let version := (workspace? log).getD ⟨""⟩
       match call.op with
-      | .sample request =>
+      | .sample spec request =>
+        let model ← rt.model spec
         let mut draw := 0
         for child in forest.childrenOf tip do
           if sampled (← rt.store.get forest child).event then draw := draw + 1
-        let answer ← modelAnswer rt draw request
+        let answer ← modelAnswer model draw request
         appendTook (answer.toOption.bind (·.elapsedMs?))
-          (.answered call.frame (.sample (Model.requestDigest request)) (answer.map (.response ·)))
+          (.answered call.frame (.sample spec.toJson (Model.requestDigest request)) (answer.map (.response ·)))
           checkout (samples + 1)
       | .exec command config =>
-        let mut checkout := checkout
+        let (executor, fresh) ← executorFor rt held log call.frame
+        let mut checkout := if fresh then {} else checkout
         if checkout.version? != some version then
           -- A container's bind mount follows the directory it was started on, which a restore
           -- replaces, so the executor is closed first: its next command starts a container.
-          io rt.executor.close
+          io executor.close
           rt.workspaces.materialize version rt.workDir
           checkout := { version? := some version }
         if config.outputs then prepareOutputs rt log
@@ -267,8 +231,8 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
           IO.FS.createDirAll rt.outputsDir
           for entry in ← rt.outputsDir.readDir do IO.FS.removeFile entry.path
         -- What the executor throws is the machine's: no container could be started, or docker
-        -- could not be run. Nothing is logged for the command, and the next `run` asks again.
-        let output ← Result.fromIO Error.environment (rt.executor.bash config rt.workDir command)
+        -- could not be run. Nothing is logged for the command, and the next `resume` asks again.
+        let output ← Result.fromIO Error.environment (executor.bash config rt.workDir command)
         let file? := if config.outputs then some s!"{outputsDir}/{outputFile output.output}" else none
         let left ← rt.workspaces.snapshot rt.workDir
         append (.answered call.frame (.exec command config)
@@ -277,27 +241,26 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
       | .time =>
         append (.answered call.frame .time
           (.ok (.timing { spentMs := timeSpent, budgetMs? := limits.budgetMs? }))) checkout samples
-      | .external command image input? timeout =>
-        let ran ← runExternal rt version command image input? timeout
-        append (.answered call.frame (.external command image input? timeout) (.ok (.external ran)))
-          checkout samples
-  loop forest tip log (Replayer.ofLog run log) spent started 0 {}
+  try loop forest tip log (Replayer.ofLog run log) spent started 0 {}
+  finally
+    if let some (_, executor) ← io held.get then io executor.close
 
 /-! ## Notices: what a person appends -/
 
-/-- Whether the agent is still running where a log ends: what its run does next is in the agent's
-frame, or inside it. -/
+/-- Whether a call is running where a log ends: what its run does next is in a call's frame,
+the call opened already. -/
 def running : Next Agent → Bool
-  | .ask call => call.frame.inAgent
-  | .opens frame _ | .returns frame _ | .fails frame _ | .hears frame _ | .waits frame _
-  | .questions frame _ => frame.inAgent
+  | .ask call => call.frame.inCall
+  | .opens frame _ => frame.size > 1
+  | .returns frame _ | .fails frame _ | .hears frame _ | .waits frame _
+  | .questions frame _ => frame.inCall
   | _ => false
 
 /-- Appends an event that comes from outside — a notice, a stop — after `tip`, after checking
-that the log can take it: a stop, a message, a change or a reply only while the agent is
-running, when it has something to end or someone to read it; a grader only where the run waits
-for one, its agent over and no grader assigned yet, and only one that can be read. Gives the
-new entry. -/
+that the log can take it: a stop, a message, a change or a reply only while a call is running,
+when it has something to end or someone to read it; a call only where the run waits for one,
+no call running and none asked for yet, and only of a program the run can build from the call's
+arguments. Gives the new entry. -/
 def append (store : Store) (run : Run Agent) (tip : Hash) (event : Event Agent) : Result (Hash × Entry) := do
   let forest ← store.forest
   let log ← store.log forest tip
@@ -307,17 +270,18 @@ def append (store : Store) (run : Run Agent) (tip : Hash) (event : Event Agent) 
       "`alaya rebase` copies the part that is into a new data directory"
   match event with
   | .stopped _ =>
-    if !running next then throw <| .input "the agent is over: there is nothing to stop"
-  | .arrived (.assigned grader) =>
+    if !running next then throw <| .input "no call is running: there is nothing to stop"
+  | .arrived (.called call) =>
     if running next then
-      throw <| .input "the agent is still running: a grader is assigned once it is over; `alaya grade` stops it first"
+      throw <| .input "a call is running: a program is called once it is over; `alaya stop` ends it first"
     if !(next matches .waits #[] _) then
-      throw <| .input "the log has its grader: a point is graded again on a fork, from the entry before the grader was assigned, as `alaya grade` does"
-    if let .error problem := Grader.fromJson grader then
-      throw <| .input s!"the grader cannot be read: {problem}"
+      throw <| .input "the run has a call to make here already: `alaya resume` makes it"
+    match run.programs call.name with
+    | none => throw <| .input s!"no program named {call.name}"
+    | some make => if let .error problem := make call.arguments then throw <| .input problem
   | .arrived _ =>
     if !running next then
-      throw <| .input "the agent is over: nothing would read a notice appended here; append it at an entry before its end"
+      throw <| .input "no call is running: nothing would read a notice appended here; append it at an entry before the call's end"
   | _ => pure ()
   let entry : Entry := { parent? := some tip, event }
   let (hash, _) ← store.put forest entry

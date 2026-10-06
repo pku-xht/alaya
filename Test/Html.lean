@@ -32,7 +32,7 @@ private def forest : TestM (Driver.Runtime × String) := do
     let _ ← assertOk <| Notices.comment rt.store waiting "why does it ask?"
     let _ ← assertOk <| Notices.comment rt.store replied "answered by hand"
     let forest ← assertOk rt.store.forest
-    pure (rt, ← assertOk <| Html.report rt.store rt.workspaces forest "a <test> report")
+    pure (rt, ← assertOk <| Html.report rt.store rt.workspaces forest "a <test> report" (run := run))
 
 def suite : Suite := Testing.suite "html" #[
   iotest "the compiled page is the files in the source tree" do

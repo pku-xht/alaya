@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 87" width="920" height="87">
+<title>call: a call of a program is appended, and the next resume opens it in a frame of its own</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
+<rect width="920" height="87" fill="#fff"/>
+<rect x="12.5" y="24.5" width="120" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(20,30) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<text x="39" y="40.5" class="c">the workspace</text>
+<text x="72.5" y="15" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M72.5,18V24"/>
+<path class="a" d="M133,36.5h12"/>
+<rect x="145.5" y="24.5" width="169" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(153,30) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
+<text x="172" y="40.5" class="c">call mini-swe “the task”</text>
+<path class="a" d="M315,36.5h12"/>
+<rect x="327.5" y="24.5" width="115" height="24" rx="6" fill="#fff" stroke="#d3d9e0" stroke-dasharray="3 2"/>
+<g transform="translate(335,30) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="354" y="40.5" class="c" style="fill:#6f7985">inbox: takes 1</text>
+<path class="a" d="M443,36.5h12"/>
+<rect x="455.5" y="24.5" width="118" height="24" rx="6" fill="#fff" stroke="#d3d9e0" stroke-dasharray="3 2"/>
+<g transform="translate(463,30) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="482" y="40.5" class="c" style="fill:#6f7985">open mini-swe</text>
+<path class="a" d="M574,36.5h12"/>
+<rect x="586.5" y="24.5" width="66" height="24" rx="6" fill="#fff" stroke="#d3d9e0" stroke-dasharray="3 2"/>
+<g transform="translate(594,30) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="613" y="40.5" class="c" style="fill:#6f7985">inbox</text>
+<path class="a" d="M653,36.5h12"/>
+<circle cx="668" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="672" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="676" cy="36.5" r="0.9" fill="#a3abb5"/>
+<text x="145" y="64" class="s">its configuration: the program, the</text>
+<text x="145" y="78" class="s">model, the task, the image by digest</text>
+<text x="691" y="40.5" class="s">the next <tspan class="m">resume</tspan></text>
+</svg>

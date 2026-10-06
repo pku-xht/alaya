@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from _harness import ROOT, grader_answer, json_lines, run
+from _harness import ROOT, entry, grade, grader_answer, json_lines, run, task_grader
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument("--benchmark", type=Path, required=True)
@@ -49,13 +49,12 @@ assert packages and all(p.is_symlink() and str(p.readlink()).startswith("/opt/ve
                         for p in packages)
 alaya = ROOT / ".lake/build/bin/alaya"
 data = output / "audit"
-# The run is created with no grader; the benchmark is snapshotted when `grade` assigns one.
-created = json_lines(run(alaya, "new", source, "--task-file", output / "MINIVERO_TASK.md",
-                         "--agent", "mini-vero", "--set", "agent.mode=proof",
-                         "--model", "gpt-oss-120b", "--image", args.agent_image,
-                         "--data", data, "--json").stdout)
-root, task = created[0], created[-1]["entry"]
-configuration = created[1]["event"]["routine"]["arguments"]
+# The run is created on the source alone; the agent is called on it with its configuration.
+root = json_lines(run(alaya, "new", source, "--data", data, "--json").stdout)[0]
+called = json_lines(run(alaya, "call", root["entry"], "mini-vero", "--task-file", output / "MINIVERO_TASK.md",
+                        "--set", "mode=proof", "--set", "model=gpt-oss-120b",
+                        "--image", args.agent_image, "--data", data, "--json").stdout)[0]
+configuration = called["event"]["notice"]["call"]["arguments"]
 workspace = root["event"]["notice"]["workspace"]
 stats = json.loads(run("restic", "--repo", data / "restic", "--insecure-no-password",
                        "stats", workspace, "--mode", "restore-size", "--json").stdout)
@@ -74,14 +73,12 @@ spec_total = sum(
     for package in json.loads((benchmark / "manifest.json").read_text())["packages"]
     for module in package.get("modules", [])
 )
-# Grade the untouched source where the task arrives: `grade` stops a fork there and runs the
-# grader, exiting 1 for the fail this is.
-final = json_lines(run(alaya, "grade", task,
-                       "--grader", "python /opt/alaya-vero/grade.py --mode proof --benchmark /grader",
-                       "--grader-input", benchmark, "--grader-image", args.grader_image,
-                       "--grader-timeout", "5400", "--json", "--data", data, codes=(1,)).stdout)[-1]
-assert final["status"] == "stopped", final
-record = final["verdict"]
+# Grade the untouched source at the root, with the benchmark's grader image: `resume` exits 1 for
+# the fail this is.
+grader_image = task_grader(args.grader_image, benchmark, "alaya-vero-grader-mathlib")
+final = grade(alaya, data, root["entry"], grader_image,
+              "python /opt/alaya-vero/grade.py --mode proof --benchmark /grader", codes=(1,), timeout=5400)
+record = final["value"]
 answer = grader_answer(json_lines(run(alaya, "log", final["entry"], "--json",
                                       "--data", data).stdout))["entry"]
 assert record["status"] == "fail", record
@@ -89,7 +86,7 @@ assert len(record["checks"]) == spec_total, (len(record["checks"]), spec_total)
 assert not any(check["ok"] for check in record["checks"]), record
 report = json.loads(run(alaya, "cat", answer, ".grade/report.json", "--data", data).stdout)
 assert report["summary"]["total_specs"] == spec_total, report["summary"]
-result = {"root": root["entry"], "task": task, "image": configuration["environment"]["image"],
+result = {"root": root["entry"], "call": called["entry"], "image": configuration["environment"]["image"],
           "snapshot_stats": stats,
           "package_symlinks": {p.name: str(p.readlink()) for p in packages},
           "uid_gid": uid, "network": "none", "build_exit": build.returncode,

@@ -142,7 +142,7 @@ def noticeText : Notice → String
   | .said message => message
   | .changed _ summary => s!"The workspace was changed: {summary}"
   | .replied _ reply => render reply
-  | .assigned _ => "A grader was assigned"
+  | .called call => s!"{call.name} was called"
 
 def askUser : Tool where
   name := "ask_user"
@@ -215,11 +215,12 @@ def hiddenTests : Tool where
 
 def grading (_ : Except String Json) : Program Agent Json := call "hidden_tests" (.str "")
 
-def graded (config : Config) : Run Agent :=
-  { routines := table
+def graded (config : Config) (after : Except String Json → Program Agent Json := grading) : Run Agent :=
+  { programs := Programs.ofRoutines <| table
       [agent config, bash, timeBudget, askUser, delegate config.model, commit, hiddenTests]
-    call := ⟨"agent", config.json⟩
-    after := grading }
+    top := .call ⟨"agent", config.json⟩ after
+    -- The sketch stops its agent alone: what follows it runs to its end.
+    stops := (· == 0) }
 
 /-! ## The sketch's world and driver -/
 
@@ -355,7 +356,7 @@ def describe : Event Agent → String
   | .arrived (.said message) => s!"-  arrived: said {message}"
   | .arrived (.changed workspace _) => s!"-  arrived: changed → {workspace.hex}"
   | .arrived (.replied to answer) => s!"-  arrived: replied to {to.toList}: {render answer}"
-  | .arrived (.assigned _) => "-  arrived: assigned a grader"
+  | .arrived (.called call) => s!"-  arrived: called {call.name}"
   | .commented text => s!"-  commented: {text}"
   | .answered frame (.external command image ..) (.ok (.external ran)) =>
     s!"{frame.toList}  answered: external {command}, in {image} → exit {ran.exit}, {ran.checkout.hex}"
@@ -388,8 +389,16 @@ def describeNext : Next Agent → String
   | .unguarded frame => s!"unguarded loop in {frame.toList}"
 
 def withAgent (run : Run Agent) (program : Program Agent Json) : Run Agent :=
-  { run with routines := fun name =>
-      if name == "agent" then some fun _ => program else run.routines name }
+  { run with programs := fun name =>
+      if name == "agent" then some fun arguments => match run.programs name with
+        | some make => (make arguments).map fun (_, routines) => (program, routines)
+        | none => .ok (program, fun _ => none)
+      else run.programs name }
+
+/-- The run without the routine `name`, wherever its programs would call it. -/
+def without (run : Run Agent) (name : String) : Run Agent :=
+  { run with programs := fun program => (run.programs program).map fun make arguments =>
+      (make arguments).map fun (body, routines) => (body, fun routine => if routine == name then none else routines routine) }
 
 def faithful (run : Run Agent) (log : Log') : Bool :=
   (List.range (log.size + 1)).all fun i =>
@@ -408,10 +417,11 @@ def drop (log : Log') (start : Nat) : Log' := log.extract start log.size
 /-- Everything the sketch's test prints, in its order. -/
 def transcript : Array String := Id.run do
   let mut out : Array String := #[]
-  let run := graded
+  let config : Config :=
     { system := "You are a coding agent."
       agent := { tools := ["bash", "time_budget", "commit", "ask_user"], retries := 2 }
       model := { name := "a-model", maxTokens := 4096 } }
+  let run := graded config
   let replay := fun log => describeNext (next run log)
   let same := fun (one other : Log') => one.map describe == other.map describe
   let (log, result) := drive world run #[]
@@ -470,8 +480,7 @@ def transcript : Array String := Id.run do
   for (event, i) in thrice.zipIdx do
     if 17 ≤ i ∧ i ≤ 25 then out := out.push s!"  {i}  {describe event}"
   out := out.push s!"  and the run ends, after {thrice.size} events: {describeNext ended}"
-  let (missing, _) := drive world { run with routines := fun name =>
-    if name == "bash" then none else run.routines name } #[]
+  let (missing, _) := drive world (without run "bash") #[]
   out := out.push "with a tool that the run does not have:"
   for (event, i) in missing.zipIdx do
     if 10 ≤ i ∧ i ≤ 14 then out := out.push s!"  {i}  {describe event}"
@@ -484,7 +493,7 @@ def transcript : Array String := Id.run do
   for (event, i) in broken.zipIdx do
     if i ≥ 3 then out := out.push s!"  {i}  {describe event}"
   out := out.push s!"  {describeNext ended}"
-  let (_, ended) := drive world { run with after := fun _ => throw "no grader" } #[]
+  let (_, ended) := drive world (graded config (after := fun _ => throw "no grader")) #[]
   out := out.push s!"with graders that fail, the run ends: {describeNext ended}"
   let (empty, pending) := drive { world with arrivals := fun _ => [] } run #[]
   out := out.push s!"with no workspace yet: {describeNext pending}, after {empty.size} events"

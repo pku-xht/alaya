@@ -119,10 +119,10 @@ def openingMessages (config : Config) (task : String) (uname : Uname) : Array Ch
   #[.system systemMessage,
     .user (MiniSwe.withInstructions config.base (taskMessage task config.mode uname config.pacing))]
 
-/-- MiniVero, for a run of `model` on a machine described by `uname`: MiniSwe's loop, with its
-linear context, and Vero's opening. -/
-def program (config : Config) (model : Models.Spec) (uname : Uname) : Program Agent Lean.Json :=
-  MiniSwe.converse { config.base with contextLimit? := MiniSwe.contextLimit? config.base model }
-    (openingMessages config · uname)
+/-- MiniVero, for a call of `model` on `task`, on a machine described by `uname`: MiniSwe's loop,
+with its linear context, and Vero's opening. -/
+def program (config : Config) (model : Models.Spec) (uname : Uname) (task : String) : Program Agent Lean.Json :=
+  MiniSwe.converse { config.base with model? := some model, contextLimit? := MiniSwe.contextLimit? config.base model }
+    (openingMessages config task uname)
 
 end Alaya.Agents.MiniVero

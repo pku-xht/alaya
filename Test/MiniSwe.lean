@@ -257,7 +257,7 @@ private def runAgent (config : Config) (responses : Array Chat.Response) :
   | .error problem => fail problem
   | .ok run =>
     let rt ← containerRuntime (some (← scriptedModel responses))
-    let (last, _) ← try assertOk <| Driver.drive rt run (← start rt run) finally rt.executor.close
+    let (last, _) ← assertOk <| Driver.drive rt run (← start rt run)
     let log ← logAt rt last
     let some (.ok outcome) := agentResult log | fail s!"the agent did not return: {agentStatus log}"
     pure (lastDialogue config run log, (workspace? log).getD default, outcome)

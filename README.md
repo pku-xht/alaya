@@ -38,21 +38,21 @@ graded on programs it never sees.
 ```sh
 last() { tail -n 1 | cut -d' ' -f1; }   # a command prints each entry it appends; keep the last
 
-# Create a run of MiniSwe on that project, and run it until the agent is over.
-tip=$(alaya new benchmarks/bija/skeleton --task-file benchmarks/bija/TASK.txt --agent mini-swe \
-  --model gpt-6-luna --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
-end=$(alaya run "$tip" --provider apiyi | last)
+# Create a run on that project, call MiniSwe on its task, and drive it until the agent is over.
+root=$(alaya new benchmarks/bija/skeleton | last)
+called=$(alaya call "$root" mini-swe --set model=gpt-6-luna --task-file benchmarks/bija/TASK.txt \
+  --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
+end=$(alaya resume "$called" --provider apiyi | last)
 
-# Grade the run's end against the reference programs.
-grader=(--grader 'python3 /opt/alaya-bija/grade.py --tests /grader'
-        --grader-image ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
-        --grader-input benchmarks/bija/reference/tests --grader-timeout 1800)
-alaya grade "$end" "${grader[@]}"
+# Grade a point: call the grader there, whose image holds the reference programs, and resume.
+grade() { alaya resume "$(alaya call "$1" grader --image alaya-bija-grader \
+  --set command='python3 /opt/alaya-bija/grade.py --tests /grader' | last)"; }
+grade "$end"
 
-# Read the log, fork it at position 140 with a hint, run the fork, and grade it.
+# Read the log, fork it at position 140 with a hint, drive the fork, and grade it.
 alaya log "$end"
 hint=$(alaya tell "$end:140" 'Check the diagnostics against SPEC.md.' | last)
-alaya grade "$(alaya run "$hint" --provider apiyi | last)" "${grader[@]}"
+grade "$(alaya resume "$hint" --provider apiyi | last)"
 ```
 
 `alaya html report.html` writes the forest as one page for reading, here for a Bija run and a

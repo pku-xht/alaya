@@ -1,11 +1,11 @@
 # The Bija benchmark's images: Python, uv, and the skeleton's development dependencies (pytest,
 # coverage) and build backend (hatchling) in uv's cache, so both the agent and the grader run the
 # suite without network. The project environment lives in /tmp, outside the workspace, so it is
-# never snapshotted. The grader image adds grade.py; the reference programs are in neither image,
-# but are the grader's trusted input.
+# never snapshotted. The grader image adds grade.py and the reference programs, its trusted input,
+# at /grader; it is built locally and never published, since the programs are the hidden tests.
 #
 #   docker build --platform linux/amd64 --target agent -t ghcr.io/msv-lab/alaya-bija-agent:COMMIT benchmarks/bija
-#   docker build --platform linux/amd64 --target grader -t ghcr.io/msv-lab/alaya-bija-grader:COMMIT benchmarks/bija
+#   docker build --platform linux/amd64 --target grader -t alaya-bija-grader benchmarks/bija
 
 # The amd64 uv/Python image is pinned by its platform-specific manifest, the one Vero's image
 # starts from (use Docker emulation on an ARM host); the suite's dependencies are pinned by the
@@ -26,3 +26,4 @@ RUN cd /tmp/seed \
 
 FROM agent AS grader
 COPY grade.py /opt/alaya-bija/grade.py
+COPY reference/tests /grader

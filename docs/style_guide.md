@@ -42,8 +42,8 @@ The colours, each with its one meaning:
 | Token | Value | Says |
 | --- | --- | --- |
 | `--blue` | `#3567a0` | the model, and what is new or can be followed: a sample, a link, what a request adds |
-| teal | `#2b6f6f` | a command run: `exec`, `external` |
-| `--violet` | `#7556a3` | from outside the program: a notice (said, changed, replied, assigned) |
+| teal | `#2b6f6f` | a command run: `exec` |
+| `--violet` | `#7556a3` | from outside the program: a notice (said, changed, replied, called) |
 | `--green` | `#2a7a4b` | went well: a return, a pass, an added file or line |
 | `--red` | `#b3261e` | went wrong: a failure, a stop, a removed file or line |
 | `--amber` | `#a8690f` | waits or needs a person: a question, a pause, a modified file |
@@ -116,13 +116,12 @@ and never an icon alone — the word follows it. The paths are `GLYPHS` in `Alay
 | a ringed dot | the root of a run | `#4a4f57` |
 | a prompt `>_` | sample | blue |
 | a triangle | exec | teal |
-| a case | external | teal |
 | a clock | time | faint |
 | an arrow into a bar | a routine opened | mute |
 | a turned-back arrow | return | green |
 | a cross | fail | red |
 | a square | stop | red |
-| a speech bubble, a diamond, a reply arrow, a checked sheet | said, changed, replied, assigned | violet |
+| a speech bubble, a diamond, a reply arrow, a checked sheet | said, changed, replied, called | violet |
 | a tray | inbox | faint |
 | a question mark | a question to a person | amber |
 | a hash `#` | comment | faint |

@@ -70,11 +70,6 @@ private def entriesAt (data : DataDir) (reference : String) :
   let (forest, hash) ← resolve data reference
   pure (forest, hash, ← data.store.entries forest hash)
 
-/-- The configuration of a log's run and its model. -/
-private def configured (log : Log Agent) : Result (RunConfig × Models.Spec) := do
-  let config ← configOf log
-  pure (config, ← Models.fromJson config.model)
-
 /-- A new entry, as the commands that append print it: a line that begins with its full name,
 or one JSON object. -/
 private def entryRecord (out : Cli.Out) (hash : Hash) (position : Nat) (entry : Entry) : Result Unit :=
@@ -84,280 +79,67 @@ private def entryRecord (out : Cli.Out) (hash : Hash) (position : Nat) (entry : 
       ("elapsed_ms", entry.elapsedMs)])
     (Render.entryLine hash position entry.event)
 
-/-- Exit status of `grade` when the verdict is a fail, and when it is an error. -/
+/-- Exit status of `resume` when the last call failed, or was a grader whose verdict is a fail;
+and when it was a grader whose verdict is an error. -/
 private def exitFail : UInt32 := 1
 private def exitError : UInt32 := 2
 
-/-- Exit status when a run waits for a person: a reply, or a task. -/
+/-- Exit status when a call waits for a person: a reply, or a notice. -/
 private def exitWaiting : UInt32 := 3
 
-/-- Exit status when a run paused at a limit of this invocation: `run` goes on from there. -/
+/-- Exit status when a run paused at a limit of this invocation: `resume` goes on from there. -/
 private def exitPaused : UInt32 := 4
 
 /-! ## Creating a run -/
 
-/-- `--agent NAME`: an agent the catalog has. -/
-private def agentName : Cli.Value String :=
-  .enum "NAME" (Agents.Catalog.all.map fun d => (d.name, d.name)).toList
+/-- `PROGRAM`: a program the catalog has. -/
+private def programName : Cli.Value String :=
+  .enum "PROGRAM" (Agents.Catalog.all.map fun d => (d.name, d.name)).toList
 
-/-- `--model NAME`: a model the table has. -/
-private def modelName : Cli.Value String :=
-  .enum "NAME" (Models.all.map fun m => (m.name, m.name)).toList
-
-/-- `--set agent.PATH=VALUE` or `--set model.PATH=VALUE`: one field over the defaults. -/
-private def setting : Cli.Value Settings.Setting := ⟨"agent|model.PATH=VALUE", Settings.parse⟩
+/-- `--set PATH=VALUE`: one field of a program's configuration over its defaults. -/
+private def setting : Cli.Value Settings.Setting := ⟨"PATH=VALUE", Settings.parse⟩
 
 private def overrides : Cli.Spec (Array Settings.Setting) :=
   Cli.repeated "set" setting
-    "a field over the agent's or the model's defaults, e.g. agent.mode=codeproof, model.params.reasoning_effort=high"
+    "a field over the program's defaults, in order, e.g. model=gpt-6-luna, model.params.reasoning_effort=high, mode=codeproof"
 
-/-- What `new` takes. -/
+/-- What `new` takes: a project, or an image whose workdir the workspace is copied from. -/
 private structure NewArgs where
   data : System.FilePath
-  task : Cli.TextSource
-  project? : Option System.FilePath
-  image : String
-  workdir : String
-  agent : String
-  model : String
-  settings : Array Settings.Setting
+  source : Sum System.FilePath (String × String)
 
 private def NewArgs.cli : Cli.Spec NewArgs :=
   NewArgs.mk
     <$> dataDir
-    <*> (Cli.text "task" "the task: the notice the agent starts from, saved verbatim").required
-      "a run needs a task: --task TEXT or --task-file FILE"
-    <*> Cli.arg? "PROJECT" .path
-      "the directory the workspace starts as; without it, the image's own workdir is copied out"
-    <*> Cli.flag "image" (.string "IMAGE") "the container image every command runs in, pinned by digest"
-    <*> Cli.flagD "workdir" (.string "PATH") Executor.Docker.defaultWorkdir
-      "where the workspace is mounted in the image"
-    <*> Cli.flag "agent" agentName s!"the agent: {Agents.Catalog.names}"
-    <*> Cli.flag "model" modelName s!"the model: {Models.names}"
-    <*> overrides
+    <*> (Prod.mk <$> (Prod.mk
+      <$> Cli.arg? "PROJECT" .path "the directory the workspace starts as"
+      <*> Cli.flag? "image" (.string "IMAGE") "without PROJECT: an image whose workdir the workspace is copied from")
+      <*> Cli.flag? "workdir" (.string "PATH") "with --image: the directory of the image to copy; by default its own workdir").refine
+      fun
+      | ((some project, none), none) => .ok (.inl project)
+      | ((none, some image), workdir?) => .ok (.inr (image, workdir?.getD ""))
+      | ((some _, some _), _) => .error "give PROJECT or --image IMAGE, not both"
+      | ((none, none), _) => .error "the workspace is PROJECT, or the workdir of --image IMAGE"
+      | ((some _, none), some _) => .error "--workdir is the directory of --image to copy"
 
-/-- The directory a new run starts from: a host `PROJECT`, or else the image's own `workdir`,
-copied out into the command's scratch. -/
-private def startingWorkspace (data : DataDir) (settings : Executor.Docker.Settings)
-    (project? : Option System.FilePath) : Result System.FilePath := do
-  match project? with
-  | some project => pure project
-  | none =>
-    let work := data.scratch / "project"
-    Result.fromIO Error.storage (IO.FS.createDirAll work)
-    Executor.Docker.copyOut settings settings.workdir work
-    pure work
-
+/-- Creates a run: its root, the workspace, where the run waits for a program to be called. -/
 private def newRun (a : NewArgs) (out : Cli.Out) : Result UInt32 := do
-  -- A configuration that is wrong is said so before anything is created.
-  let model ← Models.resolve a.model a.settings
-  let agent ← Agents.Catalog.resolve a.agent a.settings
-  let task ← a.task.read "task"
   -- Before the data directory is created: inside the project it would become part of it.
-  if let some project := a.project? then
+  if let .inl project := a.source then
     Workspaces.refuseOverlap "snapshot" project #[a.data]
   withData a.data (write := true) (create := true) fun data => do
-    Executor.Docker.checkWorkdir a.workdir #[Driver.graderInput, Driver.outputsDir]
-    let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
-    let uname ← Executor.Docker.uname settings
-    let config : RunConfig := {
-      agent, model := model.toJson
-      environment := { image := settings.image, workdir := a.workdir, uname } }
-    match config.run model with
-    | .error problem => throw <| .input problem
-    | .ok run =>
-      let project ← startingWorkspace data settings a.project?
-      let made ← Notices.create data.store data.workspaces run project task
-      for ((hash, entry), position) in made.zipIdx do entryRecord out hash position entry
-      pure 0
-
-/-! ## Driving a run -/
-
-/-- `--provider NAME`: who serves the run's model, for this invocation. -/
-private def providerName : Cli.Value Provider.Provider :=
-  .enum "NAME" (Provider.all.map fun p => (p.name, p)).toList
-
-private structure RunArgs where
-  data : System.FilePath
-  entry : String
-  provider? : Option Provider.Provider
-  endpoint? : Option Provider.Dgx.Endpoint
-  options : Executor.Docker.RunOptions
-  samples : Nat
-  budget : Nat
-
-private def RunArgs.cli : Cli.Spec RunArgs :=
-  RunArgs.mk
-    <$> dataDir
-    <*> entryArg "the entry to go on from; any unambiguous prefix, or PREFIX:N"
-    <*> Cli.flag? "provider" providerName
-      s!"who serves the run's model: {Provider.names}; needed only when the run samples"
-    <*> Provider.endpointCli
-    <*> Executor.Docker.RunOptions.cli
-    <*> Cli.flagD "samples" .nat 0 "responses this invocation may sample; 0 is no limit"
-    <*> Cli.flagD "time-budget" (.nat "S") 0
-      "seconds of run time, summed along the log, after which no operation starts; 0 is no limit"
-
-/-- Runs `k` with what a run of `config` is driven with: its work directory and outputs in the
-command's scratch, and the container its commands run in, closed when `k` ends. -/
-private def withRuntime (data : DataDir) (config : RunConfig) (options : Executor.Docker.RunOptions)
-    (model? : Option Model) (k : Runtime → Result α) : Result α := do
-  let outputs := data.scratch / "outputs"
-  let work := data.scratch / "work"
-  Result.fromIO Error.storage do
-    IO.FS.createDirAll outputs
-    IO.FS.createDirAll work
-  let settings ← Executor.Docker.settingsOf options config.environment.image config.environment.workdir
-  let settings := { settings with
-    mounts := #[{ host := ← Result.fromIO Error.storage (IO.FS.realPath outputs)
-                  container := Driver.outputsDir, readOnly := true }] }
-  settings.ensurePresent
-  let executor ← Executor.Docker.executor settings
-  try
-    k { store := data.store, workspaces := data.workspaces, workDir := work, outputsDir := outputs
-        scratch := data.scratch / "external", executor, workdir := config.environment.workdir
-        model?, graderUser? := settings.user? }
-  finally
-    Result.fromIO Error.storage executor.close
-
-/-- How a driver stopped, as the last object of `--json`: its status, what goes with it, and the
-verdict, once the run is graded. -/
-private def stopJson (last : Hash) : Stop → Json
-  | .over agent verdict? =>
-    .mkObj ([("entry", (last.hex : Json)), ("verdict", verdict?.getD .null)] ++ match agent with
-      | .returned value => [("status", "done"), ("value", value)]
-      | .failed error => [("status", "failed"), ("error", .str error)]
-      | .stopped reason => [("status", "stopped"), ("reason", .str reason)])
-  | .waits frame question? =>
-    .mkObj [("entry", last.hex), ("status", "waits"), ("frame", frame.toJson),
-      ("question", question?.map (·.toJson) |>.getD .null)]
-  | .paused reason => .mkObj [("entry", last.hex), ("status", "paused"), ("reason", .str reason)]
-
-/-- How a driver stopped, for a person. -/
-private def stopNote (last : Hash) : Stop → String
-  | .over agent verdict? => Render.endingSummary agent verdict?
-  | .waits _ (some question) =>
-    s!"waits for a reply to: {question.text}\nreply with `alaya reply {last.hex.take 12} ...`"
-  | .waits _ none => s!"waits for a notice: `alaya tell {last.hex.take 12} TEXT`"
-  | .paused reason => s!"paused: {reason}; `alaya run {last.hex.take 12}` goes on"
-
-/-- Prints how a driver stopped: the last object with `--json`, else a line on stderr, after
-the entries on stdout. -/
-private def reportStop (out : Cli.Out) (last : Hash) (stop : Stop) : Result Unit :=
-  if out.json then out.record (stopJson last stop) "" else
-    Result.fromIO Error.storage do
-      (← IO.getStdout).flush
-      (← IO.getStderr).putStrLn (stopNote last stop)
-
-private def runRun (a : RunArgs) (out : Cli.Out) : Result UInt32 := do
-  withData a.data (write := true) fun data => do
-    let (_, tip, entries) ← entriesAt data a.entry
-    let log := entries.map (·.event)
-    let (config, modelSpec) ← configured log
-    let model? ← a.provider?.mapM fun provider => do
-      let baseUrl? ← match a.endpoint?, provider.name with
-        | none, _ => pure none
-        | some endpoint, "dgx" => pure (some endpoint.baseUrl)
-        | some _, other => throw <| .input s!"--url and --port address a dgx server, not {other}"
-      Driver.buildModel modelSpec provider data.cache baseUrl?
-    if a.provider?.isNone && a.endpoint?.isSome then
-      throw <| .input "--url and --port address a provider: name it with --provider"
-    let limits : Limits := {
-      samples? := if a.samples == 0 then none else some a.samples
-      budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
-    let position ← IO.mkRef entries.size |> Result.fromIO Error.storage
-    match config.run modelSpec with
-    | .error problem => throw <| .input problem
-    | .ok run =>
-      withRuntime data config a.options model? fun rt => do
-        let (last, stop) ← Driver.drive rt run tip limits fun hash entry => do
-          let at' ← Result.fromIO Error.storage (position.modifyGet fun p => (p, p + 1))
-          entryRecord out hash at' entry
-        reportStop out last stop
-        pure <| match stop with
-          | .over (.failed _) _ => 1
-          | .over .. => 0
-          | .waits .. => exitWaiting
-          | .paused _ => exitPaused
-
-/-! ## Grading a point of a run -/
-
-private structure GradeArgs where
-  data : System.FilePath
-  entry : String
-  /-- The grader: a command that prints TAP. -/
-  command : String
-  input? : Option System.FilePath
-  image? : Option String
-  timeout : Nat
-  options : Executor.Docker.RunOptions
-
-private def GradeArgs.cli : Cli.Spec GradeArgs :=
-  GradeArgs.mk
-    <$> dataDir
-    <*> entryArg "the entry to grade the run at; any unambiguous prefix, or PREFIX:N"
-    <*> Cli.flag "grader" (.string "CMD")
-      "the grader: a command that prints TAP, e.g. 'python3 /grader/grade.py'"
-    <*> Cli.flag? "grader-input" (.path "DIR") "trusted files for the grader, snapshotted, at /grader"
-    <*> Cli.flag? "grader-image" (.string "IMAGE")
-      "the image the grader runs in, pinned by digest; by default the run's"
-    <*> Cli.flagD "grader-timeout" (.nat "S") 900 "seconds after which the grader is stopped; 0 is none"
-    <*> Executor.Docker.RunOptions.cli
-
-/-- The grader the arguments describe, for a run in `runImage`: its image pinned, its input
-snapshotted. -/
-private def GradeArgs.grader (a : GradeArgs) (workspaces : Workspaces) (runImage : String) :
-    Result Grader := do
-  let image ← match a.image? with
-    | some reference => pure (← Executor.Docker.Settings.pin { image := reference }).image
-    | none => pure runImage
-  let input? ← a.input?.mapM fun dir => do
-    if !(← Result.fromIO Error.storage dir.isDir) then
-      throw <| .input s!"--grader-input must be a directory: {dir}"
-    workspaces.snapshot dir
-  pure { command := a.command, image, input?, timeoutSeconds := a.timeout }
-
-/-- Grades a point of a run with a grader: stops the agent there if it is still running, assigns
-the grader, and drives the run to its verdict. A log has one grader, so a point that has one
-already, graded or not, is graded on a fork, from the entry before that grader was assigned.
-Exits with the verdict: 0 pass, 1 fail, 2 error. -/
-private def gradeRun (a : GradeArgs) (out : Cli.Out) : Result UInt32 := do
-  withData a.data (write := true) fun data => do
-    let (forest, tip, entries) ← entriesAt data a.entry
-    -- The point graded: the entry named, or, where the log has a grader already, the entry
-    -- before that grader was assigned.
-    let assignedAt? := entries.findIdx? fun entry => entry.event matches .arrived (.assigned _)
-    let (tip, entries) := match assignedAt? with
-      | some position => ((forest.path tip)[position - 1]!, entries.extract 0 position)
-      | none => (tip, entries)
-    let log := entries.map (·.event)
-    let (config, modelSpec) ← configured log
-    match config.run modelSpec with
-    | .error problem => throw <| .input problem
-    | .ok run =>
-      -- What is wrong with the grader is said before anything is appended.
-      let grader ← a.grader data.workspaces config.environment.image
-      let mut tip := tip
-      let mut position := entries.size
-      let stop : Array (Event Agent) :=
-        if Driver.running (next run log) then #[.stopped "to grade this point"] else #[]
-      for event in stop.push (assignment grader) do
-        let (hash, entry) ← Driver.append data.store run tip event
-        entryRecord out hash position entry
-        tip := hash
-        position := position + 1
-      let counter ← IO.mkRef position |> Result.fromIO Error.storage
-      withRuntime data config a.options none fun rt => do
-        let (last, stop) ← Driver.drive rt run tip {} fun hash entry => do
-          let at' ← Result.fromIO Error.storage (counter.modifyGet fun p => (p, p + 1))
-          entryRecord out hash at' entry
-        reportStop out last stop
-        let .over _ (some verdict) := stop
-          | throw <| .storage "the run did not come to its verdict"
-        pure <| match verdictStatus verdict with
-          | "pass" => 0
-          | "fail" => exitFail
-          | _ => exitError
+    let project ← match a.source with
+      | .inl project => pure project
+      | .inr (image, workdir) =>
+        let settings ← (← Executor.Docker.settingsOf {} image).pin
+        let workdir ← if workdir.isEmpty then Executor.Docker.imageWorkdir settings else pure workdir
+        let work := data.scratch / "project"
+        Result.fromIO Error.storage (IO.FS.createDirAll work)
+        Executor.Docker.copyOut settings workdir work
+        pure work
+    let (hash, entry) ← Notices.create data.store data.workspaces project
+    entryRecord out hash 0 entry
+    pure 0
 
 /-! ## What a person appends -/
 
@@ -366,14 +148,173 @@ private def appendTo (data : DataDir) (reference : String) (out : Cli.Out)
     (event : Log Agent → Next Agent → Result (Event Agent)) : Result UInt32 := do
   let (_, tip, entries) ← entriesAt data reference
   let log := entries.map (·.event)
-  let (config, model) ← configured log
-  match config.run model with
-  | .error problem => throw <| .input problem
-  | .ok run =>
-    let event ← event log (next run log)
-    let (hash, entry) ← Driver.append data.store run tip event
-    entryRecord out hash entries.size entry
-    pure 0
+  let event ← event log (next Run.alaya log)
+  let (hash, entry) ← Driver.append data.store Run.alaya tip event
+  entryRecord out hash entries.size entry
+  pure 0
+
+/-! ## Calling a program -/
+
+private structure CallArgs where
+  data : System.FilePath
+  entry : String
+  program : String
+  image : String
+  workdir : String
+  task? : Option Cli.TextSource
+  settings : Array Settings.Setting
+
+private def CallArgs.cli : Cli.Spec CallArgs :=
+  CallArgs.mk
+    <$> dataDir
+    <*> entryArg "the entry to call the program after; any unambiguous prefix, or PREFIX:N"
+    <*> Cli.arg "PROGRAM" programName s!"the program: {Agents.Catalog.names}"
+    <*> Cli.flag "image" (.string "IMAGE") "the container image the call's commands run in, pinned by digest"
+    <*> Cli.flagD "workdir" (.string "PATH") Executor.Docker.defaultWorkdir
+      "where the workspace is mounted in the image"
+    <*> Cli.text "task" "the task, for an agent, saved verbatim"
+    <*> overrides
+
+/-- Appends a call of a program after an entry, where no call is running: its configuration,
+complete, with its image pinned. `resume` then drives it. -/
+private def callRun (a : CallArgs) (out : Cli.Out) : Result UInt32 := do
+  -- A configuration that is wrong is said so before anything is appended.
+  let program ← Agents.Catalog.resolve a.program a.settings
+  let task? ← a.task?.mapM (·.read "task")
+  withData a.data (write := true) fun data => do
+    Executor.Docker.checkWorkdir a.workdir #[Driver.outputsDir]
+    let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
+    let uname ← Executor.Docker.uname settings
+    let config : CallConfig := {
+      program, task?
+      environment := { image := settings.image, workdir := a.workdir, uname } }
+    appendTo data a.entry out fun _ _ => pure (Call.event config)
+
+/-! ## Driving a run -/
+
+/-- `--provider NAME`: who serves the models of the run's calls, for this invocation. -/
+private def providerName : Cli.Value Provider.Provider :=
+  .enum "NAME" (Provider.all.map fun p => (p.name, p)).toList
+
+private structure ResumeArgs where
+  data : System.FilePath
+  entry : String
+  provider? : Option Provider.Provider
+  endpoint? : Option Provider.Dgx.Endpoint
+  options : Executor.Docker.RunOptions
+  samples : Nat
+  budget : Nat
+
+private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
+  ResumeArgs.mk
+    <$> dataDir
+    <*> entryArg "the entry to go on from; any unambiguous prefix, or PREFIX:N"
+    <*> Cli.flag? "provider" providerName
+      s!"who serves the models: {Provider.names}; needed only when a call samples"
+    <*> Provider.endpointCli
+    <*> Executor.Docker.RunOptions.cli
+    <*> Cli.flagD "samples" .nat 0 "responses this invocation may sample; 0 is no limit"
+    <*> Cli.flagD "time-budget" (.nat "S") 0
+      "seconds of run time, summed along the log, after which no operation starts; 0 is no limit"
+
+/-- Runs `k` with what a run is driven with: its work directory and outputs in the command's
+scratch, a container of each call's image as `options` say, and the models `provider` serves,
+each built once. -/
+private def withRuntime (data : DataDir) (options : Executor.Docker.RunOptions)
+    (provider? : Option Provider.Provider) (baseUrl? : Option String) (k : Runtime → Result α) : Result α := do
+  let outputs := data.scratch / "outputs"
+  let work := data.scratch / "work"
+  Result.fromIO Error.storage do
+    IO.FS.createDirAll outputs
+    IO.FS.createDirAll work
+  let outputsHost ← Result.fromIO Error.storage (IO.FS.realPath outputs)
+  let models ← Result.fromIO Error.storage (IO.mkRef (#[] : Array (String × Model)))
+  k { store := data.store, workspaces := data.workspaces, workDir := work, outputsDir := outputs
+      executor := fun environment => do
+        let settings ← Executor.Docker.settingsOf options environment.image environment.workdir
+        let settings := { settings with
+          mounts := #[{ host := outputsHost, container := Driver.outputsDir, readOnly := true }] }
+        settings.ensurePresent
+        Executor.Docker.executor settings
+      model := fun spec => do
+        let some provider := provider?
+          | throw <| .input "a call samples its model: name a --provider"
+        let key := spec.toJson.compress
+        if let some (_, model) := (← Result.fromIO Error.storage models.get).find? (·.1 == key) then
+          return model
+        let model ← Driver.buildModel spec provider data.cache baseUrl?
+        Result.fromIO Error.storage (models.modify (·.push (key, model)))
+        pure model }
+
+/-- How a driver stopped, as the last object of `--json`: its status, and, when no call runs,
+how the last call ended. -/
+private def stopJson (last : Hash) (log : Log Agent) : Stop → Json
+  | .idle => match lastCall? log with
+    | some (call, some ended) =>
+      .mkObj ([("entry", (last.hex : Json)), ("call", (call.name : Json))] ++ match ended with
+        | .returned value => [("status", "done"), ("value", value)]
+        | .failed error => [("status", "failed"), ("error", .str error)]
+        | .stopped reason => [("status", "stopped"), ("reason", .str reason)])
+    | _ => .mkObj [("entry", last.hex), ("status", "idle")]
+  | .waits frame question? =>
+    .mkObj [("entry", last.hex), ("status", "waits"), ("frame", frame.toJson),
+      ("question", question?.map (·.toJson) |>.getD .null)]
+  | .paused reason => .mkObj [("entry", last.hex), ("status", "paused"), ("reason", .str reason)]
+
+/-- How a driver stopped, for a person. -/
+private def stopNote (last : Hash) (log : Log Agent) : Stop → String
+  | .idle => match lastCall? log with
+    | some (call, some ended) => s!"{call.name}: {Render.endingSummary ended}"
+    | _ => s!"waits for a call: `alaya call {last.hex.take 12} PROGRAM …`"
+  | .waits _ (some question) =>
+    s!"waits for a reply to: {question.text}\nreply with `alaya reply {last.hex.take 12} ...`"
+  | .waits _ none => s!"waits for a notice: `alaya tell {last.hex.take 12} TEXT`"
+  | .paused reason => s!"paused: {reason}; `alaya resume {last.hex.take 12}` goes on"
+
+/-- Prints how a driver stopped: the last object with `--json`, else a line on stderr, after
+the entries on stdout. -/
+private def reportStop (out : Cli.Out) (last : Hash) (log : Log Agent) (stop : Stop) : Result Unit :=
+  if out.json then out.record (stopJson last log stop) "" else
+    Result.fromIO Error.storage do
+      (← IO.getStdout).flush
+      (← IO.getStderr).putStrLn (stopNote last log stop)
+
+/-- The exit status of a run that calls nothing: by the verdict when its last call was a
+grader, 1 when it failed, 0 otherwise. -/
+private def idleStatus (log : Log Agent) : UInt32 :=
+  match lastCall? log with
+  | some (call, some (.returned value)) =>
+    if call.name != Agents.Catalog.grader.name then 0 else
+    match Agents.Grader.verdictStatus value with
+    | "pass" => 0
+    | "fail" => exitFail
+    | _ => exitError
+  | some (_, some (.failed _)) => exitFail
+  | _ => 0
+
+private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
+  if a.provider?.isNone && a.endpoint?.isSome then
+    throw <| .input "--url and --port address a provider: name it with --provider"
+  let baseUrl? ← match a.endpoint?, a.provider?.map (·.name) with
+    | none, _ => pure none
+    | some endpoint, some "dgx" => pure (some endpoint.baseUrl)
+    | some _, other => throw <| .input s!"--url and --port address a dgx server, not {other.getD "none"}"
+  withData a.data (write := true) fun data => do
+    let (_, tip, entries) ← entriesAt data a.entry
+    let limits : Limits := {
+      samples? := if a.samples == 0 then none else some a.samples
+      budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
+    let position ← IO.mkRef entries.size |> Result.fromIO Error.storage
+    withRuntime data a.options a.provider? baseUrl? fun rt => do
+      let (last, stop) ← Driver.drive rt Run.alaya tip limits fun hash entry => do
+        let at' ← Result.fromIO Error.storage (position.modifyGet fun p => (p, p + 1))
+        entryRecord out hash at' entry
+      let log ← data.store.log (← data.store.forest) last
+      reportStop out last log stop
+      pure <| match stop with
+        | .idle => idleStatus log
+        | .waits .. => exitWaiting
+        | .paused _ => exitPaused
 
 private def tellRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
   withData data (write := true) fun data =>
@@ -459,26 +400,16 @@ private def logRun (data : System.FilePath) (reference : String) (out : Cli.Out)
           ("frame", (entry.event.frame?.map Frame.toJson).getD .null),
           ("event", eventToJson entry.event), ("elapsed_ms", entry.elapsedMs)])
         s!"{position}  {Render.short entry.hash}  {frame}  {Render.eventSummary entry.event}  ({Render.seconds spent})"
-    let status ← match ← tryCatch (some <$> configured log) fun _ => pure none with
-      | none => pure "the run cannot be read"
-      | some (config, model) => pure <| match config.run model with
-        | .ok run =>
-          let next := next run log
-          Render.nextSummary ((questionOf? next).map (·.2)) (agentEnd? log) next
-        | .error problem => s!"the run cannot be built: {problem}"
+    let next := next Run.alaya log
+    let status := Render.nextSummary ((questionOf? next).map (·.2)) ((lastCall? log).bind (·.2)) next
     out.record (.mkObj [("next", status)]) status
     pure 0
 
-/-- The files an entry shows: a grader's checkout as it left it, on the answer of an external
-program; the workspace the log has reached, on any other. -/
+/-- The files an entry shows: the workspace the log has reached there. -/
 private def snapshotAt (entries : Array Entry) : Result Snapshot := do
-  let last : Option (Event Agent) := entries.back?.map (·.event)
-  match last with
-  | some (.answered _ _ (.ok (.external ran))) => pure ran.checkout
-  | _ =>
-    match workspace? (entries.map (·.event)) with
-    | some snapshot => pure snapshot
-    | none => throw <| .storage "the log names no workspace"
+  match workspace? (entries.map (·.event)) with
+  | some snapshot => pure snapshot
+  | none => throw <| .storage "the log names no workspace"
 
 private def showRun (data : System.FilePath) (reference : String) (request : Bool) (out : Cli.Out) :
     Result UInt32 := do
@@ -487,23 +418,18 @@ private def showRun (data : System.FilePath) (reference : String) (request : Boo
     let log := entries.map (·.event)
     let some entry := entries.back? | throw <| .storage "an empty log"
     let position := entries.size - 1
-    let spent := entries.foldl (fun ms e => ms + e.elapsedMs) 0
+    let spent := entries.foldl (fun ms e => ms + e.elapsedMs) (0 : Nat)
     let usage := log.foldl (init := ({} : Chat.TokenUsage)) fun usage event =>
       match event with
       | .answered _ _ (.ok (.response response)) => addUsage usage (response.usage?.getD {})
       | _ => usage
     let stack := log.zipIdx.foldl (init := #[]) fun stack (event, i) => OpenCall.after stack i event
-    let (asked?, after) ← match ← tryCatch (some <$> configured log) fun _ => pure none with
-      | none => pure (none, "the run cannot be read")
-      | some (config, model) => pure <| match config.run model with
-        | .ok run =>
-          let before := Replayer.ofLog run (log.extract 0 position)
-          let asked? := match before.next, entry.event with
-            | .ask { op := .sample request, .. }, .answered .. => some request
-            | _, _ => none
-          let after := (before.feed entry.event).next
-          (asked?, Render.nextSummary ((questionOf? after).map (·.2)) (agentEnd? log) after)
-        | .error problem => (none, s!"the run cannot be built: {problem}")
+    let before := Replayer.ofLog Run.alaya (log.extract 0 position)
+    let asked? := match before.next, entry.event with
+      | .ask { op := .sample _ request, .. }, .answered .. => some request
+      | _, _ => none
+    let next := (before.feed entry.event).next
+    let after := Render.nextSummary ((questionOf? next).map (·.2)) ((lastCall? log).bind (·.2)) next
     let requestJson := if request then (asked?.map (·.toJson)).getD .null else .null
     if out.json then
       out.record (.mkObj [("entry", hash.hex), ("parent", entry.parent?.map (Json.str ·.hex) |>.getD .null),
@@ -629,12 +555,9 @@ private def rebaseRun (data : System.FilePath) (reference : String) (target : Sy
       throw <| .input s!"{target} overlaps the data directory {data.path}: put the new one beside it"
     let (_, tip, entries) ← entriesAt data reference
     let log := entries.map (·.event)
-    let (recorded, _) ← Rebase.configure log #[]
-    let (config, model) ← Rebase.configure log settings
-    match config.run model with
-    | .error problem => throw <| .input problem
-    | .ok run =>
-      let rebased := Rebase.plan run log (recorded.model == config.model)
+    let log ← Rebase.reconfigure log settings
+    do
+      let rebased := rebase Run.alaya log
       let summary := Rebase.summary rebased log.size
       let staging := target.withFileName
         s!".{name}.rebase-{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"
@@ -658,7 +581,7 @@ private def rebaseRun (data : System.FilePath) (reference : String) (target : Sy
             | none => .null
             | some divergence => .mkObj [("position", divergence.position),
                 ("found", eventToJson divergence.found),
-                ("expected", Rebase.expectedSummary divergence.expected?)]),
+                ("expected", Rebase.expectedSummary divergence.expected)]),
           ("dropped", .arr (rebased.dropped.map fun (position, event) =>
             .mkObj [("position", position), ("event", eventToJson event)]))]) ""
       else io do
@@ -666,7 +589,7 @@ private def rebaseRun (data : System.FilePath) (reference : String) (target : Sy
         let stderr ← IO.getStderr
         stderr.putStrLn summary
         for line in Rebase.droppedLines rebased do stderr.putStrLn line
-        stderr.putStrLn s!"`alaya run {Render.short last} --data {target}` goes on"
+        stderr.putStrLn s!"`alaya resume {Render.short last} --data {target}` goes on"
       pure 0
 
 /-! ## Configuration -/
@@ -685,56 +608,55 @@ private def providerText (provider : Provider.Provider) : String :=
   let routes := provider.routes.map fun (model, route) => s!"\n  {model} as {route.name}"
   s!"provider {provider.name}: {provider.baseUrl}, key {provider.keyVar}; serves {serves}" ++ String.join routes
 
-/-- The agents, models and providers with their defaults, or the configuration `new` would
-record for these flags. -/
-private def configRun (agent? model? : Option String) (settings : Array Settings.Setting)
+/-- The programs, models and providers with their defaults, or the configuration `call` would
+record for a program with these settings. -/
+private def configRun (program? : Option String) (settings : Array Settings.Setting)
     (out : Cli.Out) : Result UInt32 := do
-  for setting in settings do
-    if setting.target == .agent && agent?.isNone then
-      throw <| .input "--set agent.… needs --agent NAME, the agent it changes"
-    if setting.target == .model && model?.isNone then
-      throw <| .input "--set model.… needs --model NAME, the model it changes"
-  if agent?.isNone && model?.isNone then
+  if program?.isNone && !settings.isEmpty then
+    throw <| .input "--set needs --program NAME, the program it changes"
+  if program?.isNone then
     for definition in Agents.Catalog.all do
-      let agent ← Agents.Catalog.resolve definition.name #[]
-      out.record (.mkObj [("agent", agent)]) s!"agent {agent.pretty}"
+      let program ← Agents.Catalog.resolve definition.name #[]
+      out.record (.mkObj [("program", program)]) s!"program {program.pretty}"
     for spec in Models.all do
       out.record (.mkObj [("model", spec.toJson)]) s!"model {spec.toJson.pretty}"
     for provider in Provider.all do
       out.record (.mkObj [("provider", providerJson provider)]) (providerText provider)
     return 0
-  let mut fields : List (String × Json) := []
-  if let some name := agent? then fields := fields ++ [("agent", ← Agents.Catalog.resolve name settings)]
-  if let some name := model? then fields := fields ++ [("model", (← Models.resolve name settings).toJson)]
-  out.record (.mkObj fields) (Json.mkObj fields).pretty
+  let program ← Agents.Catalog.resolve (program?.getD "") settings
+  out.record (.mkObj [("program", program)]) program.pretty
   pure 0
 
 /-! ## The table -/
 
 private def commands : Array Cli.Command := #[
   { name := "new"
-    summary := "Create a run: its workspace, the agent's call with the run's configuration, and the task."
-    examples := #[
-      "alaya new --task 'Add a hello.py that prints hello' ./project " ++
-        "--agent mini-swe --model gpt-oss-120b --image ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
-      "alaya new --task-file TASK.md --agent mini-vero --model deepseek-v4.1-flash --set agent.mode=codeproof " ++
-        "--image my-task:1 --workdir /testbed"]
+    summary := "Create a run: its root, the workspace, where it waits for a program to be called."
+    examples := #["alaya new ./project", "alaya new --image swebench/sweb.eval.django-11099:latest --workdir /testbed"]
     spec := newRun <$> NewArgs.cli },
+  { name := "call"
+    summary := "Call a program after an entry where no call runs: an agent, or a grader; resume drives it."
+    examples := #[
+      "alaya call 4f2c8b mini-swe --set model=gpt-oss-120b --task 'Add a hello.py that prints hello' " ++
+        "--image ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
+      "alaya call 4f2c8b mini-vero --set model=deepseek-v4.1-flash --set mode=codeproof --task-file TASK.md " ++
+        "--image my-task:1 --workdir /testbed",
+      "alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grade.py'"]
+    spec := callRun <$> CallArgs.cli },
   { name := "config"
-    summary := "The agents, models and providers, or the configuration new would record; creates nothing."
+    summary := "The programs, models and providers, or the configuration call would record; creates nothing."
     examples := #["alaya config",
-      "alaya config --agent mini-vero --model deepseek-v4.1-flash --set agent.mode=codeproof --set model.params.reasoning_effort=high"]
-    spec := configRun <$> Cli.flag? "agent" agentName s!"the agent: {Agents.Catalog.names}"
-      <*> Cli.flag? "model" modelName s!"the model: {Models.names}"
+      "alaya config --program mini-vero --set model=deepseek-v4.1-flash --set model.params.reasoning_effort=high --set mode=codeproof"]
+    spec := configRun <$> Cli.flag? "program" programName s!"the program: {Agents.Catalog.names}"
       <*> overrides },
-  { name := "run"
-    summary := "Drive a run on from an entry until it is over, waits for a person, or reaches a limit."
-    examples := #["alaya run 4f2c8b --provider apiyi --time-budget 3600",
-      "alaya run 4f2c8b --provider dgx --url spark.local:9000 --samples 1",
-      "alaya run 4f2c8b --provider apiyi --samples 1"]
-    spec := runRun <$> RunArgs.cli },
+  { name := "resume"
+    summary := "Drive a run on from an entry until no call runs, a call waits for a person, or a limit is reached."
+    examples := #["alaya resume 4f2c8b --provider apiyi --time-budget 3600",
+      "alaya resume 4f2c8b --provider dgx --url spark.local:9000 --samples 1",
+      "alaya resume 9a11c0"]
+    spec := resumeRun <$> ResumeArgs.cli },
   { name := "tell"
-    summary := "Append a person's message after an entry; the agent reads it at its next read of the inbox."
+    summary := "Append a person's message after an entry; the call running reads it at its next read of the inbox."
     examples := #["alaya tell 4f2c8b 'keep the old API'"]
     spec := tellRun <$> dataDir <*> entryArg <*> Cli.arg "TEXT" .string "the message" },
   { name := "commit"
@@ -746,13 +668,8 @@ private def commands : Array Cli.Command := #[
     summary := "Answer the question a log waits on, or record that the person cannot."
     examples := #["alaya reply c61754 -- 'yes, keep it'", "alaya reply c61754 --unavailable"]
     spec := replyRun <$> dataDir <*> entryArg "the entry whose log waits for a reply" <*> replyAnswer },
-  { name := "grade"
-    summary := "Grade a run at an entry: stop the agent there, assign the grader, and run it; exits with the verdict."
-    examples := #["alaya grade 4f2c8b --grader 'python3 /grader/grade.py' --grader-input ./hidden",
-      "alaya grade 4f2c8b:120 --grader 'sh /grader/check.sh' --grader-input ./hidden --grader-image checker:1"]
-    spec := gradeRun <$> GradeArgs.cli },
   { name := "stop"
-    summary := "Stop the agent after an entry: the run is over there."
+    summary := "Stop the call running after an entry: the call is over there."
     examples := #["alaya stop 4f2c8b:120 --reason 'enough'"]
     spec := stopRun <$> dataDir <*> entryArg
       <*> Cli.flagD "reason" .string "stopped from outside" "why, as the log keeps it" },
@@ -803,19 +720,20 @@ private def commands : Array Cli.Command := #[
     spec := rmRun <$> dataDir <*> entryArg "the first entry to delete" },
   { name := "rebase"
     summary := "Copy the log at an entry into a new data directory, up to where a revised version of its agent differs, to go on with it there."
-    examples := #["alaya rebase 4f2c8b ../v2", "alaya rebase 4f2c8b ../v2 --set agent.context_reserve=16000"]
+    examples := #["alaya rebase 4f2c8b ../v2", "alaya rebase 4f2c8b ../v2 --set context_reserve=16000"]
     spec := rebaseRun <$> dataDir <*> entryArg "the entry whose log is rebased"
       <*> Cli.arg "DIR" .path "the new data directory, which must not exist"
       <*> overrides }]
 
 private def app : Cli.App where
   name := "alaya"
-  summary := "Run agents as programs over a log: drive, fork at any entry, intervene, and grade any point."
+  summary := "Run agents as programs over a log: call them, drive, fork at any entry, intervene, and grade any point."
   commands := commands
 
-/-- Exit 0 when a command succeeded. `run` exits 0 when the agent is over, returned or stopped,
-1 when the agent failed, 3 when the run waits for a person (`exitWaiting`), and 4 when it paused
-at a limit (`exitPaused`); `grade` exits with the verdict, 0 pass, 1 fail, 2 error. A failure exits with its class's status, above all of these
+/-- Exit 0 when a command succeeded. `resume` exits, when no call runs, 0 when the last call
+returned or was stopped and 1 when it failed, or, when the last call was a grader, with its
+verdict: 0 pass, 1 fail, 2 error; 3 when a call waits for a person (`exitWaiting`), and 4 when it
+paused at a limit (`exitPaused`). A failure exits with its class's status, above all of these
 (`Cli.exitFor`): 64 a command line that does not parse, 65 input, 69 environment, 74 storage, 75
 transient, 76 model. -/
 def main (argv : List String) : IO UInt32 :=

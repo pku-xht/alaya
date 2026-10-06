@@ -318,53 +318,44 @@ def runSuite : Suite := Testing.suite "workspaces.run" #[
     let workspaces ← assertOk <| Workspaces.Restic.open ((← scratch) / "restic") ((← scratch) / "restic-scratch")
     let project ← source
     writeSpec project baseSpec
-    let input := (← scratch) / "input"
-    writeSpec input #[("check.sh", "test -f tests/extra.txt && printf '1..1\\nok 1\\n'")]
-    let grader : Grader :=
-      { command := "sh /grader/check.sh", image := ← testImage, input? := some (← assertOk <| workspaces.snapshot input) }
-    let config : RunConfig := { Scripted.testConfig testAgent with
-      environment := { image := ← testImage, workdir := recordedWorkdir, uname := Scripted.testUname } }
-    match config.run Scripted.testModelSpec with
-    | .error problem => fail problem
-    | .ok run =>
-      let work := (← scratch) / "work"
-      IO.FS.createDirAll work
-      let base ← scratch
-      let graderUser? ← testUser?
-      let rt : Driver.Runtime := {
-        store, workspaces, workDir := work, outputsDir := base / "outputs", scratch := base / "external"
-        executor := noCommands, workdir := recordedWorkdir, graderUser? }
-      let made ← assertOk <| Notices.create store workspaces run project "t"
-      let tip := made.back!.1
-      IO.FS.writeFile (project / "README.md") "readme, by hand"
-      writeSpec project #[("tests/extra.txt", "extra")]
-      let event ← assertOk <| Notices.changed store workspaces tip project "by hand"
-      let .arrived (.changed after summary) := event | fail "a change is a notice"
-      assertEqual "what changed" summary "  M README.md\n  + tests\nby hand"
-      let (changed, _) ← assertOk <| Driver.append store run tip event
-      -- Graded there: the agent is stopped, and the grader reads the person's files, in a checkout.
-      let (graded, verdict) ← Scripted.grade rt run changed grader
-      assertEqual "the verdict" (verdictStatus verdict) "pass"
-      -- The point before the change, graded by the same grader, where the file is not there: the
-      -- script prints nothing, which is an error.
-      let (_, verdict) ← Scripted.grade rt run tip grader
-      assertEqual "graded without the person's file" (verdictStatus verdict) "error"
-      let log ← assertOk <| store.log (← assertOk store.forest) graded
-      let some checkout := log.findSome? fun | .answered _ _ (.ok (.external e)) => some e.checkout | _ => none
-        | fail "the grader's checkout is in the log"
-      check (← assertOk <| workspaces.readFile? checkout "tests/extra.txt").isSome "the checkout holds the change"
-      -- Removing from the change drops its snapshots and keeps the root's.
-      -- The change, the stop, the grader, its read, its program's answer, and the run's return.
-      assertEqual "removed" (← assertOk <| Notices.remove store workspaces changed) 6
-      let out := (← scratch) / "out"
-      assertOk <| workspaces.materialize ((workspace? (log.extract 0 1)).getD default) out
-      assertEqual "root intact" (← IO.FS.readFile (out / "README.md")) "readme"
-      assertError "dropped" (workspaces.materialize after out) fun
-        | .storage _ => true
-        | _ => false
-      -- The grader's input is kept: the other branch still names it.
-      assertOk <| workspaces.materialize grader.input?.get! out
-      check (← (out / "check.sh").pathExists) "the input is still in the repository"
+    -- An agent that waits for a message: it runs no command.
+    let run := Scripted.runOf fun _ => do
+      let _ ← await fun _ notice => notice matches .said _
+      return "done"
+    let work := (← scratch) / "work"
+    IO.FS.createDirAll work
+    let executor ← containerExecutor
+    let rt : Driver.Runtime := {
+      store, workspaces, workDir := work, outputsDir := (← scratch) / "outputs"
+      executor := fun _ => pure executor, model := fun _ => throw <| .input "no model" }
+    let (root, _) ← assertOk <| Notices.create store workspaces project
+    let (called, _) ← assertOk <| Driver.append store run root (Scripted.callAgent)
+    let (tip, stop) ← assertOk <| Driver.drive rt run called
+    check (stop matches .waits #[0] none) "the agent waits for a message"
+    IO.FS.writeFile (project / "README.md") "readme, by hand"
+    writeSpec project #[("tests/extra.txt", "extra")]
+    let event ← assertOk <| Notices.changed store workspaces tip project "by hand"
+    let .arrived (.changed after summary) := event | fail "a change is a notice"
+    assertEqual "what changed" summary "  M README.md\n  + tests\nby hand"
+    let (changed, _) ← assertOk <| Driver.append store run tip event
+    -- Graded there: the agent is stopped, and the grader reads the person's files.
+    let grader := Scripted.graderCall "test -f tests/extra.txt && printf '1..1\\nok 1\\n'" (← testImage)
+    let (graded, verdict) ← Scripted.grade rt run changed grader
+    assertEqual "the verdict" (Agents.Grader.verdictStatus verdict) "pass"
+    -- The point before the change, graded by the same grader, where the file is not there: the
+    -- script prints nothing, which is an error.
+    let (_, verdict) ← Scripted.grade rt run tip grader
+    assertEqual "graded without the person's file" (Agents.Grader.verdictStatus verdict) "error"
+    let log ← assertOk <| store.log (← assertOk store.forest) graded
+    -- Removing from the change drops its snapshots and keeps the root's.
+    -- The change, the stop, the grader's call, its read, its opening, its command, and its return.
+    assertEqual "removed" (← assertOk <| Notices.remove store workspaces changed) 7
+    let out := (← scratch) / "out"
+    assertOk <| workspaces.materialize ((workspace? (log.extract 0 1)).getD default) out
+    assertEqual "root intact" (← IO.FS.readFile (out / "README.md")) "readme"
+    assertError "dropped" (workspaces.materialize after out) fun
+      | .storage _ => true
+      | _ => false
 ]
 
 end WorkspacesTests

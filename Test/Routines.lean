@@ -38,7 +38,7 @@ the model answers without a call. Its answer, a command a line, is the plan. -/
 def planner : Routine Agent Task Plan := routine "planner" fun task => do
   let opening : Array Chat.Message := #[.system "You plan.", .user task.goal]
   let answer ← iter (fun (messages : Array Chat.Message) => do
-    let response ← sample { messages, tools := #[lookupDefinition] }
+    let response ← sample testModelSpec { messages, tools := #[lookupDefinition] }
     if response.toolCalls.isEmpty then return Sum.inr (response.content?.getD "")
     let mut messages := messages.push response.message
     for asked in response.toolCalls do
@@ -60,21 +60,15 @@ def workflow : Routine Agent Task String := routine "workflow" fun task => do
     if (← step.call command) != 0 then failed := failed + 1
   return s!"{plan.steps.size} steps, {failed} failed"
 
-/-- The agent: it waits for its task, and runs the workflow on it. -/
-def agent : Program Agent Json := do
-  let notices ← await fun _ notice => notice matches .said _
-  let goal := match notices with
-    | .said goal :: _ => goal
-    | _ => ""
+/-- The agent: it runs the workflow on its task. -/
+def agent (goal : String) : Program Agent Json := do
   return toJson (← workflow.call { goal })
 
 def routines : Array (Routine.Entry Agent) := #[lookup.entry, planner.entry, step.entry, workflow.entry]
 
-/-- Runs `k` with the run of `program`, with the routines above. -/
-private def withRun (program : Program Agent Json) (k : Run Agent → TestM Unit) : TestM Unit :=
-  match Run.ofAgent (testConfig testAgent).toJson program routines with
-  | .ok run => k run
-  | .error problem => fail problem
+/-- Runs `k` with the run of `make`'s program for the task, with the routines above. -/
+private def withRun (make : String → Program Agent Json) (k : Run Agent → TestM Unit) : TestM Unit :=
+  k (runOf make routines)
 
 /-- The openings of a log: the frame each call runs in, and the routine it names. -/
 private def openings (log : Log Agent) : Array (Frame × String) :=
@@ -94,10 +88,9 @@ def suite : Suite := Testing.suite "routines" #[
         responseWith #[{ id := "l", name := "lookup", arguments := .mkObj [("word", "build")] }],
         { content? := some "make\nmake test" }]
       let (rt, last, stop) ← drive run executor model "ship it"
-      match stop with
-      | .over (.returned value) none => assertEqual "the agent's result" value.compress "\"2 steps, 1 failed\""
-      | _ => fail "the agent is over"
+      check (stop matches .idle) "the agent is over"
       let log ← logAt rt last
+      assertEqual "the agent's result" ((agentResult log).bind (·.toOption) |>.map (·.compress)) (some "\"2 steps, 1 failed\"")
       assertEqual "the calls, each in its caller's next frame" (openings log)
         #[(#[0], "agent"), (#[0, 0], "workflow"), (#[0, 0, 0], "planner"), (#[0, 0, 0, 0], "lookup"),
           (#[0, 0, 1], "step"), (#[0, 0, 2], "step")]
@@ -109,7 +102,7 @@ def suite : Suite := Testing.suite "routines" #[
       check (log.any fun | .returned #[0, 0, 2] value => value.compress == "1" | _ => false) "the failed step's status"
       -- What a routine asks the world for is asked from its own frame.
       let asked := log.filterMap fun
-        | .answered frame (.sample _) _ => some (frame, "sample")
+        | .answered frame (.sample ..) _ => some (frame, "sample")
         | .answered frame (.exec command _) _ => some (frame, command)
         | _ => none
       assertEqual "who asked for what" asked
@@ -123,37 +116,35 @@ def suite : Suite := Testing.suite "routines" #[
 
   test "a routine is entered by a call alone, and what crosses the call must be what it takes" do
     -- Called with arguments it cannot read, a routine fails; its caller may catch that.
-    withRun (try Alaya.call "step" (.mkObj [("command", "make")]) catch error => pure (.str error)) fun run => do
-      let log := settle run #[.arrived (.changed default "p")]
+    withRun (fun _ => try Alaya.call "step" (.mkObj [("command", "make")]) catch error => pure (.str error)) fun run => do
+      let log := settle run opening
       check (log.any fun | .failed #[0, 0] error => contains error "step: its arguments cannot be read" | _ => false)
         "the routine failed, in its own frame"
       check ((next run log) matches .waits #[] _) "and the agent went on, to its end"
     -- A handle that expects another result than the routine gives fails where the result is read.
     let mistaken : Routine Agent String String := routine "step" fun _ => pure ""
-    withRun (toJson <$> mistaken.call "make") fun run => do
-      let log := answer run (settle run #[.arrived (.changed default "p")]) (executed)
+    withRun (fun _ => toJson <$> mistaken.call "make") fun run => do
+      let log := answer run (settle run opening) (executed)
       check (log.any fun | .returned #[0, 0] value => value.compress == "0" | _ => false) "the routine returned its status"
       check (log.any fun | .failed #[0] error => contains error "step: its result cannot be read" | _ => false)
         "the caller could not read it"
-    -- The grader is no routine: nothing an agent calls reaches it.
-    withRun (Alaya.call "grade" (Grader.toJson { command := "true", image := "image" })) fun run => do
-      let log := settle run #[.arrived (.changed default "p")]
-      check (log.any fun | .failed #[0, 0] "no routine named grade" => true | _ => false) "there is no such routine",
+    -- The grader is a program a person calls, no routine: nothing an agent calls reaches it.
+    withRun (fun _ => Alaya.call "grader" (.mkObj [("command", "true")])) fun run => do
+      let log := settle run opening
+      check (log.any fun | .failed #[0, 0] "no routine named grader" => true | _ => false) "there is no such routine",
 
-  test "the routines of a run are declared once each, and none under the agent's own name" do
-    let build (entries : Array (Routine.Entry Agent)) : Option String :=
-      match Run.ofAgent .null agent entries with
-      | .ok _ => none
-      | .error problem => some problem
-    assertEqual "the routines above" (build routines) none
-    check ((build (routines.push step.entry)).any (contains · "two routines are named step")) "a name twice"
-    check ((build #[(agentRoutine, fun _ => pure .null)]).any (contains · "cannot be named agent")) "the agent's name"
-    -- The agents the command line can name declare the tools they offer, and nothing else.
-    match miniRun { tools := #["bash", "submit", "ask_user"], questionTypes := Question.Kind.all } with
-    | .error problem => fail problem
-    | .ok run =>
-      assertEqual "what a run of MiniSwe has" (#["agent", "bash", "submit", "ask_user", "time_budget", "grade"].filter
-        fun name => (run.routines name).isSome) #["agent", "bash", "submit", "ask_user"]
+  test "a call enters its own program's routines: an agent's, the tools it offers" do
+    let program := ({ tools := #["bash", "submit", "ask_user"], questionTypes := Question.Kind.all, model? := some testModelSpec } : Agents.MiniSwe.Config)
+    let call : CallConfig := { testCall with program := program.toJson }
+    match Agents.Catalog.programs "mini-swe" with
+    | none => fail "mini-swe is a program"
+    | some make =>
+      match make call.toJson with
+      | .error problem => fail problem
+      | .ok (_, routines) =>
+        assertEqual "what a call of MiniSwe enters" (#["bash", "submit", "ask_user", "time_budget", "grader"].filter
+          fun name => (routines name).isSome) #["bash", "submit", "ask_user"]
+    check (Agents.Catalog.programs "nothing").isNone "no program of that name"
 ]
 
 end RoutinesTests

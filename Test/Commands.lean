@@ -66,54 +66,71 @@ private def appended (data : System.FilePath) (command : String) (arguments : Ar
   let some entry := made[0]? | fail s!"alaya {command} printed no entry"
   pure entry
 
-/-- A grader that checks `a.txt` was edited: two checks, the second failing where it was not. -/
-private def grader : Array String := #["--grader",
-  "printf '1..2\\nok 1 - ran\\n'; test \"$(cat a.txt)\" = edited && echo 'ok 2 - edited' || echo 'not ok 2 - edited'"]
+/-- The grader's command: it checks `a.txt` was edited, two checks, the second failing where it
+was not. -/
+private def check2 : String :=
+  "printf '1..2\\nok 1 - ran\\n'; test \"$(cat a.txt)\" = edited && echo 'ok 2 - edited' || echo 'not ok 2 - edited'"
 
-/-- A run of MiniSwe over a small project. Gives the data directory, the project, and the entries
-`new` made. -/
-private def newRun : TestM (System.FilePath × System.FilePath × Array Json) := do
+/-- Grades the point `entry` as a person does: stops the call running there, if one is, calls the
+grader with `command`, and resumes. Gives the stop, if there was one, the call, and what resume
+printed and how it exited. -/
+private def gradeAt (data : System.FilePath) (entry command : String) :
+    TestM (Option Json × Json × Ran) := do
+  let stop ← alaya data "stop" #[entry, "--json"]
+  let stopped? ← if stop.exit == 0 then pure (← records stop.stdout)[0]? else pure none
+  let at' := (stopped?.map (text · ["entry"])).getD entry
+  let called ← appended data "call" #[at', "grader", "--image", testImageReference, "--set", s!"command={command}"]
+  pure (stopped?, called, ← alaya data "resume" #[text called ["entry"], "--json"])
+
+/-- A run of MiniSwe over a small project, driven as far as it goes without a model: up to the
+agent's first sample. Gives the data directory, the project, the entries `new` and `call` made,
+and the entries `resume` appended. -/
+private def newRun : TestM (System.FilePath × System.FilePath × Array Json × Array Json) := do
   let data := (← scratch) / "data"
   let project := (← scratch) / "project"
   writeSpec project #[("a.txt", "one\n"), ("src/b.txt", "two\n")]
-  let made ← records (← ok data "new" #["--json", "--task", "the task", project.toString,
-    "--image", testImageReference, "--agent", "mini-swe", "--model", "gpt-oss-120b",
-    "--set", "agent.context_reserve=7"])
-  pure (data, project, made)
+  let root ← records (← ok data "new" #["--json", project.toString])
+  let called ← records (← ok data "call" #["--json", text root[0]! ["entry"], "mini-swe", "--task", "the task",
+    "--image", testImageReference, "--set", "model=gpt-oss-120b", "--set", "context_reserve=7"])
+  let resumed ← alaya data "resume" #[text called[0]! ["entry"], "--json"]
+  if resumed.exit != 65 || !has resumed.stderr "--provider" then
+    fail s!"resume without a provider: {resumed.exit} {resumed.stderr}"
+  pure (data, project, root ++ called, ← records resumed.stdout)
 
 def suite : Suite := Testing.suite "commands" #[
-  test "new makes a run of three entries, its root, its agent's call and its task, and the readers read it" do
-    let (data, _, made) ← newRun
-    assertEqual "three entries" (made.map (text · ["event", "type"])) #["arrived", "opened", "arrived"]
-    assertEqual "at their positions" (made.map (field · ["position"] |>.compress)) #["0", "1", "2"]
-    assertEqual "each after the one before" (made.map (text · ["parent"]))
-      #["null", text made[0]! ["entry"], text made[1]! ["entry"]]
-    assertEqual "the task" (text made[2]! ["event", "notice", "message"]) "the task"
-    let config := field made[1]! ["event", "routine", "arguments"]
-    assertEqual "the configuration is the agent's call" (text config ["agent", "name"], text config ["model", "name"],
-      (field config ["agent", "context_reserve"]).compress) ("mini-swe", "gpt-oss-120b", "7")
+  test "new makes a root, call asks for an agent with its configuration, resume opens it, and the readers read it" do
+    let (data, _, made, resumed) ← newRun
+    assertEqual "the root and the call" (made.map (text · ["event", "type"])) #["arrived", "arrived"]
+    assertEqual "each after the one before" (made.map (text · ["parent"])) #["null", text made[0]! ["entry"]]
+    let call := field made[1]! ["event", "notice", "call"]
+    let config := field call ["arguments"]
+    assertEqual "the call names its program, and holds its configuration, model and task"
+      (text call ["name"], text config ["program", "name"], text config ["program", "model", "name"],
+        (field config ["program", "context_reserve"]).compress, text config ["task"])
+      ("mini-swe", "mini-swe", "gpt-oss-120b", "7", "the task")
     check (has (text config ["environment", "image"]) "@sha256:") "the image is pinned by its digest"
-    assertEqual "and names no grader" (field config ["graders"]).compress "null"
-    check (has (← refused 64 data "new" #["--task", "t", "--image", testImageReference, "--agent", "mini-swe",
-      "--model", "gpt-oss-120b", "--grader", "true"]) "unknown option --grader") "new takes no grader"
-    let tip := text made[2]! ["entry"]
+    check (has (← refused 64 data "new" #["--task", "t", ((← scratch) / "project").toString]) "unknown option --task")
+      "new takes no task"
+    assertEqual "resume reads the call, opens the agent, and the agent reads its inbox"
+      (resumed.map (text · ["event", "type"])) #["heard", "opened", "heard"]
+    let tip := text resumed.back! ["entry"]
     -- A prefix names an entry, and `:N` a position of its log.
     let log ← records (← ok data "log" #[(tip.take 10).toString, "--json"])
     assertEqual "the log, and what comes next" (log.map fun record =>
         if (field record ["next"]) != Json.null then text record ["next"] else text record ["event", "type"])
-      #["arrived", "opened", "arrived", "next: a read of the inbox in 0"]
+      #["arrived", "arrived", "heard", "opened", "heard", "next: sample gpt-oss-120b on a request of 2 messages"]
     let plain := lines (← ok data "log" #[tip])
-    check (plain[1]?.any (has · "0  open agent: mini-swe, gpt-oss-120b")) s!"the log in lines: {plain}"
-    let shown ← records (← ok data "show" #[s!"{tip}:1", "--json"])
-    assertEqual "an entry by its position" (text shown[0]! ["entry"]) (text made[1]! ["entry"])
+    check (plain[3]?.any (has · "0  open mini-swe, gpt-oss-120b")) s!"the log in lines: {plain}"
+    let shown ← records (← ok data "show" #[s!"{tip}:3", "--json"])
+    assertEqual "an entry by its position" (text shown[0]! ["entry"]) (text resumed[1]! ["entry"])
     assertEqual "the calls open at it" ((field shown[0]! ["calls"]).getArr?.toOption.map (·.map (text · ["routine", "name"])))
-      (some #["agent"])
+      (some #["mini-swe"])
     assertEqual "the workspace it stands on" (text shown[0]! ["workspace"]) (text made[0]! ["event", "notice", "workspace"])
     check (has (← ok data "show" #[tip, "--request"]) "request: none") "an entry that answers no sample has no request"
     let tree := lines (← ok data "tree")
     assertEqual "the tree" tree.size 2
-    check (has tree[0]! "root  mini-swe, gpt-oss-120b" && has tree[1]! "[next: a read of the inbox in 0]") s!"{tree}"
-    assertEqual "the tree as records" (← records (← ok data "tree" #["--json"])).size 3
+    check (has tree[0]! "root  mini-swe, gpt-oss-120b" && has tree[1]! "[next: sample gpt-oss-120b on a request of 2 messages]") s!"{tree}"
+    assertEqual "the tree as records" (← records (← ok data "tree" #["--json"])).size 5
     assertEqual "no question waits" (← ok data "waiting") ""
     -- The workspace at an entry: listed, read, written out.
     let listed := lines (← ok data "ls" #[tip])
@@ -130,11 +147,11 @@ def suite : Suite := Testing.suite "commands" #[
     check ((← IO.FS.readFile page).startsWith "<!doctype html>") "the report is a page",
 
   test "a person's message and change are appended, any point is graded by any grader, and rm removes" do
-    let (data, _, made) ← newRun
-    let tip := text made[2]! ["entry"]
+    let (data, _, _, resumed) ← newRun
+    let tip := text resumed.back! ["entry"]
     let told ← appended data "tell" #[tip, "keep the old API"]
     assertEqual "a message" (text told ["event", "notice", "message"], (field told ["position"]).compress)
-      ("keep the old API", "3")
+      ("keep the old API", "5")
     -- A change: the files of a directory, and what changed.
     let edited := (← scratch) / "edited"
     let _ ← ok data "checkout" #[tip, edited.toString]
@@ -146,106 +163,112 @@ def suite : Suite := Testing.suite "commands" #[
     assertEqual "the change, between two entries" (lines (← ok data "diff" #[tip, text changed ["entry"]])) #["M a.txt"]
     assertEqual "the file at the change" (← ok data "cat" #[text changed ["entry"], "a.txt"]) "edited\n"
     assertEqual "and before it" (← ok data "cat" #[tip, "a.txt"]) "one\n"
-    -- Graded there: the agent is stopped, the grader assigned, and it runs, with no model.
-    let ran ← records (← ok data "grade" (#[text changed ["entry"], "--json"] ++ grader))
-    assertEqual "a stop, the grader, its read, its program, and the run's end with its verdict"
-      ((ran.extract 0 5).map fun record => text record ["event", "type"])
-      #["stopped", "arrived", "heard", "answered", "returned"]
-    assertEqual "the notice assigns the grader" (text ran[1]! ["event", "notice", "type"],
-      has (text ran[1]! ["event", "notice", "grader", "image"]) "@sha256:") ("assigned", true)
-    assertEqual "the grader runs in the run's own frame, where the run ends" ((ran.extract 3 5).map fun record =>
-      (field record ["event", "frame"]).compress) #["[]", "[]"]
-    let some status := ran.back? | fail "grade printed nothing"
-    assertEqual "the agent was stopped" (text status ["status"], text status ["reason"]) ("stopped", "to grade this point")
-    let verdictOf (status : Json) := (text status ["verdict", "status"],
-      (field status ["verdict", "passed"]).compress, (field status ["verdict", "total"]).compress)
-    assertEqual "with the grader's verdict" (verdictOf status) ("pass", "2", "2")
+    -- No program is called while the agent runs.
+    check (has (← refused 65 data "call" #[text changed ["entry"], "grader", "--image", testImageReference,
+      "--set", "command=exit 0"]) "a call is running") "a call while the agent runs"
+    -- Graded there: the agent is stopped, the grader called, and resume runs it, with no model.
+    let (stopped, called, ran) ← gradeAt data (text changed ["entry"]) check2
+    check (stopped.any (text · ["event", "type"] == "stopped")) "the agent is stopped first"
+    assertEqual "the grader is a call" (text called ["event", "notice", "call", "name"]) "grader"
+    assertEqual "a pass exits 0" ran.exit 0
+    let ran ← records ran.stdout
+    assertEqual "the run reads the call, opens it, runs its command, and it returns its verdict"
+      ((ran.extract 0 4).map fun record => text record ["event", "type"]) #["heard", "opened", "answered", "returned"]
+    assertEqual "the grader runs in a frame of its own" ((ran.extract 1 4).map fun record =>
+      (field record ["event", "frame"]).compress) #["[1]", "[1]", "[1]"]
+    let some status := ran.back? | fail "resume printed nothing"
+    let verdictOf (status : Json) := (text status ["call"], text status ["value", "status"],
+      (field status ["value", "passed"]).compress, (field status ["value", "total"]).compress)
+    assertEqual "with the grader's verdict" (verdictOf status) ("grader", "pass", "2", "2")
     let graded := text status ["entry"]
-    -- The same grader at the first version, where the file is as it was: a fail, and `grade` exits 1.
-    let early ← alaya data "grade" (#[tip, "--json"] ++ grader)
+    -- The same grader at the first version, where the file is as it was: a fail, and resume exits 1.
+    let (_, _, early) ← gradeAt data tip check2
     assertEqual "a fail exits 1" early.exit 1
-    assertEqual "its verdict" ((← records early.stdout).back?.map verdictOf) (some ("fail", "1", "2"))
-    -- Another grader, at the point already graded: a log has one grader, so this one is assigned
-    -- on a fork, from the stop, and the first verdict stays where it is.
-    let again ← alaya data "grade" #[graded, "--grader", "printf '1..1\\nok 1 - other\\n'", "--json"]
+    assertEqual "its verdict" ((← records early.stdout).back?.map verdictOf) (some ("grader", "fail", "1", "2"))
+    -- Another grader, at the point already graded: called after the first's end, it is a second call.
+    let (none, _, again) ← gradeAt data graded "printf '1..1\\nok 1 - other\\n'" | fail "no call runs there"
     assertEqual "a pass exits 0" again.exit 0
     let again ← records again.stdout
-    assertEqual "the grader is assigned after the stop, beside the first" (text again[0]! ["event", "notice", "type"],
-      text again[0]! ["parent"]) ("assigned", text ran[0]! ["entry"])
-    assertEqual "its own verdict" (again.back?.map verdictOf) (some ("pass", "1", "1"))
+    assertEqual "its own verdict" (again.back?.map verdictOf) (some ("grader", "pass", "1", "1"))
     let twice := text again.back! ["entry"]
+    -- The second grader follows the first in the same log: the tree shows how the log ends.
     let tree := lines (← ok data "tree")
-    check (tree.any (has · "[stopped: pass 2/2]") && tree.any (has · "[stopped: pass 1/1]")) s!"both verdicts: {tree}"
-    -- A grader that prints no TAP is an error, and `grade` exits 2.
-    let broken ← alaya data "grade" #[graded, "--grader", "exit 3"]
-    check (broken.exit == 2 && has broken.stderr "error 0/0") s!"an error exits 2: {broken.exit} {broken.stderr}"
-    check (has (← refused 64 data "grade" #[twice]) "--grader CMD is required") "grade needs its grader"
-    -- Once the agent is over, there is nothing to stop and no one to read a message.
-    check (has (← refused 65 data "stop" #[twice]) "the agent is over") "a stop after the end is refused"
-    check (has (← refused 65 data "tell" #[twice, "late"]) "the agent is over") "and so is a message"
-    let over ← alaya data "run" #[twice]
-    check (over.exit == 0 && has over.stderr "stopped: pass 1/1") s!"run finds nothing to do: {over.stderr}"
-    -- Removing the message removes all that followed it, and leaves the other branch.
+    check (tree.any (has · "[done: pass 1/1]") && !tree.any (has · "[done: pass 2/2]")) s!"the last verdict: {tree}"
+    check ((lines (← ok data "log" #[twice])).any (has · "return pass 2/2")) "the first is in the log, before it"
+    -- A grader that prints no TAP is an error, and resume exits 2.
+    let (_, _, broken) ← gradeAt data graded "exit 3"
+    check (broken.exit == 2 && has broken.stdout "\"status\":\"error\"") s!"an error exits 2: {broken.exit} {broken.stdout}"
+    -- Where no call runs, there is nothing to stop and no one to read a message.
+    check (has (← refused 65 data "stop" #[twice]) "no call is running") "a stop where no call runs is refused"
+    check (has (← refused 65 data "tell" #[twice, "late"]) "no call is running") "and so is a message"
+    let over ← alaya data "resume" #[twice]
+    check (over.exit == 0 && has over.stderr "grader: done: pass 1/1") s!"resume finds nothing to do: {over.stderr}"
+    -- Removing the message removes all that followed it.
     let removed ← records (← ok data "rm" #[text told ["entry"], "--json"])
     check ((field removed[0]! ["removed"]).getNat?.toOption.any (· >= 13)) s!"removed: {removed[0]!.compress}"
     check (has (← refused 65 data "log" #[text changed ["entry"]]) "no entry") "what was removed is gone"
     let tree := lines (← ok data "tree")
-    check (tree.any (has · "[stopped: fail 1/2]") && !tree.any (has · "pass 2/2")) s!"the tree after: {tree}",
+    check (tree.any (has · "[done: fail 1/2]") && !tree.any (has · "pass 2/2")) s!"the tree after: {tree}",
 
   test "rebase copies a graded run into a new data directory, which reads and runs as the old one did" do
-    let (data, _, made) ← newRun
-    let told ← appended data "tell" #[text made[2]! ["entry"], "keep the old API"]
+    let (data, _, made, resumed) ← newRun
+    let told ← appended data "tell" #[text resumed.back! ["entry"], "keep the old API"]
     let edited := (← scratch) / "edited"
     let _ ← ok data "checkout" #[text told ["entry"], edited.toString]
     IO.FS.writeFile (edited / "a.txt") "edited\n"
     let changed ← appended data "commit" #[text told ["entry"], edited.toString]
-    let graded := text (← records (← ok data "grade" (#[text changed ["entry"], "--json"] ++ grader))).back! ["entry"]
+    let (_, _, ran) ← gradeAt data (text changed ["entry"]) check2
+    let graded := text (← records ran.stdout).back! ["entry"]
     IO.FS.createDirAll (data / "cache")
     IO.FS.writeFile (data / "cache" / "0123.json") "a draw"
     let tree := lines (← ok data "tree")
     let target := (← scratch) / "rebased"
-    -- A setting this build does not know: refused, and nothing is made.
-    check (has (← refused 65 data "rebase" #[graded, target.toString, "--set", "agent.no_such_field=1"])
-      "no_such_field") "an unknown field"
+    -- A setting no call takes: refused, and nothing is made.
+    check (has (← refused 65 data "rebase" #[graded, target.toString, "--set", "no_such_field=1"])
+      "fits no call") "an unknown field"
     check (!(← target.pathExists)) "no directory is left"
     let written ← records (← ok data "rebase" #[graded, target.toString, "--json"])
     let some summary := written.back? | fail "rebase printed nothing"
     assertEqual "the whole log holds" (text summary ["held"], text summary ["total"], text summary ["divergence"])
-      ("10", "10", "null")
+      ("13", "13", "null")
     let tip := text summary ["entry"]
     let note := written[written.size - 2]!
     check (text note ["entry"] == tip && has (text note ["event", "text"]) s!"rebased from {graded}")
       s!"the last entry says where it came from: {note.compress}"
     assertEqual "the old directory as it was" (lines (← ok data "tree")) tree
-    -- The new directory reads as the old one: its tree, the file a person changed, the checkout a
-    -- grader left, each by the new names of its snapshots.
-    check ((lines (← ok target "tree")).any (has · "[stopped: pass 2/2]")) "the verdict"
-    assertEqual "the change" (← ok target "cat" #[s!"{tip}:4", "a.txt"]) "edited\n"
-    assertEqual "the grader's checkout" (← ok target "cat" #[s!"{tip}:8", "a.txt"]) "edited\n"
+    -- The new directory reads as the old one: its tree, the file a person changed, the workspace
+    -- the grader left, each by the new names of its snapshots.
+    check ((lines (← ok target "tree")).any (has · "[done: pass 2/2]")) "the verdict"
+    assertEqual "the change" (← ok target "cat" #[s!"{tip}:6", "a.txt"]) "edited\n"
+    assertEqual "after the grader's command" (← ok target "cat" #[s!"{tip}:11", "a.txt"]) "edited\n"
     check ((text written[0]! ["event", "notice", "workspace"]) != (text made[0]! ["event", "notice", "workspace"]))
       "a snapshot under a name of the new repository"
     assertEqual "the model cache" (← IO.FS.readFile (target / "cache" / "0123.json")) "a draw"
-    let over ← alaya target "run" #[tip]
-    check (over.exit == 0 && has over.stderr "stopped: pass 2/2") s!"and runs: {over.stderr}"
+    let over ← alaya target "resume" #[tip]
+    check (over.exit == 0 && has over.stderr "grader: done: pass 2/2") s!"and resumes: {over.stderr}"
     check (has (← refused 65 data "rebase" #[graded, target.toString]) "exists") "a directory that exists is refused"
     -- Without --json: the entries, then what held on stderr.
     let plain ← alaya data "rebase" #[graded, ((← scratch) / "again").toString]
-    check (plain.exit == 0 && has plain.stderr "all 10 events hold") s!"what held: {plain.stderr}"
+    check (plain.exit == 0 && has plain.stderr "all 13 events hold") s!"what held: {plain.stderr}"
     check ((lines plain.stdout).back?.any (has · "# rebased from")) "the last line is the entry to go on from",
 
   test "a command says what it refuses, with its class's exit status" do
-    let (data, _, made) ← newRun
-    let tip := text made[2]! ["entry"]
+    let (data, _, made, resumed) ← newRun
+    let tip := text resumed.back! ["entry"]
     check (has (← refused 65 data "reply" #[tip, "yes"]) "no question waits") "a reply where no question waits"
     check (has (← refused 65 data "log" #["ffff"]) "no entry matches ffff") "an entry that is not there"
     check (has (← refused 65 data "show" #[s!"{tip}:9"]) "no position 9") "a position past the end of a log"
-    check (has (← refused 65 data "run" #[tip]) "--provider") "a run that samples, with no provider named"
-    -- What the driver logged before it needed the model is kept: the next `run` goes on from there.
+    check (has (← refused 65 data "resume" #[tip]) "--provider") "a run that samples, with no provider named"
+    check (has (← refused 64 data "call" #[tip, "nothing", "--image", testImageReference]) "expects one of")
+      "a call of no program"
+    check (has (← refused 65 data "call" #[text made[0]! ["entry"], "mini-swe", "--image", testImageReference,
+      "--set", "model=gpt-oss-120b"]) "works on a task") "an agent without its task"
+    -- What the driver logged before it needed the model is kept: the next `resume` goes on from there.
     let tree := lines (← ok data "tree")
-    check (tree.any (has · "[next: sample a request of 2 messages]")) s!"the tree: {tree}"
+    check (tree.any (has · "[next: sample gpt-oss-120b on a request of 2 messages]")) s!"the tree: {tree}"
     -- A comment: on an entry that goes on, an annotation and no branch; at the end of a log, its
     -- last entry. Either way the run stands as it stood.
-    let noted ← appended data "comment" #[tip, "the task could say more"]
+    let noted ← appended data "comment" #[text made[1]! ["entry"], "the task could say more"]
     assertEqual "a comment" (text noted ["event", "type"], text noted ["event", "text"])
       ("commented", "the task could say more")
     let tree := lines (← ok data "tree")
@@ -256,7 +279,7 @@ def suite : Suite := Testing.suite "commands" #[
     let last ← appended data "comment" #[leaf, "stopped for want of a provider"]
     let log := lines (← ok data "log" #[text last ["entry"]])
     check (log.any (has · "# stopped for want of a provider") &&
-      (log.back?.any (has · "next: sample a request of 2 messages"))) s!"the log, with its comment: {log}"
+      (log.back?.any (has · "next: sample gpt-oss-120b on a request of 2 messages"))) s!"the log, with its comment: {log}"
     let errors ← records (← refused 65 data "reply" #[tip, "yes", "--json"])
     assertEqual "a failure as JSON, on stderr" (text errors[0]! ["error"]) "input"
     -- A directory that holds no entries is no data directory, whatever else it holds.
@@ -269,16 +292,16 @@ def suite : Suite := Testing.suite "commands" #[
     let usage ← alaya data "tell" #[tip]
     check (usage.exit == 64 && has usage.stderr "missing TEXT") s!"a missing argument: {usage.stderr}"
     -- The configuration a run would record, without creating one: `config` takes no data directory.
-    let shown ← bare #["config", "--agent", "mini-vero", "--model", "gpt-oss-120b", "--set", "agent.mode=codeproof", "--json"]
+    let shown ← bare #["config", "--program", "mini-vero", "--set", "model=gpt-oss-120b", "--set", "mode=codeproof", "--json"]
     assertEqual "config" shown.exit 0
     let config ← records shown.stdout
-    assertEqual "a configuration" (text config[0]! ["agent", "mode"], text config[0]! ["model", "name"])
+    assertEqual "a configuration" (text config[0]! ["program", "mode"], text config[0]! ["program", "model", "name"])
       ("codeproof", "gpt-oss-120b")
-    let wrong ← bare #["config", "--agent", "mini-swe", "--set", "agent.no_such_field=1"]
+    let wrong ← bare #["config", "--program", "mini-swe", "--set", "no_such_field=1"]
     check (wrong.exit == 65 && has wrong.stderr "no_such_field") s!"a setting that names no field: {wrong.stderr}"
     let every ← bare #["config", "--json"]
     check (every.exit == 0 && (← records every.stdout).any fun record => text record ["provider", "name"] != "null")
-      "with no flags, the agents, models and providers"
+      "with no flags, the programs, models and providers"
 ]
 
 end CommandsTests

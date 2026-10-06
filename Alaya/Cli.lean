@@ -417,7 +417,7 @@ private def Item.token (item : Item) : String :=
   | .valued metavar repeatable => s!"--{item.name} {metavar}" ++ (if repeatable then " …" else "")
   | .argument _ => item.name
 
-/-- `alaya run ENTRY [OPTIONS]`: the arguments and what is required, with
+/-- `alaya resume ENTRY [OPTIONS]`: the arguments and what is required, with
 alternatives grouped; help lists the options. -/
 def Command.usage (app : App) (c : Command) : String := Id.run do
   let items := c.full.items
