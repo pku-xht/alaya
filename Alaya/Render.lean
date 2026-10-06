@@ -136,12 +136,14 @@ def tokens (usage : Chat.TokenUsage) : String :=
 /-- Milliseconds as seconds with one decimal: `12.3 s`. -/
 def seconds (ms : Nat) : String := s!"{ms / 1000}.{(ms % 1000) / 100} s"
 
+/-- A call of an agent, by its name and its model's, `mini-swe, gpt-6-luna`: a call whose
+arguments name a model, wherever it is made. -/
+def agentTitle? (call : RoutineCall) : Option String :=
+  (call.arguments.getObjVal? "model" >>= (·.getObjVal? "name") >>= Json.getStr?).toOption.map
+    fun model => s!"{call.name}, {model}"
+
 /-- A call of a program, by its name and, for an agent, its model's: `mini-swe, gpt-6-luna`. -/
-def callTitle (call : RoutineCall) : String :=
-  match (call.arguments.getObjVal? "model" >>= (·.getObjVal? "name") >>=
-      Json.getStr?).toOption with
-  | some model => s!"{call.name}, {model}"
-  | none => call.name
+def callTitle (call : RoutineCall) : String := (agentTitle? call).getD call.name
 
 def noticeSummary : Notice → String
   | .said message => s!"said {(flatten message 70).quote}"
@@ -168,10 +170,11 @@ def eventSummary : Event Agent → String
   | .answered _ .time (.ok (.timing t)) =>
     s!"time {seconds t.spentMs}" ++ (t.budgetMs?.map (s!" of {seconds ·}") |>.getD "")
   | .answered .. => "answered"
-  | .opened frame call =>
-    -- A call the run makes is told by its program and model, not by its whole configuration.
-    if frame.size == 1 then s!"open {callTitle call}"
-    else
+  | .opened _ call =>
+    -- An agent's call is told by its routine and its model, not by its whole configuration.
+    match agentTitle? call with
+    | some title => s!"open {title}"
+    | none =>
       let arguments := argumentsSummary call.arguments
       labelled s!"open {call.name}" (if arguments.isEmpty then "" else (flatten arguments 60).quote)
   | .returned _ value => labelled "return" (valueSummary value)

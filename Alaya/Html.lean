@@ -146,7 +146,7 @@ def eventJson : Event Agent → Json
   | .opened frame call =>
     .mkObj [("k", "open"), ("routine", call.name), ("arguments", call.arguments),
       ("summary", Render.argumentsSummary call.arguments),
-      ("title", if frame.size == 1 then .str (Render.callTitle call) else .null)]
+      ("title", orNull (Render.agentTitle? call) .str)]
   | .returned _ value =>
     .mkObj [("k", "return"), ("value", value), ("summary", Render.valueSummary value),
       ("kind", orNull (Render.valueKind? value) (Json.str ·.name))]
@@ -206,15 +206,12 @@ def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title 
       | some (.returned value) =>
         if Render.valueKind? value == some .verdict then some (Render.valueSummary value) else none
       | _ => none
-    let config := match event with
-      | .opened #[_] call => call.arguments
-      | _ => .null
     let row := Json.mkObj [
       ("h", visit.hash.hex), ("p", orNull parent? fun n => (n : Json)), ("pos", visit.position),
       ("f", orNull event.frame? Frame.toJson), ("e", eventJson event),
       ("t", visit.entry.elapsedMs), ("run", visit.spentMs), ("usage", usageJson visit.usage),
       ("ws", orNull visit.workspace? (Json.str ·.hex)), ("next", orNull next? .str),
-      ("state", orNull state .str), ("graded", orNull graded .str), ("config", config),
+      ("state", orNull state .str), ("graded", orNull graded .str),
       ("question", orNull visit.question? fun q => .mkObj [("text", q.text), ("form", q.form.name),
         ("options", .arr (q.form.options.map Json.str))])]
     let request? := match visit.asked? with

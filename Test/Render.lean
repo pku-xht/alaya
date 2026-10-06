@@ -74,7 +74,7 @@ def suite : Suite := Testing.suite "render" #[
       (.answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })), "time 1.2 s of 60.0 s"),
       (.answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200 })), "time 1.2 s"),
       (.opened ⟪"mini-swe"⟫ swe, "open mini-swe, gpt-oss-120b"),
-      (.opened ⟪"grader"⟫ (graderCall "sh g.sh").call, "open grader"),
+      (.opened ⟪"grader"⟫ (graderCall "sh g.sh").call, "open grader \"sh g.sh\""),
       (.opened ⟪"agent", "bash"⟫ ⟨"bash", .mkObj [("command", "ls")]⟩, "open bash \"ls\""),
       (.opened ⟪"agent", "ask_user"⟫ ⟨"ask_user", (askCall "q" "Keep it?").arguments⟩, "open ask_user \"Keep it?\""),
       (.opened ⟪"agent", "time_budget"⟫ ⟨"time_budget", .mkObj []⟩, "open time_budget"),
