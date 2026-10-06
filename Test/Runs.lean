@@ -430,17 +430,16 @@ def suite : Suite := Testing.suite "runs" #[
     let _ ← assertOk <| Notices.comment rt.store bad "this log is broken"
     pure (),
 
-  test "a person's message and a person's change are told to the model as interventions" do
+  test "a person's message is told to the model as an intervention, and nothing else is" do
     let told (notice : Notice) : String :=
       ((Agents.MiniSwe.noticeMessage notice).map (·.toStored.compress)).getD "nothing"
     assertStringEq "a message" (told (.said "keep the old API"))
       (Chat.Message.user "<intervention>\nA person sent you a message while you were paused.\nkeep the old API\n</intervention>").toStored.compress
-    assertStringEq "a change" (told (.changed default "  M a.txt\nI fixed it"))
-      (Chat.Message.user "<intervention>\nA person changed the workspace while you were paused:\n  M a.txt\nI fixed it\n</intervention>").toStored.compress
+    assertStringEq "a change is no one's to read" (told (.changed default "M a.txt")) "nothing"
     assertStringEq "a reply is the asking call's, not the model's to be told" (told (.replied ⟪"agent", "ask_user"⟫ .yes)) "nothing"
     assertStringEq "nor a call" (told (.called { name := "grader", arguments := .null, environment? := some testEnvironment.toJson })) "nothing",
 
-  test "a commit appends the files and what changed, and the next command runs on them" do
+  test "a change appends the files and what changed, no read takes it, and the next command runs on them" do
     withMini {} fun run => do
       let executor ← containerExecutor
       try
@@ -451,12 +450,12 @@ def suite : Suite := Testing.suite "runs" #[
         let edited := (← scratch) / "edited"
         assertOk <| rt.workspaces.materialize ((workspace? (← logAt rt paused)).getD default) edited
         IO.FS.writeFile (edited / "b.txt") "from a person\n"
-        let event ← assertOk <| Notices.changed rt.store rt.workspaces paused edited "I added b.txt"
+        let event ← assertOk <| Notices.changed rt.store rt.workspaces paused edited
         match event with
-        | .arrived (.changed _ summary) => check (contains summary "+ b.txt" && contains summary "I added b.txt") summary
+        | .arrived (.changed _ summary) => assertEqual "what changed" summary "+ b.txt"
         | _ => fail "a change is a notice"
         let (changed, _) ← assertOk <| Driver.append rt.store run paused event
-        assertError "no change is refused" (Notices.changed rt.store rt.workspaces changed edited "") fun
+        assertError "no change is refused" (Notices.changed rt.store rt.workspaces changed edited) fun
           | .input _ => true
           | _ => false
         let (final, _) ← assertOk <| Driver.drive rt run changed
@@ -466,8 +465,8 @@ def suite : Suite := Testing.suite "runs" #[
           | _ => false) "the command read the person's file"
         let found := log.findIdx? (fun | .arrived (.changed _ summary) => contains summary "b.txt" | _ => false)
         let some changedAt := found | fail "the change is in the log"
-        check (log.any fun | .heard ⟪"agent"⟫ notices => notices == #[changedAt] | _ => false)
-          "the agent heard the change"
+        check (!log.any fun | .heard _ notices => notices.contains changedAt | _ => false)
+          "no read took the change"
       finally executor.close,
 
   test "a command run with its outputs kept finds the whole of earlier ones; a fork, only its own" do

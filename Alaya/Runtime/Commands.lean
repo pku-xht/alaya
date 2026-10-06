@@ -84,11 +84,12 @@ def tell (data : Data) (root : Routine Agent) (reference text : String) : Result
 def stop (data : Data) (root : Routine Agent) (reference reason : String) : Result Appended :=
   data.append root reference fun _ _ => pure (.stopped reason)
 
-/-- A change to the workspace: the files of `dir`, and what the person says of it. -/
-def commit (data : Data) (root : Routine Agent) (reference : String) (dir : System.FilePath)
-    (message : String) : Result Appended := do
+/-- A change to the workspace: the files of `dir`. No read takes it; the calls running see the
+files when they look. -/
+def commit (data : Data) (root : Routine Agent) (reference : String) (dir : System.FilePath) :
+    Result Appended := do
   let (_, tip) ← data.resolve reference
-  let event ← Notices.changed data.store data.workspaces tip dir message
+  let event ← Notices.changed data.store data.workspaces tip dir
   data.append root reference fun _ _ => pure event
 
 /-- A reply to the question the run waits on: the answer's text, or `none` when the person

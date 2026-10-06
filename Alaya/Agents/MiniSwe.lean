@@ -409,16 +409,12 @@ def outcome (status : String) (submission : String := "") (reason? : Option Stri
   .mkObj ([("status", (status : Json)), ("submission", (submission : Json))] ++
     (reason?.map fun reason => ("reason", (reason : Json))).toList)
 
-/-- What a notice tells the model: a person's message, or a change a person made to the
-workspace, in an envelope that says it came from a person while the agent was paused. A notice
-addressed to another reader — a reply, a call — tells it nothing, and no read of the agent's
-takes one. -/
+/-- What a notice tells the model: a person's message, in an envelope that says it came from a
+person while the agent was paused. No other notice reaches a read of the agent's. -/
 def noticeMessage : Notice → Option Chat.Message
   | .said message =>
     some (.user s!"<intervention>\nA person sent you a message while you were paused.\n{message}\n</intervention>")
-  | .changed _ summary =>
-    some (.user s!"<intervention>\nA person changed the workspace while you were paused:\n{summary}\n</intervention>")
-  | .replied .. | .called .. => none
+  | _ => none
 
 /-- The conversation with what has arrived since the last read of the inbox. -/
 def listen (history : History) : Computation Agent History := do

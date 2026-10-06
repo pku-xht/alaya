@@ -89,8 +89,9 @@ is logged when it arrives like the rest. -/
 inductive Notice where
   /-- A person said something: the task, or a message later on. -/
   | said (message : String)
-  /-- The workspace was changed from outside: it is now `workspace`, and `summary` says how. The
-  first event of every log is one, the workspace a run starts from. -/
+  /-- The workspace was changed from outside: it is now `workspace`, and `summary` says how. No
+  read takes it (`Notice.isMessage`). The first event of every log is one, the workspace a run
+  starts from. -/
   | changed (workspace : Snapshot) (summary : String)
   /-- A person answered the question the call in frame `to` asked. -/
   | replied (to : Frame) (reply : Reply)
@@ -99,10 +100,12 @@ inductive Notice where
   | called (call : RoutineCall)
   deriving Inhabited
 
-/-- Whether a notice is for one reader, who waits for it: a reply, for the call that asked, and a
-call, for the run. A plain read of the inbox leaves these. -/
-def Notice.addressed : Notice → Bool
-  | .replied .. | .called _ => true
+/-- Whether a plain read of the inbox takes a notice: a message does. A reply and a call are for
+one reader, who waits for them; a change of the workspace is for no reader, since what it says may
+be out of date by the time a read would take it: it changes the files the next command runs on,
+which a computation sees by looking. -/
+def Notice.isMessage : Notice → Bool
+  | .said _ => true
   | _ => false
 
 /-- What a read that waits is for: the notices it takes, given the frame the read is made in,
@@ -112,7 +115,7 @@ structure Wait where
   question? : Option Question := none
 
 /-- A computation: a tree of operations, each continued with its answer, or with the error when the
-world could not give one. A read of the inbox takes the notices not yet read that are addressed to no one; one that waits is
+world could not give one. A read of the inbox takes the messages not yet read; one that waits is
 for some notices only, which it says given the frame it is made in, and is made once one of them
 has arrived. A question is asked of a person, and continued with the reply. A call names a routine and what it is called with: the interpreter answers it by
 running the routine the scope of the calling routine has under that name, in a child frame, and it ends with the
@@ -174,7 +177,7 @@ instance : MonadExcept String (Computation σ) where
 
 end Computation
 
-/-- Takes every notice not yet read that is addressed to no one (`Notice.addressed`). -/
+/-- Takes every message not yet read (`Notice.isMessage`). -/
 def inbox : Computation σ (List Notice) := .inbox none .pure
 
 /-- Waits for notices that `accepts` takes, given the frame the read is made in, and takes them. -/

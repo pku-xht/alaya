@@ -159,8 +159,12 @@ def suite : Suite := Testing.suite "commands" #[
     let edited := (← scratch) / "edited"
     let _ ← ok data "checkout" #[tip, edited.toString]
     IO.FS.writeFile (edited / "a.txt") "edited\n"
-    let changed ← appended data "commit" #[text told ["entry"], edited.toString, "--message", "by hand"]
-    assertEqual "what changed, and what the person says" (text changed ["event", "notice", "summary"]) "  M a.txt\nby hand"
+    let made ← records (← ok data "commit" #[text told ["entry"], edited.toString, "--message", "by hand", "--json"])
+    let some changed := made[0]? | fail "commit printed no change"
+    assertEqual "what changed" (text changed ["event", "notice", "summary"]) "M a.txt"
+    -- The change reaches no read: a message after it says what changed, and what the person adds.
+    assertEqual "and a message after it" (made.map (text · ["event", "notice", "type"])) #["changed", "said"]
+    assertEqual "that says so" (text made[1]! ["event", "notice", "message"]) "I changed the workspace:\n  M a.txt\nby hand"
     check (has (← refused 65 data "commit" #[text changed ["entry"], edited.toString]) "no change")
       "a directory with no change is refused"
     assertEqual "the change, between two entries" (lines (← ok data "diff" #[tip, text changed ["entry"]])) #["M a.txt"]

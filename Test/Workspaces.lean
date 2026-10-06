@@ -334,9 +334,9 @@ def runSuite : Suite := Testing.suite "workspaces.run" #[
     check (stop matches .waits ⟪"agent"⟫ none) "the agent waits for a message"
     IO.FS.writeFile (project / "README.md") "readme, by hand"
     writeSpec project #[("tests/extra.txt", "extra")]
-    let event ← assertOk <| Notices.changed store workspaces tip project "by hand"
+    let event ← assertOk <| Notices.changed store workspaces tip project
     let .arrived (.changed after summary) := event | fail "a change is a notice"
-    assertEqual "what changed" summary "  M README.md\n  + tests\nby hand"
+    assertEqual "what changed" summary "M README.md\n+ tests"
     let (changed, _) ← assertOk <| Driver.append store run tip event
     -- Graded there: the agent is stopped, and the grader reads the person's files.
     let grader := Scripted.graderCall "test -f tests/extra.txt && printf '1..1\\nok 1\\n'" (← testImage)

@@ -225,13 +225,22 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
 private def tellRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
   appendIn data out (·.tell Catalog.run reference text)
 
+/-- A change to the workspace, and then a message that says what changed, with what the person
+adds: the change itself reaches no read, so the message is how the call running hears of it. -/
 private def commitRun (data : System.FilePath) (reference : String) (dir : System.FilePath)
     (message? : Option String) (out : Cli.Out) : Result UInt32 :=
-  appendIn data out fun data =>
-    tryCatch (data.commit Catalog.run reference dir (message?.getD "")) fun
-      | .input message => throw <| .input
-          (if message.endsWith "not changed" then s!"{message}: to send a message alone, use `tell`" else message)
+  withData data (write := true) fun data => do
+    let changed ← tryCatch (data.commit Catalog.run reference dir) fun
+      | .input message => throw <| .input s!"{message}: to send a message alone, use `tell`"
       | error => throw error
+    entryRecord out changed
+    let summary := match changed.entry.event with
+      | .arrived (.changed _ summary) => summary
+      | _ => ""
+    let lines := (summary.splitOn "\n").map ("  " ++ ·) ++ (message?.toList)
+    let text := "\n".intercalate ("I changed the workspace:" :: lines)
+    entryRecord out (← data.tell Catalog.run changed.hash.hex text)
+    pure 0
 
 /-- A person's reply: the answer's text, or `none` when they cannot answer. -/
 private def replyAnswer : Cli.Spec (Option String) :=
@@ -517,10 +526,10 @@ private def commands : Array Cli.Command := #[
     examples := #["alaya tell 4f2c8b 'keep the old API'"]
     spec := tellRun <$> dataDir <*> entryArg <*> Cli.arg "TEXT" .string "the message" },
   { name := "commit"
-    summary := "Append a change to the workspace after an entry: the files of DIR, and what changed."
+    summary := "Append a change to the workspace after an entry, the files of DIR, and a message that says what changed."
     examples := #["alaya commit 4f2c8b ./fix --message 'I fixed the fixture; the parser bug is still yours.'"]
     spec := commitRun <$> dataDir <*> entryArg <*> Cli.arg "DIR" .path "the edited workspace"
-      <*> Cli.flag? "message" .string "what to tell the agent of the change, after the list of what changed" },
+      <*> Cli.flag? "message" .string "what to tell the call running of the change, after the list of what changed" },
   { name := "reply"
     summary := "Answer the question a log waits on, or record that the person cannot."
     examples := #["alaya reply c61754 -- 'yes, keep it'", "alaya reply c61754 --unavailable"]

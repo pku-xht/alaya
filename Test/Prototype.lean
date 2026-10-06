@@ -538,6 +538,9 @@ def transcript : Array String := Id.run do
 
 def suite : Testing.Suite := Testing.suite "prototype" #[
   Testing.iotest "the interpreter reads every log as the sketch does, line for line" do
+    -- `ALAYA_REGENERATE=1` writes the transcript as the expected one, after a change of design.
+    if (← IO.getEnv "ALAYA_REGENERATE").isSome then
+      IO.FS.writeFile ("Test" / "Prototype" / "expected.txt") ("\n".intercalate transcript.toList ++ "\n")
     let expected := (← IO.FS.readFile ("Test" / "Prototype" / "expected.txt")).splitOn "\n"
     let expected := if expected.getLast? == some "" then expected.dropLast else expected
     let actual := transcript.toList

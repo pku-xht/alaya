@@ -211,12 +211,12 @@ def start (root : Routine σ) : Replayer σ :=
   settle { machine, demand := machine.advance }
 
 /-- What a read takes, and what it leaves unread. A read that waits takes the notices it is for,
-among those not yet read; any other takes all that are not yet read and addressed to no one. -/
+among those not yet read; any other takes every message not yet read. -/
 private def take (r : Replayer σ) (frame : Frame) (wait : Option Wait) :
     Array (Nat × Notice) × Array (Nat × Notice) :=
   match wait with
   | some wait => r.unread.partition fun (_, notice) => wait.accepts frame notice
-  | none => r.unread.partition fun (_, notice) => !notice.addressed
+  | none => r.unread.partition fun (_, notice) => notice.isMessage
 
 /-- What to do next, when the log ends here. -/
 def next (r : Replayer σ) : Next σ :=
