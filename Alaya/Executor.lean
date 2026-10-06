@@ -11,8 +11,11 @@ open Alaya (Result Error)
 
 /-- The result of executing one command. -/
 structure Output where
-  /-- Stdout and stderr, merged, as far as the command got. -/
+  /-- Stdout and stderr, merged, as far as the command got; stdout alone when the command was run
+  with its stderr apart. -/
   output : String
+  /-- Stderr, when the command was run with it apart. -/
+  stderr? : Option String := none
   /-- The exit status, or `none` when the command did not run to completion: it could not be
   started, or it was killed at the timeout. -/
   exitCode? : Option UInt32 := none
@@ -38,6 +41,7 @@ def toJson (o : Output) : Lean.Json :=
   .mkObj ([("output", (o.output : Lean.Json)),
            ("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null),
            ("error", o.error?.map Lean.Json.str |>.getD .null)] ++
+          (o.stderr?.map fun stderr => ("stderr", Lean.Json.str stderr)).toList ++
           (o.detail?.map fun detail => ("detail", Lean.Json.str detail)).toList)
 
 def fromJson? (json : Lean.Json) : Option Output := do
@@ -45,7 +49,8 @@ def fromJson? (json : Lean.Json) : Option Output := do
   let exitCode? := (json.getObjVal? "exit_code" >>= Lean.Json.getNat?).toOption.map (·.toUInt32)
   let error? := (json.getObjVal? "error" >>= Lean.Json.getStr?).toOption
   let detail? := (json.getObjVal? "detail" >>= Lean.Json.getStr?).toOption
-  pure { output, exitCode?, error?, detail? }
+  let stderr? := (json.getObjVal? "stderr" >>= Lean.Json.getStr?).toOption
+  pure { output, stderr?, exitCode?, error?, detail? }
 
 end Output
 
@@ -56,6 +61,13 @@ structure Uname where
   system : String
   machine : String
   deriving Repr, Inhabited, BEq
+
+def Uname.toJson (uname : Uname) : Lean.Json :=
+  .mkObj [("system", uname.system), ("machine", uname.machine)]
+
+def Uname.fromJson (json : Lean.Json) : Except String Uname := do
+  let field (name : String) := json.getObjVal? name >>= Lean.Json.getStr?
+  pure { system := ← field "system", machine := ← field "machine" }
 
 namespace Executor
 
@@ -69,12 +81,15 @@ structure Config where
   /-- Whether the command sees the whole output of every earlier command of its branch, as
   files under `/alaya/outputs`; without it, that directory is empty. -/
   outputs : Bool := false
+  /-- Whether stderr is merged into stdout, as an agent's commands have it; apart, it is kept
+  beside stdout, as a grader's TAP needs. -/
+  merge : Bool := true
   deriving Inhabited, BEq, Repr
 
 def Config.toJson (config : Config) : Lean.Json :=
   .mkObj [("timeout_seconds", (config.timeoutSeconds : Lean.Json)),
           ("env", .arr (config.env.map fun (name, value) => .arr #[.str name, .str value])),
-          ("outputs", config.outputs)]
+          ("outputs", config.outputs), ("merge", config.merge)]
 
 def Config.fromJson (json : Lean.Json) : Except String Config := do
   let timeoutSeconds ← json.getObjVal? "timeout_seconds" >>= Lean.Json.getNat?
@@ -82,18 +97,17 @@ def Config.fromJson (json : Lean.Json) : Except String Config := do
     | .arr #[.str name, .str value] => pure (name, value)
     | other => throw s!"expected a [name, value] pair of strings, got {other.compress}"
   let outputs ← json.getObjVal? "outputs" >>= Lean.Json.getBool?
-  pure { timeoutSeconds, env, outputs }
+  let merge ← json.getObjVal? "merge" >>= Lean.Json.getBool?
+  pure { timeoutSeconds, env, outputs, merge }
 
 end Executor
 
 /-- Where commands run. `exec` runs a shell script (the argv's first element; the rest are its
-positional arguments) as `config` says, in a working directory with stderr merged; `display` is
+positional arguments) as `config` says, in a working directory; `display` is
 the command as it appears in messages. -/
 structure Executor where
   exec : (config : Executor.Config) -> (workDir : System.FilePath) -> (argv : Array String) ->
     (display : String) -> IO Output
-  /-- `uname` where the commands run. -/
-  uname : IO Uname
   /-- Releases what the executor holds — a container, say — at the end of a run. -/
   close : IO Unit := pure ()
 

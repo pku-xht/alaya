@@ -2,23 +2,23 @@
 <title>A log stored as entries, each named by the hash of its parent and its event, and a fork</title>
 <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}</style>
 <rect width="920" height="189" fill="#fff"/>
-<text x="12" y="59" class="fr">root</text>
-<path class="a" d="M72,55.5H49.8"/><path fill="#a3abb5" d="M45.8,55.5l5,-2.5v5z"/>
+<text x="12" y="59" class="fr">… the call</text>
+<path class="a" d="M72,55.5H83.6"/><path fill="#a3abb5" d="M87.6,55.5l-5,-2.5v5z"/>
 <rect x="78.5" y="22.5" width="172" height="65" rx="6" fill="#fff" stroke="#d3d9e0"/>
-<text x="89" y="41" class="fr">3f2a9c1b8e7d</text>
-<g transform="translate(89,51.5) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
-<text x="108" y="62.5">the workspace</text>
+<text x="89" y="41" class="fr">06d9ae75ae21</text>
+<g transform="translate(89,51.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="108" y="62.5">inbox: takes 1</text>
 <text x="240" y="79" class="f n" text-anchor="end">0.0 s</text>
 <rect x="297.5" y="22.5" width="172" height="65" rx="6" fill="#fff" stroke="#d3d9e0"/>
-<text x="308" y="41" class="fr">06d9ae75ae21</text>
+<text x="308" y="41" class="fr">b064afdd73b7</text>
 <g transform="translate(308,51.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="327" y="62.5">open agent</text>
+<text x="327" y="62.5">open mini-swe</text>
 <text x="459" y="79" class="f n" text-anchor="end">0.0 s</text>
 <path class="a" d="M291,55.5H261"/><path fill="#a3abb5" d="M257,55.5l5,-2.5v5z"/>
 <rect x="516.5" y="22.5" width="172" height="65" rx="6" fill="#fff" stroke="#d3d9e0"/>
 <text x="527" y="41" class="fr">8cb007600701</text>
-<g transform="translate(527,51.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
-<text x="546" y="62.5" style="fill:#7556a3">said “the task”</text>
+<g transform="translate(527,51.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="546" y="62.5">inbox: nothing</text>
 <text x="678" y="79" class="f n" text-anchor="end">0.0 s</text>
 <path class="a" d="M510,55.5H480"/><path fill="#a3abb5" d="M476,55.5l5,-2.5v5z"/>
 <text x="274" y="49.5" class="s" text-anchor="middle">parent</text>

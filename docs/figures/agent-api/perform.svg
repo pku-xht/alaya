@@ -2,19 +2,19 @@
 <title>Three operations, each answered by its part of the world</title>
 <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}</style>
 <rect width="920" height="142" fill="#fff"/>
-<text x="12" y="14" class="s">program</text>
+<text x="12" y="14" class="s">computation</text>
 <text x="304" y="14" class="s">carried out by</text>
 <text x="447" y="14" class="s">log</text>
 <rect x="440.5" y="22.5" width="474" height="115" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
 <path fill="#fafbfc" d="M12.5,133.5V26.5H297.5V133.5H12.5Z"/><path class="bx" d="M12.5,133.5V26.5M297.5,26.5V133.5"/>
-<text x="20.5" y="39" class="s b">agent · 0</text>
+<text x="20.5" y="39" class="s b">agent</text>
 <circle cx="456" cy="31" r="0.9" fill="#a3abb5"/>
 <circle cx="456" cy="35" r="0.9" fill="#a3abb5"/>
 <circle cx="456" cy="39" r="0.9" fill="#a3abb5"/>
 <text x="460" y="60" class="f n" text-anchor="end">7</text>
-<text x="468" y="60" class="fr">0</text>
-<g transform="translate(527,49.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
-<text x="546" y="60.5">sample → says “run the tests”</text>
+<text x="468" y="60" class="fr">agent</text>
+<g transform="translate(537,49.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="556" y="60.5">sample → says “run the tests”</text>
 <text x="898" y="60" class="f" text-anchor="end">answered</text>
 <rect x="21.0" y="47.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
 <text x="27" y="60" class="ch">sample request</text>
@@ -23,9 +23,9 @@
 <text x="369" y="55" class="s" text-anchor="middle">model</text>
 <path class="a d" d="M436,61.5H143.1"/><path fill="#a3abb5" d="M139.1,61.5l5,-2.5v5z"/>
 <text x="460" y="84" class="f n" text-anchor="end">8</text>
-<text x="468" y="84" class="fr">0</text>
-<g transform="translate(527,73.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
-<text x="546" y="84.5">exec pytest -q → exit 1</text>
+<text x="468" y="84" class="fr">agent</text>
+<g transform="translate(537,73.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="556" y="84.5">exec pytest -q → exit 1</text>
 <text x="898" y="84" class="f" text-anchor="end">answered</text>
 <rect x="21.0" y="71.0" width="128.2" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
 <text x="27" y="84" class="ch">exec "pytest -q"</text>
@@ -34,9 +34,9 @@
 <text x="369" y="79" class="s" text-anchor="middle">executor</text>
 <path class="a d" d="M436,85.5H157.7"/><path fill="#a3abb5" d="M153.7,85.5l5,-2.5v5z"/>
 <text x="460" y="108" class="f n" text-anchor="end">9</text>
-<text x="468" y="108" class="fr">0</text>
-<g transform="translate(527,97.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="5.2" fill="none"/><path d="M7 4v3.2l2.2 1.4" fill="none"/></g>
-<text x="546" y="108.5">time 4 min 12 s of 1 h</text>
+<text x="468" y="108" class="fr">agent</text>
+<g transform="translate(537,97.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="5.2" fill="none"/><path d="M7 4v3.2l2.2 1.4" fill="none"/></g>
+<text x="556" y="108.5">time 4 min 12 s of 1 h</text>
 <text x="898" y="108" class="f" text-anchor="end">answered</text>
 <rect x="21.0" y="95.0" width="41" height="18" rx="4" fill="#f6f7f9" stroke="#a3abb5"/>
 <text x="27" y="108" class="ch">time</text>

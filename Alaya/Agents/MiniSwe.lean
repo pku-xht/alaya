@@ -33,6 +33,11 @@ structure Masking where
   deriving Inhabited, BEq, Repr
 
 structure Config where
+  /-- The model it samples: its complete spec, a name alone reading as that model's defaults.
+  There is no default: whoever calls the agent names one. -/
+  model? : Option Models.Spec := none
+  /-- The task, verbatim. There is no default: whoever calls the agent gives one. -/
+  task? : Option String := none
   /-- Consecutive format errors tolerated before exiting; 0 disables. -/
   maxConsecutiveFormatErrors : Nat := 3
   /-- How commands are run. -/
@@ -54,12 +59,16 @@ structure Config where
   /-- The tokens a request may hold: the model's context less the reserve, set from the model
   when the agent is built (`agent`), and not part of the JSON; `none` is no check. -/
   contextLimit? : Option Nat := none
+  /-- The agent itself, which `subagent` calls: its name and its complete configuration, set when
+  the agent is built, and not part of the JSON. -/
+  itself : String × Json := ("", .null)
   deriving Inhabited
 
 /-- The configuration as JSON: what a run records, and what `alaya config` shows. -/
 def Config.toJson (config : Config) : Lean.Json :=
   .mkObj [
-    ("name", "mini-swe"),
+    ("model", config.model?.map (·.toJson) |>.getD .null),
+    ("task", config.task?.map Lean.Json.str |>.getD .null),
     ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
     ("executor", .mkObj [
       ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
@@ -77,7 +86,7 @@ def Config.toJson (config : Config) : Lean.Json :=
 def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array String := #[]) :
     Except String Config := do
   let object ← ConfigJson.object json
-    (#["name", "max_consecutive_format_errors", "executor", "recover_output", "tools", "question_types",
+    (#["model", "task", "max_consecutive_format_errors", "executor", "recover_output", "tools", "question_types",
       "context_reserve", "mask_observations"] ++ own)
   let executor ← match ← object.field? "executor" with
     | none => pure defaults.executor
@@ -127,7 +136,20 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array St
     throw s!"'tools' offers ask_user: 'question_types' must say which kinds of question the model may ask ({Question.Kind.names})"
   if !names.contains "ask_user" && !questionTypes.isEmpty then
     throw "'question_types' is for ask_user, which 'tools' does not offer"
+  let model? ← match ← object.field? "model" with
+    | none => pure defaults.model?
+    | some .null => pure none
+    | some json => match Models.read json with
+      | .ok spec => pure (some spec)
+      | .error problem => throw s!"'model': {problem}"
+  let task? ← match ← object.field? "task" with
+    | none => pure defaults.task?
+    | some .null => pure none
+    | some (.str task) => pure (some task)
+    | some other => throw s!"'task' must be a string, not {other.compress}"
   pure {
+    model?
+    task?
     maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors
     executor
     recoverOutput := ← object.bool "recover_output" defaults.recoverOutput
@@ -141,9 +163,11 @@ name a file an output is in, with the outputs kept as files. -/
 def Config.commands (config : Config) : Executor.Config :=
   { config.executor with outputs := config.recoverOutput || config.masking?.isSome }
 
-/-- The tools the configuration offers, its commands run as it says. -/
+/-- The tools the configuration offers, its commands run as it says, and `subagent` calling the
+agent itself. -/
 def Config.offered (config : Config) : Array Tool :=
-  config.tools.filterMap (Tools.named? · { commands := config.commands, questions := config.questionTypes })
+  config.tools.filterMap (Tools.named? · { commands := config.commands, questions := config.questionTypes
+                                           agent := config.itself })
 
 /-! ## Prompts
 
@@ -390,17 +414,17 @@ def outcome (status : String) (submission : String := "") (reason? : Option Stri
 
 /-- What a notice tells the model: a person's message, or a change a person made to the
 workspace, in an envelope that says it came from a person while the agent was paused. A notice
-addressed to another reader — a reply, a grader — tells it nothing, and no read of the agent's
+addressed to another reader — a reply, a call — tells it nothing, and no read of the agent's
 takes one. -/
 def noticeMessage : Notice → Option Chat.Message
   | .said message =>
     some (.user s!"<intervention>\nA person sent you a message while you were paused.\n{message}\n</intervention>")
   | .changed _ summary =>
     some (.user s!"<intervention>\nA person changed the workspace while you were paused:\n{summary}\n</intervention>")
-  | .replied .. | .assigned _ => none
+  | .replied .. | .called .. => none
 
 /-- The conversation with what has arrived since the last read of the inbox. -/
-def listen (history : History) : Program Agent History := do
+def listen (history : History) : Computation Agent History := do
   let heard ← inbox
   return { history with items := history.items ++ (heard.toArray.filterMap noticeMessage).map .told }
 
@@ -411,12 +435,13 @@ when the provider refuses the request as too long, which is the one failure of a
 driver answers with; answer a malformed response with the format error, and stop after too many in a row; otherwise call each tool in
 order, a `submit` ending the agent with its message. A tool that fails gives its error as its
 result. -/
-def round (config : Config) (history : History) : Program Agent (History ⊕ Json) := do
+def round (config : Config) (history : History) : Computation Agent (History ⊕ Json) := do
   let history ← listen history
   let request := request config history
   if let some limit := config.contextLimit? then
     if contextTokens history request.messages >= limit then return .inr (outcome "ContextExceeded")
-  let response ← try sample request
+  let some model := config.model? | throw "the agent has no model to sample"
+  let response ← try sample model request
     catch refusal =>
       return .inr (outcome "ContextExceeded" (reason? := some s!"the provider refused the request: {refusal}"))
   let measured? := match response.usage?.bind (·.input?) with
@@ -435,22 +460,19 @@ def round (config : Config) (history : History) : Program Agent (History ⊕ Jso
     for asked in calls do
       if asked.name == Tools.Submit.definition.name then
         return .inr (outcome "Submitted" (Tools.Submit.message asked.arguments))
-      let result ← try call asked.name asked.arguments
+      -- The call is the one the tool makes of the model's arguments.
+      let made : RoutineCall := match config.offered.find? (·.name == asked.name) with
+        | some tool => tool.call asked.arguments
+        | none => ⟨asked.name, asked.arguments⟩
+      let result ← try call made.name made.arguments
         catch error => pure (.mkObj [("error", .str error)])
       results := results.push (asked, result)
     return .inl { history with items := history.items.push (.turn response results), formatErrors := 0 }
 
-/-- An agent with mini's loop: it waits for its task, a notice from a person, opens the
-conversation with `opening` of it, and goes round until it ends. A second notice that arrives
-with the task is told as any later one. -/
-def converse (config : Config) (opening : String → Array Chat.Message) : Program Agent Json := do
-  let notices ← await fun _ notice => notice matches .said _
-  let (task, later) := match notices with
-    | .said task :: later => (task, later)
-    | _ => ("", notices)
-  let history : History :=
-    { items := (opening task).map .told ++ (later.toArray.filterMap noticeMessage).map .told }
-  iter (round config) history
+/-- An agent with mini's loop: it opens the conversation with `opening`, and goes round until it
+ends. -/
+def converse (config : Config) (opening : Array Chat.Message) : Computation Agent Json :=
+  iter (round config) { items := opening.map .told }
 
 /-- The tokens a request to `model` may hold under `config`: its context less the room kept for
 a response; `none` when its context is not known. -/
@@ -458,8 +480,13 @@ def contextLimit? (config : Config) (model : Models.Spec) : Option Nat :=
   model.contextTokens?.map fun tokens =>
     tokens - min config.contextReserve (model.outputTokens?.getD config.contextReserve)
 
-/-- The mini agent, for a run of `model` on a machine described by `uname`. -/
-def program (config : Config) (model : Models.Spec) (uname : Uname) : Program Agent Json :=
-  converse { config with contextLimit? := contextLimit? config model } (openingMessages config · uname)
+/-- The mini agent, for a call on `task`, on the machine the call names, of `model`, which
+`subagent` calls as `itself`: its name and configuration. -/
+def computation (config : Config) (model : Models.Spec) (task : String)
+    (itself : String × Json := ("", .null)) : Computation Agent Json := do
+  -- The opening names the machine the commands run on, as the container says.
+  let uname ← Tools.Uname.read
+  converse { config with model? := some model, contextLimit? := contextLimit? config model, itself }
+    (openingMessages config task uname)
 
 end Alaya.Agents.MiniSwe

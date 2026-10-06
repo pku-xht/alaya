@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Grade a Vero attempt as an alaya grader.
+"""Grade a Vero attempt as alaya's grader.
 
 usage: grade.py --mode (proof|codeproof) --benchmark /grader [--lake-timeout S]
 
-`alaya grade` runs it on a point of a run, in the grader image (the Dockerfile's `grader`
-target), in a checkout of the attempt, with the trusted benchmark as its input at /grader:
+A call of alaya's `grader` runs it on a point of a run, in the task's grader image: the
+Dockerfile's `grader` target with the trusted benchmark added at /grader (README.md):
 
-    alaya grade ENTRY --grader-image ghcr.io/msv-lab/alaya-vero-grader:0a7325d --grader-input BENCHMARK \
-      --grader 'python /opt/alaya-vero/grade.py --mode codeproof --benchmark /grader'
+    alaya call ENTRY grader --image alaya-vero-grader-TASK \
+      --set command='python /opt/alaya-vero/grade.py --mode codeproof --benchmark /grader'
 
-The mode and the benchmark are arguments; nothing is read from the checkout to choose them. It
+The mode and the benchmark are arguments; nothing is read from the workspace to choose them. It
 extracts only the answer slots the mode permits, rebuilds from the trusted benchmark in /tmp,
-writes Vero's reports to `.grade/` in the checkout, and prints TAP on stdout: one check per
+writes Vero's reports to `.grade/` in the workspace, and prints TAP on stdout: one check per
 specification, plus a failing `acceptance: joint:...` check for an invalid joint claim. Anything
 unexpected — an unknown Vero status, a compiler timeout, an exception — is `Bail out!`.
 """

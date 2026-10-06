@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import shutil
 
-from _harness import FIXTURE, ROOT, entry, grader_answer, json_lines, run
+from _harness import FIXTURE, ROOT, entry, grade as grade_point, grader_answer, json_lines, run, task_grader
 
 
 def fill(path, key, body, prefix="benchmark"):
@@ -44,18 +44,13 @@ def main():
         return directory / "source"
 
     def grade(name, source, mode, status, passed, total, benchmark=FIXTURE, command=None):
-        """A run on the source, graded by this grader where its task arrives."""
+        """A run on the source, graded at its root by the grader of `benchmark`, in an image of its
+        own: built here, as the benchmark stands now."""
         command = command or f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader"
-        task = entry(run(alaya, "new", source, "--task", name,
-                         "--agent", "mini-vero", "--set", f"agent.mode={mode}",
-                         "--model", "gpt-oss-120b", "--image", args.agent_image,
-                         "--data", data).stdout)
-        final = json_lines(run(alaya, "grade", task, "--grader", command,
-                               "--grader-input", benchmark, "--grader-image", args.grader_image,
-                               "--grader-timeout", "60", "--json", "--data", data,
-                               codes=(0, 1, 2)).stdout)[-1]
-        assert final["status"] == "stopped", final
-        record = final["verdict"]
+        image = task_grader(args.grader_image, benchmark, f"alaya-vero-grader-regressions-{name}")
+        root = entry(run(alaya, "new", source, "--data", data).stdout)
+        final = grade_point(alaya, data, root, image, command, timeout=60)
+        record = final["value"]
         assert record["status"] == status, record
         assert sum(c["ok"] for c in record["checks"]) == passed, record
         assert len(record["checks"]) == total, record
@@ -63,7 +58,7 @@ def main():
         answer = grader_answer(log)["entry"]
         report = None
         if status != "error":
-            # The report is in the checkout as the grader left it, read at its answer's entry.
+            # The report is in the workspace as the grader left it, read at its command's answer.
             report = json.loads(run(alaya, "cat", answer, ".grade/report.json",
                                     "--data", data).stdout)
         results.append({"name": name, "entry": final["entry"], "answer": answer,

@@ -84,8 +84,6 @@ structure Item where
   default? : Option String := none
   /-- An environment variable read when the flag is absent. -/
   env? : Option String := none
-  /-- Items with the same group are alternatives, such as `--task` and `--task-file`. -/
-  group? : Option String := none
   deriving Repr, Inhabited
 
 def Item.isFlag (item : Item) : Bool :=
@@ -172,6 +170,15 @@ def repeated (name : String) (v : Value α) (help : String) : Spec (Array α) :=
   ⟨#[{ name, shape := .valued v.metavar true, help }], fun raw =>
     (raw.valuesOf name).mapM (parseAs v s!"--{name}")⟩
 
+/-- Flags that may each be given any number of times, read together: every value of any of
+them, in the order given, each read by its own flag's value. For flags whose order matters
+across them, as `--set` and `--set-file`. -/
+def interleaved (flags : Array (String × Value α × String)) : Spec (Array α) :=
+  ⟨flags.map fun (name, v, help) => { name, shape := .valued v.metavar true, help }, fun raw =>
+    raw.values.filterMapM fun (name, text) => match flags.find? (·.1 == name) with
+      | some (_, v, _) => some <$> parseAs v s!"--{name}" text
+      | none => pure none⟩
+
 def switch (name : String) (help : String) : Spec Bool :=
   ⟨#[{ name, shape := .switch, help }], fun raw => .ok (raw.switches.contains name)⟩
 
@@ -189,39 +196,6 @@ def arg (metavar : String) (v : Value α) (help : String) : Spec α :=
     match ← s.decode raw with
     | some a => pure a
     | none => throw #[s!"missing {metavar}: {help}"]⟩
-
-/-! ## Text -/
-
-/-- Where free text comes from. Parsing stays pure; the command reads it with `read`. -/
-inductive TextSource where
-  | inline (text : String)
-  | file (path : System.FilePath)
-  deriving Repr, BEq, Inhabited
-
-/-- Free text: `--NAME TEXT`, or `--NAME-file FILE`; one of the two. Stdin is the file
-`/dev/stdin`. -/
-def text (name help : String) : Spec (Option TextSource) :=
-  let fileFlag := s!"{name}-file"
-  ⟨#[{ name, shape := .valued "TEXT" false, help, group? := some name },
-     { name := fileFlag, shape := .valued "FILE" false, group? := some name,
-       help := s!"read the {name} from FILE, as it is" }], fun raw =>
-    match (raw.valuesOf name).back?, (raw.valuesOf fileFlag).back? with
-    | some _, some _ => .error #[s!"give either --{name} TEXT or --{fileFlag} FILE, not both"]
-    | some t, none => .ok (some (.inline t))
-    | none, some p => .ok (some (.file p))
-    | none, none => .ok none⟩
-
-/-- The text, exactly: a file is read on the host, not trimmed, and must be UTF-8. `name` is
-the flag's, for messages. -/
-def TextSource.read (name : String) : TextSource → Result String
-  | .inline t => pure t
-  | .file path => do
-    let bytes ← match ← (Result.fromIO Error.input (IO.FS.readBinFile path)).toBaseIO with
-      | .ok bytes => pure bytes
-      | .error _ => throw <| .input s!"cannot read the {name} file {path}"
-    match String.fromUTF8? bytes with
-    | some t => pure t
-    | none => throw <| .input s!"the {name} file {path} is not valid UTF-8"
 
 /-! ## Parsing -/
 
@@ -417,25 +391,17 @@ private def Item.token (item : Item) : String :=
   | .valued metavar repeatable => s!"--{item.name} {metavar}" ++ (if repeatable then " …" else "")
   | .argument _ => item.name
 
-/-- `alaya run ENTRY [OPTIONS]`: the arguments and what is required, with
-alternatives grouped; help lists the options. -/
+/-- `alaya resume ENTRY [OPTIONS]`: the arguments and what is required; help lists the
+options. -/
 def Command.usage (app : App) (c : Command) : String := Id.run do
   let items := c.full.items
   let mut parts : Array String := #[]
-  let mut groupsDone : Array String := #[]
   let ordered := items.filter (!·.isFlag) ++ items.filter (fun i => i.isFlag && i.required)
   for item in ordered do
-    match item.group? with
-    | some g =>
-      if !groupsDone.contains g then
-        groupsDone := groupsDone.push g
-        let members := " | ".intercalate ((items.filter (·.group? == some g)).map (·.token)).toList
-        parts := parts.push (if item.required then s!"({members})" else s!"[{members}]")
-    | none =>
-      let optional := match item.shape with
-        | .argument optional => optional
-        | _ => !item.required
-      parts := parts.push (if optional then s!"[{item.token}]" else item.token)
+    let optional := match item.shape with
+      | .argument optional => optional
+      | _ => !item.required
+    parts := parts.push (if optional then s!"[{item.token}]" else item.token)
   " ".intercalate ([app.name, c.name] ++ parts.toList ++ ["[OPTIONS]"])
 
 private def table (rows : Array (String × String)) : Array String :=
@@ -445,7 +411,7 @@ private def table (rows : Array (String × String)) : Array String :=
     else s!"  {left}{"".pushn ' ' (width - left.length)}  {right}"
 
 private def Item.describe (item : Item) : String :=
-  let notes := (if item.required && item.isFlag && item.group?.isNone then ["required"] else [])
+  let notes := (if item.required && item.isFlag then ["required"] else [])
     ++ (item.default?.map (s!"default {·}")).toList ++ (item.env?.map (s!"env {·}")).toList
   if notes.isEmpty then item.help else s!"{item.help} ({"; ".intercalate notes})"
 
@@ -482,7 +448,7 @@ private def Item.toJson (item : Item) : Lean.Json :=
   .mkObj [("name", item.name), ("kind", kind), ("metavar", metavar), ("help", item.help),
     ("required", match item.shape with | .argument optional => !optional | _ => item.required),
     ("repeatable", item.shape matches .valued _ true),
-    ("default", optional item.default?), ("env", optional item.env?), ("group", optional item.group?)]
+    ("default", optional item.default?), ("env", optional item.env?)]
 
 /-- Every command, its usage, and its items, for programs that drive the CLI. -/
 def App.describe (app : App) : Lean.Json :=

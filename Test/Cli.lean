@@ -28,14 +28,24 @@ private def baseUrlOf (argv : List String) : Except (Array String) (Option Strin
   pure ((← Provider.endpointCli.parse argv).map (·.baseUrl))
 
 private def agentSet (path : List String) (value : Lean.Json) : Settings.Setting :=
-  { target := .agent, path, value }
+  { path, value }
 
-private def modelSet (path : List String) (value : Lean.Json) : Settings.Setting :=
-  { target := .model, path, value }
+/-- `--set` and `--set-file`, as `call` reads them. -/
+private def givenSpec : Cli.Spec (Array Settings.Given) :=
+  Cli.interleaved #[
+    ("set", ⟨"PATH=VALUE", fun text => Settings.Given.value <$> Settings.parse text⟩, ""),
+    ("set-file", ⟨"PATH=FILE", Settings.parseFile⟩, "")]
 
+/-- The settings of `argv`, files read. -/
+private def given (argv : List String) : TestM (Result (Array Settings.Setting)) := do
+  let given ← parsed "settings" (givenSpec.parse argv)
+  pure (given.mapM (·.read))
+
+/-- The task of `argv`'s one setting. -/
 private def task (argv : List String) : TestM (Result String) := do
-  let source ← parsed "task" <| ((Cli.text "task" "the task").required "a task is required").parse argv
-  pure (source.read "task")
+  pure <| (← given argv).map fun settings => match (settings[0]?.map (·.value) : Option Lean.Json) with
+    | some (.str text) => text
+    | _ => ""
 
 def taskSuite : Suite := suite "cli.task" #[
   test "a task file's middle reaches the first serialized model request as it is" do
@@ -44,14 +54,14 @@ def taskSuite : Suite := suite "cli.task" #[
       "\nDONE: implement every API and prove every fixed specification.\n" ++
       String.ofList (List.replicate 6500 '🦉') ++ "\n"
     IO.FS.writeFile path contents
-    let task ← assertOk (← task ["--task-file", path.toString])
+    let task ← assertOk (← task ["--set-file", s!"task={path}"])
     assertEqual "verbatim, trailing newline included" task contents
     -- What each agent asks first, given the task as the notice it waits for.
-    for agent in [Lean.Json.mkObj [("name", "mini-swe")], .mkObj [("name", "mini-vero"), ("mode", "proof")],
-        .mkObj [("name", "mini-vero"), ("mode", "codeproof")]] do
-      let request? : Option Chat.Request := match (Scripted.testConfig agent).run Scripted.testModelSpec with
-        | .ok run => match next run (Scripted.settle run (Scripted.opening run task)) with
-          | .ask { op := .sample request, .. } => some request
+    for (name, agent) in [("mini-swe", Lean.Json.mkObj []), ("mini-vero", .mkObj [("mode", "proof")]),
+        ("mini-vero", .mkObj [("mode", "codeproof")])] do
+      let request? : Option Chat.Request := match Scripted.runOfConfig name agent with
+        | .ok run => match next run (Scripted.settle run (Scripted.opening task)) with
+          | .ask { op := .sample _ request, .. } => some request
           | _ => none
         | .error _ => none
       let some request := request? | fail s!"{agent.compress} does not sample first"
@@ -62,25 +72,25 @@ def taskSuite : Suite := suite "cli.task" #[
         | fail "serialized request is missing initial task"
       check ((content.splitOn contents).length == 2) "the whole file must occur once in the first model input",
 
-  test "a task is given as text or as a file, one of the two, and the file must be readable UTF-8" do
+  test "a field is set to a file's text, in order with --set, and the file must be readable UTF-8" do
     let configuration (label : String) (result : Result String) (expected : String -> Bool) : TestM Unit :=
       assertError label result fun
         | .input m => expected m
         | _ => false
-    assertEqual "text" (← assertOk (← task ["--task", "fix it"])) "fix it"
+    assertEqual "text" (← assertOk (← task ["--set", "task=fix it"])) "fix it"
+    let path := (← scratch) / "task.md"
+    IO.FS.writeFile path "from the file"
+    let settings ← assertOk (← given ["--set", "task=first", "--set-file", s!"task={path}", "--set", "mode=proof"])
+    assertEqual "in the order given, across the two flags" (settings.map (·.render))
+      #["task=\"first\"", "task=\"from the file\"", "mode=\"proof\""]
     let refused (label : String) (argv : List String) : TestM (Array String) :=
-      problemsOf label <| ((Cli.text "task" "the task").required "a task is required").parse argv
-    assertEqual "neither" (← refused "neither" []) #["a task is required"]
-    assertEqual "both" (← refused "both" ["--task", "a", "--task-file", "f"])
-      #["give either --task TEXT or --task-file FILE, not both"]
-    check ((← refused "empty" ["--task", ""])[0]!.startsWith "--task needs a value") "empty text"
-    check ((← refused "missing" ["--task-file"])[0]!.startsWith "--task-file needs a value") "missing value"
-    assertEqual "- is a file like any other" (← parsed "dash" ((Cli.text "task" "").parse ["--task-file", "-"]))
-      (some (.file "-"))
-    let path := (← scratch) / "missing"
-    configuration "missing file" (← task ["--task-file", path.toString]) (·.startsWith "cannot read the task file")
-    IO.FS.writeBinFile path ⟨#[255, 254]⟩
-    configuration "invalid UTF-8" (← task ["--task-file", path.toString]) (·.endsWith "is not valid UTF-8")
+      problemsOf label (givenSpec.parse argv)
+    check ((← refused "no path" ["--set-file", "TASK.md"])[0]!.endsWith "expects PATH=FILE, got 'TASK.md'") "no path"
+    check ((← refused "missing" ["--set-file"])[0]!.startsWith "--set-file needs a value") "missing value"
+    let missing := (← scratch) / "missing"
+    configuration "missing file" (← task ["--set-file", s!"task={missing}"]) (·.startsWith "--set-file task: cannot read")
+    IO.FS.writeBinFile missing ⟨#[255, 254]⟩
+    configuration "invalid UTF-8" (← task ["--set-file", s!"task={missing}"]) (·.endsWith "is not valid UTF-8")
 ]
 
 def endpointSuite : Suite := suite "cli.endpoint" #[
@@ -167,7 +177,8 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
       ((echoed.extract 0 prefix_.size).map (·.compress)).toList,
 
   test "a served model's identity is its recorded spec, whoever serves it" do
-    let spec ← assertOk <| Models.resolve "deepseek-v4.1-flash" #[modelSet ["params", "reasoning_effort"] "high"]
+    let spec ← assertOk <| Models.fromJson (.mkObj [("name", "deepseek-v4.1-flash"),
+      ("params", .mkObj [("reasoning_effort", "high")])])
     let some dgx := Provider.named? "dgx" | fail "no dgx"
     let viaDgx ← assertOk <| Provider.serve dgx spec
     let viaOther ← assertOk <| Provider.serve { dgx with name := "other", baseUrl := "http://elsewhere/v1" } spec
@@ -177,59 +188,61 @@ def endpointSuite : Suite := suite "cli.endpoint" #[
       | .environment m => (m.splitOn "ALAYA_TEST_UNSET_KEY is not set").length > 1
       | _ => false,
 
-  test "a model's name alone is its defaults, and settings are checked" do
-    let defaults ← assertOk <| Models.resolve "gpt-oss-120b" #[]
+  test "a model's name alone is its defaults, and settings over an agent's model are checked" do
+    let defaults ← assertOk <| Models.fromJson "gpt-oss-120b"
     assertEqual "context from the table" defaults.contextTokens? (some 131072)
-    let set ← assertOk <| Models.resolve "gpt-oss-120b"
-      #[modelSet ["params", "temperature"] (1 : Nat), modelSet ["context_tokens"] (65536 : Nat)]
+    let modelOf (config : Lean.Json) : TestM Models.Spec := assertOk <| Models.fromJson
+      ((config.getObjVal? "model").toOption.getD .null)
+    let set ← modelOf (← assertOk <| Agents.Catalog.resolve "mini-swe"
+      #[agentSet ["model"] "gpt-oss-120b", agentSet ["model", "params", "temperature"] (1 : Nat),
+        agentSet ["model", "context_tokens"] (65536 : Nat)])
     assertEqual "params" set.params.compress "{\"temperature\":1}"
     assertEqual "context" set.contextTokens? (some 65536)
     for (label, settings, expected) in [
-        ("unknown", #[modelSet ["temperature"] (1 : Nat)], "unknown field 'temperature'"),
-        ("protected", #[modelSet ["params", "model"] "x"], "params cannot set 'model'"),
-        ("name", #[modelSet ["name"] "x"], "--model NAME")] do
-      assertError label (Models.resolve "gpt-oss-120b" settings) fun
+        ("unknown", #[agentSet ["model", "temperature"] (1 : Nat)], "unknown field 'temperature'"),
+        ("protected", #[agentSet ["model", "params", "model"] "x"], "params cannot set 'model'"),
+        ("name", #[agentSet ["name"] "x"], "unknown field 'name'")] do
+      assertError label (Agents.Catalog.resolve "mini-swe" (#[agentSet ["model"] "gpt-oss-120b"] ++ settings)) fun
         | .input m => (m.splitOn expected).length > 1
         | _ => false
     assertError "unknown model" (Models.fromJson (.mkObj [("name", "nope")])) fun
       | .input m => m.startsWith "unknown model: nope"
       | _ => false
     match Settings.parse "model.params.reasoning_effort=high" with
-    | .ok s => check (s.target == .model && s.path == ["params", "reasoning_effort"] && s.value == "high") "parsed"
+    | .ok s => check (s.path == ["model", "params", "reasoning_effort"] && s.value == "high") "parsed"
     | .error m => fail m
 ]
 
 private def compressed (json : Lean.Json) : String := json.compress
 
 def agentsSuite : Suite := suite "cli.agents" #[
-  test "an agent's name alone is its complete defaults, and they read back as themselves" do
+  test "a program's name alone is its complete defaults, and they read back as themselves" do
     for definition in Agents.Catalog.all do
       let defaults ← assertOk <| Agents.Catalog.resolve definition.name #[]
-      assertEqual s!"{definition.name} names itself" (defaults.getObjValAs? String "name").toOption
-        (some definition.name)
-      let again ← assertOk <| Agents.Catalog.complete defaults
+      check (defaults.getObjVal? "name").toOption.isNone s!"{definition.name}: the name is the call's, not the configuration's"
+      let again ← assertOk <| Agents.Catalog.complete definition.name defaults
       assertEqual s!"{definition.name} round-trips" (compressed again) (compressed defaults),
 
   test "a configuration may leave fields out, but not misname or mistype one" do
-    let refused (label : String) (json : Lean.Json) (expected : String) : TestM Unit :=
-      assertError label (Agents.Catalog.complete json) fun
+    let refused (label : String) (name : String) (json : Lean.Json) (expected : String) : TestM Unit :=
+      assertError label (Agents.Catalog.complete name json) fun
         | .input m => (m.splitOn expected).length > 1
         | _ => false
-    refused "no name" (.mkObj [("context_reserve", 1)]) "needs a \"name\""
-    refused "unknown agent" (.mkObj [("name", "mini-swf")]) "unknown agent"
-    refused "typo" (.mkObj [("name", "mini-swe"), ("step_limt", 1)]) "unknown field 'step_limt'"
-    refused "type" (.mkObj [("name", "mini-swe"), ("recover_output", "yes")]) "must be true or false"
-    refused "mode" (.mkObj [("name", "mini-vero"), ("mode", "both")]) "unknown mode"
-    refused "nested" (.mkObj [("name", "mini-swe"), ("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
-    refused "own field, misnamed" (.mkObj [("name", "mini-vero"), ("stepp", 1)]) "mask_observations, mode"
+    refused "unknown program" "mini-swf" (.mkObj []) "unknown program"
+    refused "a name in the configuration" "mini-swe" (.mkObj [("name", "mini-swe")]) "unknown field 'name'"
+    refused "typo" "mini-swe" (.mkObj [("step_limt", 1)]) "unknown field 'step_limt'"
+    refused "type" "mini-swe" (.mkObj [("recover_output", "yes")]) "must be true or false"
+    refused "mode" "mini-vero" (.mkObj [("mode", "both")]) "unknown mode"
+    refused "nested" "mini-swe" (.mkObj [("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
+    refused "own field, misnamed" "mini-vero" (.mkObj [("stepp", 1)]) "mask_observations, mode"
     let built ← assertOk <| Agents.Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
     assertEqual "tools follow the settings" ((built.getObjVal? "tools").toOption.map (·.compress))
       (some "[\"bash\",\"submit\",\"time_budget\"]")
     -- How commands run is in each command the agent asks for.
     let nested ← assertOk <| Agents.Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]
-    let timeout? : Option Nat := match (Scripted.testConfig nested).run Scripted.testModelSpec with
+    let timeout? : Option Nat := match Scripted.runOfConfig "mini-swe" nested with
       | .ok run =>
-        let asked := Scripted.respond run (Scripted.settle run (Scripted.opening run))
+        let asked := Scripted.respond run (Scripted.settle run Scripted.opening)
           { toolCalls := #[{ id := "c", name := "bash", arguments := .mkObj [("command", "ls")] }] }
         match next run asked with
         | .ask { op := .exec _ config, .. } => some config.timeoutSeconds
@@ -237,19 +250,25 @@ def agentsSuite : Suite := suite "cli.agents" #[
       | .error _ => none
     assertEqual "a nested setting" timeout? (some 5)
     assertError "the name is not a setting" (Agents.Catalog.resolve "mini-swe" #[agentSet ["name"] "mini-vero"]) fun
-      | .input m => (m.splitOn "--agent NAME").length > 1
+      | .input m => (m.splitOn "unknown field 'name'").length > 1
       | _ => false,
 
   test "a run's configuration is the opening of its agent's call, and the tree names it" do
-    let agent ← assertOk <| Agents.Catalog.complete (.mkObj [("name", "mini-swe"), ("context_reserve", 7)])
-    match (Scripted.testConfig agent).run Scripted.testModelSpec with
-    | .error problem => fail problem
-    | .ok run =>
-      let rt ← Scripted.runtime noCommands none
-      let tip ← Scripted.start rt run "t"
-      let (told, _) ← assertOk <| Driver.append rt.store run tip (.arrived (.said "hello"))
-      let log ← Scripted.logAt rt told
-      assertEqual "the configuration" (compressed (← assertOk <| configOf log).agent) (compressed agent)
+    let agent ← assertOk <| Agents.Catalog.complete "mini-swe" (.mkObj [("model", "gpt-oss-120b"), ("context_reserve", 7)])
+    let run := session
+    let rt ← Scripted.runtime noCommands none
+    let project := (← scratch) / "project"
+    IO.FS.createDirAll project
+    let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
+    let call : Scripted.PersonCall := { call := ⟨"mini-swe", agent⟩ }
+    let (called, _) ← assertOk <| Driver.append rt.store run root call.event
+    -- The run reads the call and opens it; the agent's first read of its inbox takes nothing.
+    let log := Scripted.settle run (← Scripted.logAt rt called)
+    do
+      assertEqual "the configuration" ((argumentsAt? log { name := "mini-swe" }).map compressed) (some (compressed agent))
+      let mut tip := called
+      for event in log.extract 2 log.size do
+        tip := (← assertOk <| rt.store.put (← assertOk rt.store.forest) { parent? := some tip, event }).1
       let forest ← assertOk rt.store.forest
       let tree := Render.treeLines (← assertOk <| Render.rows rt.store forest)
       check (tree.any fun l => (l.splitOn "root  mini-swe, gpt-oss-120b").length > 1) s!"tree names the agent: {tree}"
@@ -364,8 +383,7 @@ def specSuite : Suite := suite "cli.spec" #[
     assertEqual "twice" twice.check #["--json is declared twice"]
     let order := Prod.mk <$> Cli.arg? "A" .string "" <*> Cli.arg "B" .string ""
     assertEqual "order" order.check #["B is required but follows an optional argument"]
-    let groups := Prod.mk <$> (Prod.mk <$> Provider.endpointCli <*> Executor.Docker.RunOptions.cli)
-      <*> Cli.text "task" ""
+    let groups := Prod.mk <$> Provider.endpointCli <*> Executor.Docker.RunOptions.cli
     assertEqual "the shared groups are disjoint" groups.check #[],
 
   test "a command takes --json and --help, and says what it accepts" do

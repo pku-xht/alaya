@@ -1,37 +1,61 @@
 import Lean.Data.Json
+import Alaya.Error
 
 /-!
-Overrides from the command line. `--set PATH=VALUE` names what it changes — `agent.` or
-`model.` — and a path into it; the value is read as JSON when it parses, and as a string
-otherwise. A setting replaces exactly one key of a complete configuration, with no deep
+Overrides from the command line. `--set PATH=VALUE` names a field of a program's configuration
+by its path, `context_reserve` or `model.params.reasoning_effort`; the value is read as JSON
+when it parses, and as a string otherwise. `--set-file PATH=FILE` sets the field to the text of
+a file, as it is, such as an agent's task. A setting replaces exactly one key, with no deep
 merging, and the result is then checked as a whole by what reads it.
 -/
 
 namespace Alaya.Settings
 
-/-- What a setting changes. -/
-inductive Target where
-  | agent
-  | model
-  deriving BEq, Repr, Inhabited
-
-/-- One `--set`: what it changes, the path within it, and the value. -/
+/-- One `--set`: the path of the field, and its value. -/
 structure Setting where
-  target : Target
   path : List String
   value : Lean.Json
   deriving Inhabited
 
-/-- Reads `agent.PATH=VALUE` or `model.PATH=VALUE`. -/
-def parse (text : String) : Except String Setting := do
-  let path :: value :: rest := text.splitOn "=" | throw s!"expects agent.PATH=VALUE or model.PATH=VALUE, got '{text}'"
-  let value := "=".intercalate (value :: rest)
-  let (target, keys) ← match path.splitOn "." with
-    | "agent" :: keys@(_ :: _) => pure (Target.agent, keys)
-    | "model" :: keys@(_ :: _) => pure (Target.model, keys)
-    | _ => throw s!"sets agent.FIELD or model.FIELD, not '{path}'"
+/-- The setting as it was written: `PATH=VALUE`. -/
+def Setting.render (setting : Setting) : String :=
+  s!"{".".intercalate setting.path}={setting.value.compress}"
+
+/-- Splits `PATH=REST` into the keys of the path and the rest. -/
+private def split (text : String) (form : String) : Except String (List String × String) := do
+  let path :: value :: rest := text.splitOn "=" | throw s!"expects {form}, got '{text}'"
+  let keys := path.splitOn "."
   if keys.any (·.isEmpty) then throw s!"has an empty key in '{path}'"
-  pure { target, path := keys, value := (Lean.Json.parse value).toOption.getD (.str value) }
+  pure (keys, "=".intercalate (value :: rest))
+
+/-- Reads `PATH=VALUE`. -/
+def parse (text : String) : Except String Setting := do
+  let (path, value) ← split text "PATH=VALUE"
+  pure { path, value := (Lean.Json.parse value).toOption.getD (.str value) }
+
+/-- A setting as the command line gives it: its value, or the file whose text it is, which is
+read when the command runs, so parsing stays pure. -/
+inductive Given where
+  | value (setting : Setting)
+  | file (path : List String) (source : System.FilePath)
+  deriving Inhabited
+
+/-- Reads `PATH=FILE`. -/
+def parseFile (text : String) : Except String Given := do
+  let (path, file) ← split text "PATH=FILE"
+  pure (.file path file)
+
+/-- The setting: a file is read on the host, as it is, and must be UTF-8. Stdin is the file
+`/dev/stdin`. -/
+def Given.read : Given → Alaya.Result Setting
+  | .value setting => pure setting
+  | .file path source => do
+    let bytes ← match ← (Alaya.Result.fromIO Alaya.Error.input (IO.FS.readBinFile source)).toBaseIO with
+      | .ok bytes => pure bytes
+      | .error _ => throw <| .input s!"--set-file {".".intercalate path}: cannot read {source}"
+    match String.fromUTF8? bytes with
+    | some text => pure { path, value := .str text }
+    | none => throw <| .input s!"--set-file {".".intercalate path}: {source} is not valid UTF-8"
 
 /-- `json` with the value at `path` replaced by `value`, creating the objects on the way. -/
 def setAt (json : Lean.Json) (path : List String) (value : Lean.Json) : Except String Lean.Json :=
@@ -42,17 +66,10 @@ def setAt (json : Lean.Json) (path : List String) (value : Lean.Json) : Except S
     let inner := (json.getObjVal? key).toOption.getD (.mkObj [])
     pure (json.setObjVal! key (← setAt inner rest value))
 
-/-- `json` with each setting for `target` applied in order. The name is not a setting: it is
-what `--agent NAME` or `--model NAME` chose. -/
-def apply (target : Target) (json : Lean.Json) (settings : Array Setting) : Except String Lean.Json := do
-  let prefix_ := match target with | .agent => "agent" | .model => "model"
-  let mut json := json
-  for setting in settings do
-    if setting.target != target then continue
-    if setting.path == ["name"] then throw s!"the {prefix_}'s name is --{prefix_} NAME, not a --set"
-    match setAt json setting.path setting.value with
-    | .ok updated => json := updated
-    | .error message => throw s!"--set {prefix_}.{".".intercalate setting.path}: {message}"
-  pure json
+/-- `json` with one setting applied. -/
+def apply (json : Lean.Json) (setting : Setting) : Except String Lean.Json := do
+  match setAt json setting.path setting.value with
+  | .ok updated => pure updated
+  | .error message => throw s!"--set {".".intercalate setting.path}: {message}"
 
 end Alaya.Settings

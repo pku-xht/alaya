@@ -14,7 +14,7 @@ flowchart LR
   person("a person"):::notice
   cache("D/cache<br/>the draws of<br/>each request,<br/>with their times"):::sample
   entries("D/entries<br/>one file an entry:<br/>an event and<br/>its parent")
-  restic("D/restic<br/>every snapshot:<br/>a workspace,<br/>a grader’s input,<br/>a grader’s checkout")
+  restic("D/restic<br/>every snapshot:<br/>a version of<br/>the workspace")
 
   driver -- "samples<br/>through" --> cache
   driver -- "appends" --> entries
@@ -61,7 +61,9 @@ The format carries no version: a data directory is read by the Alaya that wrote 
 ## 2. Events
 
 What each event means is `docs/agent-api.md` §2 and §3. This is how each is stored: an object
-with its kind under `type`, and its frame, where it has one, as an array of numbers.
+with its kind under `type`, and its frame, where it has one, as an array of steps, outermost
+first: each the name of the routine called, with `#N` after it for the call of that name its
+caller made after N others (`["mini-swe", "bash#1"]`).
 
 | `type` | Fields |
 | --- | --- |
@@ -80,42 +82,47 @@ with its kind under `type`, and its frame, where it has one, as an array of numb
 | `said` | `message` |
 | `changed` | `workspace`: a snapshot; `summary` |
 | `replied` | `to`: the frame that asked; `reply`: `{type}` of `yes`, `no`, `none_of_above`, `unavailable`, or `{type: "choice", number}`, `{type: "text", text}` |
-| `assigned` | `grader` (§4) |
+| `called` | `call`: `{name, arguments}`, the program the run is to call and its configuration; `environment`: `{image, workdir}`, where its commands run (§2) |
 
 | `op.type` | Fields of `op` | `answer` |
 | --- | --- | --- |
-| `sample` | `request`: the digest of the request | the response: `{content, tool_calls, reasoning, reasoning_items, finish_reason, usage}` |
-| `exec` | `command`, `config`: `{timeout_seconds, env, outputs}` | `{output: {output, exit_code, error}, workspace, file}`; `output` also has `detail`, what the machine said, when the command could not be run |
+| `sample` | `model`: the model's complete spec; `request`: the digest of the request | the response: `{content, tool_calls, reasoning, reasoning_items, finish_reason, usage}` |
+| `exec` | `command`, `config`: `{timeout_seconds, env, outputs, merge}` | `{output: {output, exit_code, error}, workspace, file}`; `output` also has `stderr` when the command kept it apart (`merge` off), and `detail`, what the machine said, when the command could not be run |
 | `time` | | `{spent_ms, budget_ms}` |
-| `external` | `command`, `image`, `input`, `timeout_seconds` | `{exit_code, stdout, stderr, checkout, elapsed_ms, error}` |
 
 A sample is kept by the digest of its request, not the request: replay computes the request
 again from the log before it, so the log does not hold the conversation once more with every
 response.
 
-*The events of a run that is told its task, runs a command, and is graded.*
+*The events of a run that calls an agent on its task, runs a command, and calls a grader.*
 
 ```json
 {"type":"arrived","notice":{"type":"changed","workspace":"3f2a…","summary":"the workspace the run starts from"}}
-{"type":"opened","frame":[0],"routine":{"name":"agent","arguments":{"agent":{…},"model":{…},"environment":{…}}}}
-{"type":"arrived","notice":{"type":"said","message":"Implement the language in SPEC.md"}}
-{"type":"heard","frame":[0],"notices":[2]}
-{"type":"answered","frame":[0],"op":{"type":"sample","request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
-{"type":"opened","frame":[0,0],"routine":{"name":"bash","arguments":{"command":"make"}}}
-{"type":"answered","frame":[0,0],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
-{"type":"returned","frame":[0,0],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
+{"type":"arrived","notice":{"type":"called","call":{"name":"mini-swe","arguments":{"model":{…},"task":"Implement the language in SPEC.md",…}},"environment":{"image":"…@sha256:…","workdir":"/workspace"}}}
+{"type":"heard","frame":[],"notices":[1]}
+{"type":"opened","frame":["mini-swe"],"routine":{"name":"mini-swe","arguments":{"model":{…},"task":"…",…}}}
+{"type":"answered","frame":["mini-swe"],"op":{"type":"exec","command":"uname -sm","config":{…}},"answer":{"output":{"output":"Linux x86_64\n",…},…},"error":null}
+{"type":"heard","frame":["mini-swe"],"notices":[]}
+{"type":"answered","frame":["mini-swe"],"op":{"type":"sample","model":{…},"request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
+{"type":"opened","frame":["mini-swe","bash"],"routine":{"name":"bash","arguments":{"command":"make","executor":{"timeout_seconds":30,…}}}}
+{"type":"answered","frame":["mini-swe","bash"],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
+{"type":"returned","frame":["mini-swe","bash"],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
 …
-{"type":"returned","frame":[0],"value":{"status":"Submitted","submission":"…"}}
-{"type":"arrived","notice":{"type":"assigned","grader":{"command":"sh /grader/grade.sh","image":"…@sha256:…","input":"7e0f…","timeout_seconds":900}}}
+{"type":"returned","frame":["mini-swe"],"value":{"status":"Submitted","submission":"…"}}
+{"type":"arrived","notice":{"type":"called","call":{"name":"grader","arguments":{"command":"sh /grader/grade.sh","timeout_seconds":900}},"environment":{…}}}
 {"type":"heard","frame":[],"notices":[212]}
-{"type":"answered","frame":[],"op":{"type":"external",…},"answer":{"exit_code":0,"stdout":"1..2\nok 1\nok 2\n",…},"error":null}
-{"type":"returned","frame":[],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],…}}
+{"type":"opened","frame":["grader"],"routine":{"name":"grader","arguments":{…}}}
+{"type":"answered","frame":["grader"],"op":{"type":"exec","command":"sh /grader/grade.sh","config":{…,"merge":false}},"answer":{"output":{"output":"1..2\nok 1\nok 2\n","stderr":"",…},…},"error":null}
+{"type":"returned","frame":["grader"],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],"exit_code":0}}
 ```
 
-The second event is the opening of the agent's call. Its arguments are the run's
-**configuration**: the agent's complete configuration, the model's complete spec, and the
-environment — the pinned image, the workdir, the image's system and architecture. Every later command builds
-the run from there.
+A person's call of a program names it, and its arguments are the program's complete
+**configuration**, an agent's model and task in it. Every later command builds the program from
+there. The `called` notice also holds the **environment** the call's commands run in: the pinned
+image, and the workdir. The driver finds it from the call's opening, through the read just before
+it, which took the notice. A program a program calls, a sub-agent, is called with its
+configuration alone, and runs where its caller's commands do. A tool's opening holds the model's
+arguments with what the agent's configuration adds, as how its command runs.
 
 ## 3. The forest
 
@@ -123,7 +130,7 @@ Entries that name the same parent are its continuations, so every entry kept for
 root is a run; an entry with two continuations is a **fork**; and a log is any path from a root.
 Nothing is rewritten: a log only grows, and two logs with the same beginning share its entries.
 
-*A run driven again from the read at 3, which takes a new draw; a person's note at a later
+*A run driven again from the read at 4, which takes a new draw; a person's note at a later
 entry; and that entry graded as it stood.*
 
 ```mermaid
@@ -134,13 +141,13 @@ flowchart TD
   classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
   classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
 
-  root("0 · the workspace the run starts from"):::notice --> opened("1 · open agent")
-  opened --> task("2 · said “the task”"):::notice --> heard("3 · inbox: takes 2")
-  heard --> first("4 · sample, draw 0 …"):::sample --> firstEnd("… return pass 41/48"):::ok
-  heard --> second("4 · sample, draw 1 …"):::sample --> secondEnd("… return pass 48/48"):::ok
+  root("0 · the workspace the run starts from"):::notice --> called("1 · call mini-swe"):::notice
+  called --> opened("2, 3 · inbox: takes 1, open mini-swe") --> heard("4 · inbox: nothing")
+  heard --> first("5 · sample, draw 0 …"):::sample --> firstEnd("… return pass 41/48"):::ok
+  heard --> second("5 · sample, draw 1 …"):::sample --> secondEnd("… return pass 48/48"):::ok
   first --> note("k · said “a note”"):::notice --> noteEnd("… return pass 45/48"):::ok
   first --> stopped("k · stopped: to grade this point"):::bad
-  stopped --> assigned("k+1 · assigned grader"):::notice --> graded("… return fail 12/48"):::bad
+  stopped --> grader("k+1 · call grader"):::notice --> graded("… return fail 12/48"):::bad
   linkStyle default stroke-width:1px
 ```
 
@@ -152,21 +159,21 @@ $ alaya tree
   06d9ae75ae21..8cb007600701  1-40  sample → bash make test
     07d75e6a71ee..bcef7c505d44  41-212  return pass 41/48  [done: pass 41/48]
     9a11c0de42f7..53be0f1a2c90  41-260  return pass 48/48  [done: pass 48/48]
-    d9d628fe75d2..9cea64cdaa71  41-45  return fail 12/48  [stopped: fail 12/48]
+    d9d628fe75d2..9cea64cdaa71  41-46  return fail 12/48  [done: fail 12/48]
 ```
 
 Every command that writes appends entries after the one it is given. Appending after an entry
-that already goes on is a fork; appending at the end of a log lets the next `run` go on with it.
+that already goes on is a fork; appending at the end of a log lets the next `resume` go on with it.
 
 | Command | Appends |
 | --- | --- |
-| `new` | the root, the opening of the agent's call, and the task |
-| `run` | an entry for each event of the run, until it stops |
+| `new` | the root |
+| `call` | a `called` notice |
+| `resume` | an entry for each event of the run, until it stops |
 | `tell` | a `said` notice |
 | `commit` | a `changed` notice: the snapshot of a directory, and the lines of what changed |
 | `reply` | a `replied` notice |
 | `stop` | a `stopped` event |
-| `grade` | a `stopped` event where the agent still runs, an `assigned` notice, then the grading's events (§4) |
 | `comment` | a `commented` event |
 
 `rm ENTRY` deletes an entry and everything after it. What each command takes and refuses is
@@ -179,38 +186,36 @@ new sample takes is `docs/agent-api.md` §10.
 
 ## 4. Grading
 
-Grading is how a run ends. Once its agent is over, a run waits for a **grader**, runs it, and
-returns its **verdict** (the events are in `docs/agent-api.md` §9). A grader is no part of a
-run's configuration, so any point of any run is graded, by any grader, at any time.
+A **grader** is a program a person calls on a log like an agent: `grader`, of the catalog. It
+runs one command, in a container of its own image, and returns the **verdict** read off what
+the command prints. Any point of any run is graded, by any grader, at any time.
 
-A grader is an external program, described by what the notice that assigns it holds:
+What a call of the grader holds as its configuration:
 
 ```json
-{"command": "sh /grader/grade.sh", "image": "…@sha256:…", "input": "7e0f…", "timeout_seconds": 900}
+{"command": "sh /grader/grade.sh", "timeout_seconds": 900}
 ```
 
 | Field | Holds |
 | --- | --- |
 | `command` | a shell command, run with `/bin/sh -c` |
-| `image` | the image it runs in, pinned to a digest when the grader is assigned; by default the run's |
-| `input` | the snapshot of its trusted files, taken when it is assigned, or `null` |
 | `timeout_seconds` | how long it may take: 900 unless given, 0 for no limit |
 
 ### The protocol
 
-1. **A point is chosen.** `alaya grade ENTRY --grader CMD` grades the run as it stood at
-   `ENTRY`. Where the agent still runs there, it is stopped first, on a fork if the log goes on.
-2. **The grader is assigned.** The `assigned` notice records the grader whole: its image as a
-   digest and its input as a snapshot. So a log says exactly what graded it.
-3. **The workspace is checked out.** The driver restores the workspace as the log has it at
-   that point into a fresh directory, the **checkout**.
-4. **The command runs** in a new container of the grader's image, with no network and a time
-   limit. The checkout is mounted read-write at the run's workdir, and the input read-only at
-   `/grader`.
-5. **It reports in TAP** on stdout: a plan `1..N`, then an `ok` or `not ok` line for each check.
-6. **Alaya reads the verdict** off the TAP, and the run returns it as its result.
-7. **The checkout is kept**, as the grader left it, reports included: `alaya ls` and `alaya cat`
-   read it at that entry. The run's workspace stays where it was.
+1. **A point is chosen.** Where a call still runs there, `alaya stop` ends it first, on a fork if
+   the log goes on.
+2. **The grader is called.** `alaya call ENTRY grader --image IMAGE --set command=CMD`
+   appends the call, its image pinned to a digest. So a log says exactly what graded it.
+3. **The command runs** in a new container of the grader's image, on the workspace the log has
+   reached, at the call's workdir, with no network unless `resume --network` gives one, and its
+   time limit. Its trusted files — hidden tests, a reference — are in its image.
+4. **It reports in TAP** on stdout, kept apart from its stderr: a plan `1..N`, then an `ok` or
+   `not ok` line for each check.
+5. **Alaya reads the verdict** off the TAP, and the call returns it as its value.
+6. **The workspace is kept** as the grader left it, reports included: `alaya ls` and `alaya cat`
+   read it at the entry of the command's answer. The agent is over, so nothing reads it but a
+   person.
 
 ![What goes into a grader's container, and what comes out](figures/log-schema/grader.svg)
 
@@ -258,15 +263,15 @@ flowchart TD
 | `fail` | the TAP is complete, and a check failed; a failing `TODO` or `SKIP` check does not count, a failing subtest does |
 | `error` | anything else: no plan, fewer or more checks than planned, a `Bail out!`, a grader that ran out of time or could not start |
 
-The value the run returns:
+The value the grader's call returns:
 
 ```json
 {"status": "fail", "passed": 2, "total": 3, "reason": "failed: errors",
- "checks": [{"ok": true, "name": "parses", "directive": ""}, …], "exit_code": 1, "elapsed_ms": 5400}
+ "checks": [{"ok": true, "name": "parses", "directive": ""}, …], "exit_code": 1}
 ```
 
-`checks` has one item for each top-level check. What the program printed is in the answer of
-the `external` operation before it.
+`checks` has one item for each top-level check. What the command printed, stdout and stderr,
+is in the answer of its `exec` before it.
 
 ### Writing a grader
 
@@ -285,18 +290,18 @@ the `external` operation before it.
   esac
   ```
 
-- **Keep what the agent must not see out of the workspace.** Hidden tests and reference outputs
-  go in the input directory (`--grader-input`). Tools the agent should not have go in an image
-  of the grader's own (`--grader-image`), best built on the agent's image.
-- **Change the checkout freely.** It is a copy: build in it, write reports in it.
+- **Keep what the agent must not see out of the workspace.** Hidden tests, reference outputs and
+  tools the agent should not have go in the grader's image, best built on the agent's image.
+  The call pins the image by digest, so the log names the very files that graded it.
+- **Change the workspace freely.** The agent is over: build in it, write reports in it.
 
 ### Grading again
 
-A grader is assigned at most once along a log. Grading a point again, with the same grader or a
-corrected one, is a fork from the entry before the first was assigned, and `alaya tree` shows
-both verdicts. A grader that reads only the workspace gives one verdict for each version of it,
-so the points worth grading are the entries that leave a new version: the answers of commands,
-and changes from outside.
+Grading a point again, with the same grader or a corrected one, is a fork from the entry before
+the first grader was called, and `alaya tree` shows both verdicts; or a second call after the
+first's end, in the same log. A grader that reads only the workspace gives one verdict for each
+version of it, so the points worth grading are the entries that leave a new version: the
+answers of commands, and changes from outside.
 
 ## 5. The data directory
 
@@ -322,8 +327,8 @@ contract, and `Workspaces.Restic` keeps it with restic 0.17 or later.
 
 | Operation | Does | Used by | restic |
 | --- | --- | --- | --- |
-| `snapshot` | captures a directory as it is now | `new`, every command of an agent, `commit`, a grader's input and its checkout | `backup`, run inside the directory |
-| `materialize` | makes a directory hold exactly a snapshot | a command on another version than the work directory holds, a grader's checkout, `checkout` | `restore --delete --overwrite always` |
+| `snapshot` | captures a directory as it is now | `new`, every command of a call, `commit` | `backup`, run inside the directory |
+| `materialize` | makes a directory hold exactly a snapshot | a command on another version than the work directory holds, `checkout` | `restore --delete --overwrite always` |
 | `diff` | lists the added, removed and modified paths | `commit`'s notice, `diff`, the report | `diff --json` |
 | `readFiles` | reads regular files of a snapshot | the report, `cat` | `restore --include`, into scratch |
 | `listEntries` | lists a directory of a snapshot | `ls`, `cat`'s check of a path | `ls --json` |
@@ -373,10 +378,11 @@ How the cache is used is `docs/llm-api.md` §5.4.
 
 - **Names.** An entry's name is the hash of its parent's name and its event. Nothing under a
   name changes, and a log only grows.
-- **Traces.** Every log the driver writes is a trace of its run's program: replay agrees with
+- **Traces.** Every log the driver writes is a trace of its run's routine: replay agrees with
   it at every prefix. A log that is not is refused, not driven on; `rebase` copies the part
   that is into a new data directory.
 - **Draws.** A sample from an entry with `n` sampled continuations is draw `n` of its request.
-- **Grading.** A graded log is complete: it ends with the verdict.
-- **Snapshots.** Every snapshot an entry names is kept while the entry is: a version of the
-  workspace, a grader's checkout, and the input of the grader assigned.
+- **Calls.** A call runs from its opening to its return, failure or stop, and no two run at once;
+  a grader's call returns its verdict.
+- **Snapshots.** Every snapshot an entry names is kept while the entry is: the versions of the
+  workspace.

@@ -3,24 +3,24 @@
 # requires-python = ">=3.12"
 # dependencies = []
 # ///
-"""Grade a Bija attempt against the reference acceptance suite, as an alaya grader.
+"""Grade a Bija attempt against the reference acceptance suite, as alaya's grader.
 
 usage: grade.py --tests /grader
 
-`alaya grade` runs it on a point of a run, in the grader image (the Dockerfile's `grader`
-target), in a checkout of the attempt, with the reference's `tests/` as its trusted input at
-/grader. From the repository root, TAG the image's tag in README.md:
+A call of alaya's `grader` runs it on a point of a run, in the grader image (the Dockerfile's
+`grader` target), on the attempt, with the reference's `tests/` at /grader in that image:
 
-    alaya grade ENTRY --grader-image ghcr.io/msv-lab/alaya-bija-grader:TAG \
-      --grader-input benchmarks/bija/reference/tests \
-      --grader 'python3 /opt/alaya-bija/grade.py --tests /grader' --grader-timeout 1800
+    alaya call ENTRY grader --image alaya-bija-grader \
+      --set command='python3 /opt/alaya-bija/grade.py --tests /grader' \
+      --set timeout_seconds=1800
 
-It replaces the checkout's `tests/` with the reference's 232 programs, runs the suite with the
+It replaces the attempt's `tests/` with the reference's 232 programs, runs the suite with the
 attempt's own project, and prints TAP on stdout: one check per program run through the command
 line (`program AREA/NAME`), then one per program compiled with `bija build` and run under a bare
 interpreter (`standalone AREA/NAME`). A suite that did not run bails out. The pass counts by
-area go to stderr, and the suite's output and JUnit report stay in the checkout under `.grade/`,
-where `alaya cat ENTRY .grade/pytest.txt` reads them, ENTRY the entry of the grader's answer.
+area go to stderr, and the suite's output and JUnit report stay in the workspace under
+`.grade/`, where `alaya cat ENTRY .grade/pytest.txt` reads them, ENTRY the entry of the grader's
+command's answer.
 """
 
 from __future__ import annotations

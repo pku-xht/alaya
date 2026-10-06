@@ -1,13 +1,13 @@
 import Alaya.Agents.Config
 import Alaya.Error
-import Alaya.Settings
 
 /-!
 The models a run can use, independent of who serves them. A model is named by its ID as its
 creator publishes it (`gpt-oss-120b`, `deepseek-v4.1-flash`), and its defaults are in this
-table. A run names one (`new --model NAME`), overrides any field on the command line
-(`--set model.FIELD=VALUE`), and the run's configuration holds the complete spec, from which every later
-command builds the same model again, through whichever provider serves it (`Alaya.Provider`).
+table. An agent's configuration names one (`--set model=NAME`), a later setting overrides any
+field (`--set model.params.reasoning_effort=high`), and the call holds the complete spec, from
+which every later command builds the same model again, through whichever provider serves it
+(`Alaya.Provider`).
 -/
 
 namespace Alaya.Models
@@ -107,8 +107,12 @@ def names : String := ", ".intercalate (all.map (·.name)).toList
 
 def named? (name : String) : Option Spec := all.find? (·.name == name)
 
-/-- The spec a recorded or given configuration describes, or what is wrong with it. -/
+/-- The spec a recorded or given configuration describes, or what is wrong with it: a name alone
+is the model's defaults. -/
 def read (json : Lean.Json) : Except String Spec := do
+  let json := match json with
+    | .str name => .mkObj [("name", name)]
+    | json => json
   let name ← match json.getObjVal? "name" with
     | .ok (.str name) => pure name
     | _ => throw s!"a model needs a \"name\": one of {names}"
@@ -121,12 +125,5 @@ def read (json : Lean.Json) : Except String Spec := do
 /-- `read`, as a command reads a configuration: what is wrong with it is the caller's to fix. -/
 def fromJson (json : Lean.Json) : Result Spec :=
   Result.fromExcept Error.input (read json)
-
-/-- The model `name` with the model's settings applied over its complete defaults. -/
-def resolve (name : String) (settings : Array Settings.Setting) : Result Spec := do
-  let defaults ← fromJson (.mkObj [("name", name)])
-  match Settings.apply .model defaults.toJson settings with
-  | .ok json => fromJson json
-  | .error message => throw <| .input message
 
 end Alaya.Models

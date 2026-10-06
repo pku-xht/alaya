@@ -1,9 +1,9 @@
 import Alaya.Driver
 
-/-! What a person adds to a log: the run itself, from a workspace and a task, and later a
-message, a change to the workspace, a reply to a question, a stop, a grader, or a comment. Each is an event the
-driver did not ask for, appended after an entry, so a person acts at any point of any run, and
-acting at a point that already goes on is a fork. -/
+/-! What a person adds to a log: the run itself, from a workspace, and later a call of a program,
+a message, a change to the workspace, a reply to a question, a stop, or a comment. Each is an
+event the driver did not ask for, appended after an entry, so a person acts at any point of any
+run, and acting at a point that already goes on is a fork. -/
 
 namespace Alaya.Notices
 
@@ -14,26 +14,13 @@ open Alaya.Workspaces (Change ChangeKind)
 /-- What the root of a run says of the workspace it starts from. -/
 def rootSummary : String := "the workspace the run starts from"
 
-/-- Creates a run: its root, the workspace `project` holds, then the opening of the agent's call
-with the run's configuration, then `task`, a notice the agent waits for. Gives the three
-entries. -/
-def create (store : Store) (workspaces : Workspaces) (run : Run Agent)
-    (project : System.FilePath) (task : String) : Result (Array (Hash × Entry)) := do
+/-- Creates a run: its root, the workspace `project` holds, where the run waits for a program to be
+called. Gives the root's entry. -/
+def create (store : Store) (workspaces : Workspaces) (project : System.FilePath) : Result (Hash × Entry) := do
   let workspace ← workspaces.snapshot project
-  let mut forest ← store.forest
-  let mut parent? : Option Hash := none
-  let mut made : Array (Hash × Entry) := #[]
-  let root : Event Agent := .arrived (.changed workspace rootSummary)
-  let opening : Event Agent ← match next run #[root] with
-    | .opens frame call => pure (.opened frame call)
-    | _ => throw <| .input "the run does not open its agent"
-  for event in #[root, opening, .arrived (.said task)] do
-    let entry : Entry := { parent?, event }
-    let (hash, grown) ← store.put forest entry
-    forest := grown
-    parent? := some hash
-    made := made.push (hash, entry)
-  pure made
+  let entry : Entry := { parent? := none, event := .arrived (.changed workspace rootSummary) }
+  let (hash, _) ← store.put (← store.forest) entry
+  pure (hash, entry)
 
 /-- A person's comment after `tip`: for whoever reads the log, and nothing else. Replay passes
 over it, so it is appended at any entry of any log, with nothing to check. Gives the new entry. -/

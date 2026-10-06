@@ -99,7 +99,7 @@ def suite : Suite := Testing.suite "responses" #[
       "a request with no items keys as before",
 
   test "a run that sends items back needs a Responses route, and apiyi serves gpt-6-luna through one" do
-    let spec ← assertOk <| Models.resolve "gpt-6-luna" #[]
+    let spec ← assertOk <| Models.fromJson "gpt-6-luna"
     assertEqual "luna sends items back" (toString spec.echoReasoning) "items"
     let some apiyi := Provider.named? "apiyi" | fail "no apiyi"
     let route ← assertOk <| Result.fromExcept Error.input (apiyi.route "gpt-6-luna")

@@ -22,19 +22,17 @@ structure Visit where
   hash : Hash
   entry : Entry
   position : Nat
-  /-- The configuration of the run, once the log has opened its agent. -/
-  config? : Option RunConfig
-  /-- The operation the event answers, as the program asked for it: for a sample, the whole
+  /-- The operation the event answers, as the computation asked for it: for a sample, the whole
   request. -/
-  asked? : Option (Call Agent)
+  asked? : Option (OpRequest Agent)
   /-- What the run does next after this entry, or none before the run is known. -/
   next? : Option (Next Agent)
   /-- The question the log waits on here, when it waits for a reply. -/
   question? : Option Question
   /-- The calls open after this entry, outermost first. -/
   stack : Array OpenCall
-  /-- How the agent ended, once it has. -/
-  agent? : Option AgentEnd
+  /-- The last call the log opens up to this entry, and how it ended, once it has. -/
+  last? : Option (RoutineCall × Option CallEnd)
   /-- The run's time up to this entry, its own included. -/
   spentMs : Nat
   /-- The tokens the run's responses cost up to this entry. -/
@@ -60,68 +58,52 @@ def addUsage (a b : Chat.TokenUsage) : Chat.TokenUsage :=
 def OpenCall.after (stack : Array OpenCall) (position : Nat) : Event Agent → Array OpenCall
   | .opened frame call => stack.push { frame, call, position }
   | .returned _ _ | .failed _ _ => stack.pop
-  | .stopped _ => stack.filter fun call => !call.frame.inAgent
+  | .stopped _ => stack.filter fun call => !call.frame.inCall
   | _ => stack
-
-/-- The run of a configuration, if it and its model can be read. -/
-private def runOf? (config : RunConfig) : Option (Run Agent) :=
-  match Models.read config.model with
-  | .ok model => (config.run model).toOption
-  | .error _ => none
 
 /-- Where the walk is in one log. -/
 private structure Place where
   position : Nat
-  config? : Option RunConfig
-  replayer? : Option (Replayer Agent)
+  replayer : Replayer Agent
   stack : Array OpenCall
-  agent? : Option AgentEnd
+  last? : Option (RoutineCall × Option CallEnd)
   spentMs : Nat
   usage : Chat.TokenUsage
   workspace? : Option Snapshot
 
 /-- Folds `f` over every entry of the forest, depth first, from each root, parents before
-children. A log whose run cannot be built is walked without `next?` and `asked?`. -/
-partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit → Result β) : Result β := do
+children, each log replayed by `root`, the run's routine. -/
+partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit → Result β)
+    (root : Routine Agent := session) : Result β := do
   let rec go (acc : β) (place : Place) (hash : Hash) : Result β := do
     let entry ← store.get forest hash
     let event := entry.event
-    let asked? := match place.replayer?.map (·.next), event with
-      | some (.ask call), .answered .. => some call
+    let asked? := match place.replayer.next, event with
+      | .ask call, .answered .. => some call
       | _, _ => none
-    -- The run is known from the opening of the agent's call, the second event.
-    let (config?, replayer?) : Option RunConfig × Option (Replayer Agent) :=
-      match place.position, event with
-      | 1, .opened #[0] call =>
-        match RunConfig.fromJson call.arguments with
-        | .ok config =>
-          match runOf? config with
-          | some run =>
-            let root := Replayer.start run |>.feed (.arrived (.changed ⟨""⟩ ""))
-            (some config, some (root.feed event))
-          | none => (some config, none)
-        | .error _ => (none, none)
-      | 0, _ => (none, none)
-      | _, _ => (place.config?, place.replayer?.map (·.feed event))
+    let replayer := place.replayer.feed event
     let before := place.workspace?
     let workspace? := (versionAfter? event).or before
     let usage := match event with
       | .answered _ _ (.ok (.response response)) => addUsage place.usage (response.usage?.getD {})
       | _ => place.usage
     let stack := OpenCall.after place.stack place.position event
-    let agent? := place.agent?.or (AgentEnd.of? event)
+    let last? := match event, place.last? with
+      | .opened #[_] call, _ => some (call, none)
+      | event, some (call, none) => some (call, CallEnd.of? event)
+      | _, last => last
     let spentMs := place.spentMs + entry.elapsedMs
-    let next? := replayer?.map (·.next)
+    let next? := some replayer.next
     let question? := (next?.bind questionOf?).map (·.2)
     let visit : Visit := {
-      hash, entry, position := place.position, config?, asked?, next?, question?, stack, agent?, spentMs
+      hash, entry, position := place.position, asked?, next?, question?, stack, last?, spentMs
       usage, workspace?
       before? := if workspace? != before then before else none }
     let acc ← f acc visit
-    let place := { position := place.position + 1, config?, replayer?, stack, agent?, spentMs, usage, workspace? }
+    let place := { position := place.position + 1, replayer, stack, last?, spentMs, usage, workspace? }
     (forest.childrenOf hash).foldlM (init := acc) fun acc child => go acc place child
-  forest.roots.foldlM (init := init) fun acc root =>
-    go acc { position := 0, config? := none, replayer? := none, stack := #[], agent? := none, spentMs := 0
-             usage := {}, workspace? := none } root
+  forest.roots.foldlM (init := init) fun acc first =>
+    go acc { position := 0, replayer := Replayer.start root, stack := #[], last? := none, spentMs := 0
+             usage := {}, workspace? := none } first
 
 end Alaya

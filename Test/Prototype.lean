@@ -1,11 +1,16 @@
 import Alaya.Replay
 import Test.Framework
+import Test.Frames
 
 /-! The sketch the design began as, run on Alaya's interpreter: its signature, its programs,
 its scripted world and its driver, transliterated, must print what the sketch printed
 (`Test/Prototype/expected.txt`). Every way a log can
 be read — a fork that is stopped, a question that waits, a failure that is caught, a log that is
-no trace of the program — is checked against the sketch, line for line. -/
+no trace of the program — is checked against the sketch, line for line.
+
+One line departs from the sketch on purpose. The sketch could stop its agent alone; in Alaya a
+stop ends whichever call of the run is running, so a stop while the sketch's run grades ends the
+grading, and the run's routine fails with it. -/
 
 namespace PrototypeTests
 
@@ -115,13 +120,13 @@ def read : (op : Op) → Stored → Option op.Answer
 abbrev Agent : Signature :=
   { Op, Answer := Op.Answer, Key := Op, key := id, sameKey := (· == ·), Stored, store, read }
 
-def perform (op : Op) : Program Agent op.Answer := Alaya.perform (σ := Agent) op
+def perform (op : Op) : Computation Agent op.Answer := Alaya.perform (σ := Agent) op
 
 /-! ## The sketch's programs -/
 
 structure Tool where
   name : String
-  run : Json → Program Agent Json
+  run : Json → Computation Agent Json
 
 def bash : Tool where
   name := "bash"
@@ -142,7 +147,7 @@ def noticeText : Notice → String
   | .said message => message
   | .changed _ summary => s!"The workspace was changed: {summary}"
   | .replied _ reply => render reply
-  | .assigned _ => "A grader was assigned"
+  | .called call _ => s!"{call.name} was called"
 
 def askUser : Tool where
   name := "ask_user"
@@ -157,7 +162,7 @@ def askUser : Tool where
     return .str ("\n".intercalate (replies.map noticeText))
 
 def round (agent : AgentConfig) (model : ModelConfig) (listen : Bool) (dialogue : Dialogue) :
-    Program Agent (Dialogue ⊕ String) := do
+    Computation Agent (Dialogue ⊕ String) := do
   let request := { model, messages := dialogue, tools := agent.tools }
   let response ← retry agent.retries (perform (.sample request))
   if response.toolCalls.isEmpty then return .inr response.text
@@ -175,7 +180,7 @@ def round (agent : AgentConfig) (model : ModelConfig) (listen : Bool) (dialogue 
     ++ heard.map (.user <| noticeText ·))
 
 def converse (agent : AgentConfig) (model : ModelConfig) (dialogue : Dialogue)
-    (listen := false) : Program Agent String :=
+    (listen := false) : Computation Agent String :=
   iter (round agent model listen) dialogue
 
 def delegate (model : ModelConfig) : Tool where
@@ -198,8 +203,9 @@ def agent (config : Config) : Tool where
     .str <$> converse config.agent config.model ([.system config.system] ++ task.map (.user <| noticeText ·))
       (listen := true)
 
-def table (tools : List Tool) : Routines Agent :=
-  fun name => (tools.find? (·.name == name)).map (·.run)
+/-- The sketch's tools as routines defined together, each calling the others by name. -/
+def scopeOf (tools : List Tool) : Scope Agent :=
+  Scope.fix fun scope => tools.toArray.map fun tool => { name := tool.name, body := tool.run, scope }
 
 def verdict (stdout : String) : String :=
   let lines := stdout.splitOn "\n"
@@ -213,13 +219,12 @@ def hiddenTests : Tool where
     let ran ← perform (.external "pytest /grader" "grader@sha256:9f2c" (some ⟨"hidden"⟩) 900)
     return .str (verdict ran.stdout)
 
-def grading (_ : Except String Json) : Program Agent Json := call "hidden_tests" (.str "")
+def grading (_ : Except String Json) : Computation Agent Json := call "hidden_tests" (.str "")
 
-def graded (config : Config) : Run Agent :=
-  { routines := table
-      [agent config, bash, timeBudget, askUser, delegate config.model, commit, hiddenTests]
-    call := ⟨"agent", config.json⟩
-    after := grading }
+def graded (config : Config) (after : Except String Json → Computation Agent Json := grading) : Routine Agent :=
+  { name := "run"
+    body := fun _ => .call ⟨"agent", config.json⟩ after
+    scope := scopeOf [agent config, bash, timeBudget, askUser, delegate config.model, commit, hiddenTests] }
 
 /-! ## The sketch's world and driver -/
 
@@ -255,16 +260,13 @@ def World.answer (world : World) (log : Log') : (op : Op) → Except String op.A
   | .time => .ok world.clock
   | .external command image _ _ => .ok (world.external (workspace log) image command)
 
-partial def drive (world : World) (run : Run Agent) (log : Log') : Log' × Next Agent :=
+partial def drive (world : World) (run : Routine Agent) (log : Log') : Log' × Next Agent :=
   let log := log ++ ((world.arrivals log).map Event.arrived).toArray
   match next run log with
   | .ask call =>
     let answer := (world.answer log call.op).map (store call.op)
     drive world run (log.push (.answered call.frame call.op answer))
-  | .hears frame notices => drive world run (log.push (.heard frame notices))
-  | .opens frame tool => drive world run (log.push (.opened frame tool))
-  | .returns frame value => drive world run (log.push (.returned frame value))
-  | .fails frame error => drive world run (log.push (.failed frame error))
+  | .mark event => drive world run (log.push event)
   | result => (log, result)
 
 def versions (log : Log') : List Nat :=
@@ -351,56 +353,80 @@ def Op.describe : Op → String
   | .external command image input _ =>
     s!"external {command}, in {image}, with {(input.map (·.hex)).getD "nothing"}"
 
-def describe : Event Agent → String
+/-- The sketch's frames: each call's ordinal among the calls of its caller, read off the openings
+of `log`, as the sketch numbered its frames. A frame the log has not opened yet, as one that
+opens next, is the next ordinal of its caller. -/
+partial def ordinals (log : Log') (frame : Frame) : List Nat :=
+  let (known, counts) := log.foldl (init := (({} : Std.HashMap Frame (List Nat)), ({} : Std.HashMap Frame Nat)))
+    fun (known, counts) event => match event with
+      | .opened opened _ =>
+        let parent := opened.pop
+        let n := counts.getD parent 0
+        (known.insert opened (ordinalOf known counts parent ++ [n]), counts.insert parent (n + 1))
+      | _ => (known, counts)
+  ordinalOf known counts frame
+where
+  ordinalOf (known : Std.HashMap Frame (List Nat)) (counts : Std.HashMap Frame Nat) (frame : Frame) : List Nat :=
+    match known.get? frame with
+    | some ordinal => ordinal
+    | none => if frame.isEmpty then [] else ordinalOf known counts frame.pop ++ [counts.getD frame.pop 0]
+
+def describe (o : Frame → List Nat) : Event Agent → String
   | .arrived (.said message) => s!"-  arrived: said {message}"
   | .arrived (.changed workspace _) => s!"-  arrived: changed → {workspace.hex}"
-  | .arrived (.replied to answer) => s!"-  arrived: replied to {to.toList}: {render answer}"
-  | .arrived (.assigned _) => "-  arrived: assigned a grader"
+  | .arrived (.replied to answer) => s!"-  arrived: replied to {o to}: {render answer}"
+  | .arrived (.called call _) => s!"-  arrived: called {call.name}"
   | .commented text => s!"-  commented: {text}"
   | .answered frame (.external command image ..) (.ok (.external ran)) =>
-    s!"{frame.toList}  answered: external {command}, in {image} → exit {ran.exit}, {ran.checkout.hex}"
+    s!"{o frame}  answered: external {command}, in {image} → exit {ran.exit}, {ran.checkout.hex}"
   | .answered frame (.exec command) (.ok (.output output)) =>
-    s!"{frame.toList}  answered: exec {command} → {output.workspace.hex}"
-  | .answered frame op (.ok _) => s!"{frame.toList}  answered: {op.describe}"
+    s!"{o frame}  answered: exec {command} → {output.workspace.hex}"
+  | .answered frame op (.ok _) => s!"{o frame}  answered: {op.describe}"
   | .answered frame op (.error error) =>
-    s!"{frame.toList}  answered: {op.describe}: failed: {error}"
-  | .opened frame tool => s!"{frame.toList}  opened: {tool.name} \"{txt tool.arguments}\""
-  | .returned frame value => s!"{frame.toList}  returned: {txt value}"
+    s!"{o frame}  answered: {op.describe}: failed: {error}"
+  | .opened frame tool => s!"{o frame}  opened: {tool.name} \"{txt tool.arguments}\""
+  | .returned frame value => s!"{o frame}  returned: {txt value}"
   | .failed frame error =>
-    s!"{frame.toList}  failed: {error.replace "no routine named" "no tool named"}"
+    s!"{o frame}  failed: {error.replace "no routine named" "no tool named"}"
   | .stopped reason => s!"-  stopped: {reason}"
-  | .heard frame notices => s!"{frame.toList}  heard {notices.toList}"
-  | .asked frame question => s!"{frame.toList}  asked: {question.text}"
+  | .heard frame notices => s!"{o frame}  heard {notices.toList}"
+  | .asked frame question => s!"{o frame}  asked: {question.text}"
 
-def describeNext : Next Agent → String
-  | .done value => s!"done: {txt value}"
-  | .ask call => s!"ask {call.frame.toList} {call.op.describe}"
-  | .opens frame tool => s!"log the opening of {frame.toList}: {tool.name}"
-  | .returns frame value => s!"log the return of {frame.toList}: {txt value}"
-  | .fails frame error => s!"log the failure of {frame.toList}: {error}"
-  | .raised error => s!"failed: {error}"
-  | .hears frame notices => s!"mark the read of {frame.toList}, of {notices.toList}"
-  | .questions frame question => s!"log the question of {frame.toList}: {question.text}"
+def describeNext (o : Frame → List Nat) : Next Agent → String
+  | .ended (.ok value) => s!"done: {txt value}"
+  | .ask call => s!"ask {o call.frame} {call.op.describe}"
+  | .mark (.opened frame tool) => s!"log the opening of {o frame}: {tool.name}"
+  | .mark (.returned frame value) => s!"log the return of {o frame}: {txt value}"
+  | .mark (.failed frame error) => s!"log the failure of {o frame}: {error}"
+  | .ended (.error error) => s!"failed: {error}"
+  | .mark (.heard frame notices) => s!"mark the read of {o frame}, of {notices.toList}"
+  | .mark (.asked frame question) => s!"log the question of {o frame}: {question.text}"
+  | .mark event => s!"mark {describe o event}"
   | .waits frame _ =>
     if frame.isEmpty then "wait: there is no workspace to start on"
-    else s!"wait: {frame.toList} reads the inbox once something arrives"
+    else s!"wait: {o frame} reads the inbox once something arrives"
   | .mismatch position => s!"mismatch at {position}"
-  | .unguarded frame => s!"unguarded loop in {frame.toList}"
+  | .unguarded frame => s!"unguarded loop in {o frame}"
 
-def withAgent (run : Run Agent) (program : Program Agent Json) : Run Agent :=
-  { run with routines := fun name =>
-      if name == "agent" then some fun _ => program else run.routines name }
+def withAgent (run : Routine Agent) (computation : Computation Agent Json) : Routine Agent :=
+  { run with scope := ⟨fun name =>
+      if name == "agent" then
+        let scope := ((run.scope.find name).map (·.scope)).getD .empty
+        some { name, body := fun _ => computation, scope }
+      else run.scope.find name⟩ }
 
-def faithful (run : Run Agent) (log : Log') : Bool :=
+/-- The run without the routine `name`, wherever its routines would call it. -/
+def without (run : Routine Agent) (name : String) : Routine Agent :=
+  { run with scope := run.scope.without name }
+
+def faithful (run : Routine Agent) (log : Log') : Bool :=
   (List.range (log.size + 1)).all fun i =>
     match log[i]?, next run (log.extract 0 i) with
     | some (.arrived _), _ => true
     | some (.answered frame op _), .ask call => frame == call.frame && op == call.op
-    | some (.heard frame notices), .hears reader taken => frame == reader && notices == taken
-    | some (.opened frame tool), .opens entered called => frame == entered && tool == called
-    | some (.returned frame value), .returns ended given => frame == ended && value == given
-    | some (.failed frame error), .fails ended given => frame == ended && error == given
-    | none, .done _ => true
+    | some (.heard frame notices), .mark (.heard reader taken) => frame == reader && notices == taken
+    | some event, .mark mark => event.sameMark mark
+    | none, .ended (.ok _) => true
     | _, _ => false
 
 def drop (log : Log') (start : Nat) : Log' := log.extract start log.size
@@ -408,15 +434,16 @@ def drop (log : Log') (start : Nat) : Log' := log.extract start log.size
 /-- Everything the sketch's test prints, in its order. -/
 def transcript : Array String := Id.run do
   let mut out : Array String := #[]
-  let run := graded
+  let config : Config :=
     { system := "You are a coding agent."
       agent := { tools := ["bash", "time_budget", "commit", "ask_user"], retries := 2 }
       model := { name := "a-model", maxTokens := 4096 } }
-  let replay := fun log => describeNext (next run log)
-  let same := fun (one other : Log') => one.map describe == other.map describe
+  let run := graded config
+  let replay := fun log => describeNext (ordinals log) (next run log)
+  let same := fun (one other : Log') => one.map (describe (ordinals one)) == other.map (describe (ordinals other))
   let (log, result) := drive world run #[]
-  for (event, i) in log.zipIdx do out := out.push s!"{i}  {describe event}"
-  out := out.push (describeNext result)
+  for (event, i) in log.zipIdx do out := out.push s!"{i}  {describe (ordinals log) event}"
+  out := out.push (describeNext (ordinals log) result)
   out := out.push s!"workspace {(workspace log).hex}"
   out := out.push s!"replay agrees with the run wherever the driver asked: {faithful run log}"
   let stoppedAt := fun position => (log.extract 0 position).push (.stopped "to grade this state")
@@ -425,10 +452,11 @@ def transcript : Array String := Id.run do
     let (fork, grade) := drive world run (stoppedAt position)
     let v := workspace (log.extract 0 position)
     let more := fork.size - position
-    out := out.push s!"  at {position}, workspace {v.hex}: {describeNext grade}, in {more} more events"
+    out := out.push s!"  at {position}, workspace {v.hex}: {describeNext (ordinals fork) grade}, in {more} more events"
   out := out.push "the fork stopped at 24:"
-  for (event, i) in (drive world run (stoppedAt 24)).1.zipIdx do
-    if i ≥ 23 then out := out.push s!"  {i}  {describe event}"
+  let stopped := (drive world run (stoppedAt 24)).1
+  for (event, i) in stopped.zipIdx do
+    if i ≥ 23 then out := out.push s!"  {i}  {describe (ordinals stopped) event}"
   out := out.push s!"the run itself is as it was: {same (drive world run log).1 log}"
   out := out.push s!"the agent cannot go on after a stop: {replay (stoppedAt 24 ++ drop log 24)}"
   out := out.push s!"a stop once the agent is over: {replay ((log.extract 0 44).push (.stopped "x"))}"
@@ -436,19 +464,19 @@ def transcript : Array String := Id.run do
   let asking := log.extract 0 6
   out := out.push s!"a reply of another form than asked: {(reply asking .yes).toOption.isSome}"
   out := out.push s!"that the person cannot answer: {(reply asking .unavailable).toOption.isSome}"
-  let wrong := asking.push (.arrived (.replied #[0, 0] .yes))
+  let wrong := asking.push (.arrived (.replied ⟪"agent", "ask_user"⟫ .yes))
   out := out.push s!"a reply of another form, put in the log: {replay wrong}"
   let (waiting, pending) := drive { world with arrivals := upTo 2 } run #[]
-  out := out.push s!"while the person has not replied: {describeNext pending}"
-  out := out.push s!"  and the log ends with: {(waiting.back?.map describe).getD ""}"
+  out := out.push s!"while the person has not replied: {describeNext (ordinals waiting) pending}"
+  out := out.push s!"  and the log ends with: {(waiting.back?.map (describe (ordinals waiting))).getD ""}"
   out := out.push s!"resumed to the same log: {same (drive world run waiting).1 log}"
   let (interrupted, pending) := drive { world with arrivals := fun log =>
     if log.size == 6 then [.changed (version 1) "a person edited README"] else upTo 2 log } run #[]
-  out := out.push s!"with another notice while a question waits: {describeNext pending}"
-  out := out.push s!"  and the log ends with: {(interrupted.back?.map describe).getD ""}"
+  out := out.push s!"with another notice while a question waits: {describeNext (ordinals interrupted) pending}"
+  out := out.push s!"  and the log ends with: {(interrupted.back?.map (describe (ordinals interrupted))).getD ""}"
   let (later, _) := drive world run interrupted
   for (event, i) in later.zipIdx do
-    if 6 ≤ i ∧ i ≤ 10 then out := out.push s!"  {i}  {describe event}"
+    if 6 ≤ i ∧ i ≤ 10 then out := out.push s!"  {i}  {describe (ordinals later) event}"
   let flaky := { world with
     arrivals := fun log => if log.size == 22 then [] else world.arrivals log
     execute := fun v command =>
@@ -458,38 +486,37 @@ def transcript : Array String := Id.run do
   let (failing, ended) := drive flaky run #[]
   out := out.push "with a commit that fails the first time:"
   for (event, i) in failing.zipIdx do
-    if 30 ≤ i ∧ i ≤ 36 then out := out.push s!"  {i}  {describe event}"
-  out := out.push s!"  and the run ends, after {failing.size} events: {describeNext ended}"
+    if 30 ≤ i ∧ i ≤ 36 then out := out.push s!"  {i}  {describe (ordinals failing) event}"
+  out := out.push s!"  and the run ends, after {failing.size} events: {describeNext (ordinals failing) ended}"
   let (once, ended) := drive { world with model := failsOnce } run #[]
   out := out.push "with a model that fails to answer once:"
   for (event, i) in once.zipIdx do
-    if 17 ≤ i ∧ i ≤ 19 then out := out.push s!"  {i}  {describe event}"
-  out := out.push s!"  and the run ends, after {once.size} events: {describeNext ended}"
+    if 17 ≤ i ∧ i ≤ 19 then out := out.push s!"  {i}  {describe (ordinals once) event}"
+  out := out.push s!"  and the run ends, after {once.size} events: {describeNext (ordinals once) ended}"
   let (thrice, ended) := drive { world with model := keepsFailing } run #[]
   out := out.push "with a model that keeps failing a sub-agent:"
   for (event, i) in thrice.zipIdx do
-    if 17 ≤ i ∧ i ≤ 25 then out := out.push s!"  {i}  {describe event}"
-  out := out.push s!"  and the run ends, after {thrice.size} events: {describeNext ended}"
-  let (missing, _) := drive world { run with routines := fun name =>
-    if name == "bash" then none else run.routines name } #[]
+    if 17 ≤ i ∧ i ≤ 25 then out := out.push s!"  {i}  {describe (ordinals thrice) event}"
+  out := out.push s!"  and the run ends, after {thrice.size} events: {describeNext (ordinals thrice) ended}"
+  let (missing, _) := drive world (without run "bash") #[]
   out := out.push "with a tool that the run does not have:"
   for (event, i) in missing.zipIdx do
-    if 10 ≤ i ∧ i ≤ 14 then out := out.push s!"  {i}  {describe event}"
+    if 10 ≤ i ∧ i ≤ 14 then out := out.push s!"  {i}  {describe (ordinals missing) event}"
   let (refused, _) := drive { world with model := overreaches } run #[]
   out := out.push "with a model that asks for a tool it was not offered:"
   for (event, i) in refused.zipIdx do
-    if 4 ≤ i ∧ i ≤ 6 then out := out.push s!"  {i}  {describe event}"
+    if 4 ≤ i ∧ i ≤ 6 then out := out.push s!"  {i}  {describe (ordinals refused) event}"
   let (broken, ended) := drive world (withAgent run (throw "no model")) #[]
   out := out.push "with an agent that fails:"
   for (event, i) in broken.zipIdx do
-    if i ≥ 3 then out := out.push s!"  {i}  {describe event}"
-  out := out.push s!"  {describeNext ended}"
-  let (_, ended) := drive world { run with after := fun _ => throw "no grader" } #[]
-  out := out.push s!"with graders that fail, the run ends: {describeNext ended}"
+    if i ≥ 3 then out := out.push s!"  {i}  {describe (ordinals broken) event}"
+  out := out.push s!"  {describeNext (ordinals broken) ended}"
+  let (graders, ended) := drive world (graded config (after := fun _ => throw "no grader")) #[]
+  out := out.push s!"with graders that fail, the run ends: {describeNext (ordinals graders) ended}"
   let (empty, pending) := drive { world with arrivals := fun _ => [] } run #[]
-  out := out.push s!"with no workspace yet: {describeNext pending}, after {empty.size} events"
+  out := out.push s!"with no workspace yet: {describeNext (ordinals empty) pending}, after {empty.size} events"
   let (idle, pending) := drive { world with arrivals := upTo 0 } run #[]
-  out := out.push s!"with no task yet: {describeNext pending}, after {idle.size} events"
+  out := out.push s!"with no task yet: {describeNext (ordinals idle) pending}, after {idle.size} events"
   out := out.push s!"resumed to the same log: {same (drive world run idle).1 log}"
   let crashed := log.extract 0 24
   out := out.push s!"after a crash at 24: {replay crashed}"
@@ -505,8 +532,8 @@ def transcript : Array String := Id.run do
   let unseen := (log.extract 0 35).push (.arrived (.said "stop")) ++ drop log 35
   out := out.push s!"a log with no root: {replay (drop log 1)}"
   out := out.push s!"a notice put in before a read: {replay unseen}"
-  let spin : Program Agent Json := iter (fun (n : Nat) => pure (.inl (n + 1))) 0
-  out := out.push s!"a loop that reads nothing: {describeNext (next (withAgent run spin) log)}"
+  let spin : Computation Agent Json := iter (fun (n : Nat) => pure (.inl (n + 1))) 0
+  out := out.push s!"a loop that reads nothing: {describeNext (ordinals log) (next (withAgent run spin) log)}"
   return out
 
 def suite : Testing.Suite := Testing.suite "prototype" #[

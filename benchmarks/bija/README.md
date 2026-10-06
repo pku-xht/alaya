@@ -37,61 +37,60 @@ cd skeleton  && uv run pytest        # 24 tests, all failing, until the work is 
 
 ## The grader
 
-`grade.py` grades an attempt as an alaya grader: `alaya grade --grader` runs it on a point of a
-run, once the agent is over or stopped there, in the grader image, in a checkout of the attempt,
-with the reference's `tests/` as its trusted input at `/grader`. It replaces the attempt's
-`tests/` with the reference's 232 programs, runs the suite, and prints TAP: one check
-per program run through the command line (`program AREA/NAME`), then one per program compiled
-with `bija build` and run under a bare interpreter (`standalone AREA/NAME`), 464 in all. The pass
-counts by section of the specification go to stderr, and the suite's output and JUnit report
-stay in the grader's checkout, under `.grade/`.
+`grade.py` grades an attempt as alaya's grader: a call of `grader` runs it on a point of a run,
+once the agent is over or stopped there, in the grader image, on the attempt, with the
+reference's `tests/` at `/grader` in that image. It replaces the attempt's `tests/` with the
+reference's 232 programs, runs the suite, and prints TAP: one check per program run through the
+command line (`program AREA/NAME`), then one per program compiled with `bija build` and run
+under a bare interpreter (`standalone AREA/NAME`), 464 in all. The pass counts by section of the
+specification go to stderr, and the suite's output and JUnit report stay in the workspace, under
+`.grade/`.
 
 ## Driving it with alaya
 
 The skeleton is a project directory, so a run starts from it directly; `TASK.txt` is the task
 statement, kept here so every run is given the same one. The agent and the grader run in the
 two amd64 images `Dockerfile` builds from a pinned base: Python, `uv`, and the suite's dependencies,
-which containers cannot download, since they run without network; the grader's adds `grade.py`.
-Neither holds the reference programs: only the grader is given them, as its input. They are
-published on the GitHub registry, tagged with the commit they were built from, and that commit's
-`Dockerfile` rebuilds them:
+which containers cannot download, since they run without network. The grader's adds `grade.py`
+and the reference programs at `/grader`. The agent's image is published on the GitHub registry,
+tagged with the commit it was built from; the grader's holds the hidden tests, so it is built
+locally and never published:
 
 ```sh
 docker build --platform linux/amd64 --target agent \
   -t ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd benchmarks/bija
-docker build --platform linux/amd64 --target grader \
-  -t ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd benchmarks/bija
+docker build --platform linux/amd64 --target grader -t alaya-bija-grader benchmarks/bija
 ```
 
 From the repository root:
 
 ```sh
 docker pull ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd
-docker pull ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
 
 export ALAYA_DATA=$PWD/bija-runs   # created by new; every command below uses it
 last() { tail -n 1 | cut -d' ' -f1; }
-tip=$(alaya new --task-file benchmarks/bija/TASK.txt benchmarks/bija/skeleton --agent mini-swe \
-  --model gpt-oss-120b --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
-end=$(alaya run "$tip" --provider dgx | last)
-# done: Submitted: …
+root=$(alaya new benchmarks/bija/skeleton | last)
+called=$(alaya call "$root" mini-swe --set model=gpt-oss-120b --set-file task=benchmarks/bija/TASK.txt \
+  --image ghcr.io/msv-lab/alaya-bija-agent:c6cd8bd | last)
+end=$(alaya resume "$called" --provider dgx | last)
+# mini-swe: done: Submitted: …
 
-grader=(--grader 'python3 /opt/alaya-bija/grade.py --tests /grader'
-        --grader-image ghcr.io/msv-lab/alaya-bija-grader:c6cd8bd
-        --grader-input benchmarks/bija/reference/tests --grader-timeout 1800)
-graded=$(alaya grade "$end" "${grader[@]}" | last)   # exits 1 for a fail
-# done: fail N/464
+grade() { alaya resume "$(alaya call "$1" grader --image alaya-bija-grader \
+  --set command='python3 /opt/alaya-bija/grade.py --tests /grader' \
+  --set timeout_seconds=1800 | last)"; }
+graded=$(grade "$end" | last)          # exits 1 for a fail
+# grader: done: fail N/464
 
-alaya log --json "$graded" | grep '"external"'  # the grader's answer: its entry, its stdout
-alaya cat ANSWER .grade/pytest.txt              # ANSWER: that entry; the suite's own output
-alaya grade "$end:200" "${grader[@]}"           # how far it was at position 200
+alaya log "$graded"                    # the grader's command's answer, then its verdict
+alaya cat ANSWER .grade/pytest.txt     # ANSWER: the entry of that answer; the suite's own output
+grade "$(alaya stop "$end:200" --reason 'to grade this point' | last)"   # how far it was at 200
 ```
 
-Alaya snapshots the whole grader input, so keep `reference/tests/` clean: no `__pycache__/` left
-by a local `uv run pytest`.
+The image is built from the context `benchmarks/bija`, which leaves out what a local
+`uv run pytest` leaves in `reference/tests/` (`.dockerignore`).
 
 The image carries the suite's dependencies, so the agent can run the sample suite itself between
 turns with `uv run pytest`.
-The agent never sees the reference programs: the grader runs only once the agent is over, and copies
-them over a checkout that the run's workspace does not follow; the verdict is what the run
-returns, in the log after the agent's end.
+The agent never sees the reference programs: they are only in the grader's image, which runs
+only once the agent is over; the verdict is what the grader's call returns, in the log after
+the agent's end.

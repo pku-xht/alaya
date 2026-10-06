@@ -38,7 +38,7 @@ font-variant-numeric:tabular-nums}
 margin-right:6px}
 .i-root{color:#4a4f57}.i-sample{color:var(--blue)}.i-exec{color:#2b6f6f}.i-open{color:var(--mute)}
 .i-return{color:var(--green)}.i-fail,.i-stop{color:var(--red)}.i-heard,.i-time,.i-comment{color:var(--faint)}
-.i-said,.i-changed,.i-replied,.i-assigned{color:var(--violet)}.i-external{color:#2b6f6f}
+.i-said,.i-changed,.i-replied,.i-called{color:var(--violet)}
 .i-question{color:var(--amber)}
 .fork{flex:none;display:inline-flex;align-items:center;margin-left:8px;border:1px solid var(--line);
 border-radius:9px;font-size:11px;color:var(--mute);background:#fff}

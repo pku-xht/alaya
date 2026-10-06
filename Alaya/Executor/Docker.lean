@@ -2,11 +2,10 @@ import Alaya.Executor
 import Alaya.Cli
 
 /-! The container executor: every command of a run in one container, with the working directory
-bind-mounted at the run's workdir, `/workspace` unless the run chose another, so the
-store still snapshots a host directory. The command runs
-through a `/bin/sh` trampoline that merges stderr into stdout, with the environment overrides
-applied to the command rather than to the docker client. `runOnce` runs a single command in a
-fresh container, which is how a grader runs. -/
+bind-mounted at the call's workdir, `/workspace` unless the call chose another, so the
+store still snapshots a host directory. The command runs through a `/bin/sh` trampoline that
+merges stderr into stdout unless the command keeps it apart, with the environment overrides
+applied to the command rather than to the docker client. -/
 
 namespace Alaya.Executor.Docker
 
@@ -134,17 +133,6 @@ private def runArgs (settings : Settings) : Array String :=
     -- The uid usually has no passwd entry, and tools that want $HOME would write to /.
     ++ #["--env", "HOME=/tmp"]
 
-/-- `uname` inside the image, for a prompt that describes the machine. Read with a throwaway
-container, since it is needed when a run is created, before any command of it has run. -/
-def uname (settings : Settings) : Result Uname := do
-  let script := "uname -s; uname -m"
-  let out ← docker (#["run", "--rm", "--entrypoint", "/bin/sh"] ++ runArgs settings ++
-    #[settings.image, "-c", script]) s!"reading uname from {settings.image}"
-  match out.splitOn "\n" with
-  | [system, machine] =>
-    pure { system := system.trimAscii.toString, machine := machine.trimAscii.toString }
-  | _ => throw <| .environment s!"unexpected uname output from {settings.image}: {out}"
-
 /-- A running container, plus whether its image has `timeout(1)`, which kills the command's
 whole process group inside. Minimal images may not, and then the host-side deadline below is the
 only backstop. -/
@@ -175,6 +163,15 @@ private def start (settings : Settings) (workDir : System.FilePath) : IO Contain
 private def remove (id : String) : IO Unit := do
   let _ ← client #["rm", "--force", id]
 
+/-- The image's own working directory, its Dockerfile's `WORKDIR`. One that sets none has no
+directory to copy a project from. -/
+def imageWorkdir (settings : Settings) : Result String := do
+  let dir ← docker #["image", "inspect", "--format", "{{.Config.WorkingDir}}", settings.image]
+    s!"inspecting {settings.image}"
+  if dir.isEmpty || dir == "/" then
+    throw <| .input s!"{settings.image} sets no workdir of its own: give the directory to copy with --workdir PATH"
+  pure dir
+
 /-- Copies the contents of `path` in the image into `destination`, which must already exist.
 The container is created but never started, so nothing in the image runs — this seeds a
 run from an image that already carries the project, the way task images usually do. -/
@@ -196,9 +193,10 @@ def copyOut (settings : Settings) (path : String) (destination : System.FilePath
 /-- The trampoline, with the in-container timeout when the image has one. The inner
 `/bin/sh -c "$@"` still receives exactly the caller's argv, so its error messages are unchanged. -/
 private def script (config : Config) (hasTimeout : Bool) : String :=
+  let merge := if config.merge then " 2>&1" else ""
   if hasTimeout && config.timeoutSeconds > 0 then
-    s!"exec timeout -k 2 {config.timeoutSeconds} /bin/sh -c \"$@\" 2>&1"
-  else "exec /bin/sh -c \"$@\" 2>&1"
+    s!"exec timeout -k 2 {config.timeoutSeconds} /bin/sh -c \"$@\"{merge}"
+  else s!"exec /bin/sh -c \"$@\"{merge}"
 
 private partial def poll (child : IO.Process.Child cfg) (readAll : IO String)
     (deadlineMs? : Option Nat) : IO (Option UInt32 × String) := do
@@ -214,8 +212,8 @@ private partial def poll (child : IO.Process.Child cfg) (readAll : IO String)
       poll child readAll deadlineMs?
 
 /-- Docker's own failures (125, and 126/127 when it could not exec at all) come back on the
-client's stderr, while the command's own output arrives on stdout with its stderr already
-merged. A command may legitimately exit 126/127, so both signals are required. -/
+client's stderr, while the command's own output arrives on stdout, with its stderr merged unless
+it is kept apart. A command may legitimately exit 126/127, so both signals are required. -/
 private def clientFailure? (code : UInt32) (stderr : String) : Option String :=
   if (code == 125 || code == 126 || code == 127) && !stderr.isEmpty then some stderr else none
 
@@ -278,7 +276,7 @@ private def execIn (ref : IO.Ref (Option Container)) (settings : Settings) (conf
       if (code == 124 || code == 137 || code == 143) && config.timeoutSeconds > 0 &&
           elapsedMs >= config.timeoutSeconds * 1000 then
         pure (timedOut output display config.timeoutSeconds)
-      else pure { output, exitCode? := some code }
+      else pure { output, exitCode? := some code, stderr? := if config.merge then none else some stderr }
 
 /-- An executor that runs every command of a run in one container, with the working directory
 bind-mounted, each as its own configuration says. `settings.image` should already be pinned,
@@ -287,65 +285,11 @@ def executor (settings : Settings) : Result Executor := do
   let ref ← Result.fromIO Error.storage (IO.mkRef (none : Option Container))
   pure {
     exec := execIn ref settings
-    uname := (uname settings).toUserIO
     close := do
       match ← ref.get with
       | some container => remove container.id; ref.set none
       | none => pure ()
   }
-
-/-! ## One command in a fresh container -/
-
-/-- Waits for `child`; at `deadline` runs `stop` and returns `none`. -/
-private partial def waitUntil (child : IO.Process.Child cfg) (deadline : Option Nat)
-    (stop : IO Unit) : IO (Option UInt32) := do
-  match ← child.tryWait with
-  | some code => pure (some code)
-  | none =>
-    if let some limit := deadline then
-      if (← IO.monoMsNow) >= limit then
-        stop
-        let _ ← child.wait
-        return none
-    IO.sleep 20
-    waitUntil child deadline stop
-
-/-- What a `runOnce` command printed, how it ended, and, when it did not end on its own, why. -/
-structure Captured where
-  stdout : String := ""
-  stderr : String := ""
-  exitCode? : Option UInt32 := none
-  /-- Set when the command did not finish: it timed out, or could not be started. -/
-  stopped? : Option String := none
-  deriving Inhabited
-
-/-- Runs `command` once with `/bin/sh -c` in a fresh container from `settings.image`, with
-`mounts`, in `workdir`, and removes the container afterwards. Stdout and stderr are kept apart.
-At `timeoutSeconds` (0 for none) the container is removed and the result says it timed out. -/
-def runOnce (settings : Settings) (mounts : Array Mount) (workdir command : String)
-    (timeoutSeconds : Nat) : IO Captured := do
-  let name := s!"alaya-once-{← IO.monoNanosNow}"
-  try
-    let volumes ← volumes mounts
-    let child ← IO.Process.spawn {
-      cmd := "docker"
-      args := #["run", "--rm", "--init", "--name", name, "--entrypoint", "/bin/sh"]
-        ++ runArgs settings ++ volumes ++ #["--workdir", workdir] ++ settings.extraRunArgs
-        ++ #[settings.image, "-c", command]
-      stdin := .null, stdout := .piped, stderr := .piped }
-    let outReader ← IO.asTask (prio := .dedicated) child.stdout.readBinToEnd
-    let errReader ← IO.asTask (prio := .dedicated) child.stderr.readBinToEnd
-    let read (reader : Task (Except IO.Error ByteArray)) : IO String := do
-      pure (lossyDecodeUtf8 ((← IO.wait reader).toOption.getD ByteArray.empty))
-    let now ← IO.monoMsNow
-    let deadline := if timeoutSeconds == 0 then none else some (now + timeoutSeconds * 1000)
-    -- Killing the client would leave the command running; the container has to go.
-    let code? ← waitUntil child deadline (remove name)
-    pure { stdout := ← read outReader, stderr := ← read errReader, exitCode? := code?
-           stopped? := if code?.isNone then some s!"timed out after {timeoutSeconds} seconds" else none }
-  catch e =>
-    remove name
-    pure { stopped? := some s!"could not be started: {e}" }
 
 /-! ## Command line -/
 

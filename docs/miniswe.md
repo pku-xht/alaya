@@ -4,19 +4,21 @@
 [mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent)'s default tool-calling agent. It
 keeps what defines that agent: its prompts, its `bash` tool, its way of reading a response and
 answering a malformed one, and its limits. It is written as a program (`docs/agent-api.md` §8):
-a wait for the task, then a loop over the conversation.
+a loop over a conversation that opens with its task.
 
 ## 1. Options
 
-Set at `new` with `--set agent.FIELD=VALUE`; `alaya config --agent mini-swe` prints the
-defaults. A field left out is its default, and a misspelt one is an error.
+Set at `call` with `--set FIELD=VALUE`; `alaya config --program mini-swe` prints the defaults.
+A field left out is its default, and a misspelt one is an error.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
+| `model` | none | the model it samples: its spec (`docs/llm-api.md`), a name alone being that model's defaults; required |
+| `task` | none | the task, verbatim; required. `--set-file task=FILE` reads it from a file |
 | `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
 | `executor.timeout_seconds` | 30 | the time a command may take |
 | `executor.env` | mini's | environment overrides for every command: `PAGER=cat` and the like |
-| `tools` | `["bash", "submit"]` | the tools offered, in order. `bash` and `submit` are required; `ask_user` and `time_budget` may be added. The list replaces the default one |
+| `tools` | `["bash", "submit"]` | the tools offered, in order. `bash` and `submit` are required; `ask_user`, `time_budget` and `subagent` may be added. The list replaces the default one |
 | `question_types` | `[]` | the kinds of question `ask_user` lets the model ask: any of `yes_no`, `single_choice`, `open_ended`. Required, and not empty, when `ask_user` is offered |
 | `recover_output` | false | name the file that holds the whole of a cut output (§4) |
 | `context_reserve` | 8000 | tokens kept free for the next response (§3) |
@@ -25,7 +27,8 @@ defaults. A field left out is its default, and a misspelt one is an error.
 ## 2. What the model is sent
 
 **The opening** is mini's two messages, rendered from its `mini.yaml`: the system message, and
-the task with a line naming the machine: the system and the architecture of the run's image. Each offered tool's instruction is appended to the task message.
+the task with a line naming the machine: the system and the architecture, as `uname -sm` reads
+them in the call's container. Each offered tool's instruction is appended to the task message.
 
 **The view** is what each later request holds of the conversation:
 
@@ -111,11 +114,11 @@ end, and the provider's prompt cache stays valid.
 - **Error texts are plain**, not Python's exception messages, and invalid UTF-8 in output is
   replaced byte by byte.
 - **The environment is a snapshot of the workspace**, not a persistent machine: what a command
-  installs outside the workspace lasts only until a later `run` starts a new container.
+  installs outside the workspace lasts only until a later `resume` starts a new container.
 - **A full context ends the agent** (§3), where mini sends the request.
 - **No cost accounting or step limit**: mini's `cost_limit` and `step_limit` are not enforced,
-  and the agent never ends with `LimitsExceeded`. `alaya run --samples N` pauses a run after `N`
-  responses instead, and a later `run` goes on from there (`docs/cli.md`).
+  and the agent never ends with `LimitsExceeded`. `alaya resume --samples N` pauses a run after `N`
+  responses instead, and a later `resume` goes on from there (`docs/cli.md`).
 - **A person can speak to it**: what a person says or changes reaches the model at the start of
   its next round, and with `ask_user` among its tools it can ask, in the kinds of question its
   configuration allows (`docs/agent-api.md` §7).

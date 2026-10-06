@@ -160,8 +160,8 @@ class Columns:
         self.l1 = 810 if workspace else 914
         self.pos = self.l0 + 20                          # positions end here
         self.frame = self.l0 + 28
-        self.icon = self.l0 + 87
-        self.text = self.l0 + 106
+        self.icon = self.l0 + 97
+        self.text = self.l0 + 116
         self.ctor = self.l1 - (8 if workspace else 16)   # constructors end here
         self.arc = self.l1 - 13                          # the arcs of `takes`
         self.version = 892.5                             # the line of versions
@@ -175,12 +175,11 @@ KINDS = [
     ("said ", "said", VIOLET, "arrived", "notice", None),
     ("workspace changed", "changed", VIOLET, "arrived", "notice", None),
     ("replied ", "replied", VIOLET, "arrived", "notice", None),
-    ("assigned ", "assigned", VIOLET, "arrived", "notice", None),
+    ("call ", "called", VIOLET, "arrived", "notice", None),
     ("inbox", "heard", FAINT, "heard", "ask", "the log"),
     ("sample failed", "fail", RED, "answered", "ask", "model"),
     ("sample", "sample", BLUE, "answered", "ask", "model"),
     ("exec", "exec", TEAL, "answered", "ask", "executor"),
-    ("external", "external", TEAL, "answered", "ask", "container"),
     ("time", "time", FAINT, "answered", "ask", "clock"),
     ("ask ", "question", AMBER, "asked", "mark", None),
     ("open ", "open", MUTE, "opened", "open", None),
@@ -199,7 +198,7 @@ def kind_of(text):
 def default_chip(text):
     """What the program wrote to get this row: `exec "make"` for `exec make → exit 0`."""
     word = text.split()[0].rstrip(":")
-    if word in ("exec", "external"):
+    if word == "exec":
         return f'{word} "{text[len(word) + 1:].split(" →")[0]}"'
     return "sample request" if word == "sample" else word
 
@@ -353,7 +352,7 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
             if role == "stop":
                 program.cut(y + 6.5, r.get("note"))
             elif role == "open":
-                program.open(r["text"].split()[1].rstrip(":") + " · " + r["frame"], y + 2.5, cy)
+                program.open(r["frame"], y + 2.5, cy)
                 out.append(arrow(program.stack[-1]["x1"] + 1, c.l0 - 4, cy + .5))
             elif role == "end":
                 x0, x1 = program.inner()
@@ -401,9 +400,9 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
                 out.append(label(x - 9, cy + 4, f"runs on `{r['on']}` →", "s", anchor="end"))
 
     # around the rows: the heads of the columns, the ground of the log, what is said below
-    head = [label(c.p0, 14, "program", "s"), label(c.m0 + 6, 14, "carried out by", "s"), label(c.l0 + 7, 14, "log", "s")]
+    head = [label(c.p0, 14, "computation", "s"), label(c.m0 + 6, 14, "carried out by", "s"), label(c.l0 + 7, 14, "log", "s")]
     if heads:
-        head += [label(c.pos, 31, "position", "f", anchor="end"), label(c.frame, 31, "frame", "f"),
+        head += [label(c.pos, 31, "position", "f", anchor="end"), label(c.frame, 31, "call", "f"),
                  label(c.icon, 31, "event", "f")]
     if versions:
         head.append(label(WIDTH - 6, 14, "workspace", "s", anchor="end"))
@@ -418,9 +417,9 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
         samples = [
             (arrow(x, x + 66, 0) + f'<rect x="{x + 14}" y="-7" width="34" height="13" fill="#fff"/>'
              + label(x + 31, 3.5, "model", "s", anchor="middle"),
-             "the program asks; the driver carries it out and appends the answer"),
+             "the computation asks; the driver carries it out and appends the answer"),
             (arrow(x + 66, x, 0, dashed=True), "on replay the answer is read back from the log"),
-            (arrow(x, x + 66, 0), "a mark of what the program did: a call opened, a call ended"),
+            (arrow(x, x + 66, 0), "a mark of what the computation did: a call opened, a call ended"),
         ]
         for sample, text in samples:
             out.append(f'<g transform="translate(0,{y + 6.5})">{sample}</g>' + label(x + 78, y + 10, text, "s"))
@@ -438,179 +437,176 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
 
 ROOT_ROW = R(0, "-", "the workspace the run starts from")
 
-figure("log", "The log of a small agent, beside its program", [
-    ROOT_ROW,
-    R(1, "0", "open agent"),
-    R(2, "-", "said “fix the build”"),
-    R(3, "0", "inbox: takes 2", chip="await"),
-    R(4, "0", "sample → says “run make”"),
-    R(5, "0", "exec make → exit 0"),
-    R(6, "0", "return fixed", end='return "fixed"'),
+
+def CALLED(task="fix the build", program="agent"):
+    """The start of every log: the root, a person's call of the agent, the run's read of it, and
+    the opening of the call."""
+    return [ROOT_ROW, R(1, "-", f"call {program} “{task}”"), R(2, "-", "inbox: takes 1", chip="await"),
+            R(3, program, f"open {program}")]
+
+
+figure("log", "The log of a small agent, beside its computation", CALLED() + [
+    R(4, "agent", "inbox: nothing"),
+    R(5, "agent", "sample → says “run make”"),
+    R(6, "agent", "exec make → exit 0"),
+    R(7, "agent", "return fixed", end='return "fixed"'),
 ], heads=True, legend=True)
 
 figure("perform", "Three operations, each answered by its part of the world", [
     GAP(),
-    R(7, "0", "sample → says “run the tests”"),
-    R(8, "0", "exec pytest -q → exit 1"),
-    R(9, "0", "time 4 min 12 s of 1 h"),
+    R(7, "agent", "sample → says “run the tests”"),
+    R(8, "agent", "exec pytest -q → exit 1"),
+    R(9, "agent", "time 4 min 12 s of 1 h"),
     GAP(),
-], inside=["agent · 0"])
+], inside=["agent"])
 
 figure("workspace", "The versions of the workspace along a log", [
     R(0, "-", "the workspace the run starts from", ws="w0"),
-    R(1, "0", "open agent"),
-    GAP(on="bash · 0.0"),
-    R(5, "0.0", "exec make → exit 0", ws="w1", on="w0"),
+    R(1, "-", "call agent “fix the build”"),
+    R(3, "agent", "open agent"),
+    GAP(on="bash"),
+    R(7, "bash", "exec make → exit 0", ws="w1", on="w0"),
     GAP(off=1),
-    R(9, "-", "workspace changed: fixed the Makefile", ws="w2"),
-    GAP(on="bash · 0.1"),
-    R(12, "0.1", "exec make test → exit 0", ws="w3", on="w2"),
+    R(11, "-", "workspace changed: fixed Makefile", ws="w2"),
+    GAP(on="bash#1"),
+    R(14, "bash#1", "exec make test → exit 0", ws="w3", on="w2"),
     GAP(off=2),
-    R(40, "-", "external pytest /grader → exit 0", checkout="c1"),
-], workspace="a checkout: the workspace stays at `w3`")
+    R(40, "-", "call grader “pytest /grader”"),
+    R(42, "grader", "open grader"),
+    R(43, "grader", "exec pytest /grader → exit 0", ws="w4", on="w3"),
+], workspace="a grader’s command, too, leaves a version: its reports are in `w4`")
 
-figure("inbox", "Notices arrive from outside, and reads take them", [
-    ROOT_ROW,
-    R(1, "0", "open agent"),
-    R(2, "-", "said “fix the build”"),
-    R(3, "0", "inbox: takes 2", chip="await", note="waits until a notice it is for has arrived"),
-    R(4, "0", "sample → bash make"),
+figure("inbox", "Notices arrive from outside, and reads take them", CALLED() + [
+    R(4, "agent", "inbox: nothing", note="a read takes what has arrived, possibly nothing"),
+    R(5, "agent", "sample → bash make"),
     GAP(),
     R(9, "-", "said “use ninja, not make”", by="at any time"),
     GAP(),
-    R(12, "0", "inbox: takes 9"),
-    R(13, "0", "sample → bash ninja"),
+    R(12, "agent", "inbox: takes 9"),
+    R(13, "agent", "sample → bash ninja"),
     GAP(),
-    R(17, "0", "inbox: nothing"),
+    R(17, "agent", "inbox: nothing"),
     GAP(),
 ], takes=True)
 
-figure("call", "Two calls of a routine, each a bracket in the log", [
-    ROOT_ROW,
-    R(1, "0", "open agent"),
-    R(2, "0.0", "open step “make”"),
-    R(3, "0.0", "exec make → exit 0"),
-    R(4, "0.0", "return 0", end="return 0"),
-    R(5, "0.1", "open step “make test”"),
-    R(6, "0.1", "exec make test → exit 1"),
-    R(7, "0.1", "return 1", end="return 1"),
-    R(8, "0", "return 2 steps, 1 failed"),
-], foot=["a child frame is its caller’s frame and the call’s ordinal"])
+figure("call", "Two calls of a routine, each a bracket in the log", CALLED() + [
+    R(4, "step", "open step “make”"),
+    R(5, "step", "exec make → exit 0"),
+    R(6, "step", "return 0", end="return 0"),
+    R(7, "step#1", "open step “make test”"),
+    R(8, "step#1", "exec make test → exit 1"),
+    R(9, "step#1", "return 1", end="return 1"),
+    R(10, "agent", "return 2 steps, 1 failed"),
+], foot=["a child frame is its caller’s and a step: the routine, and how many calls of it came before"])
 
-figure("failure", "A failed sample ends its routine, and the caller catches the failure", [
-    ROOT_ROW,
-    R(1, "0", "open agent"),
-    R(2, "0.0", "open planner “ship it”"),
-    R(3, "0.0", "sample failed: the request is too long",
+figure("failure", "A failed sample ends its routine, and the caller catches the failure", CALLED() + [
+    R(4, "planner", "open planner “ship it”"),
+    R(5, "planner", "sample failed: the request is too long",
       note="the answer is an error: the operation fails where it was performed"),
-    R(4, "0.0", "fail: the request is too long"),
+    R(6, "planner", "fail: the request is too long"),
     NOTE("`try … catch`: the caller catches the error; no mark"),
-    R(5, "0.1", "open step “make”"),
-    R(6, "0.1", "exec make → exit 0"),
-    R(7, "0.1", "return 0", end="return 0"),
-    R(8, "0", "return built without a plan"),
+    R(7, "step", "open step “make”"),
+    R(8, "step", "exec make → exit 0"),
+    R(9, "step", "return 0", end="return 0"),
+    R(10, "agent", "return built without a plan"),
 ])
 
-figure("loop", "A loop of three rounds: the log holds their events, flat", [
-    ROOT_ROW,
-    R(1, "0", "open agent"),
-    R(2, "-", "said “fix the build”"),
-    R(3, "0", "inbox: takes 2", chip="await"),
+figure("loop", "A loop of three rounds: the log holds their events, flat", CALLED() + [
     ROUND("round 1 · state: 2 messages", 4),
-    R(4, "0", "sample → bash make"),
-    R(5, "0.0", "open bash “make”"),
-    R(6, "0.0", "exec make → exit 2"),
-    R(7, "0.0", "return exit 2: no rule to make target"),
+    R(4, "agent", "sample → bash make"),
+    R(5, "bash", "open bash “make”"),
+    R(6, "bash", "exec make → exit 2"),
+    R(7, "bash", "return exit 2: no rule to make target"),
     ROUND("round 2 · 4 messages", 4),
-    R(8, "0", "sample → bash ninja"),
-    R(9, "0.1", "open bash “ninja”"),
-    R(10, "0.1", "exec ninja → exit 0"),
-    R(11, "0.1", "return exit 0: build ok"),
+    R(8, "agent", "sample → bash ninja"),
+    R(9, "bash#1", "open bash “ninja”"),
+    R(10, "bash#1", "exec ninja → exit 0"),
+    R(11, "bash#1", "return exit 0: build ok"),
     ROUND("round 3 · 6 messages → result", 1),
-    R(12, "0", "sample → says “fixed: use ninja”"),
-    R(13, "0", "return fixed: use ninja"),
+    R(12, "agent", "sample → says “fixed: use ninja”"),
+    R(13, "agent", "return fixed: use ninja"),
 ], foot=["a loop writes nothing of its own; every round reads an event"])
 
-figure("stop", "A stop ends every frame of the agent, and the run goes on to its grading", [
+figure("stop", "A stop ends every frame of the call, and the run waits for the next", [
     R(0, "-", "the workspace the run starts from", opens="run · -"),
-    R(1, "0", "open agent"),
-    R(2, "0.0", "open workflow “ship it”"),
-    R(3, "0.0.0", "open planner “ship it”"),
-    R(4, "0.0.0", "sample → lookup build"),
-    R(5, "-", "stopped: to grade this point", note="every frame of the agent ends; no marks"),
-    DIV("the agent is over: the run waits for a grader"),
-    R(6, "-", "assigned grader “pytest /grader”"),
-    R(7, "-", "inbox: takes 6", chip="await"),
-    R(8, "-", "external pytest /grader → exit 1"),
-    R(9, "-", "return fail 12/48", end="return verdict"),
+    R(1, "-", "call agent “ship it”"),
+    R(2, "-", "inbox: takes 1", chip="await"),
+    R(3, "agent", "open agent"),
+    R(4, "workflow", "open workflow “ship it”"),
+    R(5, "planner", "open planner “ship it”"),
+    R(6, "planner", "sample → lookup build"),
+    R(7, "-", "stopped: to grade this point", note="every frame of the call ends; no marks"),
+    DIV("no call runs: the run waits for the next"),
+    R(8, "-", "call grader “pytest /grader”"),
+    R(9, "-", "inbox: takes 8", chip="await"),
+    R(10, "grader", "open grader"),
+    R(11, "grader", "exec pytest /grader → exit 1"),
+    R(12, "grader", "return fail 12/48", end="return verdict"),
 ])
 
-figure("routines", "The log of the workflow, its sub-agent and their tools", [
-    ROOT_ROW,
-    R(1, "0", "open agent"),
-    R(2, "-", "said “ship it”"),
-    R(3, "0", "inbox: takes 2", chip="await"),
-    R(4, "0.0", "open workflow “ship it”"),
-    R(5, "0.0.0", "open planner “ship it”"),
-    R(6, "0.0.0", "sample → lookup build"),
-    R(7, "0.0.0.0", "open lookup “build”"),
-    R(8, "0.0.0.0", "exec grep build notes.txt → exit 0"),
-    R(9, "0.0.0.0", "return build: make"),
-    R(10, "0.0.0", "sample → says “make make test”"),
-    R(11, "0.0.0", "return steps: make, make test"),
-    R(12, "0.0.1", "open step “make”"),
-    R(13, "0.0.1", "exec make → exit 0"),
-    R(14, "0.0.1", "return 0"),
-    R(15, "0.0.2", "open step “make test”"),
-    R(16, "0.0.2", "exec make test → exit 1"),
-    R(17, "0.0.2", "return 1"),
-    R(18, "0.0", "return 2 steps, 1 failed"),
-    R(19, "0", "return 2 steps, 1 failed"),
+figure("routines", "The log of the workflow, its sub-agent and their tools", CALLED("ship it") + [
+    R(4, "workflow", "open workflow “ship it”"),
+    R(5, "planner", "open planner “ship it”"),
+    R(6, "planner", "sample → lookup build"),
+    R(7, "lookup", "open lookup “build”"),
+    R(8, "lookup", "exec grep build notes.txt → exit 0"),
+    R(9, "lookup", "return build: make"),
+    R(10, "planner", "sample → says “make make test”"),
+    R(11, "planner", "return steps: make, make test"),
+    R(12, "step", "open step “make”"),
+    R(13, "step", "exec make → exit 0"),
+    R(14, "step", "return 0"),
+    R(15, "step#1", "open step “make test”"),
+    R(16, "step#1", "exec make test → exit 1"),
+    R(17, "step#1", "return 1"),
+    R(18, "workflow", "return 2 steps, 1 failed"),
+    R(19, "agent", "return 2 steps, 1 failed"),
 ])
 
 figure("tool-call", "A response that asks for two tools, and the two calls it becomes", [
     GAP(),
-    R(10, "0", "inbox: nothing"),
-    R(11, "0", "sample → bash make; bash make test", note="the response asks for two tools"),
-    NOTE("each: check its arguments, then `call name arguments`"),
-    R(12, "0.3", "open bash “make”"),
-    R(13, "0.3", "exec make → exit 0"),
-    R(14, "0.3", "return exit 0: build ok"),
-    R(15, "0.4", "open bash “make test”"),
-    R(16, "0.4", "exec make test → exit 1"),
-    R(17, "0.4", "return exit 1: 1 test failed"),
-    R(18, "0", "inbox: nothing"),
-    R(19, "0", "sample → says “one test fails”", note="the next request holds both results"),
+    R(10, "agent", "inbox: nothing"),
+    R(11, "agent", "sample → bash make; bash make test", note="the response asks for two tools"),
+    NOTE("each: check its arguments, then call the tool's routine, the agent's settings added"),
+    R(12, "bash#2", "open bash “make”"),
+    R(13, "bash#2", "exec make → exit 0"),
+    R(14, "bash#2", "return exit 0: build ok"),
+    R(15, "bash#3", "open bash “make test”"),
+    R(16, "bash#3", "exec make test → exit 1"),
+    R(17, "bash#3", "return exit 1: 1 test failed"),
+    R(18, "agent", "inbox: nothing"),
+    R(19, "agent", "sample → says “one test fails”", note="the next request holds both results"),
     GAP(),
-], inside=["agent · 0"])
+], inside=["agent"])
 
 figure("ask-user", "A question: the tool asks, the run waits, a person replies, the call returns", [
     GAP(),
-    R(10, "0", "inbox: nothing"),
-    R(11, "0", "sample → ask_user Should duplicates be kept?"),
-    R(12, "0.2", "open ask_user “Should duplicates be kept?”"),
-    R(13, "0.2", "ask “Should duplicates be kept?”", note="the question is in the log, whoever asks it"),
-    DIV("the driver stops: the run waits for a reply to 0.2"),
-    R(14, "-", "replied to 0.2: yes", by="`alaya reply`"),
-    R(15, "0.2", "inbox: takes 14", chip="the reply"),
-    R(16, "0.2", "return yes", end='return "yes"'),
-    R(17, "0", "inbox: nothing", note="a plain read leaves replies"),
-    R(18, "0", "sample → bash sort -u names.txt", note="the model is shown `yes` as the tool’s result"),
+    R(10, "agent", "inbox: nothing"),
+    R(11, "agent", "sample → ask_user Keep duplicates?"),
+    R(12, "ask_user", "open ask_user “Keep duplicates?”"),
+    R(13, "ask_user", "ask “Keep duplicates?”", note="the question is in the log, whoever asks it"),
+    DIV("the driver stops: the run waits for a reply to agent/ask_user"),
+    R(14, "-", "replied to agent/ask_user: yes", by="`alaya reply`"),
+    R(15, "ask_user", "inbox: takes 14", chip="the reply"),
+    R(16, "ask_user", "return yes", end='return "yes"'),
+    R(17, "agent", "inbox: nothing", note="a plain read leaves replies"),
+    R(18, "agent", "sample → bash sort -u names.txt", note="the model is shown `yes` as the tool’s result"),
     GAP(),
-], inside=["agent · 0"], takes=True)
+], inside=["agent"], takes=True)
 
-figure("run", "A whole run: the agent in frame 0, then its grading in the run’s own frame", [
+figure("run", "A whole run: the agent, then a grader, each in a frame of its own", [
     R(0, "-", "the workspace the run starts from", by="`alaya new`", opens="run · -"),
-    R(1, "0", "open agent: mini-swe, gpt-6-luna", note="the call’s arguments are the run’s configuration"),
-    R(2, "-", "said “Implement SPEC.md”"),
-    R(3, "0", "inbox: takes 2", chip="await"),
+    R(1, "-", "call mini-swe “Implement SPEC.md”", by="`alaya call`"),
+    R(2, "-", "inbox: takes 1", chip="await"),
+    R(3, "mini-swe", "open mini-swe"),
     GAP("the agent’s rounds"),
-    R(41, "0", "return Submitted: implemented the language"),
-    DIV("the agent is over: the run waits for a grader"),
-    R(42, "-", "assigned grader “pytest /grader”", by="`alaya grade`"),
+    R(41, "mini-swe", "return Submitted"),
+    DIV("no call runs: the run waits for the next"),
+    R(42, "-", "call grader “pytest /grader”", by="`alaya call`"),
     R(43, "-", "inbox: takes 42", chip="await"),
-    R(44, "-", "external pytest /grader → exit 0"),
-    R(45, "-", "return pass 48/48", note="the result of the run"),
+    R(44, "grader", "open grader"),
+    R(45, "grader", "exec pytest /grader → exit 0"),
+    R(46, "grader", "return pass 48/48", end="return verdict", note="the grader’s verdict"),
 ])
 
 
@@ -849,11 +845,12 @@ def pill(x, cy, text, tint):
 
 
 def entries():
-    """A log of four entries and a second child of its third: a fork."""
-    root = "root"
-    line = [("3f2a9c1b8e7d", "root", "the workspace", "0.0 s"),
-            ("06d9ae75ae21", "open", "open agent", "0.0 s"),
-            ("8cb007600701", "said", "said “the task”", "0.0 s")]
+    """Three entries of a log, after its root and the call of its agent, and a second child of
+    the last: a fork."""
+    root = "… the call"
+    line = [("06d9ae75ae21", "heard", "inbox: takes 1", "0.0 s"),
+            ("b064afdd73b7", "open", "open mini-swe", "0.0 s"),
+            ("8cb007600701", "heard", "inbox: nothing", "0.0 s")]
     children = [("draw 0", ("07d75e6a71ee", "sample", "sample → bash make", "7.6 s")),
                 ("draw 1", ("9a11c0de42f7", "sample", "sample → bash ninja", "3.1 s"))]
     parent = "parent"
@@ -895,15 +892,15 @@ def entries():
 def grader():
     """The grading of a run: what goes into the grader's container, and what comes out of it."""
     heads = ["what goes in", "the grader runs", "what comes out"]
-    inputs = [("the workspace at the graded entry", "a fresh checkout", "as the log had it there"),
-              ("the grader’s input", "trusted files: hidden tests", "snapshotted when the grader is assigned")]
-    container = "a container of the grader’s image · no network"
-    mounts = [("the workdir", "the checkout, read-write"), ("/grader", "the input, read-only")]
+    inputs = [("the workspace at the graded entry", "the workspace", "the version the log has reached"),
+              ("the grader’s image, pinned by its call", "trusted files: hidden tests", "built into the image")]
+    container = "a container of the grader’s own image · no network"
+    mounts = [("the workdir", "the workspace, read-write"), ("/grader", "in the image")]
     command = ("sh /grader/grade.sh", "the grader’s command, with a time limit")
     tap = ("stdout: TAP", ["1..3", "ok 1 - parses", "ok 2 - runs", "not ok 3 - errors"])
-    read, verdict, says = "read as", "fail 2/3", ["the verdict:", "the result of the run"]
-    kept = ["stderr and the exit status are kept,", "and decide nothing"]
-    left = ("the checkout as the grader left it", "a snapshot", "kept with the verdict; the run’s workspace does not move")
+    read, verdict, says = "read as", "fail 2/3", ["the verdict:", "the value of the call"]
+    kept = ["stderr, kept apart, and the exit status", "are kept, and decide nothing"]
+    left = ("the workspace as the grader left it", "a new version", "its reports in it, after the agent’s last version")
 
     (x1, w1), (x2, w2), (x3, w3) = columns = [(12, 226), (282, 296), (622, 286)]
     top, pitch, inset = 26, 76, 14             # of the zones; from a row to the next; in the container
@@ -938,7 +935,7 @@ def grader():
 
     box = (f'<rect x="{x2 + .5}" y="{top + .5}" width="{w2 - 1}" height="{n(end2 + 6 - top)}" rx="6" '
            f'fill="{SIDE}" stroke="{GUIDE}"/>')
-    write("log-schema", "grader", "How a run is graded: what goes into the grader’s container, and what comes out of it",
+    write("log-schema", "grader", "How a point is graded: what goes into the grader’s container, and what comes out of it",
           int(max(end2 + 7, end3)) + 8, out[:3] + [box] + inside + out[3:])
 
 
@@ -948,7 +945,7 @@ grader()
 
 # === docs/cli.md ==========================================================================
 #
-# Twelve figures, one for a command or a group of commands: what the command does to the forest
+# Thirteen figures, one for a command or a group of commands: what the command does to the forest
 # of entries. All are drawn with one kit: a strip of entries, each a chip in the report's words,
 # a parent at the left of its child. A chip's state says what the command does with the entry.
 
@@ -1057,37 +1054,33 @@ TOP = 24  # of a row with an `ENTRY` above it
 
 
 def cli_new():
-    """`new`: a project, an image and a task become the first three entries of a run."""
-    inputs = [("`PROJECT`", "./project"), ("`--image`", "my-task:1"), ("`--task-file`", "TASK.txt")]
-    made = [("the workspace", "a snapshot of `PROJECT`"),
-            ("open agent", "its arguments: the agent, the model, the image by digest"),
-            ("said “the task”", "the task")]
-    x, w, top, pitch, h = 12, 104, 18, 53, 33  # the blocks: their left, width, first top, pitch, height
-    out = []
-    for i, (name, text) in enumerate(inputs):
-        out += node(x, top + pitch * i, w, text, name)[0]
-    y0, y1 = top + .5, top + pitch * 2 + h - .5
-    bx, cy = x + w + 8.5, (y0 + y1) / 2
-    out.append(f'<path class="a" d="M{bx - 4},{y0}H{bx}V{y1}H{bx - 4}"/>')
-
-    # the chips, each as far from the next as its note needs
-    x0, y, limit = 190, int(cy - CHIP_H / 2), 190
-    notes = [wrap(text, limit) for _, text in made]
-    widths = [chip(0, 0, text)[1] for text, _ in made]
-    joins = [max(max(width(line, 11) for line in lines) + 22 - w, 36) for lines, w in zip(notes, widths)]
-    part, at = strip(x0, y, [(text, "new") for text, _ in made], joins)
-    out += [arrow(bx, x0 - 6, cy)] + part
-    for (a, _), (_, text) in zip(at, made):
-        out += under(a, y, text, limit)
-    cli("new", "new: a project, an image and a task become the first three entries of a run", int(y1) + 9, out)
+    """`new`: a directory becomes the root of a run."""
+    x, w, top = 12, 104, 18
+    out = node(x, top, w, "./project", "`PROJECT`")[0]
+    cy = top + 16.5
+    x0, y = 190, int(cy - CHIP_H / 2)
+    part, at = strip(x0, y, [("the workspace", "new")])
+    out += [arrow(x + w + 6, x0 - 6, cy)] + part + under(at[0][0], y, "a snapshot of `PROJECT`: the run waits for a call")
+    cli("new", "new: a directory becomes the root of a run", y + CHIP_H + 26, out)
 
 
-def cli_run():
-    """`run`: entries are appended after the given one until the run ends in one of three ways."""
+def cli_call():
+    """`call`: a call of a program is appended, and the next resume opens it in a frame of its own."""
     y = TOP
-    out, at = strip(12, y, ["…", ("said “the task”", "old", True), ("inbox", "new"), ("sample", "new"), ("open bash", "new"),
-                            ("exec make", "new"), ("return", "new"), "…"])
-    ends = [(OK, "the agent is over", "exit 0, or 1 if it failed"), (WAIT, "waits for a person", "exit 3"),
+    out, at = strip(12, y, [("the workspace", "old", True), ("call mini-swe “the task”", "new"),
+                            ("inbox: takes 1", "later"), ("open mini-swe", "later"), ("inbox", "later"), "…"])
+    out += under(at[1][0], y, "its configuration: the program with its model and task, the image by digest", 300)
+    out.append(note(at[-1][1] + 12, y, "the next `resume`"))
+    cli("call", "call: a call of a program is appended, and the next resume opens it in a frame of its own",
+        y + CHIP_H + 38, out)
+
+
+def cli_resume():
+    """`resume`: entries are appended after the given one until the run stops in one of three ways."""
+    y = TOP
+    out, at = strip(12, y, ["…", ("call mini-swe", "old", True), ("inbox", "new"), ("open mini-swe", "new"),
+                            ("sample", "new"), "…"])
+    ends = [(OK, "no call runs", "exit 0 or 1; a grader: by verdict"), (WAIT, "waits for a person", "exit 3"),
             (NEUTRAL, "paused at a limit", "exit 4")]
     bx, pitch = at[-1][1] + 10.5, 24
     out.append(f'<path class="a" d="M{bx + 4},{y - pitch + 3.5}H{bx}V{y + pitch + 21.5}H{bx + 4}"/>')
@@ -1096,8 +1089,8 @@ def cli_run():
         part, w = tag(bx + 10, row, text, tint)
         out += [part, note(bx + 10 + w + 8, row, says)]
         if bx + 18 + w + width(says, 11) > WIDTH - 12:
-            print(f"  run: may not fit: {says}")
-    cli("run", "run: entries are appended after the given one until the agent is over, waits or is paused",
+            print(f"  resume: may not fit: {says}")
+    cli("resume", "resume: entries are appended after the given one until no call runs, a call waits, or a limit pauses it",
         y + pitch + 30, out)
 
 
@@ -1133,37 +1126,38 @@ def cli_reply():
     """`reply`: a reply is appended after the question it answers; the next run goes on from it."""
     y = TOP
     out, at = strip(12, y, ["…", "open ask_user", ("ask “keep duplicates?”", "old", True),
-                            ("replied to 0.2: yes", "new"), ("inbox: takes it", "later"), ("return yes", "later")])
+                            ("replied to mini-swe/ask_user: yes", "new"), ("inbox: takes it", "later"), ("return yes", "later")])
     below = y + CHIP_H + 3
-    out += [tag(at[2][0], below, "waits for a reply", WAIT)[0], note(at[4][0], below, "the next run goes on from the reply")]
-    cli("reply", "reply: a reply is appended after the question that waits for it, and the next run goes on from it",
+    out += [tag(at[2][0], below, "waits for a reply", WAIT)[0], note(at[4][0], below, "the next resume goes on from the reply")]
+    cli("reply", "reply: a reply is appended after the question that waits for it, and the next resume goes on from it",
         below + CHIP_H + 4, out)
 
 
 def cli_stop():
-    """`stop`: a stop is appended, and the agent is over."""
+    """`stop`: a stop is appended, and the call is over."""
     y = TOP
     out, at = strip(12, y, ["…", ("sample → bash make", "old", True), ("stopped: wrong approach", "new")])
     x = at[-1][1] + 10
-    part, w = tag(x, y, "the agent is over", NEUTRAL)
-    out += [part, note(x + w + 10, y, "nothing in it goes on; the run waits for a grader")]
-    cli("stop", "stop: a stop is appended after the given entry, and the agent is over", y + CHIP_H + 8, out)
+    part, w = tag(x, y, "the call is over", NEUTRAL)
+    out += [part, note(x + w + 10, y, "nothing in it goes on; the run waits for the next call")]
+    cli("stop", "stop: a stop is appended after the given entry, and the call is over", y + CHIP_H + 8, out)
 
 
 def cli_grade():
-    """`grade`: a grader is assigned and run; where the agent still runs, after a stop on a fork."""
+    """Grading: where the agent still runs, a stop on a fork; then a call of the grader, which
+    resume opens and runs."""
     y, below = TOP, TOP + CHIP_H + 12
     out, at = strip(12, y, ["…", ("exec make test → exit 1", "old", True), "…", "return Submitted: done"])
     line, x = branch(at[1][0], y, below)
-    part, fork = strip(x, below, [(text, "new") for text in ["stopped: to grade this point", "assigned grader", "inbox",
-                                                              "external … → exit 1", "return fail 12/48"]])
+    part, fork = strip(x, below, [("stopped: to grade", "new"), ("call grader", "new")] +
+                       [(text, "later") for text in ["open grader", "exec grade.sh", "return fail 12/48"]])
     verdict, w = tag(fork[-1][1] + 10, below, "exit 1", BAD)
     if fork[-1][1] + 10 + w > WIDTH - 12:
         print("  grade: the verdict may not fit")
-    out += [line] + part + [verdict] + under(x, below, "the agent still runs here: a stop first, on a fork")
+    out += [line] + part + [verdict] + under(x, below, "`stop` and `call` append; `resume` runs the grader in its own frame")
     foot = below + CHIP_H + 41
-    out.append(label(12, foot, "at an entry where the agent is over: no stop, and no fork unless the log is graded already", "s"))
-    cli("grade", "grade: a grader is assigned after the given entry and run, after a stop on a fork when the agent still runs",
+    out.append(label(12, foot, "where no call runs, as after the agent's end: no stop, and the grader is called there", "s"))
+    cli("grade", "grading: the agent is stopped, the grader is called, and resume runs its command and returns the verdict",
         foot + 9, out)
 
 
@@ -1219,7 +1213,7 @@ def cli_rebase():
 
 def cli_read():
     """`tree`, `log`, `show`, `waiting`: what each reads of one small forest."""
-    line = ["the workspace", "open agent", "said “the task”", "sample", "…", "return pass 48/48"]
+    line = ["the workspace", "call mini-swe", "open mini-swe", "sample", "…", "return pass 48/48"]
     bare, fork, waits = 3, 3, "ask “…?”"  # chips with no text; the entry that forks; its second child
     panels = [("tree", "the whole forest: runs, stretches, forks", set(range(7)), None),
               ("log ENTRY", "the path from the root to `ENTRY`", set(range(6)), 5),
@@ -1276,7 +1270,8 @@ def cli_workspace():
 
 
 cli_new()
-cli_run()
+cli_call()
+cli_resume()
 cli_tell()
 cli_commit()
 cli_reply()

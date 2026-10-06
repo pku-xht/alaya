@@ -1,15 +1,16 @@
 import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
+import Alaya.Agents.Grader
 import Alaya.Settings
 
 /-!
-The agents the command line can run, by name, and how a run's agent is configured.
+The programs a call can name, and how a call's configuration builds one: the agents, and the
+grader.
 
-An agent's defaults are in code, in its definition. A run names an agent (`new --agent NAME`)
-and overrides any of its fields on the command line (`--set agent.FIELD=VALUE`), and the run's
-configuration — the opening of the agent's call, the second event of its log — holds the
-complete configuration, from which every later command builds the same agent again. There are
-no configuration files.
+A program's defaults are in code, in its definition. A call names a program (`alaya call ENTRY
+NAME`) and overrides any of its fields on the command line (`--set FIELD=VALUE`), and the
+call's opening in the log holds the name and the complete configuration, from which every later
+command builds the same program again. There are no configuration files.
 -/
 
 namespace Alaya.Agents.Catalog
@@ -17,66 +18,125 @@ namespace Alaya.Agents.Catalog
 open Lean (Json)
 open Alaya (Result Error Uname)
 
-/-- An agent built from its configuration: the complete configuration, its program, for a run of
-a model on a machine, and the routines it calls, which the run has under their names: the tools
-it offers a model, its sub-agents, the steps of its workflows. -/
+/-- A program built from its configuration: the complete configuration, and its computation, or
+why the configuration does not make one. -/
 structure Built where
   config : Json
-  routines : Array (Routine.Entry Agent)
-  program : Models.Spec → Uname → Program Agent Json
+  computation : Except String (Computation Agent Json)
 
-/-- An agent the command line can name, and how a configuration builds it. -/
+/-- A program a call can name: the routine a call of it runs, and how its configuration is read,
+which the command line needs before any call is made. -/
 structure Definition where
-  name : String
-  /-- The agent a configuration describes: one that names this agent, with any of its fields
-  left out for their defaults. -/
+  routine : Routine Agent
+  /-- The program a configuration describes, with any of its fields left out for their
+  defaults. -/
   make : Json → Except String Built
 
-def miniSwe : Definition := {
-  name := "mini-swe"
-  make := fun json => match MiniSwe.Config.fromJson json with
-    | .ok config =>
-      .ok { config := config.toJson, routines := config.offered.map (·.entry), program := MiniSwe.program config }
-    | .error problem => .error problem }
+def Definition.name (definition : Definition) : String := definition.routine.name
 
-def miniVero : Definition := {
-  name := "mini-vero"
-  make := fun json => match MiniVero.Config.fromJson json with
-    | .ok config =>
-      .ok { config := config.toJson, routines := config.base.offered.map (·.entry)
-            program := MiniVero.program config }
-    | .error problem => .error problem }
+/-- The computation of a call of the program `name`, whose configuration `make` reads: its
+arguments, the configuration; or why there is none. -/
+private def computationOf (name : String) (make : Json → Except String Built) (arguments : Json) :
+    Except String (Computation Agent Json) :=
+  match make arguments with
+  | .error problem => .error s!"{name}: {problem}"
+  | .ok built => match built.computation with
+    | .error problem => .error s!"{name}: {problem}"
+    | .ok computation => .ok computation
 
-def all : Array Definition := #[miniSwe, miniVero]
+/-- The program `name`, whose configuration `make` reads. Its routine's computation is the one
+`make` builds from the call's configuration, failing in its frame when it does not fit; its scope
+is `routines`, its tools, and itself, which a sub-agent calls. -/
+def Definition.of (name : String) (make : Json → Except String Built)
+    (routines : Array (Routine Agent) := #[]) : Definition :=
+  let body (arguments : Json) : Computation Agent Json :=
+    match computationOf name make arguments with
+    | .ok computation => computation
+    | .error problem => .fail problem
+  { routine := { name, body, scope := Scope.fix fun scope => routines.push { name, body, scope } }
+    make }
+
+/-- What an agent needs of its configuration: a model, and a task. -/
+private def agentCall (model? : Option Models.Spec) (task? : Option String)
+    (k : Models.Spec → String → Computation Agent Json) : Except String (Computation Agent Json) :=
+  match model?, task? with
+  | some model, some task => .ok (k model task)
+  | none, _ => .error s!"it samples a model: name it with --set model=NAME"
+  | _, none => .error s!"it works on a task: give it with --set task=TEXT or --set-file task=FILE"
+
+def miniSwe : Definition := .of "mini-swe" (routines := Tools.routines) fun json =>
+  match MiniSwe.Config.fromJson json with
+  | .ok config =>
+    .ok { config := config.toJson
+          computation := agentCall config.model? config.task? fun model task =>
+            MiniSwe.computation config model task ("mini-swe", config.toJson) }
+  | .error problem => .error problem
+
+def miniVero : Definition := .of "mini-vero" (routines := Tools.routines) fun json =>
+  match MiniVero.Config.fromJson json with
+  | .ok config =>
+    .ok { config := config.toJson
+          computation := agentCall config.base.model? config.base.task? fun model task =>
+            MiniVero.computation config model task ("mini-vero", config.toJson) }
+  | .error problem => .error problem
+
+def grader : Definition := .of "grader" fun json =>
+  match Grader.Config.fromJson json with
+  | .ok config =>
+    .ok { config := config.toJson
+          computation :=
+            if config.command.trimAscii.isEmpty then
+              .error "it needs its command, which prints TAP: --set command=CMD"
+            else .ok (Grader.computation config) }
+  | .error problem => .error problem
+
+def all : Array Definition := #[miniSwe, miniVero, grader]
 
 def names : String := ", ".intercalate (all.map (·.name)).toList
 
 def named? (name : String) : Option Definition := all.find? (·.name == name)
 
-/-- The agent a configuration describes, or what is wrong with it. -/
-def build (json : Json) : Except String Built :=
-  match json.getObjVal? "name" with
-  | .ok (.str name) => match named? name with
-    | some definition => match definition.make json with
-      | .ok built => .ok built
-      | .error message => .error s!"{name}: {message}"
-    | none => .error s!"unknown agent: {name} (use {names})"
-  | _ => .error s!"an agent configuration needs a \"name\": one of {names}"
+/-- The program `name` as the configuration `json` describes it, or what is wrong with it. -/
+def build (name : String) (json : Json) : Except String Built :=
+  match named? name with
+  | some definition => match definition.make json with
+    | .ok built => .ok built
+    | .error message => .error s!"{name}: {message}"
+  | none => .error s!"unknown program: {name} (use {names})"
 
-/-- The complete configuration of the agent a configuration describes, or what is wrong with
-it: every field, those left out at their defaults. -/
-def complete (json : Json) : Result Json :=
-  match build json with
+/-- The complete configuration of the program `name` that `json` describes, or what is wrong
+with it: every field, those left out at their defaults. -/
+def complete (name : String) (json : Json) : Result Json :=
+  match build name json with
   | .ok built => pure built.config
   | .error message => throw <| .input message
 
-/-- The complete configuration of the agent `name` with the agent's settings applied over its
-defaults. Every key is checked as a configuration's would be: an unknown one, or a value of the
+/-- The complete configuration of the program `name`, `config` with `settings` applied over it,
+one after another, each result completed before the next when it is complete on its own: so
+`model=NAME` is that model's whole spec, which a later `model.params.FIELD=VALUE` changes a field
+of, while settings that are complete only together (`tools` and `question_types`) may come one
+after the other. The result is checked as a configuration: an unknown key, or a value of the
 wrong type, is an error naming it. -/
+def applying (name : String) (config : Json) (settings : Array Settings.Setting) : Result Json := do
+  let applied ← settings.foldlM (init := config) fun config setting =>
+    match Settings.apply config setting with
+    | .ok config => tryCatch (complete name config) fun _ => pure config
+    | .error message => throw <| .input message
+  complete name applied
+
+/-- The complete configuration of the program `name` with `settings` over its defaults. -/
 def resolve (name : String) (settings : Array Settings.Setting) : Result Json := do
-  let defaults ← complete (.mkObj [("name", name)])
-  match Settings.apply .agent defaults settings with
-  | .ok config => complete config
-  | .error message => throw <| .input message
+  applying name (← complete name (.mkObj [])) settings
+
+/-- Whether a call fits the program it names: what `alaya call` checks before it appends one. -/
+def check (call : RoutineCall) : Except String Unit :=
+  match named? call.name with
+  | none => .error s!"unknown program: {call.name} (use {names})"
+  | some definition => match computationOf definition.name definition.make call.arguments with
+    | .ok _ => .ok ()
+    | .error problem => .error problem
+
+/-- The programs a run calls: the run's scope. -/
+def scope : Scope Agent := Scope.of (all.map (·.routine))
 
 end Alaya.Agents.Catalog

@@ -12,44 +12,43 @@ flowchart TD
   classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
   new("<b>new</b><br/>create a run")
-  run("<b>run</b><br/>drive it on")
-  over("the agent is over<br/>exit 0, or 1 if it failed"):::ok
+  call("<b>call</b><br/>an agent, a grader")
+  resume("<b>resume</b><br/>drive it on")
+  idle("no call runs<br/>exit 0, or 1 if it failed;<br/>a grader: by its verdict"):::ok
   paused("paused at a limit<br/>exit 4"):::wait
   waits("waits for a person<br/>exit 3"):::wait
-  grade("<b>grade</b><br/>stop if needed,<br/>assign a grader, run it")
+  stop("<b>stop</b><br/>end the call")
   tell("<b>tell</b> · <b>commit</b><br/>say or change something")
   reply("<b>reply</b><br/>answer the question")
-  verdict("the verdict<br/>exit 0 pass · 1 fail · 2 error"):::ok
 
-  new --> run
-  run --> over
-  over --> grade
-  grade --> verdict
-  run --> paused
-  paused -. "grade it as it stands" .-> grade
-  paused -- "run again" --> run
+  new --> call
+  call --> resume
+  resume --> idle
+  idle -- "call the next" --> call
+  resume --> paused
+  paused -- "resume again" --> resume
   paused --> tell
-  tell --> run
-  run --> waits
+  paused --> stop
+  stop --> call
+  tell --> resume
+  resume --> waits
   waits --> reply
-  reply --> run
-  linkStyle 5 stroke-width:1px,stroke-dasharray:3
+  reply --> resume
   linkStyle default stroke-width:1px
 ```
 
 ## 1. Commands
 
 ```
-alaya new [PROJECT] (--task TEXT | --task-file FILE) --agent NAME --model NAME --image IMAGE
-          [--workdir PATH] [--set PATH=VALUE …]      create a run
-alaya run ENTRY [--provider NAME [--url URL] [--port N]] [--samples N] [--time-budget S]
+alaya new (PROJECT | --image IMAGE [--workdir PATH])  create a run: its workspace
+alaya call ENTRY PROGRAM --image IMAGE [--workdir PATH]
+          [--set PATH=VALUE | --set-file PATH=FILE …] call a program, an agent or a grader
+alaya resume ENTRY [--provider NAME [--url URL] [--port N]] [--samples N] [--time-budget S]
           [--container-user UID:GID] [--network NAME]   drive a run on
 alaya tell ENTRY TEXT                                append a person's message
 alaya commit ENTRY DIR [--message TEXT]              append a change to the workspace
 alaya reply ENTRY (TEXT | --unavailable)             answer the question the log waits on
-alaya stop ENTRY [--reason TEXT]                     stop the agent there
-alaya grade ENTRY --grader CMD [--grader-input DIR] [--grader-image IMAGE] [--grader-timeout S]
-                                                     grade the run at ENTRY
+alaya stop ENTRY [--reason TEXT]                     stop the call running there
 alaya comment ENTRY TEXT                             append a comment to the log
 alaya rm ENTRY                                       delete ENTRY and everything after it
 alaya rebase ENTRY DIR [--set PATH=VALUE …]          copy the log at ENTRY into a new data directory,
@@ -65,7 +64,7 @@ alaya checkout ENTRY DIR                             write the workspace at ENTR
 alaya diff A B                                       the workspace changes between two entries
 alaya html FILE [--hide DIR]                         write the forest as one page, for reading
 
-alaya config [--agent NAME] [--model NAME] [--set PATH=VALUE …]   what there is, or what new would record
+alaya config [--program NAME] [--set PATH=VALUE …]  what there is, or what call would record
 alaya help [COMMAND]                                 what a command takes
 ```
 
@@ -82,10 +81,12 @@ alaya help [COMMAND]                                 what a command takes
 A session in a script:
 
 ```sh
-tip=$(alaya new ./project --task-file TASK.txt --agent mini-swe --model gpt-6-luna \
-  --image my-task:1 | tail -n 1 | cut -d' ' -f1)
-end=$(alaya run "$tip" --provider apiyi | tail -n 1 | cut -d' ' -f1)
-alaya grade "$end" --grader 'python3 /grader/grade.py' --grader-input ./hidden
+last() { tail -n 1 | cut -d' ' -f1; }
+root=$(alaya new ./project | last)
+called=$(alaya call "$root" mini-swe --set model=gpt-6-luna --set-file task=TASK.txt --image my-task:1 | last)
+end=$(alaya resume "$called" --provider apiyi | last)
+graded=$(alaya call "$end" grader --image my-grader:1 --set command='python3 /grader/grade.py' | last)
+alaya resume "$graded"                     # exits 0 for a pass, 1 for a fail, 2 for an error
 ```
 
 ## 2. Output
@@ -103,16 +104,17 @@ b064afdd…73b   3  0    inbox: takes [2]
 ```
 
 The last line is the entry the log now ends at, which a script takes with
-`tail -n 1 | cut -d' ' -f1`. `run` and `grade` say how they stopped on stderr: `done: pass
-48/48`, `stopped: fail 12/48`, `waits for a reply: …`, `paused: …`.
+`tail -n 1 | cut -d' ' -f1`. `resume` says how it stopped on stderr: how the last call ended,
+`mini-swe: done: Submitted` or `grader: done: pass 48/48`, or `waits for a reply: …`, or
+`paused: …`.
 
 With `--json`, a command prints one object a line:
 
 | Command | Object |
 | --- | --- |
 | a command that appends | each entry: `{entry, parent, position, frame, summary, event, elapsed_ms}` |
-| `run`, `grade` | then how it stopped: `{entry, status, …}`. `status` is `done` with `value`, `failed` with `error`, or `stopped` with `reason`, each with `verdict`, `null` until graded; or `waits` with `frame` and `question`; or `paused` with `reason` |
-| `config` | a line for each `{agent}`, `{model}` and `{provider}`; with `--agent` or `--model`, the one `{agent, model}` that `new` would record |
+| `resume` | then how it stopped: `{entry, status, …}`. Where no call runs, `call` names the last call, and `status` is `done` with `value`, `failed` with `error`, or `stopped` with `reason`; or `idle` before any call. Or `waits` with `frame` and `question`; or `paused` with `reason` |
+| `config` | a line for each `{program, config}`, `{model}` and `{provider}`; with `--program`, the one `{program, config}` that `call` would record |
 | `tree` | every entry: `{entry, parent, position, summary, status}` |
 | `log` | every entry of the log: `{entry, position, frame, event, elapsed_ms}`, then `{next}` |
 | `show` | `{entry, parent, position, event, elapsed_ms, run_time_ms, run_usage, workspace, calls, next, request}` |
@@ -132,11 +134,11 @@ command.
 
 | Status | Means | What to do |
 | --- | --- | --- |
-| 0 | success; `run`: the agent is over, returned or stopped; `grade`: a pass | |
-| 1 | `run`: the agent failed; `grade`: a fail | look at the log |
-| 2 | `grade`: an error: the grader did not finish, or printed no complete TAP | look at the grader's answer |
-| 3 | `run`: the run waits for a person | `reply` or `tell`, then `run` from the new entry |
-| 4 | `run`: a limit paused it | `run` from the entry it printed last |
+| 0 | success; `resume`: no call runs, and the last one returned or was stopped; a grader's: a pass | |
+| 1 | `resume`: the last call failed; a grader's: a fail | look at the log |
+| 2 | `resume`: the last call was a grader, and its verdict is an error: it did not finish, or printed no complete TAP | look at the grader's command |
+| 3 | `resume`: a call waits for a person | `reply` or `tell`, then `resume` from the new entry |
+| 4 | `resume`: a limit paused it | `resume` from the entry it printed last |
 | 64 | `usage`: the command line does not parse | fix the command line |
 | 65 | `input`: it names something not there, in the wrong condition, or malformed | fix the request |
 | 69 | `environment`: the machine lacks docker, an image, restic or an API key | fix the machine |
@@ -147,8 +149,8 @@ command.
 - **The five from `input` on are the classes of `Alaya.Error`** (`docs/llm-api.md` §7).
 - **A failure prints** `error: MESSAGE` on stderr, or with `--json` one object:
   `{"error": CLASS, "message": …}`, with `status` and `retry_after_ms` for an HTTP failure.
-- **A failed `run` keeps every entry it appended.** The operation it was carrying out is asked
-  for again by the next `run` from the entry it printed last.
+- **A failed `resume` keeps every entry it appended.** The operation it was carrying out is
+  asked for again by the next `resume` from the entry it printed last.
 - **One writer at a time.** A command that writes holds the directory's lock from start to
   end, and a second writer is refused at once, with 75 and the holder's pid. Commands that only
   read take no lock, so a run can be watched while it grows. Work in parallel goes to several
@@ -161,56 +163,77 @@ command appends.
 
 ### `new`
 
-Creates a run: its workspace, the opening of its agent, and its task.
+Creates a run: its root, the workspace, where the run waits for a program to be called.
 
 ```sh
-alaya new ./project --task-file TASK.txt --agent mini-swe --model gpt-6-luna --image my-task:1
+alaya new ./project
+alaya new --image swebench/sweb.eval.django-11099:latest --workdir /testbed
 ```
 
-![new: a directory, an image and a task become the first three entries](figures/cli/new.svg)
+![new: a directory becomes the root of a run](figures/cli/new.svg)
 
-- **The task** is `--task TEXT` or `--task-file FILE`, one of the two. A file is read as it is
-  and must be UTF-8; stdin is `/dev/stdin`.
-- **The agent and the model** are named: `--agent mini-swe` or `mini-vero`, and `--model` by
-  the model's ID as its creator publishes it. Their defaults are in code, and there are no
-  configuration files.
-- **`--set PATH=VALUE`** overrides one field, and repeats. `PATH` starts with `agent.` or
-  `model.` (`agent.executor.timeout_seconds=60`, `model.params.reasoning_effort=high`).
-  `VALUE` is read as JSON when it parses, and as a string otherwise. An unknown field or a value
-  of the wrong type is an input error.
-- **The image** is resolved to a digest and recorded: every command of the run runs in it. The
-  workspace is mounted at `--workdir`, `/workspace` unless given: an absolute path other than
-  `/`, `/grader` and `/alaya/outputs`.
-- **Without `PROJECT`**, the image's own workdir is copied out as the workspace the run starts
-  from. So task images that hold their project in place, such as SWE-bench's at `/testbed`,
-  work as they are.
-- **No grader.** A grader is given to `grade`.
+- **The workspace** is `PROJECT`, a directory, or the directory `--workdir` of the image
+  `--image`, copied out of it; by default the image's own `WORKDIR`. So task images that hold
+  their project in place, such as SWE-bench's at `/testbed`, work as they are.
+- **No program.** A run calls its programs after it is created, with `call`.
 
-### `run`
+### `call`
 
-Replays the log that ends at `ENTRY` and drives it on, until the agent is over, the run waits
-for a person, or it reaches a limit.
+Calls a program after `ENTRY`, where no call runs: an agent, or a grader. `resume` then drives it.
 
 ```sh
-alaya run 4f2c8b --provider apiyi --samples 50 --time-budget 3600
+alaya call 3f2a9c mini-swe --set model=gpt-6-luna --set-file task=TASK.txt --image my-task:1
+alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grade.py'
 ```
 
-![run: entries are appended until the agent is over, the run waits, or a limit pauses it](figures/cli/run.svg)
+![call: a call of a program is appended, and the next resume opens it in a frame of its own](figures/cli/call.svg)
 
-- **`--provider NAME`** says who serves the run's model, for this invocation alone, and is
-  needed only when the run samples. A provider that cannot serve the model as the run recorded
+- **`PROGRAM`** is one of the catalog: `mini-swe` and `mini-vero`, the agents
+  (`docs/miniswe.md`, `docs/minivero.md`), or `grader` (`docs/log-schema.md` §4). Their defaults
+  are in code, and there are no configuration files.
+- **`--set PATH=VALUE`** overrides one field of the program's configuration, and repeats
+  (`executor.timeout_seconds=60`, `command='make check'`). `VALUE` is read as JSON when it
+  parses, and as a string otherwise. An unknown field or a value of the wrong type is an input
+  error.
+- **`--set-file PATH=FILE`** sets one field to the text of a file, as it is (`task=TASK.md`).
+  The file must be UTF-8; stdin is `/dev/stdin`. Settings of both flags apply in the
+  order given.
+- **Every program is called the same way:** its configuration and its image. An agent's
+  model and task are fields of its configuration. `--set model=NAME` names the model by its ID
+  as its creator publishes it, with the defaults of the model table, and a later setting
+  changes one of its fields (`model.params.reasoning_effort=high`). `--set task=TEXT` or
+  `--set-file task=FILE` gives the task. A grader has neither field.
+- **The image** is resolved to a digest and recorded: every command of the call runs in a
+  container of it, its own. The workspace is mounted at `--workdir`, `/workspace` unless given:
+  an absolute path other than `/` and `/alaya/outputs`.
+- **One call at a time.** A call is refused where another runs, or where one is asked for
+  already and not yet made; `stop` ends a call that runs.
+
+### `resume`
+
+Replays the log that ends at `ENTRY` and drives it on, until no call runs, a call waits for a
+person, or it reaches a limit.
+
+```sh
+alaya resume 4f2c8b --provider apiyi --samples 50 --time-budget 3600
+```
+
+![resume: entries are appended until no call runs, a call waits, or a limit pauses it](figures/cli/resume.svg)
+
+- **`--provider NAME`** says who serves the models of the calls, for this invocation alone, and
+  is needed only when a call samples. A provider that cannot serve a model as its call recorded
   it is refused before any request (`docs/llm-api.md` §6). `dgx` also takes `--url` and `--port`.
-- **`--samples N`** pauses before the agent's `N+1`th response of this invocation, and
-  **`--time-budget S`** once the run's time along its log is spent. Neither is recorded. A
-  paused run is driven on by a later `run`, and a person may append there first.
+- **`--samples N`** pauses before the `N+1`th response of this invocation, and
+  **`--time-budget S`** once the run's time along its log is spent. Neither is recorded, and
+  both hold every call, a grader's too. A paused run is driven on by a later `resume`, and a
+  person may append there first.
 - **Containers** run with no network unless `--network NAME` gives one, and as
-  `--container-user UID:GID`. A user or a network docker does not know stops `run` with an
-  environment error (69), and nothing is logged.
+  `--container-user UID:GID`. A user or a network docker does not know, or an image that cannot
+  start, stops `resume` with an environment error (69), and nothing is logged.
 - **A log that is no trace of its run's program** is refused (65): one edited by hand, or
-  written by another version of the agent.
-- **An interrupted `grade`** is finished by `run`. `grade` records the grader in the log
-  before running it, so if it is interrupted in between, `run` at the last entry runs that
-  grader and records its verdict.
+  written by another version of an agent; `rebase` copies the part that is.
+- **The exit status** is how the last call ended: 0 when it returned or was stopped, 1 when it
+  failed, and, for a grader, by its verdict: 0 a pass, 1 a fail, 2 an error.
 
 ### `tell`
 
@@ -222,8 +245,8 @@ alaya tell 4f2c8b:140 'The parser is fine; look at the evaluator.'
 
 ![tell: a message is appended after an entry, as a fork where the log already goes on](figures/cli/tell.svg)
 
-The agent reads it at its next read of its inbox, which MiniSwe makes at the start of every
-round. It is refused once the agent is over, where no one would read it.
+The call running reads it at its next read of its inbox, which MiniSwe makes at the start of
+every round. It is refused where no call runs, where no one would read it.
 
 ### `commit`
 
@@ -249,10 +272,10 @@ alaya waiting                              # every question that waits, with its
 alaya reply -- 4f2c8b 2                    # the second candidate of a choice
 alaya reply -- 4f2c8b none_of_above        # no candidate is right: an answer
 alaya reply --unavailable -- 4f2c8b        # the person cannot answer: not an answer
-alaya run REPLY --provider apiyi           # go on from the entry reply printed
+alaya resume REPLY --provider apiyi        # go on from the entry reply printed
 ```
 
-![reply: a reply is appended where a question waits, and the next run goes on from it](figures/cli/reply.svg)
+![reply: a reply is appended where a question waits, and the next resume goes on from it](figures/cli/reply.svg)
 
 | Question | `TEXT` |
 | --- | --- |
@@ -268,39 +291,38 @@ alaya run REPLY --provider apiyi           # go on from the entry reply printed
 
 ### `stop`
 
-Ends the agent at an entry.
+Ends the call running at an entry.
 
 ```sh
 alaya stop 4f2c8b --reason 'wrong approach'
 ```
 
-![stop: a stop is appended, and the agent is over](figures/cli/stop.svg)
+![stop: a stop is appended, and the call is over](figures/cli/stop.svg)
 
-Every frame of the agent ends there (`docs/agent-api.md` §3.7). `grade` does this itself where
-the agent still runs.
+Every frame of the call ends there (`docs/agent-api.md` §3.7), and the run waits for the next
+call. A stop is refused where no call runs.
 
-### `grade`
+### Grading
 
-Grades the run as it stood at `ENTRY`, and exits with the verdict: 0 a pass, 1 a fail, 2 an
-error.
+A grader is a program like an agent: grading a point of a run is calling the grader there.
 
 ```sh
-alaya grade 4f2c8b --grader 'python3 /grader/grade.py' --grader-input ./hidden      # the end of a run
-alaya grade 4f2c8b:140 --grader 'python3 /grader/grade.py' --grader-input ./hidden  # an earlier point
-alaya grade 4f2c8b --grader 'sh /grader/strict.sh' --grader-input ./hidden          # the end again, by another
+alaya stop 4f2c8b:140 --reason 'to grade this point'      # where the agent still runs
+alaya call STOPPED grader --image my-grader:1 --set command='python3 /grader/grade.py'
+alaya resume CALLED                                       # exits 0 pass, 1 fail, 2 error
 ```
 
-![grade: a point where the agent still runs is stopped on a fork, a grader is assigned, and it runs](figures/cli/grade.svg)
+![grading: the agent is stopped, the grader is called, and resume runs its command and returns the verdict](figures/cli/grade.svg)
 
-- **`--grader CMD`** is the grader's command, which prints TAP. **`--grader-input DIR`** is
-  its trusted files, mounted read-only at `/grader`. **`--grader-image IMAGE`** is the image it
-  runs in, by default the run's. **`--grader-timeout S`** is 900 unless given, 0 for none.
-- **No provider is needed**: the agent does not go on. The grader's container never has a
-  network.
-- **Grading again forks.** Where the log at `ENTRY` already has a grader, the new one is
-  assigned on a fork, and `tree` shows both verdicts.
+- **The grader's command** prints TAP on stdout; `timeout_seconds` is 900 unless set,
+  0 for none. It runs in a container of its own image, on the workspace the log has reached.
+- **Its trusted files** — the hidden tests, a reference — are in its image, which the call pins
+  by digest, so the verdict is reproducible from the log alone.
+- **No provider is needed**: the grader samples no model.
+- **Grading a point again** with another grader is a fork from the entry before the first was
+  called, or a second call after the first's end.
 
-What a grader is given, and how its output becomes a verdict, is `docs/log-schema.md` §4.
+What a grader runs on, and how its output becomes a verdict, is `docs/log-schema.md` §4.
 
 ### `comment`
 
@@ -333,25 +355,25 @@ Then it drops the snapshots that only the deleted entries named.
 Continues a log with a revised version of its agent. Two versions take part: the **original
 agent**, which wrote the log that ends at `ENTRY`, and the **revised agent**, its current version.
 `rebase` copies the log into a new data directory, `DIR`, up to the first event where the two
-agents differ, and `run` goes on from there with the revised agent.
+agents differ, and `resume` goes on from there with the revised agent.
 
 ```sh
 tip=$(alaya rebase 4f2c8b ../v2 | tail -n 1 | cut -d' ' -f1)
-alaya run "$tip" --data ../v2 --provider apiyi
+alaya resume "$tip" --data ../v2 --provider apiyi
 ```
 
 ![rebase: the log, up to where the two agents differ, is copied into a new data directory, where the revised agent goes on](figures/cli/rebase.svg)
 
 The revised agent cannot go on in the original data directory: every log of a data directory is
-written by one agent, and `run` refuses a log its agent did not write (`docs/agent-api.md` §4).
+written by one agent, and `resume` refuses a log its agent did not write (`docs/agent-api.md` §4).
 
 - **The copy** is the revised agent replayed against the log: an answer it asks for again is
   taken from the log, and a mark it makes is checked against the log's.
 - **Comments** of the log are left out. The revised agent's are written before the events they
-  precede, as `run` writes them.
+  precede, as `resume` writes them.
 - **Notices and stops after the copy's end** are left out, and listed.
-- **`--set PATH=VALUE`** changes the revised agent's configuration, as on `new`. With another
-  model, the copy ends at the first sample.
+- **`--set PATH=VALUE`** and **`--set-file PATH=FILE`** change the configuration of every call
+  they fit, as on `call`; one that fits no call is refused. With another model, a call's copy ends at its first sample.
 - **`DIR`** has a restic repository of its own, with copies of the snapshots, and the model cache
   as hard links (`docs/log-schema.md` §6). Its last entry is a comment that names the source.
 - **`DIR` must not exist**, and is made whole or not at all. The source is only read.
@@ -376,15 +398,16 @@ alaya waiting --json              # the questions that wait, for a script or a p
 
 ![What tree, log, show and waiting each read of the forest](figures/cli/read.svg)
 
-- **`tree`** prints each run, then every stretch of entries with no fork as one line: its first
-  and last entry, its positions, its last event, and at the end of a log how the run stands:
-  `done: pass 48/48`, `stopped: fail 12/48`, `waits for a reply: …`, `next: …`.
+- **`tree`** prints each run, named by its first call, then every stretch of entries with no
+  fork as one line: its first and last entry, its positions, its last event, and at the end of a
+  log how the run stands: how its last call ended, `done: pass 48/48`, `stopped: to grade`, or
+  `waits for a reply: …`, `next: …`.
 
   ```
   3f2a9c1b8e7d  root  mini-swe, gpt-6-luna
     06d9ae75ae21..8cb007600701  1-40  sample → bash make test
-      07d75e6a71ee..bcef7c505d44  41-212  return pass 41/48  [done: pass 41/48]
-      9a11c0de42f7..53be0f1a2c90  41-260  return pass 48/48  [done: pass 48/48]
+      07d75e6a71ee..bcef7c505d44  41-216  return pass 41/48  [done: pass 41/48]
+      9a11c0de42f7..53be0f1a2c90  41-264  return pass 48/48  [done: pass 48/48]
   ```
 
 - **`log`** prints the lines of §2, with the run's time so far.
@@ -403,9 +426,8 @@ alaya diff 4f2c8b:40 4f2c8b          # what changed between two entries
 
 ![The workspace at an entry, and what ls, cat, checkout and diff do with it](figures/cli/workspace.svg)
 
-- **The workspace at an entry** is the version its log has reached there. At the answer of a
-  grader's program it is the checkout as the grader left it, which is how a grader's report is
-  read.
+- **The workspace at an entry** is the version its log has reached there. After a grader's
+  command it is the workspace as the grader left it, which is how a grader's report is read.
 - **`ls` and `cat` read the snapshot directly**, without restoring it. A path is relative to
   the workspace's root, with no `..`. A symbolic link is listed, and never followed.
 - **`cat --json` previews anything**: a UTF-8 file of up to 1 MiB is `text` with its `content`,
@@ -432,10 +454,10 @@ alaya html report.html --hide .venv,__pycache__
 ### `config` and `help`
 
 ```sh
-alaya config                                                  # every agent, model and provider
-alaya config --agent mini-vero --model gpt-6-luna --set agent.mode=codeproof   # what new would record
-alaya help grade                                              # what grade takes
+alaya config                                                  # every program, model and provider
+alaya config --program mini-vero --set model=gpt-6-luna --set mode=codeproof   # what call would record
+alaya help call                                               # what call takes
 ```
 
-`config` takes no `--data` and creates nothing. With `--agent` or `--model` it prints exactly
-the configuration `new` would record with the same options.
+`config` takes no `--data` and creates nothing. With `--program` it prints exactly the
+configuration `call` would record with the same settings.

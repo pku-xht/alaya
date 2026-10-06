@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 78" width="920" height="78">
+<title>resume: entries are appended after the given one until no call runs, a call waits, or a limit pauses it</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
+<rect width="920" height="78" fill="#fff"/>
+<circle cx="15" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="19" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="23" cy="36.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M26,36.5h12"/>
+<rect x="38.5" y="24.5" width="111" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(46,30) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
+<text x="65" y="40.5" class="c">call mini-swe</text>
+<text x="94.5" y="15" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M94.5,18V24"/>
+<path class="a" d="M150,36.5h12"/>
+<rect x="162.5" y="24.5" width="66" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(170,30) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="189" y="40.5" class="c">inbox</text>
+<path class="a" d="M229,36.5h12"/>
+<rect x="241.5" y="24.5" width="118" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(249,30) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="268" y="40.5" class="c">open mini-swe</text>
+<path class="a" d="M360,36.5h12"/>
+<rect x="372.5" y="24.5" width="76" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(380,30) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="399" y="40.5" class="c">sample</text>
+<path class="a" d="M449,36.5h12"/>
+<circle cx="464" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="468" cy="36.5" r="0.9" fill="#a3abb5"/>
+<circle cx="472" cy="36.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M489.5,3.5H485.5V69.5H489.5"/>
+<rect x="495.9" y="3" width="77.6" height="18" rx="9" fill="#dcf1e2"/><text x="534.7" y="16" class="s n" style="fill:#1c5c33" text-anchor="middle">no call runs</text>
+<text x="581.5" y="16.5" class="s">exit 0 or 1; a grader: by verdict</text>
+<rect x="495.6" y="27" width="112.9" height="18" rx="9" fill="#fbe9cf"/><text x="552.1" y="40" class="s n" style="fill:#7a4a08" text-anchor="middle">waits for a person</text>
+<text x="616.5" y="40.5" class="s">exit 3</text>
+<rect x="496.4" y="51" width="104.1" height="18" rx="9" fill="#eceef1"/><text x="548.4" y="64" class="s n" style="fill:#454b53" text-anchor="middle">paused at a limit</text>
+<text x="608.5" y="64.5" class="s">exit 4</text>
+</svg>

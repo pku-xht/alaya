@@ -64,7 +64,7 @@ the fork stopped at 24:
   28  []  returned: fail 1/4
 the run itself is as it was: true
 the agent cannot go on after a stop: mismatch at 25
-a stop once the agent is over: mismatch at 44
+a stop once the agent is over: log the failure of []: stopped
 a reply when no question waits: false
 a reply of another form than asked: false
 that the person cannot answer: true

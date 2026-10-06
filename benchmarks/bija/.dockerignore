@@ -1,0 +1,3 @@
+# What a local run of the reference suite leaves is no part of the grader's input.
+**/__pycache__
+**/.pytest_cache

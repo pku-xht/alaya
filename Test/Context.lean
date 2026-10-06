@@ -61,12 +61,12 @@ private def refusing (answers : Array Chat.Response) : IO Model := do
 /-- What MiniSwe does after its task, `task`, for a model of `context` tokens: sample, or end
 before it. -/
 private def afterTask (context? : Option Nat) (task : String) (config : Config := {}) : String :=
-  match (testConfig config.toJson).run { testModelSpec with contextTokens? := context? } with
+  match runOfConfig "mini-swe" config.toJson { testModelSpec with contextTokens? := context? } with
   | .error problem => problem
   | .ok run =>
-    let log := settle run (opening run task)
+    let log := settle run (opening task)
     match next run log with
-    | .ask { op := .sample _, .. } => "sample"
+    | .ask { op := .sample .., .. } => "sample"
     | _ => agentStatus log
 
 def suite : Suite := Testing.suite "context" #[
@@ -137,9 +137,9 @@ def suite : Suite := Testing.suite "context" #[
     assertEqual "bounded" (afterTask (some 9000) long) "ContextExceeded"
     assertEqual "roomy" (afterTask (some 100000) long) "sample"
     assertEqual "unknown context" (afterTask none long) "sample"
-    assertEqual "MiniVero too" (match (testConfig (.mkObj [("name", "mini-vero")])).run
+    assertEqual "MiniVero too" (match runOfConfig "mini-vero" (.mkObj [])
         { testModelSpec with contextTokens? := some 9000 } with
-      | .ok run => agentStatus (settle run (opening run long))
+      | .ok run => agentStatus (settle run (opening long))
       | .error problem => problem) "ContextExceeded",
 
   iotest "a provider's refusal of a too-long request is recognised, in either API's words" do
@@ -159,30 +159,31 @@ def suite : Suite := Testing.suite "context" #[
     | _ => throw <| IO.userError "a failed Responses overflow is not one",
 
   test "a refused request ends the agent with ContextExceeded, and the draw it took is not lost" do
-    let executor : Executor := { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 }
-                                 uname := pure default }
+    let executor : Executor := { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 } }
     match miniRun with
     | .error problem => fail problem
     | .ok run =>
       let rt ← runtime executor (some (← refusing #[response "c1"]))
       let tip ← start rt run
       let (ended, stop) ← assertOk <| Driver.drive rt run tip
-      match stop with
-      | .over (.returned value) _ =>
+      check (stop matches .idle) "the agent is over"
+      let log ← logAt rt ended
+      match agentResult log with
+      | some (.ok value) =>
         assertEqual "the agent's outcome" value.compress
           (outcome "ContextExceeded" (reason? := some
             "the provider refused the request: This model's maximum context length is 100 tokens.")).compress
       | _ => fail "the agent ends with an outcome, as it does before a request it knows is too long"
-      let log ← logAt rt ended
       assertEqual "the agent's status" (agentStatus log) "ContextExceeded"
       let refused? := log.findIdx? fun
-        | .answered _ (.sample _) (.error "This model's maximum context length is 100 tokens.") => true
+        | .answered _ (.sample ..) (.error "This model's maximum context length is 100 tokens.") => true
         | _ => false
       let some refused := refused? | fail "the refusal is not logged as the answer, in the provider's words"
       -- The refusal took no draw: from the entry before it, the next sample is its first draw.
       let forest ← assertOk rt.store.forest
       let before := (forest.path ended)[refused - 1]!
-      let again := { rt with model? := some (← refusing #[response "c2", { content? := some "x" }]) }
+      let again ← runtime executor (some (← refusing #[response "c2", { content? := some "x" }]))
+      let again := { again with store := rt.store, workspaces := rt.workspaces }
       let (_, _) ← assertOk <| Driver.drive again run before { samples? := some 1 }
       let forest ← assertOk rt.store.forest
       let mut answered := 0

@@ -16,19 +16,12 @@ open Lean (Json)
 
 /-- An executor that answers every command with `ok`, and runs nothing. -/
 private def echoing : Executor :=
-  { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 }, uname := pure testUname }
-
-/-- The run of an agent whose program is `body`. -/
-private def runOf (body : Program Agent Json) : Run Agent :=
-  { routines := fun name => if name == agentRoutine then some fun _ => body else none
-    call := ⟨agentRoutine, (testConfig testAgent).toJson⟩
-    after := grading }
+  { exec := fun _ _ _ _ => pure { output := "ok", exitCode? := some 0 } }
 
 /-- An agent that waits for its task and runs `commands`, one after another, reading its inbox
 after each; when `comments`, it says which command it runs before each. -/
-private def agent (commands : Array String) (comments : Bool := false) : Run Agent :=
-  runOf do
-    let _ ← await fun _ notice => notice matches .said _
+private def agent (commands : Array String) (comments : Bool := false) : Routine Agent :=
+  runOf fun _ => do
     for command in commands do
       if comments then comment s!"running {command}"
       let _ ← exec command
@@ -48,7 +41,7 @@ private def comments (log : Log Agent) : Array String :=
   log.filterMap fun | .commented text => some text | _ => none
 
 /-- Drives `run` from a new log until it is over. -/
-private def driven (run : Run Agent) : TestM (Driver.Runtime × Hash × Log Agent) := do
+private def driven (run : Routine Agent) : TestM (Driver.Runtime × Hash × Log Agent) := do
   let (rt, last, _) ← drive run echoing (← scriptedModel #[])
   pure (rt, last, ← logAt rt last)
 
@@ -60,35 +53,40 @@ private def answerOf (log : Log Agent) (command : String) : TestM Nat := do
     | fail s!"no answer to {command}"
   pure position
 
-/-- A run of MiniSwe rebased with another model, and with a field of the agent changed. -/
-private def reconfigured (run : Run Agent) : TestM Unit := do
-  let (rt, last, _) ← drive run echoing (← scriptedModel #[
-    responseWith #[call "c1" "bash" "echo one"], responseWith #[submitCall "s" "done"]])
+/-- A run of MiniSwe, as Alaya runs it, rebased with another model, and with a field of the
+agent changed. -/
+private def reconfigured : TestM Unit := do
+  let run := session
+  let rt ← runtime echoing (some (← scriptedModel #[
+    responseWith #[call "c1" "bash" "echo one"], responseWith #[submitCall "s" "done"]]))
+  let project := (← scratch) / "project"
+  IO.FS.createDirAll project
+  let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
+  let swe : PersonCall := { call := ⟨"mini-swe", ← assertOk <| Agents.Catalog.resolve "mini-swe"
+      #[{ path := ["model"], value := "gpt-oss-120b" }, { path := ["task"], value := "t" }]⟩ }
+  let (called, _) ← assertOk <| Driver.append rt.store run root swe.event
+  let (last, _) ← assertOk <| Driver.drive rt run called
   let log ← logAt rt last
   let setting (text : String) : TestM Settings.Setting := match Settings.parse text with
     | .ok setting => pure setting
     | .error problem => fail problem
   let rebaseWith (settings : Array Settings.Setting) : TestM (Rebased Agent) := do
-    let (recorded, _) ← assertOk <| Rebase.configure log #[]
-    let (config, model) ← assertOk <| Rebase.configure log settings
-    match config.run model with
-    | .ok run => pure (Rebase.plan run log (recorded.model == config.model))
-    | .error problem => fail problem
+    pure (rebase run (← assertOk <| Rebase.reconfigure log settings))
   -- A field of the agent that changes no request: the whole log holds, under the new opening.
-  let tuned ← rebaseWith #[← setting "agent.context_reserve=7"]
+  let tuned ← rebaseWith #[← setting "context_reserve=7"]
   check tuned.divergence?.isNone "the whole log holds"
-  let some (Event.opened _ opening, _) := tuned.log[1]? | fail "the opening of the agent"
-  let reserve := (opening.arguments.getObjVal? "agent" >>= (·.getObjVal? "context_reserve")).toOption
+  let some opening := tuned.log.findSome? fun | (.opened ⟪"mini-swe"⟫ opened, _) => some opened | _ => none
+    | fail "the opening of the agent"
+  let reserve := (opening.arguments.getObjVal? "context_reserve").toOption
   assertEqual "the new configuration" (reserve.map (·.compress)) (some "7")
-  -- Another model's parameters: the first response is no longer the model's.
+  -- Another model's parameters: a sample names its model, so the first is another operation.
   let other ← rebaseWith #[← setting "model.params.reasoning_effort=high"]
   let some divergence := other.divergence? | fail "the log diverges"
-  check (divergence.found matches .answered _ (.sample _) _) "at the first response"
-  check divergence.expected?.isNone "which no agent is to take"
-  check (contains (Rebase.summary other log.size) "another model") (Rebase.summary other log.size)
-  -- A field this build does not know is the caller's to fix.
-  assertError "an unknown field" (Rebase.configure log #[← setting "agent.no_such_field=1"]) fun
-    | .input _ => true
+  check (divergence.found matches .answered _ (.sample ..) _) "at the first response"
+  check (divergence.expected matches .ask { op := .sample { params := .obj _, .. } _, .. }) "where the agent samples the other"
+  -- A field no call takes is the caller's to fix.
+  assertError "an unknown field" (Rebase.reconfigure log #[← setting "no_such_field=1"]) fun
+    | .input message => contains message "fits no call"
     | _ => false
 
 def suite : Suite := Testing.suite "rebase" #[
@@ -121,8 +119,8 @@ def suite : Suite := Testing.suite "rebase" #[
     let some hint := new.findIdx? (· matches .arrived (.said "a hint")) | fail "the message"
     assertEqual "the message, one further on" hint ((log.findIdx? (· matches .arrived (.said "a hint"))).map (· + 1) |>.getD 0)
     check (new.any fun | .heard _ notices => notices == #[hint] | _ => false) "the read takes it there"
-    assertEqual "a trace of the revised agent, to the same end" (Render.nextSummary none (agentEnd? new) (next revised new))
-      (Render.nextSummary none (agentEnd? log) (next original log))
+    assertEqual "a trace of the revised agent, to the same end" (Render.nextSummary none ((lastCall? new).bind (·.2)) (next revised new))
+      (Render.nextSummary none ((lastCall? log).bind (·.2)) (next original log))
     -- The way back: every comment of the log is left out, whoever wrote it.
     let (rt, last, commented) ← driven revised
     let (noted, _) ← assertOk <| Notices.comment rt.store last "by hand"
@@ -137,7 +135,7 @@ def suite : Suite := Testing.suite "rebase" #[
     let rebased := rebase changed log
     let some divergence := rebased.divergence? | fail "the log diverges"
     assertEqual "at the second command" divergence.position (← answerOf log "echo two")
-    check (divergence.expected? matches some (.ask { op := .exec "echo TWO" _, .. })) "where the agent runs another"
+    check (divergence.expected matches .ask { op := .exec "echo TWO" _, .. }) "where the agent runs another"
     assertEqual "the log before it" (json (rebased.log.map (·.1))) (json (log.extract 0 divergence.position))
     -- Written into a new store, with its snapshots copied into new workspaces.
     let entries ← assertOk <| rt.store.entries (← assertOk rt.store.forest) last
@@ -154,7 +152,7 @@ def suite : Suite := Testing.suite "rebase" #[
       assertOk <| workspaces.materialize id ((← scratch) / "check")
     let rt' := { rt with store, workspaces }
     let (end', stop) ← assertOk <| Driver.drive rt' changed tip
-    check (stop matches .over (.returned _) none) "the new agent is over"
+    check (stop matches .idle) "the new agent is over"
     let goneOn ← logAt rt' end'
     let (_, _, fresh) ← driven changed
     assertEqual "the log the new agent makes from the start, and the note"
@@ -171,12 +169,10 @@ def suite : Suite := Testing.suite "rebase" #[
     let rebased := rebase (agent #["echo one", "echo TWO"]) (← logAt rt stopped)
     assertEqual "the message and the stop" (rebased.dropped.map (·.1)) #[two + 1, two + 2]
     check (Rebase.droppedLines rebased |>.all (contains · "left out")) "each in a line"
-    check (rebased.log.any fun | (Event.arrived (.said "t"), _) => true | _ => false) "the task, before it, is kept",
+    check (rebased.log.any fun | (Event.arrived (.called ..), _) => true | _ => false) "the call, before it, is kept",
 
   test "a response is not taken for another model, and a setting over the configuration is the new log's" do
-    match miniRun {} with
-    | .ok run => reconfigured run
-    | .error problem => fail problem,
+    reconfigured,
 
   test "the cache is shared as links, and a write in either directory leaves the other as it was" do
     let source := (← scratch) / "cache"
