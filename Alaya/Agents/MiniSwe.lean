@@ -421,7 +421,7 @@ def noticeMessage : Notice → Option Chat.Message
     some (.user s!"<intervention>\nA person sent you a message while you were paused.\n{message}\n</intervention>")
   | .changed _ summary =>
     some (.user s!"<intervention>\nA person changed the workspace while you were paused:\n{summary}\n</intervention>")
-  | .replied .. | .called _ => none
+  | .replied .. | .called .. => none
 
 /-- The conversation with what has arrived since the last read of the inbox. -/
 def listen (history : History) : Computation Agent History := do

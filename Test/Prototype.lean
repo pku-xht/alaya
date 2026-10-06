@@ -147,7 +147,7 @@ def noticeText : Notice → String
   | .said message => message
   | .changed _ summary => s!"The workspace was changed: {summary}"
   | .replied _ reply => render reply
-  | .called call => s!"{call.name} was called"
+  | .called call _ => s!"{call.name} was called"
 
 def askUser : Tool where
   name := "ask_user"
@@ -375,7 +375,7 @@ def describe (o : Frame → List Nat) : Event Agent → String
   | .arrived (.said message) => s!"-  arrived: said {message}"
   | .arrived (.changed workspace _) => s!"-  arrived: changed → {workspace.hex}"
   | .arrived (.replied to answer) => s!"-  arrived: replied to {o to}: {render answer}"
-  | .arrived (.called call) => s!"-  arrived: called {call.name}"
+  | .arrived (.called call _) => s!"-  arrived: called {call.name}"
   | .commented text => s!"-  commented: {text}"
   | .answered frame (.external command image ..) (.ok (.external ran)) =>
     s!"{o frame}  answered: external {command}, in {image} → exit {ran.exit}, {ran.checkout.hex}"

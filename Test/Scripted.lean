@@ -77,18 +77,25 @@ def answeringUname (executor : Executor) : Executor :=
       if argv[0]? == some Agents.Tools.Uname.command then pure { output := testUnameOutput, exitCode? := some 0 }
       else executor.exec config workDir argv display }
 
-/-- The arguments of the test's agent, `agent`, on `task`, with the test model, in
-`environment`. -/
-def testArguments (task : String := "t") (environment : Environment := testEnvironment) : ProgramArguments :=
-  { config := .mkObj [("model", testModelSpec.toJson), ("task", task)], environment? := some environment }
+/-- The configuration of the test's agent, `agent`, on `task`, with the test model. -/
+def testConfig (task : String := "t") : Json :=
+  .mkObj [("model", testModelSpec.toJson), ("task", task)]
 
-/-- A person's call of the test's agent on `task`. -/
-def testCall (task : String := "t") (environment : Environment := testEnvironment) : RoutineCall :=
-  ⟨"agent", (testArguments task environment).toJson⟩
+/-- The call of the test's agent on `task`. -/
+def testCall (task : String := "t") : RoutineCall := ⟨"agent", testConfig task⟩
+
+/-- A person's call: the routine called, and where its commands run. -/
+structure PersonCall where
+  call : RoutineCall
+  environment : Environment := testEnvironment
+
+/-- The arrival of a person's call. -/
+def PersonCall.event (person : PersonCall) : Event Agent :=
+  calling person.call.name person.call.arguments person.environment
 
 /-- The notice that calls the test's agent on `task`. -/
 def callAgent (task : String := "t") (environment : Environment := testEnvironment) : Event Agent :=
-  (testCall task environment).event
+  { call := testCall task, environment : PersonCall }.event
 
 /-- The task a configuration gives, if any. -/
 def taskOf (config : Json) : Option String :=
@@ -99,9 +106,7 @@ naming routines in `scope`. Every program of the catalog is there too, the grade
 def runWith (body : Json → Computation Agent Json) (scope : Scope Agent := .empty) : Routine Agent :=
   { session with scope := ⟨fun name =>
       if name == "agent" then
-        some { name, scope, body := fun arguments => match ProgramArguments.fromJson arguments with
-          | .ok arguments => body arguments.config
-          | .error problem => .fail problem }
+        some { name, scope, body }
       else Agents.Catalog.scope.find name⟩ }
 
 /-- A run of Alaya whose program `agent` is `make`'s computation for the call's task, its calls
@@ -190,14 +195,14 @@ def logAt (rt : Driver.Runtime) (hash : Hash) : TestM (Log Agent) := do
 
 /-- A person's call of the grader with `command`, in `image`. -/
 def graderCall (command : String) (image : String := recordedImage) (timeoutSeconds : Nat := 900)
-    (workdir : String := recordedWorkdir) : RoutineCall :=
-  programCall "grader" (.mkObj [("command", command), ("timeout_seconds", timeoutSeconds)])
-    { testEnvironment with image, workdir }
+    (workdir : String := recordedWorkdir) : PersonCall :=
+  { call := ⟨"grader", .mkObj [("command", command), ("timeout_seconds", timeoutSeconds)]⟩
+    environment := { image, workdir } }
 
 /-- Grades the point `tip` of a run with the grader `call`, as a person does: stops the call
 running there, if one is, calls the grader, and drives it to its end. Gives the entry the log
 ends at, and the verdict. -/
-def grade (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (call : RoutineCall) :
+def grade (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (call : PersonCall) :
     TestM (Hash × Json) := do
   let mut tip := tip
   if Driver.running (next run (← logAt rt tip)) then

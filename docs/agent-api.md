@@ -588,16 +588,22 @@ def workflow : Routine.Typed Agent Task String := routine "workflow" fun task =>
       failed := failed + 1
   return s!"{plan.steps.size} steps, {failed} failed"
 
-/-- The agent: it waits for its task, and runs the workflow on it. -/
-def agent : Computation Agent Json := do
-  let notices ← await fun _ notice => notice matches .said _
-  let goal := match notices with
-    | .said goal :: _ => goal
-    | _ => ""
-  return toJson (← workflow.call { goal })
-
+/-- The routines the agent calls, defined together: each calls the others by name. -/
 def scope := Scope.fix fun scope =>
   #[lookup.within scope, planner.within scope, step.within scope, workflow.within scope]
+
+/-- The agent's configuration: what a person calls it with. -/
+structure Config where
+  task : String
+  deriving ToJson, FromJson
+
+/-- The agent: a routine, the workflow on the task of its configuration, that calls the
+routines of `scope`. -/
+def agent : Routine Agent :=
+  (routine "agent" fun (config : Config) => workflow.call { goal := config.task }).within scope
+
+/-- The run: the run's routine, whose scope has the agent, so that a person's call of it finds it. -/
+def run : Routine Agent := { session with scope := Scope.of #[agent] }
 ```
 
 *The calls made when this agent runs, as a tree of frames.*
@@ -788,24 +794,25 @@ waits again. Its scope is the catalog.
 ```lean
 session : Routine Agent                             -- wait for a call, make it, wait again
 
-structure ProgramArguments where                    -- what a program is called with
-  config       : Json                -- its complete configuration: an agent's model and task
-  environment? : Option Environment  -- the pinned image, and the workdir;
-                                     --   a person's call names it, a sub-agent's does not
+structure Environment where                         -- where a person's call's commands run
+  image   : String                                  -- the pinned image
+  workdir : String                                  -- where the workspace is mounted
 
-programCall    : String → Json → Environment → RoutineCall      -- a person's call of a program
+calling        : String → Json → Environment → Event Agent      -- a person's call: arrived (called …)
 environmentOf  : Log Agent → Frame → Result Environment        -- where a frame's commands run
 lastCall?      : Log Agent → Option (RoutineCall × Option CallEnd)   -- the last call, and how it ended
 ```
 
 1. **The root.** A person provides the workspace: `arrived (changed …)`, at position 0. The run
    waits for a call.
-2. **A person calls a program**: `alaya call` appends `arrived (called ⟨name, {config,
-   environment}⟩)`. The name is the program's, as a routine's is; the configuration has none.
-3. **The run reads it, and opens the call**: `heard - [1]`, then `opened 0 ⟨name, arguments⟩`, so
-   every later command builds the same program from the log alone.
-4. **The call runs**, in frame `mini-swe`, until it returns, fails, or is stopped. Its calls name
-   routines in the program's scope, and its commands run in a container of its own image.
+2. **A person calls a program**: `alaya call` appends `arrived (called ⟨name, config⟩
+   environment)`. The program's arguments are its configuration, as any routine's arguments are
+   its own. The environment is the person's call's, beside the arguments.
+3. **The run reads it, and opens the call**: `heard - [1]`, then `opened mini-swe ⟨name,
+   config⟩`, so every later command builds the same program from the log alone.
+4. **The call runs**, in frame `mini-swe`, until it returns, fails, or is stopped. It calls the
+   routines of the program's scope, and its commands run in a container of the image its
+   person's call named. A call inside it, a sub-agent's, runs in the same container.
 5. **The run waits for the next call.** A grader is called the same way, in frame `grader`, and its
    value is its verdict.
 

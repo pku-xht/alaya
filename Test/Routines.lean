@@ -60,13 +60,22 @@ def workflow : Routine.Typed Agent Task String := routine "workflow" fun task =>
     if (← step.call command) != 0 then failed := failed + 1
   return s!"{plan.steps.size} steps, {failed} failed"
 
-/-- The agent: it runs the workflow on its task. -/
-def agent (goal : String) : Computation Agent Json := do
-  return toJson (← workflow.call { goal })
-
 /-- The routines above, defined together: each calls the others by name. -/
 def scope : Scope Agent :=
   Scope.fix fun scope => #[lookup.within scope, planner.within scope, step.within scope, workflow.within scope]
+
+/-- The agent's configuration: what a person calls it with. -/
+structure Config where
+  task : String
+  deriving ToJson, FromJson
+
+/-- The agent: a routine, the workflow on the task of its configuration, that calls the routines
+of `scope`. -/
+def agent : Routine Agent :=
+  (routine "agent" fun (config : Config) => workflow.call { goal := config.task }).within scope
+
+/-- The run: the run's routine, whose scope has the agent, so that a person's call of it finds it. -/
+def run : Routine Agent := { session with scope := Scope.of #[agent] }
 
 /-- Runs `k` with the run of `make`'s computation for the task, in the scope above. -/
 private def withRun (make : String → Computation Agent Json) (k : Routine Agent → TestM Unit) : TestM Unit :=
@@ -81,7 +90,7 @@ private def executed (output : String := "ok") : Stored :=
 
 def suite : Suite := Testing.suite "routines" #[
   test "a workflow, its sub-agent and their tools are calls in frames of their own, nested in the log" do
-    withRun agent fun run => do
+    do
       let executor : Executor := { exec := fun _ _ argv _ => do
         let command := argv[0]?.getD ""
         pure { output := if command.startsWith "grep" then "build: make" else "ok"

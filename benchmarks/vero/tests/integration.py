@@ -114,7 +114,9 @@ def test_mode(args, mode):
         return root + called
 
     def configuration(rows):
-        return rows[1]["event"]["notice"]["call"]["arguments"]
+        """The person's call: its configuration, and the environment it names."""
+        notice = rows[1]["event"]["notice"]
+        return {"config": notice["call"]["arguments"], "environment": notice["environment"]}
 
     vero = f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader"
 
@@ -134,11 +136,13 @@ def test_mode(args, mode):
         assert len(record["checks"]) == total, record
         assert sum(c["ok"] for c in record["checks"]) == passed, record
         trace = log(final["entry"])
-        [call] = [r["event"]["routine"] for r in trace if r["event"]["type"] == "opened"
-                  and r["event"]["routine"]["name"] == "grader"][-1:]
+        # The person's call of the grader names the image it runs in.
+        [called] = [r["event"]["notice"] for r in trace if r["event"]["type"] == "arrived"
+                    and r["event"]["notice"]["type"] == "called"
+                    and r["event"]["notice"]["call"]["name"] == "grader"][-1:]
         answer = grader_answer(trace)
         return {"entry": final["entry"], "answer": answer["entry"], "record": record,
-                "image": call["arguments"]["environment"]["image"],
+                "image": called["environment"]["image"],
                 "workspace": answer["event"]["answer"]["workspace"]}
 
     def vero_graded(at, expected, passed):

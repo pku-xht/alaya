@@ -62,8 +62,8 @@ private def reconfigured : TestM Unit := do
   let project := (← scratch) / "project"
   IO.FS.createDirAll project
   let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
-  let swe := programCall "mini-swe" (← assertOk <| Agents.Catalog.resolve "mini-swe"
-      #[{ path := ["model"], value := "gpt-oss-120b" }, { path := ["task"], value := "t" }]) testEnvironment
+  let swe : PersonCall := { call := ⟨"mini-swe", ← assertOk <| Agents.Catalog.resolve "mini-swe"
+      #[{ path := ["model"], value := "gpt-oss-120b" }, { path := ["task"], value := "t" }]⟩ }
   let (called, _) ← assertOk <| Driver.append rt.store run root swe.event
   let (last, _) ← assertOk <| Driver.drive rt run called
   let log ← logAt rt last
@@ -77,7 +77,7 @@ private def reconfigured : TestM Unit := do
   check tuned.divergence?.isNone "the whole log holds"
   let some opening := tuned.log.findSome? fun | (.opened ⟪"mini-swe"⟫ opened, _) => some opened | _ => none
     | fail "the opening of the agent"
-  let reserve := (opening.arguments.getObjVal? "config" >>= (·.getObjVal? "context_reserve")).toOption
+  let reserve := (opening.arguments.getObjVal? "context_reserve").toOption
   assertEqual "the new configuration" (reserve.map (·.compress)) (some "7")
   -- Another model's parameters: a sample names its model, so the first is another operation.
   let other ← rebaseWith #[← setting "model.params.reasoning_effort=high"]
@@ -169,7 +169,7 @@ def suite : Suite := Testing.suite "rebase" #[
     let rebased := rebase (agent #["echo one", "echo TWO"]) (← logAt rt stopped)
     assertEqual "the message and the stop" (rebased.dropped.map (·.1)) #[two + 1, two + 2]
     check (Rebase.droppedLines rebased |>.all (contains · "left out")) "each in a line"
-    check (rebased.log.any fun | (Event.arrived (.called _), _) => true | _ => false) "the call, before it, is kept",
+    check (rebased.log.any fun | (Event.arrived (.called ..), _) => true | _ => false) "the call, before it, is kept",
 
   test "a response is not taken for another model, and a setting over the configuration is the new log's" do
     reconfigured,

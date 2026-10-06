@@ -4,8 +4,8 @@ import Alaya.Agents.Catalog
 run's routine, `session`, in its frame `#[]`, waits for a person to call a program — an agent, a
 grader — calls it in a frame of its own, named by the program (`mini-swe`, then `grader`), and
 when the call ends, waits for the next. A call's configuration is the arguments of its opening,
-so every later command builds the same program from the log alone, and its commands run in the
-container of its own image. See `docs/agent-api.md` §9. -/
+so every later command builds the same program from the log alone; its commands run in the
+container of the image the person's call names. See `docs/agent-api.md` §9. -/
 
 namespace Alaya
 
@@ -17,34 +17,40 @@ it calls are those of the catalog. -/
 def session : Routine Agent where
   name := "session"
   body _ := iter (fun (_ : Unit) => do
-    match ← await fun _ notice => notice matches .called _ with
-    | .called call :: _ => Computation.call call fun _ => pure (.inl ())
+    match ← await fun _ notice => notice matches .called .. with
+    | .called call _ :: _ => Computation.call call fun _ => pure (.inl ())
     | _ => throw "the wait for a call ended without one") ()
   scope := Agents.Catalog.scope
 
-/-- The arrival of a person's call of a program. -/
-def RoutineCall.event (call : RoutineCall) : Event Agent := .arrived (.called call)
-
-/-- A person's call of the program `name`: its configuration, and where its commands run. -/
-def programCall (name : String) (config : Json) (environment : Environment) : RoutineCall :=
-  ⟨name, ({ config, environment? := some environment } : ProgramArguments).toJson⟩
+/-- The arrival of a person's call of the routine `name` with `arguments` — a program's
+configuration — its commands to run in `environment`. -/
+def calling (name : String) (arguments : Json) (environment : Environment) : Event Agent :=
+  .arrived (.called ⟨name, arguments⟩ environment)
 
 /-! ## The calls of a log -/
 
 /-- The arguments of the call the run made in frame `#[call]`, read off its opening. -/
-def callAt? (log : Log Agent) (call : Frame.Segment) : Option ProgramArguments :=
+def argumentsAt? (log : Log Agent) (call : Frame.Segment) : Option Json :=
   log.findSome? fun
-    | .opened #[opened] routine =>
-      if opened == call then (ProgramArguments.fromJson routine.arguments).toOption else none
+    | .opened #[opened] routine => if opened == call then some routine.arguments else none
     | _ => none
 
-/-- Where the commands of the call a frame is in run: the environment of the call the run made,
-which a call inside it shares. -/
+/-- Where the commands of the call a frame is in run: the environment of the person's call the
+run took just before it opened the call, which a call inside it shares. -/
 def environmentOf (log : Log Agent) (frame : Frame) : Result Environment := do
   let some call := frame[0]? | throw <| .storage "the run's own frame is no call's"
-  let some { environment? := some environment, .. } := callAt? log call
-    | throw <| .storage s!"the log does not open the call {call.render} with an environment this build reads"
-  pure environment
+  -- The run reads the person's call, then opens it: the notice is among what that read took.
+  let mut taken : Array Nat := #[]
+  for event in log do
+    match event with
+    | .heard #[] positions => taken := positions
+    | .opened #[opened] _ =>
+      if opened == call then
+        for position in taken do
+          if let some (.arrived (.called _ environment)) := log[position]? then return environment
+        throw <| .storage s!"the call {call.render} opens with no person's call before it"
+    | _ => pure ()
+  throw <| .storage s!"the log does not open the call {call.render}"
 
 /-- How a call ended. -/
 inductive CallEnd where

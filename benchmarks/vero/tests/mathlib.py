@@ -54,7 +54,7 @@ root = json_lines(run(alaya, "new", source, "--data", data, "--json").stdout)[0]
 called = json_lines(run(alaya, "call", root["entry"], "mini-vero", "--set-file", f"task={output / 'MINIVERO_TASK.md'}",
                         "--set", "mode=proof", "--set", "model=gpt-oss-120b",
                         "--image", args.agent_image, "--data", data, "--json").stdout)[0]
-configuration = called["event"]["notice"]["call"]["arguments"]
+environment = called["event"]["notice"]["environment"]
 workspace = root["event"]["notice"]["workspace"]
 stats = json.loads(run("restic", "--repo", data / "restic", "--insecure-no-password",
                        "stats", workspace, "--mode", "restore-size", "--json").stdout)
@@ -86,7 +86,7 @@ assert len(record["checks"]) == spec_total, (len(record["checks"]), spec_total)
 assert not any(check["ok"] for check in record["checks"]), record
 report = json.loads(run(alaya, "cat", answer, ".grade/report.json", "--data", data).stdout)
 assert report["summary"]["total_specs"] == spec_total, report["summary"]
-result = {"root": root["entry"], "call": called["entry"], "image": configuration["environment"]["image"],
+result = {"root": root["entry"], "call": called["entry"], "image": environment["image"],
           "snapshot_stats": stats,
           "package_symlinks": {p.name: str(p.readlink()) for p in packages},
           "uid_gid": uid, "network": "none", "build_exit": build.returncode,

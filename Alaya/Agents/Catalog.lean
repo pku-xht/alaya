@@ -1,7 +1,6 @@
 import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
 import Alaya.Agents.Grader
-import Alaya.Call
 import Alaya.Settings
 
 /-!
@@ -35,18 +34,15 @@ structure Definition where
 
 def Definition.name (definition : Definition) : String := definition.routine.name
 
-/-- The computation of a call of the program `name`, whose configuration `make` reads, from the
-call's arguments; or why there is none. Only the configuration is the program's: where the
-call's commands run is the driver's. -/
+/-- The computation of a call of the program `name`, whose configuration `make` reads: its
+arguments, the configuration; or why there is none. -/
 private def computationOf (name : String) (make : Json → Except String Built) (arguments : Json) :
     Except String (Computation Agent Json) :=
-  match ProgramArguments.fromJson arguments with
-  | .error problem => .error s!"the call's arguments: {problem}"
-  | .ok arguments => match make arguments.config with
+  match make arguments with
+  | .error problem => .error s!"{name}: {problem}"
+  | .ok built => match built.computation with
     | .error problem => .error s!"{name}: {problem}"
-    | .ok built => match built.computation with
-      | .error problem => .error s!"{name}: {problem}"
-      | .ok computation => .ok computation
+    | .ok computation => .ok computation
 
 /-- The program `name`, whose configuration `make` reads. Its routine's computation is the one
 `make` builds from the call's configuration, failing in its frame when it does not fit; its scope

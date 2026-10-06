@@ -45,7 +45,7 @@ private def events : Array (Event Agent) := #[
   .stopped "to grade this point",
   .commented "a comment\non two lines",
   (graderCall "sh /grader/g.sh").event,
-  (testCall "the task").event]
+  callAgent "the task"]
 
 /-- The call of the agent of `runOf`'s runs. -/
 private def agentCall : RoutineCall := ⟨"agent", .null⟩
@@ -303,14 +303,14 @@ def suite : Suite := Testing.suite "log" #[
         assertEqual "the grader's verdict" (opened.name, Agents.Grader.verdictStatus verdict) ("grader", "pass")
       | _ => fail "the grader returned its verdict",
 
-  test "a call's environment is read off the opening of the call the run made, or the log is refused" do
+  test "a call's environment is the person's call's, which the run took before it opened the call" do
     let unreadable (label : String) (log : Log Agent) (frame : Frame) : TestM Unit :=
       assertError label (environmentOf log frame) fun | .storage _ => true | _ => false
     unreadable "no opening" rootOnly ⟪"agent"⟫
     unreadable "the run's own frame" (rootOnly.push (.opened ⟪"agent"⟫ (testCall "t"))) #[]
-    unreadable "no environment" (rootOnly.push (.opened ⟪"agent"⟫ ⟨"agent", .mkObj [("config", .mkObj [])]⟩)) ⟪"agent"⟫
+    unreadable "no person's call" (rootOnly.push (.opened ⟪"agent"⟫ (testCall "t"))) ⟪"agent"⟫
     -- A call inside the call shares its environment.
-    let environment ← assertOk <| environmentOf (rootOnly.push (.opened ⟪"agent"⟫ (testCall "t"))) ⟪"agent", "bash"⟫
+    let environment ← assertOk <| environmentOf (opening "t") ⟪"agent", "bash"⟫
     assertEqual "the environment" environment.toJson.compress testEnvironment.toJson.compress,
 
   iotest "frames render as paths of routines, read back, and a reference to an entry may name a position" do

@@ -270,7 +270,7 @@ def append (store : Store) (root : Routine Agent) (tip : Hash) (event : Event Ag
   match event with
   | .stopped _ =>
     if !running next then throw <| .input "no call is running: there is nothing to stop"
-  | .arrived (.called call) =>
+  | .arrived (.called call _) =>
     if running next then
       throw <| .input "a call is running: a program is called once it is over; `alaya stop` ends it first"
     if !(next matches .waits #[] _) then

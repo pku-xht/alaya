@@ -111,13 +111,13 @@ def suite : Suite := Testing.suite "runs" #[
       let log ← logAt rt tip
       assertEqual "the root and the call" log.size 2
       check (log[0]! matches .arrived (.changed ..)) "the root is the workspace"
-      check (log[1]! matches .arrived (.called _)) "the call is a notice"
+      check (log[1]! matches .arrived (.called ..)) "the call is a notice"
       match next run log with
       | .mark (.heard #[] notices) => assertEqual "the run's read takes the call" notices #[1]
       | _ => fail "the run reads its call next"
       let settled := settle run log
-      assertEqual "the call opens with its configuration" ((callAt? settled { name := "agent" }).map (·.toJson.compress))
-        (some (testArguments "the task").toJson.compress)
+      assertEqual "the call opens with its configuration" ((argumentsAt? settled { name := "agent" }).map (·.compress))
+        (some (testConfig "the task").compress)
       check (settled[3]? matches some (Event.opened ⟪"agent"⟫ _)) "in a frame of its own",
 
   test "the driver appends an entry an event, and replay agrees with the log at every prefix" do
@@ -339,21 +339,21 @@ def suite : Suite := Testing.suite "runs" #[
       assertError "a call while the agent runs" (Driver.append rt.store run paused grader) fun
         | .input message => contains message "a call is running"
         | _ => false
-      assertError "a call of no program" (Driver.append rt.store run ended ({ testCall with name := "nothing" }).event) fun
+      assertError "a call of no program" (Driver.append rt.store run ended ({ call := { testCall with name := "nothing" } } : PersonCall).event) fun
         | .input message => contains message "no program named nothing"
         | _ => false
       -- Whether a call's arguments fit its program is the CLI's to check before it appends it.
-      check (match Agents.Catalog.check (graderCall "") with
+      check (match Agents.Catalog.check (graderCall "").call with
         | .error message => contains message "needs its command"
         | .ok () => false) "a grader with no command"
       -- Every program is called the same way: a task is a field of an agent's configuration.
       let agentWith (fields : List (String × Json)) : RoutineCall :=
-        programCall "mini-swe" (.mkObj ((("model", "gpt-oss-120b") : String × Json) :: fields)) testEnvironment
+        ⟨"mini-swe", .mkObj ((("model", "gpt-oss-120b") : String × Json) :: fields)⟩
       check (match Agents.Catalog.check (agentWith []) with
         | .error message => contains message "works on a task"
         | .ok () => false) "an agent with no task"
       check (Agents.Catalog.check (agentWith [("task", "fix it")]) matches .ok ()) "an agent with its task"
-      let tasked := programCall "grader" (.mkObj [("command", "true"), ("task", "t")]) testEnvironment
+      let tasked : RoutineCall := ⟨"grader", .mkObj [("command", "true"), ("task", "t")]⟩
       check (match Agents.Catalog.check tasked with
         | .error message => contains message "task"
         | .ok () => false) "a grader takes no task: it has no such field"
@@ -438,7 +438,7 @@ def suite : Suite := Testing.suite "runs" #[
     assertStringEq "a change" (told (.changed default "  M a.txt\nI fixed it"))
       (Chat.Message.user "<intervention>\nA person changed the workspace while you were paused:\n  M a.txt\nI fixed it\n</intervention>").toStored.compress
     assertStringEq "a reply is the asking call's, not the model's to be told" (told (.replied ⟪"agent", "ask_user"⟫ .yes)) "nothing"
-    assertStringEq "nor a call" (told (.called ⟨"grader", .null⟩)) "nothing",
+    assertStringEq "nor a call" (told (.called ⟨"grader", .null⟩ testEnvironment)) "nothing",
 
   test "a commit appends the files and what changed, and the next command runs on them" do
     withMini {} fun run => do

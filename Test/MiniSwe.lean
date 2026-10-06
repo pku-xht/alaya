@@ -282,10 +282,9 @@ def runSuite : Suite := suite "mini-swe.run" #[
       #[(⟪"agent"⟫, "agent"), (⟪"agent", "mini-swe"⟫, "mini-swe"), (⟪"agent", "mini-swe", "bash"⟫, "bash")]
     -- The sub-agent's call is the agent's own, with the model's task: its configuration, its model.
     check (log.any fun
-        | .opened ⟪"agent", "mini-swe"⟫ ⟨"mini-swe", arguments⟩ => match ProgramArguments.fromJson arguments with
-          | .ok delegated => taskOf delegated.config == some "write b.txt" && delegated.environment?.isNone &&
-              (delegated.config.getObjVal? "tools").toOption == some (Lean.toJson config.tools)
-          | .error _ => false
+        | .opened ⟪"agent", "mini-swe"⟫ ⟨"mini-swe", delegated⟩ =>
+          taskOf delegated == some "write b.txt" &&
+            (delegated.getObjVal? "tools").toOption == some (Lean.toJson config.tools)
         | _ => false)
       "the sub-agent's call is the agent's configuration, with the model's task, and no environment"
     -- The sub-agent's conversation is its own: its task, not the agent's, is what its model is told.

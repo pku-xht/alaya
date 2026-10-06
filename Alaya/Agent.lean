@@ -159,12 +159,19 @@ def Reply.ofStored (json : Json) : Except String Reply := do
   | "unavailable" => pure .unavailable
   | other => throw s!"unknown reply: {other}"
 
+def Environment.toJson (environment : Environment) : Json :=
+  .mkObj [("image", environment.image), ("workdir", environment.workdir)]
+
+def Environment.fromJson (json : Json) : Except String Environment := do
+  pure { image := ← str json "image", workdir := ← str json "workdir" }
+
 def Notice.toJson : Notice → Json
   | .said message => .mkObj [("type", "said"), ("message", message)]
   | .changed workspace summary =>
     .mkObj [("type", "changed"), ("workspace", workspace.hex), ("summary", summary)]
   | .replied to reply => .mkObj [("type", "replied"), ("to", to.toJson), ("reply", reply.toStored)]
-  | .called call => .mkObj [("type", "called"), ("call", call.toJson)]
+  | .called call environment =>
+    .mkObj [("type", "called"), ("call", call.toJson), ("environment", environment.toJson)]
 
 def Notice.fromJson (json : Json) : Except String Notice := do
   match ← str json "type" with
@@ -172,7 +179,8 @@ def Notice.fromJson (json : Json) : Except String Notice := do
   | "changed" => pure (.changed (← json.getObjVal? "workspace" >>= hashOf) (← str json "summary"))
   | "replied" =>
     pure (.replied (← json.getObjVal? "to" >>= Frame.fromJson) (← json.getObjVal? "reply" >>= Reply.ofStored))
-  | "called" => .called <$> (json.getObjVal? "call" >>= RoutineCall.fromJson)
+  | "called" => pure (.called (← json.getObjVal? "call" >>= RoutineCall.fromJson)
+      (← json.getObjVal? "environment" >>= Environment.fromJson))
   | other => throw s!"unknown notice: {other}"
 
 def Op.Key.toJson : Op.Key → Json

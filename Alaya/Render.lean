@@ -138,7 +138,7 @@ def seconds (ms : Nat) : String := s!"{ms / 1000}.{(ms % 1000) / 100} s"
 
 /-- A call of a program, by its name and, for an agent, its model's: `mini-swe, gpt-6-luna`. -/
 def callTitle (call : RoutineCall) : String :=
-  match (call.arguments.getObjVal? "config" >>= (·.getObjVal? "model") >>= (·.getObjVal? "name") >>=
+  match (call.arguments.getObjVal? "model" >>= (·.getObjVal? "name") >>=
       Json.getStr?).toOption with
   | some model => s!"{call.name}, {model}"
   | none => call.name
@@ -147,7 +147,7 @@ def noticeSummary : Notice → String
   | .said message => s!"said {(flatten message 70).quote}"
   | .changed workspace summary => s!"changed → {short workspace}: {flatten summary 60}"
   | .replied to reply => s!"replied to {to.render}: {flatten reply.line 60}"
-  | .called call => s!"call {callTitle call}"
+  | .called call _ => s!"call {callTitle call}"
 
 /-- An event in a line. -/
 def eventSummary : Event Agent → String

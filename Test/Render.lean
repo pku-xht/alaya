@@ -58,7 +58,7 @@ def suite : Suite := Testing.suite "render" #[
       (.arrived (.replied ⟪"agent", "ask_user"⟫ .unavailable), "replied to agent/ask_user: unavailable"),
       (.arrived (.replied ⟪"agent", "ask_user"⟫ .yes), "replied to agent/ask_user: yes"),
       (.asked ⟪"agent", "ask_user"⟫ { text := "Keep the old API?", form := .yesNo }, "ask \"Keep the old API?\""),
-      (swe.event, "call mini-swe, gpt-oss-120b"),
+      (({ call := swe } : PersonCall).event, "call mini-swe, gpt-oss-120b"),
       ((graderCall "python3 /grader/grade.py").event, "call grader"),
       (.heard ⟪"agent"⟫ #[], "inbox: nothing"),
       (.heard ⟪"agent"⟫ #[2, 5], "inbox: takes [2, 5]"),
@@ -74,7 +74,7 @@ def suite : Suite := Testing.suite "render" #[
       (.answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })), "time 1.2 s of 60.0 s"),
       (.answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200 })), "time 1.2 s"),
       (.opened ⟪"mini-swe"⟫ swe, "open mini-swe, gpt-oss-120b"),
-      (.opened ⟪"grader"⟫ ⟨"grader", (graderCall "sh g.sh").toJson⟩, "open grader"),
+      (.opened ⟪"grader"⟫ (graderCall "sh g.sh").call, "open grader"),
       (.opened ⟪"agent", "bash"⟫ ⟨"bash", .mkObj [("command", "ls")]⟩, "open bash \"ls\""),
       (.opened ⟪"agent", "ask_user"⟫ ⟨"ask_user", (askCall "q" "Keep it?").arguments⟩, "open ask_user \"Keep it?\""),
       (.opened ⟪"agent", "time_budget"⟫ ⟨"time_budget", .mkObj []⟩, "open time_budget"),
@@ -210,7 +210,7 @@ def suite : Suite := Testing.suite "render" #[
     let call : RoutineCall := { testCall with name := "an-agent-of-another-version" }
     let mut forest ← assertOk store.forest
     let mut parent? : Option Hash := none
-    for event in #[.arrived (.changed (snapshot 'a') "the project"), .arrived (.called call), .heard #[] #[1],
+    for event in #[.arrived (.changed (snapshot 'a') "the project"), .arrived (.called call testEnvironment), .heard #[] #[1],
         (.opened #[{ name := call.name }] call : Event Agent)] do
       let (hash, grown) ← assertOk <| store.put forest { parent?, event }
       forest := grown

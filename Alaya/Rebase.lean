@@ -89,16 +89,14 @@ private def reading (name : String) (action : Result α) : Result α :=
 of `settings` its program takes over it, every field complete; and which of `settings` it takes. -/
 private def reconfigureCall (call : RoutineCall) (settings : Array Settings.Setting) :
     Result (RoutineCall × Array Bool) := do
-  let arguments ← Result.fromExcept (fun m => .storage s!"the call of {call.name}: {m}")
-    (ProgramArguments.fromJson call.arguments)
-  let mut config ← reading call.name (Agents.Catalog.complete call.name arguments.config)
+  let mut config ← reading call.name (Agents.Catalog.complete call.name call.arguments)
   let mut taken := #[]
   -- A setting fits a call when its program takes it.
   for setting in settings do
     match ← tryCatch (some <$> Agents.Catalog.applying call.name config #[setting]) (fun _ => pure none) with
     | some applied => config := applied; taken := taken.push true
     | none => taken := taken.push false
-  pure (⟨call.name, { arguments with config }.toJson⟩, taken)
+  pure (⟨call.name, config⟩, taken)
 
 /-- The log with every call configured as the current version of its program reads it, with
 `settings` over each call they fit, both where the call is asked for and where it opens. A
@@ -108,9 +106,9 @@ def reconfigure (log : Log Agent) (settings : Array Settings.Setting) : Result (
   let mut accepted := settings.map fun _ => false
   for event in log do
     match event with
-    | .arrived (.called call) =>
+    | .arrived (.called call environment) =>
       let (call, _) ← reconfigureCall call settings
-      events := events.push (.arrived (.called call))
+      events := events.push (.arrived (.called call environment))
     | .opened #[i] call =>
       let (call, fits) ← reconfigureCall call settings
       accepted := (accepted.zip fits).map fun (a, b) => a || b

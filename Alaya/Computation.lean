@@ -75,6 +75,13 @@ structure RoutineCall where
   arguments : Json
   deriving BEq, Inhabited
 
+/-- Where the commands of a call a person makes run: a pinned image, and the path the workspace
+is mounted at. A call inside it runs where it does. -/
+structure Environment where
+  image : String
+  workdir : String
+  deriving Inhabited, BEq
+
 /-- Something that happened without a computation asking for it, or the reply of a person to a
 question a computation asked: that is asked for, but it comes in its own time, from outside, so it
 is logged when it arrives like the rest. -/
@@ -86,14 +93,15 @@ inductive Notice where
   | changed (workspace : Snapshot) (summary : String)
   /-- A person answered the question the call in frame `to` asked. -/
   | replied (to : Frame) (reply : Reply)
-  /-- A person asked the run to call a routine: its name, and its arguments. -/
-  | called (call : RoutineCall)
+  /-- A person asked the run to call a routine: its name and its arguments, and where its
+  commands run. -/
+  | called (call : RoutineCall) (environment : Environment)
   deriving Inhabited
 
 /-- Whether a notice is for one reader, who waits for it: a reply, for the call that asked, and a
 call, for the run. A plain read of the inbox leaves these. -/
 def Notice.addressed : Notice → Bool
-  | .replied .. | .called _ => true
+  | .replied .. | .called .. => true
   | _ => false
 
 /-- What a read that waits is for: the notices it takes, given the frame the read is made in,

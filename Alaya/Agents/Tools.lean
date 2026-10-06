@@ -1,5 +1,4 @@
 import Alaya.Agent
-import Alaya.Call
 
 /-!
 The tools an agent can offer, each on its own, as a `Tool`: what a model needs to call it — its
@@ -362,7 +361,7 @@ def tool (name : String) (config : Json) : Tool := {
   instruction? := some instruction
   check := fun arguments => (task arguments).map fun _ => ()
   call := fun arguments => match task arguments with
-    | .ok task => ⟨name, ({ config := config.setObjVal! "task" task } : ProgramArguments).toJson⟩
+    | .ok task => ⟨name, config.setObjVal! "task" task⟩
     | .error _ => ⟨name, arguments⟩ }
 
 end Subagent

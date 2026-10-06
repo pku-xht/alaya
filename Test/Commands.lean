@@ -104,12 +104,13 @@ def suite : Suite := Testing.suite "commands" #[
     assertEqual "each after the one before" (made.map (text · ["parent"])) #["null", text made[0]! ["entry"]]
     let call := field made[1]! ["event", "notice", "call"]
     let config := field call ["arguments"]
-    assertEqual "the call names its program, and holds its configuration, model and task"
-      (text call ["name"], text config ["config", "model", "name"],
-        (field config ["config", "context_reserve"]).compress, text config ["config", "task"])
+    assertEqual "the call names its program, and its arguments are its configuration, model and task"
+      (text call ["name"], text config ["model", "name"], (field config ["context_reserve"]).compress,
+        text config ["task"])
       ("mini-swe", "gpt-oss-120b", "7", "the task")
-    check ((field config ["config", "name"]) == Json.null) "the name is the call's alone"
-    check (has (text config ["environment", "image"]) "@sha256:") "the image is pinned by its digest"
+    check ((field config ["name"]) == Json.null) "the name is the call's alone"
+    check (has (text made[1]! ["event", "notice", "environment", "image"]) "@sha256:")
+      "the person's call pins its image by its digest"
     check (has (← refused 64 data "new" #["--task", "t", ((← scratch) / "project").toString]) "unknown option --task")
       "new takes no task"
     assertEqual "resume reads the call, opens the agent, which runs uname and reads its inbox"
