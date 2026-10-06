@@ -116,7 +116,7 @@ def test_mode(args, mode):
     def configuration(rows):
         """The person's call: its configuration, and the environment it names."""
         notice = rows[1]["event"]["notice"]
-        return {"config": notice["call"]["arguments"], "environment": notice["environment"]}
+        return {"config": notice["call"]["arguments"], "environment": notice["call"]["environment"]}
 
     vero = f"python /opt/alaya-vero/grade.py --mode {mode} --benchmark /grader"
 
@@ -142,7 +142,7 @@ def test_mode(args, mode):
                     and r["event"]["notice"]["call"]["name"] == "grader"][-1:]
         answer = grader_answer(trace)
         return {"entry": final["entry"], "answer": answer["entry"], "record": record,
-                "image": called["environment"]["image"],
+                "image": called["call"]["environment"]["image"],
                 "workspace": answer["event"]["answer"]["workspace"]}
 
     def vero_graded(at, expected, passed):

@@ -147,7 +147,7 @@ def noticeText : Notice → String
   | .said message => message
   | .changed _ summary => s!"The workspace was changed: {summary}"
   | .replied _ reply => render reply
-  | .called call _ => s!"{call.name} was called"
+  | .called call => s!"{call.name} was called"
 
 def askUser : Tool where
   name := "ask_user"
@@ -223,7 +223,7 @@ def grading (_ : Except String Json) : Computation Agent Json := call "hidden_te
 
 def graded (config : Config) (after : Except String Json → Computation Agent Json := grading) : Routine Agent :=
   { name := "run"
-    body := fun _ => .call ⟨"agent", config.json⟩ after
+    body := fun _ => .call { name := "agent", arguments := config.json } after
     scope := scopeOf [agent config, bash, timeBudget, askUser, delegate config.model, commit, hiddenTests] }
 
 /-! ## The sketch's world and driver -/
@@ -242,7 +242,7 @@ def reply (log : Log') (answer : Reply) : Except String (Event Agent) := do
     | .opened .. | .returned .. | .failed .. | .stopped _ => true
     | _ => false
   match bracket with
-  | some (.opened frame ⟨"ask_user", arguments⟩) =>
+  | some (.opened frame { name := "ask_user", arguments, .. }) =>
     if (← Question.parse (txt arguments)).accepts answer then pure (.arrived (.replied frame answer))
     else throw "the reply is not of the form the question asks for"
   | _ => throw "no question waits for a reply"
@@ -282,7 +282,7 @@ def Request.last (request : Request) : String :=
   | none => ""
 
 def calls (pairs : List (String × String)) : Response :=
-  { text := "", toolCalls := pairs.map fun (name, arguments) => ⟨name, .str arguments⟩ }
+  { text := "", toolCalls := pairs.map fun (name, arguments) => { name, arguments := .str arguments } }
 
 def script (request : Request) : Response :=
   match request.last with
@@ -300,7 +300,7 @@ def asked (log : Log') : Bool :=
     | .arrived (.said _) | .arrived (.changed ..) => false
     | _ => true
   match last with
-  | some (.opened _ ⟨"ask_user", _⟩) => true
+  | some (.opened _ { name := "ask_user", .. }) => true
   | _ => false
 
 def version (n : Nat) : Snapshot := ⟨s!"w{n}"⟩
@@ -375,7 +375,7 @@ def describe (o : Frame → List Nat) : Event Agent → String
   | .arrived (.said message) => s!"-  arrived: said {message}"
   | .arrived (.changed workspace _) => s!"-  arrived: changed → {workspace.hex}"
   | .arrived (.replied to answer) => s!"-  arrived: replied to {o to}: {render answer}"
-  | .arrived (.called call _) => s!"-  arrived: called {call.name}"
+  | .arrived (.called call) => s!"-  arrived: called {call.name}"
   | .commented text => s!"-  commented: {text}"
   | .answered frame (.external command image ..) (.ok (.external ran)) =>
     s!"{o frame}  answered: external {command}, in {image} → exit {ran.exit}, {ran.checkout.hex}"

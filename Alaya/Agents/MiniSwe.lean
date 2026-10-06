@@ -463,7 +463,7 @@ def round (config : Config) (history : History) : Computation Agent (History ⊕
       -- The call is the one the tool makes of the model's arguments.
       let made : RoutineCall := match config.offered.find? (·.name == asked.name) with
         | some tool => tool.call asked.arguments
-        | none => ⟨asked.name, asked.arguments⟩
+        | none => { name := asked.name, arguments := asked.arguments }
       let result ← try call made.name made.arguments
         catch error => pure (.mkObj [("error", .str error)])
       results := results.push (asked, result)

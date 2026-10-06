@@ -614,7 +614,11 @@ function renderEvent(parent, i) {
     case 'time':
       facts(parent, [['time', took], ['run time', duration(e.spent)], ['budget', given(e.budget) ? duration(e.budget) : 'none']]);
       break;
-    case 'open': renderArguments(parent, '', e.arguments); break;
+    case 'open':
+      // A call that names an environment runs its commands, and its calls', there.
+      if (e.environment) facts(parent, [['image', e.environment.image], ['workdir', e.environment.workdir]]);
+      renderArguments(parent, '', e.arguments);
+      break;
     case 'return': renderValue(parent, e.value, e.kind); break;
     case 'fail': block(parent, 'error', e.error, 'bad'); break;
     case 'stop': block(parent, 'reason', e.text, 'prose'); break;

@@ -109,7 +109,7 @@ def suite : Suite := Testing.suite "commands" #[
         text config ["task"])
       ("mini-swe", "gpt-oss-120b", "7", "the task")
     check ((field config ["name"]) == Json.null) "the name is the call's alone"
-    check (has (text made[1]! ["event", "notice", "environment", "image"]) "@sha256:")
+    check (has (text call ["environment", "image"]) "@sha256:")
       "the person's call pins its image by its digest"
     check (has (← refused 64 data "new" #["--task", "t", ((← scratch) / "project").toString]) "unknown option --task")
       "new takes no task"

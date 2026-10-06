@@ -126,18 +126,18 @@ private def sampled : Event Agent → Bool
   | .answered _ (.sample ..) (.ok _) => true
   | _ => false
 
-/-- The executor of the call the run made that `frame` is in, the one the driver holds when it is
-that call's, or
-a new one when it is another's, which is closed first: a call's commands share its container,
-and no two calls share one. -/
-private def executorFor (rt : Runtime) (held : IO.Ref (Option (Frame.Segment × Executor)))
+/-- The executor of `frame`'s commands: the container of the nearest call on its path that names
+an environment. It is the one the driver holds when that call is the one it holds, or a new one,
+the held one closed first: the commands of a call and of the calls inside it that name none share
+its container. -/
+private def executorFor (rt : Runtime) (held : IO.Ref (Option (Frame × Executor)))
     (log : Log Agent) (frame : Frame) : Result (Executor × Bool) := do
-  let call := frame[0]?.getD default
+  let (named, environment) ← environmentOf log frame
   match ← io held.get with
-  | some (at', executor) => if at' == call then return (executor, false) else io executor.close
+  | some (at', executor) => if at' == named then return (executor, false) else io executor.close
   | none => pure ()
-  let executor ← rt.executor (← environmentOf log frame)
-  io (held.set (some (call, executor)))
+  let executor ← rt.executor environment
+  io (held.set (some (named, executor)))
   pure (executor, true)
 
 /-- Drives the run of `root` on from the entry `tip`, appending each event as an entry and calling `onEntry`
@@ -154,7 +154,7 @@ partial def drive (rt : Runtime) (root : Routine Agent) (tip : Hash) (limits : L
   -- Another log's files may be there; this one's are written afresh.
   io do if ← rt.outputsDir.pathExists then IO.FS.removeDirAll rt.outputsDir
   let started ← nowMs
-  let held ← io (IO.mkRef (none : Option (Frame.Segment × Executor)))
+  let held ← io (IO.mkRef (none : Option (Frame × Executor)))
   let rec loop (forest : Forest) (tip : Hash) (log : Log Agent) (replayer : Replayer Agent)
       (spent stamp samples : Nat) (checkout : Checkout) : Result (Hash × Stop) := do
     -- Which limit, if any, keeps the driver from going on in `frame`: the time budget, before
@@ -270,7 +270,7 @@ def append (store : Store) (root : Routine Agent) (tip : Hash) (event : Event Ag
   match event with
   | .stopped _ =>
     if !running next then throw <| .input "no call is running: there is nothing to stop"
-  | .arrived (.called call _) =>
+  | .arrived (.called call) =>
     if running next then
       throw <| .input "a call is running: a program is called once it is over; `alaya stop` ends it first"
     if !(next matches .waits #[] _) then

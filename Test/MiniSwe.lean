@@ -282,7 +282,7 @@ def runSuite : Suite := suite "mini-swe.run" #[
       #[(⟪"agent"⟫, "agent"), (⟪"agent", "mini-swe"⟫, "mini-swe"), (⟪"agent", "mini-swe", "bash"⟫, "bash")]
     -- The sub-agent's call is the agent's own, with the model's task: its configuration, its model.
     check (log.any fun
-        | .opened ⟪"agent", "mini-swe"⟫ ⟨"mini-swe", delegated⟩ =>
+        | .opened ⟪"agent", "mini-swe"⟫ { name := "mini-swe", arguments := delegated, environment? := none } =>
           taskOf delegated == some "write b.txt" &&
             (delegated.getObjVal? "tools").toOption == some (Lean.toJson config.tools)
         | _ => false)

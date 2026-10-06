@@ -69,7 +69,7 @@ private def openIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Rou
 
 /-- Grades the point `tip` of a run with the grader `call`: the agent stopped there, the grader
 called. Gives its verdict, and what its command left: its output and the workspace after it. -/
-private def gradeAt (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (call : Scripted.PersonCall) :
+private def gradeAt (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (call : RoutineCall) :
     TestM (Json × Execution) := do
   let (graded, verdict) ← Scripted.grade rt run tip call
   let log ← Scripted.logAt rt graded
@@ -189,7 +189,7 @@ def suite : Suite := Testing.suite "docker" #[
           let (paused, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 1 }
           let log ← Scripted.logAt rt paused
           let environment ← assertOk (environmentOf log ⟪"agent"⟫)
-          assertEqual "the call's image, from the person's call" environment.image settings.image
+          assertEqual "the call's image, from the person's call" environment.2.image settings.image
           -- The container wrote it, the host snapshotted it.
           assertEqual "snapshot"
             ((← assertOk ((← workspaces).readFile? ((workspace? log).getD default) "made.txt")).map (String.fromUTF8? ·))

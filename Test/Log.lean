@@ -39,7 +39,7 @@ private def events : Array (Event Agent) := #[
   .answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200 })),
   .answered ⟪"grader"⟫ (.exec "sh g.sh" { timeoutSeconds := 900, merge := false })
     (.ok (.execution { output := { output := "ok 1\n", stderr? := some "e", exitCode? := some 1 }, workspace := snapshot 'e' })),
-  .opened ⟪"agent", "bash"⟫ ⟨"bash", .mkObj [("command", "ls")]⟩,
+  .opened ⟪"agent", "bash"⟫ { name := "bash", arguments := .mkObj [("command", "ls")] },
   .returned ⟪"agent", "bash"⟫ (.mkObj [("output", "x")]),
   .failed ⟪"agent", "bash"⟫ "no routine named bash",
   .stopped "to grade this point",
@@ -48,7 +48,7 @@ private def events : Array (Event Agent) := #[
   callAgent "the task"]
 
 /-- The call of the agent of `runOf`'s runs. -/
-private def agentCall : RoutineCall := ⟨"agent", .null⟩
+private def agentCall : RoutineCall := { name := "agent", arguments := .null }
 
 /-- A run whose routine calls `computation` as its agent at once, with a tool `boom` that fails,
 and ends with what the agent gave: no session, so that a log of one call ends where it does. -/
@@ -291,7 +291,7 @@ def suite : Suite := Testing.suite "log" #[
       let called := log.size
       let log := settle run (log.push (graderCall "sh g.sh").event)
       check (log.any fun | .heard #[] notices => notices == #[called] | _ => false) "the run's own frame takes the call"
-      check (log.any fun | .opened ⟪"grader"⟫ ⟨"grader", _⟩ => true | _ => false) "the grader opens in a frame of its own"
+      check (log.any fun | .opened ⟪"grader"⟫ { name := "grader", .. } => true | _ => false) "the grader opens in a frame of its own"
       let .ask first := next run log | fail "the grader's command is asked for"
       assertEqual "in its frame" first.frame ⟪"grader"⟫
       check (first.op matches .exec "sh g.sh" { merge := false, .. }) "the command, its stderr apart"
@@ -303,15 +303,20 @@ def suite : Suite := Testing.suite "log" #[
         assertEqual "the grader's verdict" (opened.name, Agents.Grader.verdictStatus verdict) ("grader", "pass")
       | _ => fail "the grader returned its verdict",
 
-  test "a call's environment is the person's call's, which the run took before it opened the call" do
+  test "a frame's commands run where the nearest call on its path that names an environment says" do
     let unreadable (label : String) (log : Log Agent) (frame : Frame) : TestM Unit :=
       assertError label (environmentOf log frame) fun | .storage _ => true | _ => false
     unreadable "no opening" rootOnly ⟪"agent"⟫
     unreadable "the run's own frame" (rootOnly.push (.opened ⟪"agent"⟫ (testCall "t"))) #[]
-    unreadable "no person's call" (rootOnly.push (.opened ⟪"agent"⟫ (testCall "t"))) ⟪"agent"⟫
-    -- A call inside the call shares its environment.
-    let environment ← assertOk <| environmentOf (opening "t") ⟪"agent", "bash"⟫
-    assertEqual "the environment" environment.toJson.compress testEnvironment.toJson.compress,
+    unreadable "a call that names none, on a path where none does"
+      (rootOnly.push (.opened ⟪"agent"⟫ { testCall "t" with environment? := none })) ⟪"agent"⟫
+    -- A call inside the call that names none shares its caller's environment.
+    let (named, environment) ← assertOk <| environmentOf (opening "t") ⟪"agent", "bash"⟫
+    assertEqual "the caller's" (named, environment.image) (⟪"agent"⟫, testEnvironment.image)
+    -- One that names its own runs there, and so do the calls inside it.
+    let grading := (opening "t").push (.opened ⟪"agent", "grader"⟫ (graderCall "sh g.sh" "grader:1"))
+    let (named, environment) ← assertOk <| environmentOf grading ⟪"agent", "grader", "bash"⟫
+    assertEqual "its own" (named, environment.image) (⟪"agent", "grader"⟫, "grader:1"),
 
   iotest "frames render as paths of routines, read back, and a reference to an entry may name a position" do
     if Frame.render ⟪"agent", "bash#2", "x"⟫ != "agent/bash#2/x" || Frame.render ⟪⟫ != "-" then

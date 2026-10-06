@@ -68,19 +68,23 @@ def Frame.parse (text : String) : Except String Frame :=
 /-- Whether the frame is a call's, or inside one: not the run's own. -/
 def Frame.inCall (frame : Frame) : Bool := !frame.isEmpty
 
-/-- A call of a routine, by its name, with its arguments: what the log holds as the opening of
-the call. It holds no body, so it is data. -/
-structure RoutineCall where
-  name : String
-  arguments : Json
-  deriving BEq, Inhabited
-
-/-- Where the commands of a call a person makes run: a pinned image, and the path the workspace
-is mounted at. A call inside it runs where it does. -/
+/-- Where a call's commands run: a pinned image, and the path the workspace is mounted at. -/
 structure Environment where
   image : String
   workdir : String
   deriving Inhabited, BEq
+
+/-- A call of a routine, by its name, with its arguments, and, when the caller says, where its
+commands run: what the log holds as the opening of the call. It holds no body, so it is data.
+
+What a call can reach is the scope of the routine it is made in, fixed where that routine is
+defined; where its commands run is the environment of the nearest call on its path that names
+one, which its caller decides. A call that names none runs where its caller's commands do. -/
+structure RoutineCall where
+  name : String
+  arguments : Json
+  environment? : Option Environment := none
+  deriving BEq, Inhabited
 
 /-- Something that happened without a computation asking for it, or the reply of a person to a
 question a computation asked: that is asked for, but it comes in its own time, from outside, so it
@@ -93,15 +97,15 @@ inductive Notice where
   | changed (workspace : Snapshot) (summary : String)
   /-- A person answered the question the call in frame `to` asked. -/
   | replied (to : Frame) (reply : Reply)
-  /-- A person asked the run to call a routine: its name and its arguments, and where its
-  commands run. -/
-  | called (call : RoutineCall) (environment : Environment)
+  /-- A person asked the run to call a routine: its name, its arguments, and where its commands
+  run. -/
+  | called (call : RoutineCall)
   deriving Inhabited
 
 /-- Whether a notice is for one reader, who waits for it: a reply, for the call that asked, and a
 call, for the run. A plain read of the inbox leaves these. -/
 def Notice.addressed : Notice → Bool
-  | .replied .. | .called .. => true
+  | .replied .. | .called _ => true
   | _ => false
 
 /-- What a read that waits is for: the notices it takes, given the frame the read is made in,
@@ -198,9 +202,11 @@ def retry (attempts : Nat) (computation : Computation σ α) : Computation σ α
   | 0 => computation
   | attempts + 1 => try computation catch _ => retry attempts computation
 
-/-- Calls a routine by its name. Its failure is its caller's too, unless the caller catches it. -/
-def call (name : String) (arguments : Json) : Computation σ Json :=
-  .call ⟨name, arguments⟩ fun | .ok value => .pure value | .error error => .fail error
+/-- Calls a routine by its name, its commands to run in `environment?` when one is given, and
+where the caller's do otherwise. Its failure is its caller's too, unless the caller catches it. -/
+def call (name : String) (arguments : Json) (environment? : Option Environment := none) :
+    Computation σ Json :=
+  .call { name, arguments, environment? } fun | .ok value => .pure value | .error error => .fail error
 
 /-- Says `text` to whoever reads the log. Replay passes over it, and over every comment a log
 holds, so a computation's comments can change without a log of it becoming no trace of it; the

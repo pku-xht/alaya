@@ -96,7 +96,7 @@ private def reconfigureCall (call : RoutineCall) (settings : Array Settings.Sett
     match ← tryCatch (some <$> Agents.Catalog.applying call.name config #[setting]) (fun _ => pure none) with
     | some applied => config := applied; taken := taken.push true
     | none => taken := taken.push false
-  pure (⟨call.name, config⟩, taken)
+  pure ({ call with arguments := config }, taken)
 
 /-- The log with every call configured as the current version of its program reads it, with
 `settings` over each call they fit, both where the call is asked for and where it opens. A
@@ -106,9 +106,9 @@ def reconfigure (log : Log Agent) (settings : Array Settings.Setting) : Result (
   let mut accepted := settings.map fun _ => false
   for event in log do
     match event with
-    | .arrived (.called call environment) =>
+    | .arrived (.called call) =>
       let (call, _) ← reconfigureCall call settings
-      events := events.push (.arrived (.called call environment))
+      events := events.push (.arrived (.called call))
     | .opened #[i] call =>
       let (call, fits) ← reconfigureCall call settings
       accepted := (accepted.zip fits).map fun (a, b) => a || b

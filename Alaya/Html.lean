@@ -119,9 +119,9 @@ def eventJson : Event Agent → Json
     .mkObj [("k", "changed"), ("workspace", workspace.hex), ("text", summary)]
   | .arrived (.replied to reply) =>
     .mkObj [("k", "replied"), ("to", to.toJson), ("text", reply.line)]
-  | .arrived (.called call environment) =>
+  | .arrived (.called call) =>
     .mkObj [("k", "called"), ("routine", call.name), ("arguments", call.arguments),
-      ("environment", environment.toJson), ("title", Render.callTitle call)]
+      ("environment", orNull call.environment? (·.toJson)), ("title", Render.callTitle call)]
   | .heard _ notices => .mkObj [("k", "heard"), ("notices", .arr (notices.map fun (n : Nat) => (n : Json)))]
   | .asked _ question =>
     .mkObj [("k", "asked"), ("text", question.text), ("form", question.form.name),
@@ -143,8 +143,9 @@ def eventJson : Event Agent → Json
       ("stderr", orNull e.output.stderr? .str), ("workspace", e.workspace.hex), ("file", orNull e.file? .str)]
   | .answered _ _ (.ok (.timing t)) =>
     .mkObj [("k", "time"), ("spent", t.spentMs), ("budget", orNull t.budgetMs? fun n => (n : Json))]
-  | .opened frame call =>
+  | .opened _ call =>
     .mkObj [("k", "open"), ("routine", call.name), ("arguments", call.arguments),
+      ("environment", orNull call.environment? (·.toJson)),
       ("summary", Render.argumentsSummary call.arguments),
       ("title", orNull (Render.agentTitle? call) .str)]
   | .returned _ value =>

@@ -82,7 +82,7 @@ caller made after N others (`["mini-swe", "bash#1"]`).
 | `said` | `message` |
 | `changed` | `workspace`: a snapshot; `summary` |
 | `replied` | `to`: the frame that asked; `reply`: `{type}` of `yes`, `no`, `none_of_above`, `unavailable`, or `{type: "choice", number}`, `{type: "text", text}` |
-| `called` | `call`: `{name, arguments}`, the program the run is to call and its configuration; `environment`: `{image, workdir}`, where its commands run (§2) |
+| `called` | `call`: `{name, arguments, environment}`, the program the run is to call, its configuration, and where its commands run (§2) |
 
 | `op.type` | Fields of `op` | `answer` |
 | --- | --- | --- |
@@ -98,9 +98,9 @@ response.
 
 ```json
 {"type":"arrived","notice":{"type":"changed","workspace":"3f2a…","summary":"the workspace the run starts from"}}
-{"type":"arrived","notice":{"type":"called","call":{"name":"mini-swe","arguments":{"model":{…},"task":"Implement the language in SPEC.md",…}},"environment":{"image":"…@sha256:…","workdir":"/workspace"}}}
+{"type":"arrived","notice":{"type":"called","call":{"name":"mini-swe","arguments":{"model":{…},"task":"Implement the language in SPEC.md",…},"environment":{"image":"…@sha256:…","workdir":"/workspace"}}}}
 {"type":"heard","frame":[],"notices":[1]}
-{"type":"opened","frame":["mini-swe"],"routine":{"name":"mini-swe","arguments":{"model":{…},"task":"…",…}}}
+{"type":"opened","frame":["mini-swe"],"routine":{"name":"mini-swe","arguments":{"model":{…},"task":"…",…},"environment":{…}}}
 {"type":"answered","frame":["mini-swe"],"op":{"type":"exec","command":"uname -sm","config":{…}},"answer":{"output":{"output":"Linux x86_64\n",…},…},"error":null}
 {"type":"heard","frame":["mini-swe"],"notices":[]}
 {"type":"answered","frame":["mini-swe"],"op":{"type":"sample","model":{…},"request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
@@ -109,19 +109,19 @@ response.
 {"type":"returned","frame":["mini-swe","bash"],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
 …
 {"type":"returned","frame":["mini-swe"],"value":{"status":"Submitted","submission":"…"}}
-{"type":"arrived","notice":{"type":"called","call":{"name":"grader","arguments":{"command":"sh /grader/grade.sh","timeout_seconds":900}},"environment":{…}}}
+{"type":"arrived","notice":{"type":"called","call":{"name":"grader","arguments":{"command":"sh /grader/grade.sh","timeout_seconds":900},"environment":{…}}}}
 {"type":"heard","frame":[],"notices":[212]}
 {"type":"opened","frame":["grader"],"routine":{"name":"grader","arguments":{…}}}
 {"type":"answered","frame":["grader"],"op":{"type":"exec","command":"sh /grader/grade.sh","config":{…,"merge":false}},"answer":{"output":{"output":"1..2\nok 1\nok 2\n","stderr":"",…},…},"error":null}
 {"type":"returned","frame":["grader"],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],"exit_code":0}}
 ```
 
-A person's call of a program names it, and its arguments are the program's complete
-**configuration**, an agent's model and task in it. Every later command builds the program from
-there. The `called` notice also holds the **environment** the call's commands run in: the pinned
-image, and the workdir. The driver finds it from the call's opening, through the read just before
-it, which took the notice. A program a program calls, a sub-agent, is called with its
-configuration alone, and runs where its caller's commands do. A tool's opening holds the model's
+A call names a routine, and its arguments are, for a program, its complete **configuration**, an
+agent's model and task in it. Every later command builds the program from there. A call may also
+name the **environment** its commands run in: the pinned image, and the workdir. A person's call
+always does; a call inside one that names none, a sub-agent's or a tool's, runs where its
+caller's commands do. The driver reads a frame's environment off the nearest opening on its path
+that names one. A tool's opening holds the model's
 arguments with what the agent's configuration adds, as how its command runs.
 
 ## 3. The forest

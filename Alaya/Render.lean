@@ -149,7 +149,7 @@ def noticeSummary : Notice → String
   | .said message => s!"said {(flatten message 70).quote}"
   | .changed workspace summary => s!"changed → {short workspace}: {flatten summary 60}"
   | .replied to reply => s!"replied to {to.render}: {flatten reply.line 60}"
-  | .called call _ => s!"call {callTitle call}"
+  | .called call => s!"call {callTitle call}"
 
 /-- An event in a line. -/
 def eventSummary : Event Agent → String

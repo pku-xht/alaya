@@ -107,7 +107,7 @@ def suite : Suite := Testing.suite "routines" #[
           (⟪"agent", "workflow", "planner", "lookup"⟫, "lookup"), (⟪"agent", "workflow", "step"⟫, "step"),
           (⟪"agent", "workflow", "step#1"⟫, "step")]
       -- A call's opening holds its arguments, and its end its result: both data, in the log.
-      check (log.any fun | .opened ⟪"agent", "workflow"⟫ ⟨"workflow", arguments⟩ => arguments.compress == "{\"goal\":\"ship it\"}" | _ => false)
+      check (log.any fun | .opened ⟪"agent", "workflow"⟫ { name := "workflow", arguments, .. } => arguments.compress == "{\"goal\":\"ship it\"}" | _ => false)
         "the workflow's arguments"
       check (log.any fun | .returned ⟪"agent", "workflow", "planner"⟫ value => value.compress == "{\"steps\":[\"make\",\"make test\"]}" | _ => false)
         "the planner's plan"

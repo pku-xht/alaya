@@ -180,13 +180,14 @@ complete, with its image pinned. `resume` then drives it. -/
 private def callRun (a : CallArgs) (out : Cli.Out) : Result UInt32 := do
   -- A configuration that is wrong is said so before anything is appended.
   let config ← Agents.Catalog.resolve a.program (← a.settings.mapM (·.read))
-  if let .error problem := Agents.Catalog.check ⟨a.program, config⟩ then
+  if let .error problem := Agents.Catalog.check { name := a.program, arguments := config } then
     throw <| .input problem
   withData a.data (write := true) fun data => do
     Executor.Docker.checkWorkdir a.workdir #[Driver.outputsDir]
     let settings ← (← Executor.Docker.settingsOf {} a.image a.workdir).pin
     let environment : Environment := { image := settings.image, workdir := a.workdir }
-    appendTo data a.entry out fun _ _ => pure (calling a.program config environment)
+    appendTo data a.entry out fun _ _ =>
+      pure ({ name := a.program, arguments := config, environment? := some environment } : RoutineCall).event
 
 /-! ## Driving a run -/
 

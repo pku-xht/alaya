@@ -62,8 +62,9 @@ private def reconfigured : TestM Unit := do
   let project := (← scratch) / "project"
   IO.FS.createDirAll project
   let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
-  let swe : PersonCall := { call := ⟨"mini-swe", ← assertOk <| Agents.Catalog.resolve "mini-swe"
-      #[{ path := ["model"], value := "gpt-oss-120b" }, { path := ["task"], value := "t" }]⟩ }
+  let config ← assertOk <| Agents.Catalog.resolve "mini-swe"
+    #[{ path := ["model"], value := "gpt-oss-120b" }, { path := ["task"], value := "t" }]
+  let swe : RoutineCall := { name := "mini-swe", arguments := config, environment? := some testEnvironment }
   let (called, _) ← assertOk <| Driver.append rt.store run root swe.event
   let (last, _) ← assertOk <| Driver.drive rt run called
   let log ← logAt rt last

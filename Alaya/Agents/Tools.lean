@@ -29,7 +29,7 @@ structure Tool where
   check : Json → Except String Unit := fun _ => pure ()
   /-- The routine call the model's arguments make: by default, of the routine of the tool's name,
   with those arguments. -/
-  call : Json → RoutineCall := fun arguments => ⟨definition.name, arguments⟩
+  call : Json → RoutineCall := fun arguments => { name := definition.name, arguments }
 
 def Tool.name (tool : Tool) : String := tool.definition.name
 
@@ -96,7 +96,7 @@ model's. -/
 def tool (config : Executor.Config := {}) : Tool := {
   definition
   check := fun arguments => (command arguments).map fun _ => ()
-  call := fun arguments => ⟨definition.name, arguments.setObjVal! "executor" config.toJson⟩ }
+  call := fun arguments => { name := definition.name, arguments := arguments.setObjVal! "executor" config.toJson } }
 
 /-- What an omitted output says in its place. -/
 def omittedNotice (file : String) : String := s!"[output omitted; full output: {file}]"
@@ -361,8 +361,8 @@ def tool (name : String) (config : Json) : Tool := {
   instruction? := some instruction
   check := fun arguments => (task arguments).map fun _ => ()
   call := fun arguments => match task arguments with
-    | .ok task => ⟨name, config.setObjVal! "task" task⟩
-    | .error _ => ⟨name, arguments⟩ }
+    | .ok task => { name, arguments := config.setObjVal! "task" task }
+    | .error _ => { name, arguments } }
 
 end Subagent
 

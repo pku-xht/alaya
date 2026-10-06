@@ -244,7 +244,7 @@ the agent: no read takes it.
 `call` runs a routine, a named computation (§5), in a frame of its own, and gives back its result.
 
 ```lean
-call : (name : String) → (arguments : Json) → Computation σ Json
+call : (name : String) → (arguments : Json) → (environment? : Option Environment := none) → Computation σ Json
 ```
 
 1. The computation calls a routine by its name. The driver marks the call,
@@ -253,6 +253,9 @@ call : (name : String) → (arguments : Json) → Computation σ Json
    `mini-swe/bash`, then `mini-swe/bash#1`.
 2. The routine the caller's scope has under that name (§5) runs in the child frame: its
    operations are performed there, and its own calls open frames nested in it.
+3. Its commands run in the environment the call names, when it names one: an image, and where
+   the workspace is mounted. Otherwise they run where its caller's do. What a call can reach is
+   fixed where its routine is defined (§5); where it runs is its caller's to say.
 3. The routine ends, and the driver marks how: `returned child value`, or `failed child error`.
 4. The caller goes on with the value. A failure is the caller's too, unless it catches it.
 
@@ -794,25 +797,26 @@ waits again. Its scope is the catalog.
 ```lean
 session : Routine Agent                             -- wait for a call, make it, wait again
 
-structure Environment where                         -- where a person's call's commands run
+structure Environment where                         -- where a call's commands run
   image   : String                                  -- the pinned image
   workdir : String                                  -- where the workspace is mounted
 
-calling        : String → Json → Environment → Event Agent      -- a person's call: arrived (called …)
-environmentOf  : Log Agent → Frame → Result Environment        -- where a frame's commands run
+RoutineCall.event : RoutineCall → Event Agent      -- a person's call: arrived (called call)
+environmentOf : Log Agent → Frame → Result (Frame × Environment)  -- where a frame's commands run
 lastCall?      : Log Agent → Option (RoutineCall × Option CallEnd)   -- the last call, and how it ended
 ```
 
 1. **The root.** A person provides the workspace: `arrived (changed …)`, at position 0. The run
    waits for a call.
-2. **A person calls a program**: `alaya call` appends `arrived (called ⟨name, config⟩
-   environment)`. The program's arguments are its configuration, as any routine's arguments are
-   its own. The environment is the person's call's, beside the arguments.
-3. **The run reads it, and opens the call**: `heard - [1]`, then `opened mini-swe ⟨name,
-   config⟩`, so every later command builds the same program from the log alone.
+2. **A person calls a program**: `alaya call` appends `arrived (called call)`, a call like any
+   other: the program's name, its configuration as its arguments, and the environment its
+   commands run in, which a person's call always names.
+3. **The run reads it, and opens the call** as it is: `heard - [1]`, then `opened mini-swe
+   call`, so every later command builds the same program from the log alone.
 4. **The call runs**, in frame `mini-swe`, until it returns, fails, or is stopped. It calls the
-   routines of the program's scope, and its commands run in a container of the image its
-   person's call named. A call inside it, a sub-agent's, runs in the same container.
+   routines of the program's scope, and its commands run in a container of the image its call
+   named. A call inside it that names no environment, a sub-agent's or a tool's, runs in the
+   same container; one that names its own runs in a container of that image.
 5. **The run waits for the next call.** A grader is called the same way, in frame `grader`, and its
    value is its verdict.
 

@@ -81,21 +81,13 @@ def answeringUname (executor : Executor) : Executor :=
 def testConfig (task : String := "t") : Json :=
   .mkObj [("model", testModelSpec.toJson), ("task", task)]
 
-/-- The call of the test's agent on `task`. -/
-def testCall (task : String := "t") : RoutineCall := ⟨"agent", testConfig task⟩
-
-/-- A person's call: the routine called, and where its commands run. -/
-structure PersonCall where
-  call : RoutineCall
-  environment : Environment := testEnvironment
-
-/-- The arrival of a person's call. -/
-def PersonCall.event (person : PersonCall) : Event Agent :=
-  calling person.call.name person.call.arguments person.environment
+/-- A person's call of the test's agent on `task`, in `environment`. -/
+def testCall (task : String := "t") (environment : Environment := testEnvironment) : RoutineCall :=
+  { name := "agent", arguments := testConfig task, environment? := some environment }
 
 /-- The notice that calls the test's agent on `task`. -/
 def callAgent (task : String := "t") (environment : Environment := testEnvironment) : Event Agent :=
-  { call := testCall task, environment : PersonCall }.event
+  (testCall task environment).event
 
 /-- The task a configuration gives, if any. -/
 def taskOf (config : Json) : Option String :=
@@ -195,14 +187,14 @@ def logAt (rt : Driver.Runtime) (hash : Hash) : TestM (Log Agent) := do
 
 /-- A person's call of the grader with `command`, in `image`. -/
 def graderCall (command : String) (image : String := recordedImage) (timeoutSeconds : Nat := 900)
-    (workdir : String := recordedWorkdir) : PersonCall :=
-  { call := ⟨"grader", .mkObj [("command", command), ("timeout_seconds", timeoutSeconds)]⟩
-    environment := { image, workdir } }
+    (workdir : String := recordedWorkdir) : RoutineCall :=
+  { name := "grader", arguments := .mkObj [("command", command), ("timeout_seconds", timeoutSeconds)]
+    environment? := some { image, workdir } }
 
 /-- Grades the point `tip` of a run with the grader `call`, as a person does: stops the call
 running there, if one is, calls the grader, and drives it to its end. Gives the entry the log
 ends at, and the verdict. -/
-def grade (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (call : PersonCall) :
+def grade (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (call : RoutineCall) :
     TestM (Hash × Json) := do
   let mut tip := tip
   if Driver.running (next run (← logAt rt tip)) then
