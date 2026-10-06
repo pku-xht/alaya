@@ -85,8 +85,7 @@ def suite : Suite := Testing.suite "render" #[
       (.returned #[0] (json "{\"status\":\"Submitted\",\"submission\":\"done\"}"), "return Submitted: done"),
       (.failed #[0, 1] "no routine named bash", "fail: no routine named bash"),
       (.stopped "to grade this point", "stopped: to grade this point"),
-      (.commented none "the parser goes wrong here\nsee 5.7", "# the parser goes wrong here see 5.7"),
-      (.commented (some #[0, 1]) "masking 3 old outputs", "# masking 3 old outputs")]
+      (.commented "the parser goes wrong here\nsee 5.7", "# the parser goes wrong here see 5.7")]
     for (event, line) in lines do
       assertEqual line (Render.eventSummary event) line
     assertEqual "an entry, as the commands that append print it"
@@ -113,8 +112,7 @@ def suite : Suite := Testing.suite "render" #[
       (none, .returns #[0, 1] .null, "next: the return of 0.1"),
       (none, .fails #[0, 1] "x", "next: the failure of 0.1"),
       (none, .mismatch 7, "broken: the event at 7 is no trace of the program"),
-      (none, .unguarded #[0], "broken: a loop in 0 reads no event"),
-      (none, .comments #[0, 1] "masking", "next: a comment in 0.1")]
+      (none, .unguarded #[0], "broken: a loop in 0 reads no event")]
     for (question?, next, line) in lines do
       assertEqual line (Render.nextSummary question? none next) line
     -- Once the agent is over, the run waits for a grader, and then ends with its verdict: how it

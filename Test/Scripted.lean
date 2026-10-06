@@ -157,23 +157,27 @@ def lastDialogue (config : Agents.MiniSwe.Config) (run : Run Agent) (log : Log A
       | .calls _ => response.message
       | .formatError message => .user message
 
+/-- The log with `event` appended as the driver appends an event of the program: after the
+comments the program made since its last one. -/
+def appended (run : Run Agent) (log : Log Agent) (event : Event Agent) : Log Agent :=
+  (log ++ (Replayer.ofLog run log).comments.map Event.commented).push event
+
 /-- The log with every mark `run` makes after it appended, up to what it asks of the world
 next, or how it ends: what the driver would log before its next operation, without one. -/
 partial def settle (run : Run Agent) (log : Log Agent) : Log Agent :=
   match next run log with
-  | .hears frame notices => settle run (log.push (.heard frame notices))
-  | .questions frame question => settle run (log.push (.asked frame question))
-  | .opens frame opened => settle run (log.push (.opened frame opened))
-  | .returns frame value => settle run (log.push (.returned frame value))
-  | .fails frame error => settle run (log.push (.failed frame error))
-  | .comments frame text => settle run (log.push (.commented (some frame) text))
+  | .hears frame notices => settle run (appended run log (.heard frame notices))
+  | .questions frame question => settle run (appended run log (.asked frame question))
+  | .opens frame opened => settle run (appended run log (.opened frame opened))
+  | .returns frame value => settle run (appended run log (.returned frame value))
+  | .fails frame error => settle run (appended run log (.failed frame error))
   | _ => log
 
 /-- The log with the answer to what `run` asks next appended, and then its marks: what the world
 said, as a log keeps it. -/
 def answer (run : Run Agent) (log : Log Agent) (stored : Stored) : Log Agent :=
   match next run log with
-  | .ask call => settle run (log.push (.answered call.frame call.op.key (.ok stored)))
+  | .ask call => settle run (appended run log (.answered call.frame call.op.key (.ok stored)))
   | _ => log
 
 /-- The log with `response` as the model's answer to what `run` asks next. -/

@@ -178,7 +178,7 @@ def eventSummary : Event Agent → String
   | .returned _ value => labelled "return" (valueSummary value)
   | .failed _ error => s!"fail: {flatten error}"
   | .stopped reason => s!"stopped: {flatten reason}"
-  | .commented _ text => s!"# {flatten text}"
+  | .commented text => s!"# {flatten text}"
 
 /-- How a run whose agent is over stands, in a line: how the agent ended, and the verdict once
 the run is graded — `done: fail 352/464`, `stopped: pass 2/2` — or what the agent gave, or why
@@ -211,7 +211,6 @@ def nextSummary (question? : Option Question) (agent? : Option AgentEnd) : Next 
   | .fails frame _ => s!"next: the failure of {frame.render}"
   | .mismatch position => s!"broken: the event at {position} is no trace of the program"
   | .unguarded frame => s!"broken: a loop in {frame.render} reads no event"
-  | .comments frame _ => s!"next: a comment in {frame.render}"
 
 /-- An entry as the commands that append print it: its full name, its position, its frame, and
 its event. -/

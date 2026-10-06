@@ -73,7 +73,7 @@ with its kind under `type`, and its frame, where it has one, as an array of numb
 | `returned` | `frame`, `value` |
 | `failed` | `frame`, `error` |
 | `stopped` | `reason` |
-| `commented` | `frame`, or `null` for a person's; `text` |
+| `commented` | `text` |
 
 | Notice `type` | Fields |
 | --- | --- |
@@ -328,6 +328,7 @@ contract, and `Workspaces.Restic` keeps it with restic 0.17 or later.
 | `readFiles` | reads regular files of a snapshot | the report, `cat` | `restore --include`, into scratch |
 | `listEntries` | lists a directory of a snapshot | `ls`, `cat`'s check of a path | `ls --json` |
 | `retainOnly` | drops every snapshot not listed | `rm`, with the snapshots the remaining entries name | `forget`, then `prune` |
+| `transfer` | copies snapshots into a new store, under names of their own there | `rebase` | `init --from-repo --copy-chunker-params`, then `copy`, matched by each copy's `original` |
 
 What the contract requires (`Test/Workspaces.lean`):
 
@@ -362,6 +363,9 @@ A snapshot or a checkout of a directory that overlaps `D` is refused before anyt
 - The stored key is checked against the file's name on load. A corrupt entry reads as empty and
   is replaced on the next sample.
 - An entry is only ever appended to, so the directory is safe to keep between runs.
+- An entry is never written in place: a save renames a new file over its name. So `rebase`
+  gives a new data directory the entries as hard links, and a draw in either directory leaves the
+  other as it was.
 
 How the cache is used is `docs/llm-api.md` §5.4.
 
@@ -370,7 +374,8 @@ How the cache is used is `docs/llm-api.md` §5.4.
 - **Names.** An entry's name is the hash of its parent's name and its event. Nothing under a
   name changes, and a log only grows.
 - **Traces.** Every log the driver writes is a trace of its run's program: replay agrees with
-  it at every prefix. A log that is not is refused, not driven on.
+  it at every prefix. A log that is not is refused, not driven on; `rebase` copies the part
+  that is into a new data directory.
 - **Draws.** A sample from an entry with `n` sampled continuations is draw `n` of its request.
 - **Grading.** A graded log is complete: it ends with the verdict.
 - **Snapshots.** Every snapshot an entry names is kept while the entry is: a version of the

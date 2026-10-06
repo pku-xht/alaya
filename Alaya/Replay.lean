@@ -16,9 +16,9 @@ event at a time and never replays from the start, and a reader replays a whole l
 A loop must read an event every round (Hancock and Setzer 2000), which is what makes every step
 of the machine end.
 
-A comment is no part of any of this. Replay passes over a comment in the log wherever it
-stands, and over a comment the program makes where the log holds none: a program's comment is
-written when the driver reaches it at the end of a log, and never needed after. -/
+A comment is no part of any of this. Replay passes over every comment in the log, and over
+every comment the program makes. It keeps only the comments the program has made since the last
+event it read, which the driver writes before the next event it appends. -/
 
 namespace Alaya
 
@@ -48,12 +48,12 @@ structure Machine (σ : Signature) : Type 1 where
   result? : Option (Except String Json) := none
 
 /-- What the machine needs next from the log: an answer to an operation, a mark it makes, a read
-of the inbox, or nothing more; or what it says there, a comment, which it does not need. -/
+of the inbox, or nothing more; or what it says before it, a comment, which it does not need. -/
 inductive Demand (σ : Signature) where
   | ask (call : Call σ) (resume : Except String (σ.Answer call.op) → Machine σ)
   | mark (expected : Event σ) (resume : Machine σ)
   | read (frame : Frame) (wait : Option Wait) (resume : List Notice → Machine σ)
-  | comment (frame : Frame) (text : String) (resume : Machine σ)
+  | comment (text : String) (resume : Machine σ)
   | finished (result : Except String Json)
   | unguarded (frame : Frame)
 
@@ -116,7 +116,7 @@ partial def advance (routines : Routines σ) (m : Machine σ) : Demand σ :=
     advance routines { α := _, program := step s, stack := .round step k read stack, frame, opened, read }
   -- A comment reads no event: a round that only comments is no guarded round.
   | ⟨α, .comment text k, stack, frame, opened, read, _⟩ =>
-    .comment frame text ⟨α, k, stack, frame, opened, read, none⟩
+    .comment text ⟨α, k, stack, frame, opened, read, none⟩
 
 /-- The machine after a stop from outside: every frame of the agent ends, whatever the nesting,
 without a mark, and what follows the agent is given the error. Nothing in the agent can catch
@@ -164,8 +164,6 @@ inductive Next (σ : Signature) where
   | mismatch (position : Nat)
   /-- A loop went round without reading an event. -/
   | unguarded (frame : Frame)
-  /-- The program says this next: a comment, which the driver writes and replay does not need. -/
-  | comments (frame : Frame) (text : String)
 
 instance : Inhabited (Next σ) := ⟨.mismatch 0⟩
 
@@ -181,12 +179,22 @@ structure Replayer (σ : Signature) where
   rooted : Bool := false
   /-- Set when the log has turned out to be no trace of the run. -/
   broken? : Option (Next σ) := none
+  /-- The comments the program has made since the last event it read, in order: the driver
+  writes them before the next event it appends. -/
+  comments : Array String := #[]
 
 namespace Replayer
 
+/-- Goes on past the comments the program makes, keeping them, to what it needs of the log. -/
+private partial def settle (r : Replayer σ) : Replayer σ :=
+  match r.demand with
+  | .comment text machine =>
+    settle { r with machine, demand := machine.advance r.routines, comments := r.comments.push text }
+  | _ => r
+
 def start (run : Run σ) : Replayer σ :=
   let machine := Machine.start run
-  { routines := run.routines, machine, demand := machine.advance run.routines }
+  settle { routines := run.routines, machine, demand := machine.advance run.routines }
 
 /-- What a read takes, and what it leaves unread. A read that waits takes the notices it is for,
 among those not yet read; any other takes all that are not yet read and addressed to no one. -/
@@ -210,15 +218,17 @@ def next (r : Replayer σ) : Next σ :=
   | .mark (.returned frame value) _ => .returns frame value
   | .mark (.failed frame error) _ => .fails frame error
   | .mark _ _ => .mismatch r.position
-  | .comment frame text _ => .comments frame text
+  -- Never: `settle` goes on past every comment.
+  | .comment .. => .mismatch r.position
   | .read frame wait _ =>
     let (taken, _) := r.take frame wait
     if wait.isSome && taken.isEmpty then .waits frame (wait.bind (·.question?))
     else .hears frame (taken.map (·.1))
 
-/-- The replayer with the machine gone on to `machine`, the event at its position read. -/
+/-- The replayer with the machine gone on to `machine`, the event at its position read: the
+comments made before that event are behind it. -/
 private def resume (r : Replayer σ) (machine : Machine σ) : Replayer σ :=
-  { r with machine, demand := machine.advance r.routines, position := r.position + 1 }
+  settle { r with machine, demand := machine.advance r.routines, position := r.position + 1, comments := #[] }
 
 private def broken (r : Replayer σ) (next : Next σ) : Replayer σ :=
   { r with broken? := some next }
@@ -228,15 +238,7 @@ private def demandFrame? : Demand σ → Option Frame
   | .ask call _ => some call.frame
   | .mark event _ => event.frame?
   | .read frame _ _ => some frame
-  | .comment frame _ _ => some frame
   | _ => none
-
-/-- Passes over the comments the program makes where the log holds none: one is written at the
-end of a log or not at all, and replay never needs it. -/
-private partial def passComments (r : Replayer σ) : Replayer σ :=
-  match r.demand with
-  | .comment _ _ machine => passComments { r with machine, demand := machine.advance r.routines }
-  | _ => r
 
 /-- Reads one more event of the log. -/
 def feed (r : Replayer σ) (event : Event σ) : Replayer σ :=
@@ -248,13 +250,7 @@ def feed (r : Replayer σ) (event : Event σ) : Replayer σ :=
     | .arrived (.changed ..) => { r with rooted := true, position := 1 }
     | _ => r.broken (.mismatch position)
   else match event with
-  | .commented frame? text =>
-    -- The comment the program makes here, written; any other is passed over, and changes nothing.
-    match r.demand with
-    | .comment frame expected machine =>
-      if frame? == some frame && text == expected then r.resume machine
-      else { r with position := position + 1 }
-    | _ => { r with position := position + 1 }
+  | .commented _ => { r with position := position + 1 }
   | .arrived notice => { r with unread := r.unread.push (position, notice), position := position + 1 }
   | .stopped _ =>
     let inAgent := (demandFrame? r.demand).any (·.inAgent)
@@ -262,8 +258,6 @@ def feed (r : Replayer σ) (event : Event σ) : Replayer σ :=
     | true, some machine => r.resume machine
     | _, _ => r.broken (.mismatch position)
   | event =>
-    let r := r.passComments
-    if let .unguarded frame := r.demand then r.broken (.unguarded frame) else
     match r.demand with
     | .read frame wait resume =>
       let (taken, left) := r.take frame wait

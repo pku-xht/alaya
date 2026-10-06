@@ -120,19 +120,20 @@ inductive Event (σ : Signature) where
   | returned  (frame : Frame) (value : Json)                 -- … and ends with its value
   | failed    (frame : Frame) (error : String)               -- … or with its failure
   | stopped   (reason : String)                              -- from outside: the agent ends
-  | commented (frame? : Option Frame) (text : String)        -- for a reader only
+  | commented (text : String)                                -- for a reader only
 
 abbrev Log (σ : Signature) := Array (Event σ)
 ```
 
-A log is an array of events, and an event's **position** is its index. There are three kinds of
+A log is an array of events, and an event's **position** is its index. There are four kinds of
 event:
 
 | Kind | Events | Appended |
 | --- | --- | --- |
-| from outside | `arrived`, `stopped`, a person's `commented` | by a person, at any time; it has no frame |
+| from outside | `arrived`, `stopped` | by a person, at any time; it has no frame |
 | answer | `answered` | by the driver, after it carried out an operation |
-| mark | `heard`, `asked`, `opened`, `returned`, `failed`, a program's `commented` | by the driver, where the program did something that needs no world |
+| mark | `heard`, `asked`, `opened`, `returned`, `failed` | by the driver, where the program did something that needs no world |
+| comment | `commented` | by the driver, for the program, or by a person; it has no frame |
 
 Marks make the log readable without the program: who read which notice, where each call began
 and how it ended.
@@ -305,14 +306,15 @@ itself is the loop of interaction trees (Xia et al. 2020).
 comment : String → Program σ Unit
 ```
 
-A comment is a line for whoever reads the log, for debugging an agent. The driver writes it
-where the program is, `commented (some frame) text`, and `alaya log` and the report show it as
-`# text`.
+A comment is a line for whoever reads the log, `commented text`, shown as `# text` by `alaya log`
+and the report. A program writes one with `comment`, and a person with `alaya comment`; the two
+are the same event.
 
-Nothing depends on a comment. Replay passes over a comment in the log wherever it stands, and
-over a comment of the program that the log does not hold. So comments can be added to an agent,
-reworded or removed, and every existing log is still a log of that agent. A comment does not
-guard a loop. A person's comment (`alaya comment`) has no frame.
+Replay passes over every comment: those in the log, and those the program makes. A comment of
+the program matters only at the end of the log, where the driver writes it before the next event
+it appends. So comments can be added to an agent, reworded or removed, and every existing log is
+still a log of that agent. `alaya rebase` writes an agent's new comments into a copy of an
+existing log. A comment does not guard a loop.
 
 ### 3.7 Stops
 
@@ -410,7 +412,7 @@ flowchart TD
   next -- "waits" --> waits("stop: wait for a person<br/>a task, a reply, a grader"):::wait
   next -- "done · raised" --> over("the run is over"):::ok
   next -- "mismatch ·<br/>unguarded" --> refuse("refuse: the log<br/>is not a trace<br/>of the program"):::bad
-  next -- "hears · questions<br/>opens · returns<br/>fails · comments" --> mark("append<br/>the mark")
+  next -- "hears · questions<br/>opens · returns<br/>fails" --> mark("append<br/>the mark")
   mark --> next
   next -- "ask" --> act("carry out<br/>the operation") --> answered("append answered")
   answered --> next
@@ -420,7 +422,7 @@ flowchart TD
 | `Next` | What the log says |
 | --- | --- |
 | `ask call` | it ends where the program asks for an operation |
-| `hears`, `questions`, `opens`, `returns`, `fails`, `comments` | it ends where the program makes a mark |
+| `hears`, `questions`, `opens`, `returns`, `fails` | it ends where the program makes a mark |
 | `waits frame question?` | it ends where a read waits, and nothing the read is for has arrived; with the question, when it waits for a reply |
 | `done value`, `raised error` | it is complete: the run is over |
 | `mismatch position` | its event at `position` is not what the program does |
@@ -436,7 +438,8 @@ Three rules make a program one that can be replayed:
 
 A log is matched by position, so a program changed after a log was written reads that log only
 up to its first changed operation; after it the log is a `mismatch`, which the driver refuses
-to go on from. Comments are the exception (§3.6).
+to go on from. Comments are the exception (§3.6). `alaya rebase` copies the prefix that holds
+into a data directory of its own, as the changed program makes it (`docs/cli.md`).
 
 ## 5. Routines
 
@@ -775,8 +778,9 @@ A point of a run is an **entry**: one event and the entry before it, named by a 
 
 1. It reads the log that ends at `tip`, and replays it.
 2. It asks what the run does next, and does it (the diagram of §4): it carries out an
-   operation and appends the answer, or appends a mark. Each event is a new entry after the
-   last, and `OnEntry` is called with it.
+   operation and appends the answer, or appends a mark, after the comments the program made
+   since its last event. Each event is a new entry after the last, and `OnEntry` is called with
+   it.
 3. It stops when the agent is over and no grader is assigned, when the run is graded, when a
    read waits for a person, or at a limit. It gives the last entry, and why it stopped.
 

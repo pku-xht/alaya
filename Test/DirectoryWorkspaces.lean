@@ -99,6 +99,13 @@ def directoryWorkspaces (root : System.FilePath) : Workspaces where
       if !keep.any (·.hex == entry.fileName) then
         let _ ← IO.Process.output { cmd := "chmod", args := #["-R", "u+w", entry.path.toString] }
         IO.FS.removeDirAll entry.path
+  -- A copy gets an identifier of its own, as one of restic's does, so that a caller who keeps
+  -- the old one is found out.
+  transfer ids location := ids.mapM fun id => storageIO do
+    let moved : Hash := ⟨Sha256.sumHex s!"copy of {id.hex}".toUTF8⟩
+    if !(← (root / id.hex).isDir) then throw <| IO.userError s!"no snapshot {id.hex}"
+    if !(← (location / moved.hex).isDir) then copy (root / id.hex) (location / moved.hex)
+    pure moved
 
 /-- The test's own snapshot store, the same one however often it is asked for. -/
 def workspaces : TestM Workspaces := do

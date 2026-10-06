@@ -21,6 +21,7 @@ private def fakeWorkspaces (reads listings : IO.Ref (Array String)) : Workspaces
   materialize _ _ := throw <| .storage "unexpected materialization"
   diff _ _ := pure #[]
   retainOnly _ := pure ()
+  transfer _ _ := throw <| .storage "unexpected transfer"
   listEntries _ path := do
     Result.fromIO Error.storage <| listings.modify (·.push path)
     if path.isEmpty then return #[

@@ -196,15 +196,23 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
       else if sampling && limits.samples?.any (samples ≥ ·) then some s!"{samples} response(s) sampled"
       else none
     -- An entry's time is how long its event took the driver, except for a response whose own
-    -- time is known (`took?`): a draw costs what it took when it was made, cached or not.
+    -- time is known (`took?`): a draw costs what it took when it was made, cached or not. The
+    -- program's comments since its last event are written first, in no time.
     let appendTook (took? : Option Nat) (event : Event Agent) (checkout : Checkout) (samples : Nat) :
         Result (Hash × Stop) := do
+      let comments := replayer.comments.map Event.commented
+      let mut (forest, tip) := (forest, tip)
+      for comment in comments do
+        let entry : Entry := { parent? := some tip, event := comment }
+        let (hash, grown) ← rt.store.put forest entry
+        onEntry hash entry
+        (forest, tip) := (grown, hash)
       let now ← nowMs
       let entry : Entry := { parent? := some tip, event, elapsedMs := took?.getD (now - stamp) }
-      let (hash, forest) ← rt.store.put forest entry
+      let (hash, grown) ← rt.store.put forest entry
       onEntry hash entry
-      loop forest hash (log.push event) (replayer.feed event) (spent + entry.elapsedMs) now samples
-        checkout
+      loop grown hash ((log ++ comments).push event) ((comments.foldl Replayer.feed replayer).feed event)
+        (spent + entry.elapsedMs) now samples checkout
     let append := appendTook none
     match replayer.next with
     -- The run has ended: with its verdict, or, when its grading failed, an error.
@@ -217,7 +225,8 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
       | true, some agent => pure (tip, .over agent none)
       | _, _ => pure (tip, .waits frame question?)
     | .mismatch position =>
-      throw <| .input s!"the log is no trace of its run's program: the event at {position} is not what it does"
+      throw <| .input <| s!"the log is no trace of its run's program: the event at {position} is not what it does; " ++
+        "`alaya rebase` copies the part that is into a new data directory"
     | .unguarded frame =>
       throw <| .input s!"a loop in frame {frame.render} went round without reading an event"
     | .hears frame notices =>
@@ -226,7 +235,6 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
       if let some reason := limit? (← nowMs) frame (sampling := true) then
         return (tip, .paused reason)
       append (.heard frame notices) checkout samples
-    | .comments frame text => append (.commented (some frame) text) checkout samples
     | .questions frame question => append (.asked frame question) checkout samples
     | .opens frame call => append (.opened frame call) checkout samples
     | .returns frame value => append (.returned frame value) checkout samples
@@ -282,7 +290,7 @@ frame, or inside it. -/
 def running : Next Agent → Bool
   | .ask call => call.frame.inAgent
   | .opens frame _ | .returns frame _ | .fails frame _ | .hears frame _ | .waits frame _
-  | .questions frame _ | .comments frame _ => frame.inAgent
+  | .questions frame _ => frame.inAgent
   | _ => false
 
 /-- Appends an event that comes from outside — a notice, a stop — after `tip`, after checking
@@ -295,7 +303,8 @@ def append (store : Store) (run : Run Agent) (tip : Hash) (event : Event Agent) 
   let log ← store.log forest tip
   let next := (Replayer.ofLog run log).next
   if let .mismatch position := next then
-    throw <| .input s!"the log is no trace of its run's program at position {position}"
+    throw <| .input <| s!"the log is no trace of its run's program at position {position}; " ++
+      "`alaya rebase` copies the part that is into a new data directory"
   match event with
   | .stopped _ =>
     if !running next then throw <| .input "the agent is over: there is nothing to stop"

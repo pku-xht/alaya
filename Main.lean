@@ -611,6 +611,64 @@ private def rmRun (data : System.FilePath) (reference : String) (out : Cli.Out) 
     out.record (.mkObj [("removed", removed)]) s!"removed {removed} entries"
     pure 0
 
+/-! ## Rebasing a run -/
+
+/-- Copies the run that ends at an entry into a new data directory, `target`, as the current
+version of its agent makes it, with `settings` over its configuration (`Alaya.Rebase`). The source is only
+read. The new directory is written beside `target` under another name and renamed into place
+once complete, so a failure leaves none. -/
+private def rebaseRun (data : System.FilePath) (reference : String) (target : System.FilePath)
+    (settings : Array Settings.Setting) (out : Cli.Out) : Result UInt32 :=
+  withData data fun data => do
+    let io {α} (action : IO α) : Result α := Result.fromIO Error.storage action
+    if ← io target.pathExists then
+      throw <| .input s!"{target} exists: rebase makes a new data directory"
+    let some name := target.fileName | throw <| .input s!"not a directory to create: {target}"
+    let source ← io (IO.FS.realPath data.path)
+    if Workspaces.overlap (← io (Workspaces.resolved target)) source then
+      throw <| .input s!"{target} overlaps the data directory {data.path}: put the new one beside it"
+    let (_, tip, entries) ← entriesAt data reference
+    let log := entries.map (·.event)
+    let (recorded, _) ← Rebase.configure log #[]
+    let (config, model) ← Rebase.configure log settings
+    match config.run model with
+    | .error problem => throw <| .input problem
+    | .ok run =>
+      let rebased := Rebase.plan run log (recorded.model == config.model)
+      let summary := Rebase.summary rebased log.size
+      let staging := target.withFileName
+        s!".{name}.rebase-{← (IO.Process.getPID : BaseIO UInt32)}-{← (IO.monoNanosNow : BaseIO Nat)}"
+      let written ← try
+          let store ← Store.create (staging / "entries")
+          let written ← Rebase.write rebased entries data.workspaces (staging / "restic") store
+            s!"rebased from {tip.hex} in {source}: {summary}"
+          Cache.link data.cache (staging / "cache")
+          io (IO.FS.rename staging target)
+          pure written
+        catch error =>
+          Workspaces.makeWritable staging
+          io do if ← staging.pathExists then IO.FS.removeDirAll staging
+          throw error
+      for ((hash, entry), position) in written.zipIdx do entryRecord out hash position entry
+      let some (last, _) := written.back? | throw <| .storage "a rebase wrote no entry"
+      if out.json then
+        out.record (.mkObj [("entry", last.hex), ("data", target.toString),
+          ("held", (rebased.divergence?.map (·.position)).getD log.size), ("total", log.size),
+          ("divergence", match rebased.divergence? with
+            | none => .null
+            | some divergence => .mkObj [("position", divergence.position),
+                ("found", eventToJson divergence.found),
+                ("expected", Rebase.expectedSummary divergence.expected?)]),
+          ("dropped", .arr (rebased.dropped.map fun (position, event) =>
+            .mkObj [("position", position), ("event", eventToJson event)]))]) ""
+      else io do
+        (← IO.getStdout).flush
+        let stderr ← IO.getStderr
+        stderr.putStrLn summary
+        for line in Rebase.droppedLines rebased do stderr.putStrLn line
+        stderr.putStrLn s!"`alaya run {Render.short last} --data {target}` goes on"
+      pure 0
+
 /-! ## Configuration -/
 
 private def providerJson (provider : Provider.Provider) : Json :=
@@ -742,7 +800,13 @@ private def commands : Array Cli.Command := #[
       <*> Cli.repeated "hide" (.string "DIRS") "directories to leave out of the page, comma-separated" },
   { name := "rm"
     summary := "Delete an entry, everything after it, and the snapshots only they named."
-    spec := rmRun <$> dataDir <*> entryArg "the first entry to delete" }]
+    spec := rmRun <$> dataDir <*> entryArg "the first entry to delete" },
+  { name := "rebase"
+    summary := "Copy the log at an entry into a new data directory, up to where a revised version of its agent differs, to go on with it there."
+    examples := #["alaya rebase 4f2c8b ../v2", "alaya rebase 4f2c8b ../v2 --set agent.context_reserve=16000"]
+    spec := rebaseRun <$> dataDir <*> entryArg "the entry whose log is rebased"
+      <*> Cli.arg "DIR" .path "the new data directory, which must not exist"
+      <*> overrides }]
 
 private def app : Cli.App where
   name := "alaya"

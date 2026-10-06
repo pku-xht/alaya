@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 152" width="920" height="152">
+<title>rebase: the log, up to where the two agents differ, is copied into a new data directory, where the revised agent goes on</title>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}.c{font-size:12px}</style>
+<rect width="920" height="152" fill="#fff"/>
+<rect x="12.5" y="28.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(20,34) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<path class="a" d="M41,40.5h12"/>
+<rect x="53.5" y="28.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(61,34) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<path class="a" d="M82,40.5h12"/>
+<rect x="94.5" y="28.5" width="97" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(102,34) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<text x="121" y="44.5" class="c">said “fix it”</text>
+<path class="a" d="M192,40.5h12"/>
+<rect x="204.5" y="28.5" width="135" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(212,34) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.6 2.5l-1.2 9M9.6 2.5l-1.2 9M3 5.5h8.5M2.5 8.5H11" fill="none"/></g>
+<text x="231" y="44.5" class="c" style="fill:#6f7985"># an old comment</text>
+<path class="a" d="M340,40.5h12"/>
+<rect x="352.5" y="28.5" width="97" height="24" rx="6" fill="#dfe9f6" stroke="#d3d9e0"/>
+<g transform="translate(360,34) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="379" y="44.5" class="c">exec make</text>
+<path class="a" d="M450,40.5h12"/>
+<rect x="462.5" y="28.5" width="123" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(470,34) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="489" y="44.5" class="c">exec make test</text>
+<path class="a" d="M586,40.5h12"/>
+<circle cx="601" cy="40.5" r="0.9" fill="#a3abb5"/>
+<circle cx="605" cy="40.5" r="0.9" fill="#a3abb5"/>
+<circle cx="609" cy="40.5" r="0.9" fill="#a3abb5"/>
+<path class="a" d="M612,40.5h12"/>
+<rect x="624.5" y="28.5" width="128" height="24" rx="6" fill="#fff" stroke="#d3d9e0"/>
+<g transform="translate(632,34) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="651" y="44.5" class="c">return fail 12/48</text>
+<text x="688.5" y="19" class="s m" text-anchor="middle">ENTRY</text>
+<path class="a" d="M688.5,22V28"/>
+<rect x="12.5" y="103.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(20,109) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
+<path class="a" d="M41,115.5h12"/>
+<rect x="53.5" y="103.5" width="28" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(61,109) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<path class="a" d="M82,115.5h12"/>
+<rect x="94.5" y="103.5" width="97" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(102,109) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v6H6l-3 2.5V9H2z" fill="none"/></g>
+<text x="121" y="119.5" class="c">said “fix it”</text>
+<path class="a" d="M192,115.5h12"/>
+<rect x="204.5" y="103.5" width="135" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(212,109) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.6 2.5l-1.2 9M9.6 2.5l-1.2 9M3 5.5h8.5M2.5 8.5H11" fill="none"/></g>
+<text x="231" y="119.5" class="c" style="fill:#6f7985"># a new comment</text>
+<path class="a" d="M340,115.5h12"/>
+<rect x="352.5" y="103.5" width="97" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(360,109) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="379" y="119.5" class="c">exec make</text>
+<path class="a" d="M450,115.5h12"/>
+<rect x="462.5" y="103.5" width="135" height="24" rx="6" fill="#dfe9f6" stroke="#3567a0"/>
+<g transform="translate(470,109) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.6 2.5l-1.2 9M9.6 2.5l-1.2 9M3 5.5h8.5M2.5 8.5H11" fill="none"/></g>
+<text x="489" y="119.5" class="c" style="fill:#6f7985"># rebased from …</text>
+<path class="a" d="M598,115.5h12"/>
+<rect x="610.5" y="103.5" width="134" height="24" rx="6" fill="#fff" stroke="#d3d9e0" stroke-dasharray="3 2"/>
+<g transform="translate(618,109) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="637" y="119.5" class="c" style="fill:#6f7985">exec make check</text>
+<text x="12" y="19" class="s"><tspan class="m">D</tspan>, the original agent’s log, only read: in blue, what the revised agent makes too</text>
+<text x="12" y="94" class="s"><tspan class="m">DIR</tspan>: what <tspan class="m">rebase</tspan> writes; the log’s comments left out, the revised agent’s written</text>
+<text x="462" y="68" class="s">the revised agent runs <tspan class="m">make check</tspan> here: the copy ends</text>
+<text x="610" y="143" class="s">the next <tspan class="m">run</tspan>, in <tspan class="m">DIR</tspan></text>
+</svg>

@@ -192,6 +192,47 @@ def suite : Suite := Testing.suite "commands" #[
     let tree := lines (← ok data "tree")
     check (tree.any (has · "[stopped: fail 1/2]") && !tree.any (has · "pass 2/2")) s!"the tree after: {tree}",
 
+  test "rebase copies a graded run into a new data directory, which reads and runs as the old one did" do
+    let (data, _, made) ← newRun
+    let told ← appended data "tell" #[text made[2]! ["entry"], "keep the old API"]
+    let edited := (← scratch) / "edited"
+    let _ ← ok data "checkout" #[text told ["entry"], edited.toString]
+    IO.FS.writeFile (edited / "a.txt") "edited\n"
+    let changed ← appended data "commit" #[text told ["entry"], edited.toString]
+    let graded := text (← records (← ok data "grade" (#[text changed ["entry"], "--json"] ++ grader))).back! ["entry"]
+    IO.FS.createDirAll (data / "cache")
+    IO.FS.writeFile (data / "cache" / "0123.json") "a draw"
+    let tree := lines (← ok data "tree")
+    let target := (← scratch) / "rebased"
+    -- A setting this build does not know: refused, and nothing is made.
+    check (has (← refused 65 data "rebase" #[graded, target.toString, "--set", "agent.no_such_field=1"])
+      "no_such_field") "an unknown field"
+    check (!(← target.pathExists)) "no directory is left"
+    let written ← records (← ok data "rebase" #[graded, target.toString, "--json"])
+    let some summary := written.back? | fail "rebase printed nothing"
+    assertEqual "the whole log holds" (text summary ["held"], text summary ["total"], text summary ["divergence"])
+      ("10", "10", "null")
+    let tip := text summary ["entry"]
+    let note := written[written.size - 2]!
+    check (text note ["entry"] == tip && has (text note ["event", "text"]) s!"rebased from {graded}")
+      s!"the last entry says where it came from: {note.compress}"
+    assertEqual "the old directory as it was" (lines (← ok data "tree")) tree
+    -- The new directory reads as the old one: its tree, the file a person changed, the checkout a
+    -- grader left, each by the new names of its snapshots.
+    check ((lines (← ok target "tree")).any (has · "[stopped: pass 2/2]")) "the verdict"
+    assertEqual "the change" (← ok target "cat" #[s!"{tip}:4", "a.txt"]) "edited\n"
+    assertEqual "the grader's checkout" (← ok target "cat" #[s!"{tip}:8", "a.txt"]) "edited\n"
+    check ((text written[0]! ["event", "notice", "workspace"]) != (text made[0]! ["event", "notice", "workspace"]))
+      "a snapshot under a name of the new repository"
+    assertEqual "the model cache" (← IO.FS.readFile (target / "cache" / "0123.json")) "a draw"
+    let over ← alaya target "run" #[tip]
+    check (over.exit == 0 && has over.stderr "stopped: pass 2/2") s!"and runs: {over.stderr}"
+    check (has (← refused 65 data "rebase" #[graded, target.toString]) "exists") "a directory that exists is refused"
+    -- Without --json: the entries, then what held on stderr.
+    let plain ← alaya data "rebase" #[graded, ((← scratch) / "again").toString]
+    check (plain.exit == 0 && has plain.stderr "all 10 events hold") s!"what held: {plain.stderr}"
+    check ((lines plain.stdout).back?.any (has · "# rebased from")) "the last line is the entry to go on from",
+
   test "a command says what it refuses, with its class's exit status" do
     let (data, _, made) ← newRun
     let tip := text made[2]! ["entry"]
@@ -205,8 +246,8 @@ def suite : Suite := Testing.suite "commands" #[
     -- A comment: on an entry that goes on, an annotation and no branch; at the end of a log, its
     -- last entry. Either way the run stands as it stood.
     let noted ← appended data "comment" #[tip, "the task could say more"]
-    assertEqual "a comment" (text noted ["event", "type"], (field noted ["event", "frame"]).compress,
-      text noted ["event", "text"]) ("commented", "null", "the task could say more")
+    assertEqual "a comment" (text noted ["event", "type"], text noted ["event", "text"])
+      ("commented", "the task could say more")
     let tree := lines (← ok data "tree")
     assertEqual "no branch for it" tree.size 3
     check (tree.any (has · "# the task could say more")) s!"the annotation: {tree}"

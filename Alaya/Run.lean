@@ -163,6 +163,24 @@ def snapshots (log : Log Agent) : Array Snapshot :=
       | _ => found
     | _ => found
 
+/-- The event with every snapshot it names renamed by `rename`: the ones `snapshots` finds. -/
+def Event.renameSnapshots (rename : Snapshot → Snapshot) : Event Agent → Event Agent
+  | .answered frame key answer =>
+    let key := match key with
+      | .external command image input? timeout => .external command image (input?.map rename) timeout
+      | key => key
+    let answer := answer.map fun
+      | .execution execution => .execution { execution with workspace := rename execution.workspace }
+      | .external external => .external { external with checkout := rename external.checkout }
+      | stored => stored
+    .answered frame key answer
+  | .arrived (.changed workspace summary) => .arrived (.changed (rename workspace) summary)
+  | .arrived (.assigned grader) =>
+    match Grader.fromJson grader with
+    | .ok grader => .arrived (.assigned { grader with input? := grader.input?.map rename }.toJson)
+    | .error _ => .arrived (.assigned grader)
+  | event => event
+
 /-- The question a run waits on, where it waits on one: the frame that asked, and the question.
 Whatever asked it — a tool a model called, a step of a workflow — replay says so itself. -/
 def questionOf? : Next Agent → Option (Frame × Question)

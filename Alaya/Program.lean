@@ -169,9 +169,9 @@ def retry (attempts : Nat) (program : Program σ α) : Program σ α :=
 def call (name : String) (arguments : Json) : Program σ Json :=
   .call ⟨name, arguments⟩ fun | .ok value => .pure value | .error error => .fail error
 
-/-- Says `text` to whoever reads the log. It is written where the driver reaches it, and replay
-neither needs it nor minds it, so a program's comments can change without a log of it becoming
-no trace of it. -/
+/-- Says `text` to whoever reads the log. Replay passes over it, and over every comment a log
+holds, so a program's comments can change without a log of it becoming no trace of it; the
+driver writes it before the next event it appends. -/
 def comment (text : String) : Program σ Unit := .comment text (.pure ())
 
 /-- Goes round `step` from `s` until a round gives a result. -/
@@ -236,9 +236,8 @@ is an error when the world could not give one. The others are marks of what the 
 logged so that the log can be read without the program: a read of the inbox, with the positions
 of the notices it took, a question asked of a person, and the opening of a call and how it
 ended, with a return or a failure.
-A stop comes from outside and ends every frame of the agent. A comment is for a reader alone:
-replay passes over it wherever it stands. A program's comment has the frame that made it; a
-person's has none. -/
+A stop comes from outside and ends every frame of the agent. A comment is for a reader alone,
+whoever wrote it: replay passes over it wherever it stands. -/
 inductive Event (σ : Signature) where
   | arrived (notice : Notice)
   | heard (frame : Frame) (notices : Array Nat)
@@ -248,17 +247,15 @@ inductive Event (σ : Signature) where
   | returned (frame : Frame) (value : Json)
   | failed (frame : Frame) (error : String)
   | stopped (reason : String)
-  | commented (frame? : Option Frame) (text : String)
+  | commented (text : String)
 
 instance : Inhabited (Event σ) := ⟨.stopped ""⟩
 
-/-- The frame an event is in; none for a notice, a stop or a person's comment, which come from
-outside. -/
+/-- The frame an event is in; none for a notice, a stop or a comment, which no frame makes. -/
 def Event.frame? : Event σ → Option Frame
   | .heard frame _ | .asked frame _ | .answered frame .. | .opened frame _ | .returned frame _
   | .failed frame _ => some frame
-  | .commented frame? _ => frame?
-  | .arrived _ | .stopped _ => none
+  | .arrived _ | .stopped _ | .commented _ => none
 
 /-- A log: what happened, in order, from the workspace a run starts on. -/
 abbrev Log (σ : Signature) := Array (Event σ)
