@@ -485,7 +485,7 @@ def contextLimit? (config : Config) (model : Models.Spec) : Option Nat :=
 def computation (config : Config) (model : Models.Spec) (task : String)
     (itself : String × Json := ("", .null)) : Computation Agent Json := do
   -- The opening names the machine the commands run on, as the container says.
-  let uname ← Tools.Uname.ask
+  let uname ← Tools.Uname.read
   converse { config with model? := some model, contextLimit? := contextLimit? config model, itself }
     (openingMessages config task uname)
 

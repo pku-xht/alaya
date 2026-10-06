@@ -73,8 +73,11 @@ private def gradeAt (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (ca
     TestM (Json × Execution) := do
   let (graded, verdict) ← Scripted.grade rt run tip call
   let log ← Scripted.logAt rt graded
-  let some ran := log.findSome? fun | .answered #[_] _ (.ok (.execution e)) => some e | _ => none
-    | fail "the grader ran no command"
+  -- The grader's command, in the frame of the run's call of the grader.
+  let found := log.reverse.findSome? fun
+    | .answered #[step] _ (.ok (.execution e)) => if step.name == "grader" then some e else none
+    | _ => none
+  let some ran := found | fail "the grader ran no command"
   pure (verdict, ran)
 
 private def status (verdict : Json) : String := (verdict.getObjVal? "status" >>= Json.getStr?).toOption.getD "?"

@@ -279,8 +279,7 @@ def runSuite : Suite := suite "mini-swe.run" #[
     assertEqual "the agent's outcome" ((agentResult log).bind (·.toOption) |>.map (status ·)) (some "Submitted")
     assertEqual "the calls: each agent's uname, MiniSwe itself in the agent's frame, its bash in the sub-agent's"
       (log.filterMap fun | .opened frame opened => some (frame, opened.name) | _ => none)
-      #[(⟪"agent"⟫, "agent"), (⟪"agent", "uname"⟫, "uname"), (⟪"agent", "mini-swe"⟫, "mini-swe"),
-        (⟪"agent", "mini-swe", "uname"⟫, "uname"), (⟪"agent", "mini-swe", "bash"⟫, "bash")]
+      #[(⟪"agent"⟫, "agent"), (⟪"agent", "mini-swe"⟫, "mini-swe"), (⟪"agent", "mini-swe", "bash"⟫, "bash")]
     -- The sub-agent's call is the agent's own, with the model's task: its configuration, its model.
     check (log.any fun
         | .opened ⟪"agent", "mini-swe"⟫ ⟨"mini-swe", arguments⟩ => match ProgramArguments.fromJson arguments with

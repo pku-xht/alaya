@@ -155,7 +155,7 @@ that name its caller made before it. `#[]` is the run itself, `mini-swe` the age
 `mini-swe/bash#2` the agent's third call of `bash`. It is written so, and `-` where there is none.
 
 A frame keeps its identity when a program changes around it: a call of one routine does not
-move the calls of another. An agent that comes to call `uname` first still has its first
+move the calls of another. An agent that comes to call `subagent` first still has its first
 `bash` in `mini-swe/bash`.
 
 *The log of the agent below.*
@@ -608,15 +608,13 @@ structure Tool where
   check        : Json → Except String Unit        -- what is wrong with a call's arguments
   call         : Json → RoutineCall               -- the call the model's arguments make
 
-Tools.routines : Array (Routine Agent)            -- bash, ask_user, time_budget, and uname
+Tools.routines : Array (Routine Agent)            -- bash, ask_user, time_budget
 ```
 
 A tool is parameterized by what the agent's configuration says of it, as `ask_user` is by the
 kinds of question: `bash` by how a command runs, which its call adds to the model's arguments;
 `subagent` by the agent itself, its name and its configuration, which its call names with the
-model's task. The routines are fixed, so all of it is in the call's arguments, in the log. `Tools.routines` also
-holds `uname`, which no model calls: an agent calls it for its opening, which names the system
-and architecture its commands run on, and it runs `uname -sm` in the call's container.
+model's task. The routines are fixed, so all of it is in the call's arguments, in the log.
 
 A model's tool call becomes a call of a routine in four steps:
 
@@ -738,7 +736,7 @@ A **program** is a routine of the catalog (`Agents.Catalog`), which a person cal
 how its configuration is read: the agents, and the grader (`docs/log-schema.md` §4). The command
 line reads a configuration before any call is made: to print its defaults, apply `--set`, and
 check a call. The program reads only its configuration, from which `make` builds its
-computation; an agent asks where it runs with the `uname` routine. Its scope is fixed: its tools, and
+computation; an agent reads where it runs with `uname -sm`. Its scope is fixed: its tools, and
 itself, which `subagent` calls with its configuration and another task.
 
 ```lean

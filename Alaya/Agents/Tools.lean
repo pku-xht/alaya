@@ -308,7 +308,7 @@ def tool : Tool := { definition, instruction? := some instruction }
 
 end TimeBudget
 
-/-! ## uname: the machine, which no model calls -/
+/-! ## uname: the machine, which an agent reads for its opening -/
 
 namespace Uname
 
@@ -321,22 +321,14 @@ def parse (output : String) : Except String Alaya.Uname :=
   | [system, machine] => .ok { system, machine }
   | _ => .error s!"uname: unexpected output: {output}"
 
-/-- The system and architecture the call's commands run on, as the container says. -/
-def routine : Routine Agent := {
-  name := "uname"
-  body := fun _ => do
-    let ran ← exec command
-    match ran.output.exitCode?, parse ran.output.output with
-    | some 0, .ok uname => return uname.toJson
-    | _, .error problem => throw problem
-    | _, _ => throw s!"uname: {ran.output.output}"
-  scope := .empty }
-
-/-- Asks the routine, from an agent whose scope has it. -/
-def ask : Computation Agent Alaya.Uname := do
-  match Alaya.Uname.fromJson (← call routine.name .null) with
-  | .ok uname => pure uname
-  | .error problem => throw s!"uname: {problem}"
+/-- The system and architecture the call's commands run on, as the container says: a command in
+the frame of whoever reads it, and no call. -/
+def read : Computation Agent Alaya.Uname := do
+  let ran ← exec command
+  match ran.output.exitCode?, parse ran.output.output with
+  | some 0, .ok uname => pure uname
+  | _, .error problem => throw problem
+  | _, _ => throw s!"uname: {ran.output.output}"
 
 end Uname
 
@@ -389,9 +381,9 @@ def all (options : Options := {}) : Array Tool :=
   #[Bash.tool options.commands, Submit.tool, AskUser.tool options.questions, TimeBudget.tool,
     Subagent.tool options.agent.1 options.agent.2]
 
-/-- The routines the tools call, but an agent's own, and `uname`, which an agent calls for its
-opening: each fixed, what an agent's configuration says of a call coming in its arguments. -/
-def routines : Array (Routine Agent) := #[Bash.routine, AskUser.routine, TimeBudget.routine, Uname.routine]
+/-- The routines the tools call, but an agent's own: each fixed, what an agent's configuration
+says of a call coming in its arguments. -/
+def routines : Array (Routine Agent) := #[Bash.routine, AskUser.routine, TimeBudget.routine]
 
 def names : Array String := (all).map (·.name)
 

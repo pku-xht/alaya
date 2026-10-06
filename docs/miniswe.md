@@ -27,8 +27,8 @@ A field left out is its default, and a misspelt one is an error.
 ## 2. What the model is sent
 
 **The opening** is mini's two messages, rendered from its `mini.yaml`: the system message, and
-the task with a line naming the machine: the system and the architecture, as the `uname`
-routine reads them in the call's container. Each offered tool's instruction is appended to the task message.
+the task with a line naming the machine: the system and the architecture, as `uname -sm` reads
+them in the call's container. Each offered tool's instruction is appended to the task message.
 
 **The view** is what each later request holds of the conversation:
 

@@ -123,7 +123,7 @@ def openingMessages (config : Config) (task : String) (uname : Uname) : Array Ch
 `subagent` calls as `itself`: MiniSwe's loop, with its linear context, and Vero's opening. -/
 def computation (config : Config) (model : Models.Spec) (task : String)
     (itself : String × Lean.Json := ("", .null)) : Computation Agent Lean.Json := do
-  let uname ← Tools.Uname.ask
+  let uname ← Tools.Uname.read
   MiniSwe.converse { config.base with model? := some model
                                       contextLimit? := MiniSwe.contextLimit? config.base model, itself }
     (openingMessages config task uname)

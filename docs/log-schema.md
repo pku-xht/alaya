@@ -101,9 +101,7 @@ response.
 {"type":"arrived","notice":{"type":"called","call":{"name":"mini-swe","arguments":{"config":{"model":{…},"task":"Implement the language in SPEC.md",…},"environment":{…}}}}}
 {"type":"heard","frame":[],"notices":[1]}
 {"type":"opened","frame":["mini-swe"],"routine":{"name":"mini-swe","arguments":{"config":{…},"environment":{…}}}}
-{"type":"opened","frame":["mini-swe","uname"],"routine":{"name":"uname","arguments":null}}
-{"type":"answered","frame":["mini-swe","uname"],"op":{"type":"exec","command":"uname -sm","config":{…}},"answer":{"output":{"output":"Linux x86_64\n",…},…},"error":null}
-{"type":"returned","frame":["mini-swe","uname"],"value":{"system":"Linux","machine":"x86_64"}}
+{"type":"answered","frame":["mini-swe"],"op":{"type":"exec","command":"uname -sm","config":{…}},"answer":{"output":{"output":"Linux x86_64\n",…},…},"error":null}
 {"type":"heard","frame":["mini-swe"],"notices":[]}
 {"type":"answered","frame":["mini-swe"],"op":{"type":"sample","model":{…},"request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
 {"type":"opened","frame":["mini-swe","bash"],"routine":{"name":"bash","arguments":{"command":"make","executor":{"timeout_seconds":30,…}}}}
