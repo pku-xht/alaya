@@ -29,6 +29,7 @@ import Alaya.Run
 import Alaya.Store
 import Alaya.Driver
 import Alaya.Notices
+import Alaya.Rebase
 import Alaya.Walk
 import Alaya.Render
 import Alaya.Html

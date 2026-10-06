@@ -311,8 +311,9 @@ where the program is, `commented (some frame) text`, and `alaya log` and the rep
 
 Nothing depends on a comment. Replay passes over a comment in the log wherever it stands, and
 over a comment of the program that the log does not hold. So comments can be added to an agent,
-reworded or removed, and every existing log is still a log of that agent. A comment does not
-guard a loop. A person's comment (`alaya comment`) has no frame.
+reworded or removed, and every existing log is still a log of that agent. `alaya rebase` writes
+the new comments into a copy of an existing log. A comment does not guard a loop. A person's
+comment (`alaya comment`) has no frame.
 
 ### 3.7 Stops
 
@@ -436,7 +437,8 @@ Three rules make a program one that can be replayed:
 
 A log is matched by position, so a program changed after a log was written reads that log only
 up to its first changed operation; after it the log is a `mismatch`, which the driver refuses
-to go on from. Comments are the exception (§3.6).
+to go on from. Comments are the exception (§3.6). `alaya rebase` copies the prefix that holds
+into a data directory of its own, as the changed program makes it (`docs/cli.md`).
 
 ## 5. Routines
 

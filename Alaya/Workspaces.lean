@@ -6,7 +6,7 @@ Where the versions of a run's workspace are kept.
 
 A log names a version of the workspace by an identifier and never looks inside it: the driver
 and the commands of a person ask to snapshot a directory, to write a snapshot back out, to say
-what changed between two snapshots, and to read one file of one. `Workspaces` is that contract,
+what changed between two snapshots, to read one file of one, and to copy some into a new store. `Workspaces` is that contract,
 and `Workspaces.Restic` keeps it with a restic repository. See `docs/log-schema.md` §5.
 -/
 
@@ -84,6 +84,10 @@ structure Workspaces where
   listEntries : Snapshot -> String -> Result (Array Workspaces.Entry)
   /-- Drops every snapshot not listed, and reclaims their space. -/
   retainOnly : Array Snapshot -> Result Unit
+  /-- Makes `location`, where no store is yet, a store of the same kind that holds these
+  snapshots, and gives the identifier each has there, in order. Only these are copied, and the
+  store opened at `location` reads them by the new identifiers. -/
+  transfer : Array Snapshot -> System.FilePath -> Result (Array Snapshot)
 
 namespace Workspaces
 

@@ -10,7 +10,7 @@ permissions, times, hard links, extended attributes, special files — rather th
 A workspace identifier is a restic snapshot ID. It covers the time of the snapshot and the
 metadata of every file, so two snapshots of equal directories have different identifiers.
 
-Every operation is one `restic` process. The repository is unencrypted-by-password
+Every operation is one `restic` process, but `transfer`, which makes a new repository. The repository is unencrypted-by-password
 (`--insecure-no-password`): it sits beside the entries, which are not encrypted either.
 -/
 
@@ -221,6 +221,35 @@ def retainOnly (settings : Settings) (keep : Array Snapshot) : Result Unit := do
     rest := rest.extract 200 rest.size
   let _ ← succeed "prune" (← run settings #["prune", "--quiet"])
 
+/-- A new repository at `location` that holds copies of `ids`: one `init` that takes this
+repository's chunker parameters, so the copies share their data as the originals do, and one
+`copy` a batch. A copy is a new snapshot, and restic records the one it copies as its
+`original`, which is how each identifier here is found there. -/
+def transfer (settings : Settings) (ids : Array Snapshot) (location : System.FilePath) :
+    Result (Array Snapshot) := do
+  refuseOverlap "copy snapshots into" location settings.kept
+  let repository ← Result.fromIO Error.storage do
+    IO.FS.createDirAll location
+    IO.FS.realPath location
+  let into := { settings with repository }
+  let source := #["--from-repo", settings.repository.toString, "--from-insecure-no-password"]
+  let _ ← succeed "init" (← run into (#["init", "--quiet", "--copy-chunker-params"] ++ source))
+  let mut rest := ids.foldl (init := #[]) fun unique id =>
+    if unique.contains id.hex then unique else unique.push id.hex
+  while !rest.isEmpty do
+    let _ ← succeed "copy" (← run into (#["copy", "--quiet"] ++ source ++ rest.extract 0 200))
+    rest := rest.extract 200 rest.size
+  let listed ← succeed "snapshots" (← run into #["snapshots", "--json"])
+  let copies : Std.HashMap String String := match jsonLines listed.stdout with
+    | #[.arr snapshots] => snapshots.foldl (init := {}) fun copies json =>
+      match stringField? json "original", stringField? json "id" with
+      | some original, some id => copies.insert original id
+      | _, _ => copies
+    | _ => {}
+  ids.mapM fun id => match copies.get? id.hex with
+    | some copy => idOf "copy" copy
+    | none => throw <| .storage s!"restic copy did not copy the snapshot {id.hex}"
+
 /-- The restic version as `(major, minor)`, or an environment error when it cannot be run. -/
 def version (settings : Settings) : Result (Nat × Nat) := do
   let missing : Error := .environment <|
@@ -259,6 +288,7 @@ def «open» (repository scratch : System.FilePath) (keep : Array System.FilePat
     diff := diff settings
     readFiles := readFiles settings
     listEntries := listEntries settings
-    retainOnly := retainOnly settings }
+    retainOnly := retainOnly settings
+    transfer := transfer settings }
 
 end Alaya.Workspaces.Restic

@@ -217,7 +217,8 @@ partial def drive (rt : Runtime) (run : Run Agent) (tip : Hash) (limits : Limits
       | true, some agent => pure (tip, .over agent none)
       | _, _ => pure (tip, .waits frame question?)
     | .mismatch position =>
-      throw <| .input s!"the log is no trace of its run's program: the event at {position} is not what it does"
+      throw <| .input <| s!"the log is no trace of its run's program: the event at {position} is not what it does; " ++
+        "`alaya rebase` copies the part that is into a new data directory"
     | .unguarded frame =>
       throw <| .input s!"a loop in frame {frame.render} went round without reading an event"
     | .hears frame notices =>
@@ -295,7 +296,8 @@ def append (store : Store) (run : Run Agent) (tip : Hash) (event : Event Agent) 
   let log ← store.log forest tip
   let next := (Replayer.ofLog run log).next
   if let .mismatch position := next then
-    throw <| .input s!"the log is no trace of its run's program at position {position}"
+    throw <| .input <| s!"the log is no trace of its run's program at position {position}; " ++
+      "`alaya rebase` copies the part that is into a new data directory"
   match event with
   | .stopped _ =>
     if !running next then throw <| .input "the agent is over: there is nothing to stop"

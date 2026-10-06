@@ -17,10 +17,13 @@ private structure Backend where
   name : String
   /-- The store over a fresh location under the test's scratch directory. -/
   «open» : TestM Workspaces
+  /-- The store of the same kind at `location`, where `transfer` made one. -/
+  reopen : System.FilePath → TestM Workspaces
 
 private def backends : Array Backend := #[
-  { name := "restic", «open» := do assertOk <| Workspaces.Restic.open ((← scratch) / "restic") ((← scratch) / "restic-scratch") },
-  { name := "copies", «open» := Testing.workspaces }]
+  { name := "restic", «open» := do assertOk <| Workspaces.Restic.open ((← scratch) / "restic") ((← scratch) / "restic-scratch")
+    reopen := fun location => do assertOk <| Workspaces.Restic.open location ((← scratch) / "restic-scratch") },
+  { name := "copies", «open» := Testing.workspaces, reopen := fun location => pure (directoryWorkspaces location) }]
 
 private def run (args : Array String) : TestM Unit := do
   let out ← IO.Process.output { cmd := args[0]!, args := args.extract 1 args.size }
@@ -41,6 +44,11 @@ private def summary (changes : Array Change) : Array (ChangeKind × String × Bo
 private def onEach (name : String) (body : Workspaces -> TestM Unit) : Array Case :=
   backends.map fun backend =>
     test s!"{backend.name}: {name}" do body (← backend.open)
+
+/-- One case per backend, named `name`, given the backend itself. -/
+private def onEachBackend (name : String) (body : Backend -> TestM Unit) : Array Case :=
+  backends.map fun backend =>
+    test s!"{backend.name}: {name}" do body backend
 
 def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
   onEach "a snapshot materializes as the directory it was taken of" fun workspaces => do
@@ -231,7 +239,36 @@ def suite : Suite := Testing.suite "workspaces" <| Array.flatten #[
     -- The dropped snapshot's space is the backend's to reclaim; it must not take the kept one's.
     let _ := first
     assertEqual "still readable" ((← assertOk <| workspaces.readFile? second "src/main.lean").bind
-      String.fromUTF8?) (some "def main := 1")
+      String.fromUTF8?) (some "def main := 1"),
+
+  onEachBackend "transfer copies the snapshots named into a new store, each under a name of its own there" fun backend => do
+    let workspaces ← backend.open
+    let source ← source
+    writeSpec source baseSpec
+    let first ← assertOk <| workspaces.snapshot source
+    -- Two snapshots of one directory as it is: each is copied, and neither stands for the other.
+    let twin ← assertOk <| workspaces.snapshot source
+    let before ← readSpec source
+    IO.FS.writeFile (source / "README.md") "second"
+    let second ← assertOk <| workspaces.snapshot source
+    let after ← readSpec source
+    let _ ← assertOk <| workspaces.snapshot source
+    let location := (← scratch) / "moved"
+    let copies ← assertOk <| workspaces.transfer #[first, second, twin, first] location
+    assertEqual "a name each, in order" copies.size 4
+    assertEqual "one snapshot named twice, one copy" copies[3]! copies[0]!
+    check (copies[0]! != copies[2]!) "two snapshots, two copies"
+    let moved ← backend.reopen location
+    let out := (← scratch) / "out"
+    assertOk <| moved.materialize copies[1]! out
+    assertEqual "the second, as it was" (← readSpec out) after
+    assertOk <| moved.materialize copies[2]! out
+    assertEqual "the twin, as it was" (← readSpec out) before
+    assertEqual "a diff in the new store" (summary (← assertOk <| moved.diff copies[0]! copies[1]!))
+      #[(.modified, "README.md", false)]
+    -- Only what was named: the store holds four snapshots, of which three were copied.
+    assertError "a snapshot that was not named" (moved.materialize (← assertOk <| workspaces.snapshot source) out)
+      fun _ => true
 ]
 
 def pathSuite : Suite := Testing.suite "workspaces.paths" #[

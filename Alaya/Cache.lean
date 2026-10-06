@@ -114,4 +114,18 @@ def persistent (inner : Model) (config : Config) : Result Model := do
       pure (Model.Stream.withNative next nextN)
   }
 
+/-- Gives the directory `target` every entry of the directory `source`, each as a hard link to
+the same file, or a copy where the filesystem allows no link. An entry is never changed in
+place: `save` renames a new file over its name. So a write in either directory leaves the other
+as it was, and the two share an entry only until either draws for it again. -/
+def link (source target : System.FilePath) : Result Unit := io do
+  IO.FS.createDirAll target
+  if !(← source.isDir) then return
+  for entry in ← source.readDir do
+    -- A temporary file is a save in progress, or one a crash left: no entry.
+    if entry.fileName.endsWith ".json" then
+      let linked := target / entry.fileName
+      try IO.FS.hardLink entry.path linked
+      catch _ => IO.FS.writeBinFile linked (← IO.FS.readBinFile entry.path)
+
 end Alaya.Cache
