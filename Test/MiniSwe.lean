@@ -15,7 +15,7 @@ namespace MiniSweTests
 
 open Testing
 open Scripted
-open Alaya
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 open Alaya.Agents.MiniSwe
 open Alaya.Agents.Tools.Bash (observation)
 open Lean (Json)

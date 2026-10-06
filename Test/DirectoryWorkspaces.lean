@@ -7,8 +7,8 @@ spends most of a second deriving the repository key — and so keeps tests of ru
 
 namespace Testing
 
-open Alaya
-open Alaya.Workspaces (Change)
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
+open Alaya.Runtime.Workspaces (Change)
 
 private def storageIO (action : IO α) : Result α := Result.fromIO Error.storage action
 

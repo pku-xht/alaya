@@ -1,5 +1,5 @@
 import Lean.Data.Json
-import Alaya.Error
+import Alaya.Base.Error
 
 /-!
 A small test framework for reproducible, convenient IO tests.
@@ -12,7 +12,7 @@ runner accepts a substring filter so a single suite or case can be re-run in iso
 
 namespace Testing
 
-open Alaya (Result Error)
+open Alaya.Base (Result Error)
 
 /-- Everything a running test can reach: its full name and its private scratch directory. -/
 structure Context where

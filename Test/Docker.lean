@@ -9,8 +9,8 @@ import Alaya
 namespace DockerTests
 
 open Testing
-open Alaya
-open Alaya.Executor
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
+open Alaya.Runtime.Executor
 open Lean (Json)
 
 /-- Mini's command settings, with a short timeout. -/

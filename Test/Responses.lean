@@ -6,7 +6,7 @@ reasoning it records and sends back as it was received. -/
 
 namespace ResponsesTests
 
-open Testing Alaya
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 
 private def json (text : String) : Lean.Json := (Lean.Json.parse text).toOption.getD .null
 

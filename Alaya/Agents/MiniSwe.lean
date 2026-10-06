@@ -1,6 +1,6 @@
 import Alaya.Agents.Tools
-import Alaya.Agents.Config
-import Alaya.Models
+import Alaya.Base.ConfigJson
+import Alaya.LLM.Models
 
 /-! A port of mini-SWE-agent's default tool-calling agent as a program. It waits for its task,
 then goes round a loop whose state is the conversation: it samples the model on mini's view of
@@ -10,8 +10,9 @@ See `docs/miniswe.md`. -/
 
 namespace Alaya.Agents.MiniSwe
 
+open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
+
 open Lean (Json)
-open Alaya (Output Executor Uname)
 
 /-- The context a sample is conditioned on: the output of a view. -/
 abbrev Dialogue := Array Chat.Message

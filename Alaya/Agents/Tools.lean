@@ -1,4 +1,4 @@
-import Alaya.Agent
+import Alaya.Runtime.Agent
 
 /-!
 The tools an agent can offer, each on its own, as a `Tool`: what a model needs to call it — its
@@ -14,6 +14,8 @@ routine: an agent that offers it ends with its message.
 -/
 
 namespace Alaya.Agents
+
+open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
 
 open Lean (Json)
 
@@ -149,7 +151,7 @@ end Submit
 
 /-! ## ask_user: a question a model asks a person
 
-The tool is a model's way to `ask` (`Alaya.Computation`), and nothing more. What a question is,
+The tool is a model's way to `ask` (`Alaya.Core.Computation`), and nothing more. What a question is,
 which replies fit it, and how a person gives one are not the tool's. The tool's are the words
 and the schema a model is given, which kinds of question it may ask, and how a reply is shown
 to it. -/
@@ -315,14 +317,14 @@ namespace Uname
 kernel's release and version are left out: a container has its host's kernel. -/
 def command : String := "uname -sm"
 
-def parse (output : String) : Except String Alaya.Uname :=
+def parse (output : String) : Except String Alaya.Runtime.Uname :=
   match (output.trimAscii.toString.splitOn " ").filter (!·.isEmpty) with
   | [system, machine] => .ok { system, machine }
   | _ => .error s!"uname: unexpected output: {output}"
 
 /-- The system and architecture the call's commands run on, as the container says: a command in
 the frame of whoever reads it, and no call. -/
-def read : Computation Agent Alaya.Uname := do
+def read : Computation Agent Alaya.Runtime.Uname := do
   let ran ← exec command
   match ran.output.exitCode?, parse ran.output.output with
   | some 0, .ok uname => pure uname

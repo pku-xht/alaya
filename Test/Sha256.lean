@@ -1,5 +1,5 @@
 import Test.Framework
-import Alaya.Sha256
+import Alaya.Base.Sha256
 
 /-! The pure SHA-256 against NIST vectors and, for block
 boundaries and bulk input, cross-checked against the system checksum tool. -/
@@ -7,7 +7,7 @@ boundaries and bulk input, cross-checked against the system checksum tool. -/
 namespace Sha256Tests
 
 open Testing
-open Alaya
+open Alaya Alaya.Base
 
 private def vectors : Array (String × String) := #[
   ("", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),

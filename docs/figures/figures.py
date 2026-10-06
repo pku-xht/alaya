@@ -7,7 +7,7 @@
 document beside this file, `agent-api/` for docs/agent-api.md, `llm-api/` for docs/llm-api.md,
 `log-schema/` for docs/log-schema.md and `cli/` for docs/cli.md.
 
-The look is docs/style_guide.md; the icons are read from Alaya/Html/page.js. The file has five
+The look is docs/style_guide.md; the icons are read from Alaya/App/Html/page.js. The file has five
 parts: what every figure is drawn with (the style's values, text, shapes), then the figures of
 agent-api.md, those of llm-api.md, those of log-schema.md, and those of cli.md. SVG cannot
 measure text, so a width here is an estimate: after changing a label, run the script and look at

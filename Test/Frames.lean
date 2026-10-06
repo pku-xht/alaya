@@ -1,4 +1,4 @@
-import Alaya.Computation
+import Alaya.Core.Computation
 
 /-! Frames in tests, written as `Frame.render` writes them: `⟪"agent", "bash#1"⟫` is the frame
 `agent/bash#1`, the second call of `bash` by the call of `agent`. It expands to the array of its
@@ -21,7 +21,7 @@ macro_rules
           | some occurrence => pure (name, occurrence)
           | none => Macro.throwErrorAt step s!"a frame step counts its calls with a number: {step.getString}"
         | _ => Macro.throwErrorAt step s!"not a frame step: {step.getString}"
-      `(Alaya.Frame.Segment.mk $(Syntax.mkStrLit name) $(Syntax.mkNumLit (toString occurrence)))
+      `(Alaya.Core.Frame.Segment.mk $(Syntax.mkStrLit name) $(Syntax.mkNumLit (toString occurrence)))
     `(#[$segments,*])
 
 end Testing

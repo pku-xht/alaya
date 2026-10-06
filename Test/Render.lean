@@ -8,7 +8,7 @@ reports, read in either API's names and summed along a log. -/
 
 namespace RenderTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Lean (Json)
 
 private def snapshot (c : Char) : Snapshot := ⟨String.ofList (List.replicate 64 c)⟩

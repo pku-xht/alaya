@@ -11,7 +11,7 @@ in the test container. -/
 
 namespace RunsTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Lean (Json)
 
 /-- An executor that answers every command with `output`, and runs nothing. -/

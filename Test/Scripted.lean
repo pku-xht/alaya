@@ -11,7 +11,7 @@ own store, and readers of what a log holds. -/
 namespace Scripted
 
 open Testing
-open Alaya
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 open Lean (Json)
 
 def contains (haystack needle : String) : Bool :=

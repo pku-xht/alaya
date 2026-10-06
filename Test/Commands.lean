@@ -10,7 +10,7 @@ builds both. -/
 
 namespace CommandsTests
 
-open Testing Alaya
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 open Lean (Json)
 
 private def binary : System.FilePath := ".lake" / "build" / "bin" / "alaya"

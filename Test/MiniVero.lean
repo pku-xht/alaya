@@ -8,7 +8,7 @@ import Alaya
 feedback, submission, and its limits. -/
 
 namespace MiniVeroTests
-open Testing Alaya
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 open Alaya.Agents
 open Lean (Json)
 

@@ -1,17 +1,18 @@
-import Alaya.Agent
-import Alaya.Grader
-import Alaya.Agents.Config
+import Alaya.Runtime.Agent
+import Alaya.Agents.Verdict
+import Alaya.Base.ConfigJson
 
 /-! The grader: a routine that runs one command, in its call's container, and returns the verdict
-read off the TAP the command prints on stdout (`Alaya.Grader`). Its trusted input — the tests, a
+read off the TAP the command prints on stdout (`Alaya.Agents.Verdict`, under `Alaya.Agents.Grader`). Its trusted input — the tests, a
 reference — is in its image, so a call needs nothing besides the image and the command. What
 the command writes lands in the workspace, after the agent's last version: the agent is over by
 then, and nothing reads it but a person. See `docs/log-schema.md` §4. -/
 
 namespace Alaya.Agents.Grader
 
-open Lean (Json)
+open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
 
+open Lean (Json)
 
 structure Config where
   /-- The command, which prints TAP on stdout; what it prints on stderr is kept apart. -/

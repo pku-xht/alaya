@@ -8,7 +8,7 @@ the agent is the nesting of what it did. -/
 
 namespace RoutinesTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Lean (Json ToJson FromJson toJson)
 
 structure Task where
@@ -43,7 +43,7 @@ def planner : Routine.Typed Agent Task Plan := routine "planner" fun task => do
     let mut messages := messages.push response.message
     for asked in response.toolCalls do
       -- The model's call is a call of the routine it names, with the arguments it gave.
-      let result ← try Alaya.call asked.name asked.arguments catch error => pure (.str s!"error: {error}")
+      let result ← try Alaya.Core.call asked.name asked.arguments catch error => pure (.str s!"error: {error}")
       messages := messages.push (.tool asked.id result)
     return Sum.inl messages) opening
   return { steps := ((answer.splitOn "\n").filter (!·.isEmpty)).toArray }
@@ -129,7 +129,7 @@ def suite : Suite := Testing.suite "routines" #[
 
   test "a routine is entered by a call alone, and what crosses the call must be what it takes" do
     -- Called with arguments it cannot read, a routine fails; its caller may catch that.
-    withRun (fun _ => try Alaya.call "step" (.mkObj [("command", "make")]) catch error => pure (.str error)) fun run => do
+    withRun (fun _ => try Alaya.Core.call "step" (.mkObj [("command", "make")]) catch error => pure (.str error)) fun run => do
       let log := settle run opening
       check (log.any fun | .failed ⟪"agent", "step"⟫ error => contains error "step: its arguments cannot be read" | _ => false)
         "the routine failed, in its own frame"
@@ -142,7 +142,7 @@ def suite : Suite := Testing.suite "routines" #[
       check (log.any fun | .failed ⟪"agent"⟫ error => contains error "step: its result cannot be read" | _ => false)
         "the caller could not read it"
     -- The grader is a program a person calls, no routine: nothing an agent calls reaches it.
-    withRun (fun _ => Alaya.call "grader" (.mkObj [("command", "true")])) fun run => do
+    withRun (fun _ => Alaya.Core.call "grader" (.mkObj [("command", "true")])) fun run => do
       let log := settle run opening
       check (log.any fun | .failed ⟪"agent", "grader"⟫ "no routine named grader" => true | _ => false) "there is no such routine",
 

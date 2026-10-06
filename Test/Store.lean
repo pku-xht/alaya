@@ -7,7 +7,7 @@ that does not hold what names it, is never taken for one. -/
 
 namespace StoreTests
 
-open Testing Alaya
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 open Lean (Json)
 
 private def root : Event Agent := .arrived (.changed (Hash.ofBytes "project".toUTF8) "the project")

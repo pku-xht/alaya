@@ -7,7 +7,7 @@ action, and it renders every entry of a forest, and every branch, without an err
 
 namespace HtmlTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Lean (Json)
 
 /-- A forest of two branches: a run that asks a question, is answered, and submits, and a fork
@@ -38,8 +38,8 @@ def suite : Suite := Testing.suite "html" #[
   iotest "the compiled page is the files in the source tree" do
     -- Lake does not rebuild a module when a file it takes with `include_str` changes.
     for (file, compiled) in [("page.js", Html.script), ("page.css", Html.styles)] do
-      if (← IO.FS.readFile ("Alaya" / "Html" / file)) != compiled then
-        throw <| IO.userError s!"{file} changed after Alaya.Html was built: remove .lake/build/lib/lean/Alaya/Html.* and rebuild",
+      if (← IO.FS.readFile ("Alaya" / "App" / "Html" / file)) != compiled then
+        throw <| IO.userError s!"{file} changed after Alaya.App.Html was built: remove .lake/build/lib/lean/Alaya/Html.* and rebuild",
   iotest "the page's script asks nothing of a network and offers no action" do
     for api in ["fetch(", "XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "<form", "import(",
         "localStorage", "eval(", "new Function", "window.open"] do

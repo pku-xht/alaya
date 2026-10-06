@@ -1,4 +1,4 @@
-import Alaya.Replay
+import Alaya.Core.Replay
 import Test.Framework
 import Test.Frames
 
@@ -14,7 +14,7 @@ grading, and the run's routine fails with it. -/
 
 namespace PrototypeTests
 
-open Alaya
+open Alaya Alaya.Base Alaya.Core
 open Lean (Json)
 
 /-! ## The sketch's stubs -/
@@ -120,7 +120,7 @@ def read : (op : Op) → Stored → Option op.Answer
 abbrev Agent : Signature :=
   { Op, Answer := Op.Answer, Key := Op, key := id, sameKey := (· == ·), Stored, store, read }
 
-def perform (op : Op) : Computation Agent op.Answer := Alaya.perform (σ := Agent) op
+def perform (op : Op) : Computation Agent op.Answer := Alaya.Core.perform (σ := Agent) op
 
 /-! ## The sketch's programs -/
 

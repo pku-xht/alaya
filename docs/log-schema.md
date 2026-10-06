@@ -322,7 +322,7 @@ place, and never changes.
 ### Workspace snapshots
 
 A log names each version of the workspace by a **snapshot**: an identifier of 64 hexadecimal
-digits, which means something only to the store that issued it. `Alaya.Workspaces` is the
+digits, which means something only to the store that issued it. `Alaya.Runtime.Workspaces` is the
 contract, and `Workspaces.Restic` keeps it with restic 0.17 or later.
 
 | Operation | Does | Used by | restic |

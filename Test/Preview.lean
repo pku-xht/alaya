@@ -1,12 +1,12 @@
 import Test.Framework
-import Alaya.Workspaces.Restic
+import Alaya.Runtime.Workspaces.Restic
 
 /-! What `cat --json` shows of a snapshot entry, read from the snapshot and never the live
 directory. -/
 
 namespace PreviewTests
 
-open Testing Alaya
+open Testing Alaya Alaya.Base Alaya.Runtime
 
 private def workspace : Hash := Hash.ofBytes "test snapshot".toUTF8
 

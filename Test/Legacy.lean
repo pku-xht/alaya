@@ -1,7 +1,7 @@
 import Test.Framework
-import Alaya.Cache
-import Alaya.Chat.Schema
-import Alaya.Model
+import Alaya.LLM.Cache
+import Alaya.LLM.Chat.Schema
+import Alaya.LLM.Model
 
 /-! The pre-framework test suites for the chat protocol, structured output, caching,
 batching, and retry stack, wrapped as framework cases. -/
@@ -9,8 +9,8 @@ batching, and retry stack, wrapped as framework cases. -/
 namespace LegacyTests
 
 open Lean
-open Alaya
-open Alaya.Chat
+open Alaya Alaya.Base Alaya.LLM
+open Alaya.LLM.Chat
 
 private def expectEqual [BEq alpha] (name : String) (actual expected : alpha) : IO Unit := do
   if actual != expected then throw <| IO.userError s!"{name}: unexpected result"

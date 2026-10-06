@@ -146,7 +146,7 @@ command.
 | 75 | `transient`: another command is writing the data directory, or the provider is unreachable or throttling after alaya's own retries | try again later |
 | 76 | `model`: the provider rejected the request, or answered it wrongly | fix the model's settings, or the key |
 
-- **The five from `input` on are the classes of `Alaya.Error`** (`docs/llm-api.md` §7).
+- **The five from `input` on are the classes of `Alaya.Base.Error`** (`docs/llm-api.md` §7).
 - **A failure prints** `error: MESSAGE` on stderr, or with `--json` one object:
   `{"error": CLASS, "message": …}`, with `status` and `retry_after_ms` for an HTTP failure.
 - **A failed `resume` keeps every entry it appended.** The operation it was carrying out is

@@ -8,7 +8,7 @@ view may omit old outputs in blocks, naming the files that hold them. -/
 
 namespace ContextTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Alaya.Agents.MiniSwe
 open Lean (Json)
 

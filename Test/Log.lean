@@ -9,7 +9,7 @@ breaks the way the design says. The interpreter itself is checked against the sk
 
 namespace LogTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Lean (Json)
 
 private def snapshot (c : Char) : Snapshot := ⟨String.ofList (List.replicate 64 c)⟩

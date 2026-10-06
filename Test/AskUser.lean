@@ -10,7 +10,7 @@ that counts calls detects unwanted side effects. -/
 
 namespace AskUserTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Alaya.Agents
 open Alaya.Agents.MiniSwe (Config parseActions)
 open Lean (Json)
@@ -283,8 +283,8 @@ def suite : Suite := Testing.suite "ask_user" #[
   test "a program asks without any tool: the question is in the log, and a reply to its frame answers it" do
     let deploy : Question := { text := "Deploy?", form := .yesNo }
     let program : Computation Agent Json := do
-      let first ← Alaya.ask deploy
-      let second ← Alaya.ask { text := "Which region?", form := .singleChoice #["east", "west"] }
+      let first ← Alaya.Core.ask deploy
+      let second ← Alaya.Core.ask { text := "Which region?", form := .singleChoice #["east", "west"] }
       return .str s!"{first.line}, {second.line}"
     do
       let run := runOf fun _ => program
@@ -311,7 +311,7 @@ def suite : Suite := Testing.suite "ask_user" #[
       check (replyTo (next run log) .yes).toOption.isNone "no question waits once the agent is over"
     -- A question that cannot be asked is a failure where it is asked, and nothing waits.
     do
-      let run := runOf fun _ => Json.str <$> (·.line) <$> Alaya.ask { text := " \n" }
+      let run := runOf fun _ => Json.str <$> (·.line) <$> Alaya.Core.ask { text := " \n" }
       let log := settle run opening
       check (log.any fun | .failed ⟪"agent"⟫ error => contains error "blank" | _ => false) "a blank question fails"
       check (!log.any (· matches .asked ..)) "and is never asked",

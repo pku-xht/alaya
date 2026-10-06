@@ -1,8 +1,8 @@
 import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
 import Alaya.Agents.Grader
-import Alaya.Settings
-import Alaya.Calls
+import Alaya.Base.Settings
+import Alaya.Runtime.Calls
 
 /-!
 The programs a call can name, and how a call's configuration builds one: the agents, and the
@@ -16,8 +16,9 @@ command builds the same program again. There are no configuration files.
 
 namespace Alaya.Agents.Catalog
 
+open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
+
 open Lean (Json)
-open Alaya (Result Error Uname)
 
 /-- A program built from its configuration: the complete configuration, and its computation, or
 why the configuration does not make one. -/

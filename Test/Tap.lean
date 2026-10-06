@@ -1,5 +1,5 @@
 import Test.Framework
-import Alaya.Tap
+import Alaya.Base.Tap
 import Lean.Data.Json
 
 /-! The TAP 14 parser, on two kinds of evidence: every example in the TAP 14 specification, with the
@@ -10,7 +10,7 @@ oracle. -/
 namespace TapTests
 
 open Testing
-open Alaya.Tap
+open Alaya.Base.Tap
 
 /-- A stream of `lines`, each ended by a line break. -/
 private def doc (lines : List String) : Document := parse (String.join (lines.map (· ++ "\n")))

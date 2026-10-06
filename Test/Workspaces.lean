@@ -10,8 +10,8 @@ stand in for it in the other tests, so that those test against something faithfu
 
 namespace WorkspacesTests
 
-open Testing Alaya
-open Alaya.Workspaces (Change ChangeKind)
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
+open Alaya.Runtime.Workspaces (Change ChangeKind)
 
 private structure Backend where
   name : String

@@ -30,30 +30,30 @@ flowchart LR
 
 | § | What | Where |
 | --- | --- | --- |
-| 1 | a **computation**: a tree of what it asks for | `Alaya.Computation` |
-| 2 | the **log** and its **events** | `Alaya.Computation` |
-| 3 | what each construct of a computation writes in the log | `Alaya.Replay`, `Alaya.Agent` |
-| 4 | **replay**: from the log back to the computation | `Alaya.Replay` |
-| 5 | **routines** and **scopes**: how a computation is structured | `Alaya.Computation` |
+| 1 | a **computation**: a tree of what it asks for | `Alaya.Core.Computation` |
+| 2 | the **log** and its **events** | `Alaya.Core.Computation` |
+| 3 | what each construct of a computation writes in the log | `Alaya.Core.Replay`, `Alaya.Runtime.Agent` |
+| 4 | **replay**: from the log back to the computation | `Alaya.Core.Replay` |
+| 5 | **routines** and **scopes**: how a computation is structured | `Alaya.Core.Computation` |
 | 6 | **tools**: routines a model can call | `Alaya.Agents.Tools` |
 | 7 | `ask_user`: a model asks a person | `Alaya.Agents.Tools` |
 | 8 | an **agent**: a program and its routines | `Alaya.Agents.*` |
-| 9 | a **run**: a workspace, and the programs called on it | `Alaya.Run` |
-| 10 | **driving** a run: the driver's own API | `Alaya.Driver` |
+| 9 | a **run**: a workspace, and the programs called on it | `Alaya.Runtime.Calls` |
+| 10 | **driving** a run: the driver's own API | `Alaya.Runtime.Driver` |
 
 `docs/log-schema.md` specifies how a log is stored; `docs/cli.md` is the command line.
 
 ## 1. A computation
 
 ```lean
-inductive Computation (σ : Signature) : Type → Type 1 where              -- Alaya.Computation
+inductive Computation (σ : Signature) : Type → Type 1 where              -- Alaya.Core.Computation
   | pure    : α → Computation σ α                                          -- a leaf: a value
   | fail    : String → Computation σ α                                     -- a leaf: a failure
   | perform : (op : σ.Op) → (Except String (σ.Answer op) → Computation σ α) →
               Computation σ α
   -- the other constructors (inbox, ask, call, iter, comment) are omitted here; see §3
 
-abbrev Agent : Signature            -- Alaya.Agent: its operations are sample, exec, time
+abbrev Agent : Signature            -- Alaya.Runtime.Agent: its operations are sample, exec, time
 ```
 
 A computation of Alaya has the type `Computation Agent α`: it asks for operations of the signature

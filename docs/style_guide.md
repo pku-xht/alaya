@@ -1,8 +1,8 @@
 # Style guide
 
 How Alaya looks: the report that `alaya html` writes, set down so that the website and the
-diagrams look the same. The report is where the style comes from, and `Alaya/Html/page.css` and
-`Alaya/Html/page.js` hold its values; §1–§7 describe what is there, and §8 and §9 say how a page
+diagrams look the same. The report is where the style comes from, and `Alaya/App/Html/page.css` and
+`Alaya/App/Html/page.js` hold its values; §1–§7 describe what is there, and §8 and §9 say how a page
 of prose and a diagram take it up.
 
 ![The HTML report of a gpt-6-luna run on Bija](figures/bija-report.png)
@@ -109,7 +109,7 @@ wherever they stand in a column. Prose in a block runs to 88 characters at most,
 
 An icon is drawn on a 14×14 grid and shown at 13px: an outline of 1.5 with round caps and joins,
 in the colour of its kind (`currentColor`), filled only for a dot. One icon per kind of thing,
-and never an icon alone — the word follows it. The paths are `GLYPHS` in `Alaya/Html/page.js`.
+and never an icon alone — the word follows it. The paths are `GLYPHS` in `Alaya/App/Html/page.js`.
 
 | Icon | Kind | Colour |
 | --- | --- | --- |

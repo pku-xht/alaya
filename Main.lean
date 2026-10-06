@@ -3,8 +3,8 @@ import Alaya
 /-! `alaya` — the command line over a forest of logs. See `docs/cli.md` for the commands. -/
 
 open Lean (Json)
-open Alaya
-open Alaya.Driver (Runtime Limits Stop)
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
+open Alaya.Runtime.Driver (Runtime Limits Stop)
 
 private def emitLines (lines : Array String) : Result Unit :=
   lines.forM Cli.emit
@@ -539,7 +539,7 @@ private def rmRun (data : System.FilePath) (reference : String) (out : Cli.Out) 
 /-! ## Rebasing a run -/
 
 /-- Copies the run that ends at an entry into a new data directory, `target`, as the current
-version of its agent makes it, with `settings` over its configuration (`Alaya.Rebase`). The source is only
+version of its agent makes it, with `settings` over its configuration (`Alaya.App.Rebase`). The source is only
 read. The new directory is written beside `target` under another name and renamed into place
 once complete, so a failure leaves none. -/
 private def rebaseRun (data : System.FilePath) (reference : String) (target : System.FilePath)

@@ -9,7 +9,7 @@ import Alaya
 namespace CliTests
 
 open Testing
-open Alaya
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 
 private def endpoint (url : String) : Option Provider.Dgx.Endpoint :=
   (Provider.Dgx.Endpoint.ofUrl url).toOption

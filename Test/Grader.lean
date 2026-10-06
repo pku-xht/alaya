@@ -1,12 +1,12 @@
 import Test.Framework
-import Alaya.Grader
+import Alaya.Agents.Verdict
 
-/-! The verdict on a grader's TAP: pass, fail, or error (`Alaya.Grader`). -/
+/-! The verdict on a grader's TAP: pass, fail, or error (`Alaya.Agents.Verdict`). -/
 
 namespace GraderTests
 
 open Testing
-open Alaya.Grader
+open Alaya.Agents.Grader
 
 private def tap (lines : List String) : String := String.join (lines.map (· ++ "\n"))
 

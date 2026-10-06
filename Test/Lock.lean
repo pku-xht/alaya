@@ -1,11 +1,11 @@
 import Test.Framework
-import Alaya.Lock
+import Alaya.Base.Lock
 
-/-! One writer at a time in a data directory (`Alaya.Lock`). -/
+/-! One writer at a time in a data directory (`Alaya.Base.Lock`). -/
 
 namespace LockTests
 
-open Testing Alaya
+open Testing Alaya.Base
 
 def suite : Suite := Testing.suite "lock" #[
   test "a second writer is refused at once, naming the holder, until the first releases" do

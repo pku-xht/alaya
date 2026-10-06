@@ -1,4 +1,4 @@
-// Prints tap-parser's final results for each fixture, reduced to what Alaya.Tap models.
+// Prints tap-parser's final results for each fixture, reduced to what Alaya.Base.Tap models.
 // Regenerate Test/Tap/expected.json with tap-parser 18.3.4 (tapjs commit 8ab84eb):
 //   npm install tap-parser@18.3.4 && node Test/Tap/oracle.js Test/Tap/fixtures > Test/Tap/expected.json
 const fs = require('fs')
