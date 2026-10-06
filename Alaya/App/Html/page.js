@@ -96,7 +96,7 @@ function summary(i) {
       return 'open ' + e.routine + ' “' + flat(e.summary, 60) + '”';
     case 'return': return 'return ' + (verdictOf(e.value) || flat(e.summary, 70));
     case 'fail': return 'fail: ' + flat(e.error, 70);
-    case 'stop': return 'stopped: ' + flat(e.text, 70);
+    case 'stop': return 'stopped ' + (e.frame || []).join('/') + ': ' + flat(e.text, 70);
     case 'comment': return '# ' + flat(e.text, 80);
     default: return e.k;
   }
@@ -155,11 +155,13 @@ function stateChip(i) {
 
 /* --- the run an entry belongs to --------------------------------------- */
 
-/** A run by its first call: the routine and the model, and the task, along its first branch. */
+/** A run by its first call: the routine and the model, and the task, along its first branch. The
+run's own call is the session's, so its first call is the session's first; a run of a program
+alone is that program's. */
 function runTitle(root) {
   for (let i = root; i !== undefined; i = children[i][0]) {
     const x = entries[i];
-    if (x.e.k === 'open' && x.f && x.f.length === 1)
+    if (x.e.k === 'open' && x.f && (x.f.length === 2 || (x.f.length === 1 && x.e.routine !== 'session')))
       return { name: x.e.title || x.e.routine, task: ((x.e.arguments || {}).task) || '' };
   }
   return { name: 'a run', task: '' };
@@ -233,7 +235,8 @@ function depths(path) {
     else depth.set(i, f.length + 1);
     if (x.e.k === 'open') open++;
     else if ((x.e.k === 'return' || x.e.k === 'fail') && f !== null && f.length) open = Math.max(0, open - 1);
-    else if (x.e.k === 'stop') open = 0;
+    // A break ends the call open in its frame, and every call in it.
+    else if (x.e.k === 'stop') open = Math.min(open, Math.max(0, (x.e.frame || []).length - 1));
   }
   return depth;
 }
@@ -375,8 +378,8 @@ function callsAround(i) {
     const x = entries[j];
     if (x.e.k === 'open') { if (j !== i) open.push(j); }
     else if ((x.e.k === 'return' || x.e.k === 'fail') && x.f && x.f.length) { if (j !== i) open.pop(); }
-    // A stop ends the call the run made, and every call in it.
-    else if (x.e.k === 'stop') open.length = 0;
+    // A break ends the call open in its frame, and every call in it.
+    else if (x.e.k === 'stop') open.length = Math.min(open.length, Math.max(0, (x.e.frame || []).length - 1));
   }
   return open;
 }

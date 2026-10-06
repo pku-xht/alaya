@@ -1,4 +1,5 @@
 import Alaya.App.Render
+import Alaya.App.Catalog
 import Alaya.Runtime.Workspaces
 
 /-!
@@ -153,7 +154,7 @@ def eventJson : Event Agent → Json
     .mkObj [("k", "return"), ("value", value), ("summary", Render.valueSummary value),
       ("kind", orNull (valueKind? value) (Json.str ·.name))]
   | .failed _ error => .mkObj [("k", "fail"), ("error", error)]
-  | .stopped reason => .mkObj [("k", "stop"), ("text", reason)]
+  | .broke frame reason => .mkObj [("k", "stop"), ("frame", frame.toJson), ("text", reason)]
   | .commented text => .mkObj [("k", "comment"), ("text", text)]
 
 /-- What the walk keeps of the forest for the page. -/
@@ -179,10 +180,10 @@ private def envelope (request : Chat.Request) : Json :=
 
 /-- Everything the page renders, as one JSON document. -/
 def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title : String)
-    (hidden : Array String := #[]) (root : Routine Agent) : Result Json := do
+    (hidden : Array String := #[]) (scope : Scope Agent) : Result Json := do
   let hidden := hidden.map fun prefix' =>
     if prefix'.endsWith "/" then (prefix'.dropEnd 1).toString else prefix'
-  let acc ← walk (root := root) store forest ({} : Acc) fun acc visit => do
+  let acc ← walk (scope := scope) store forest ({} : Acc) fun acc visit => do
     let i := acc.rows.size
     let parent? := visit.entry.parent?.bind acc.index.get?
     let event := visit.entry.event
@@ -193,12 +194,13 @@ def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title 
       else none
     -- A run that calls nothing stands as its last call ended.
     let idle := match visit.next? with
-      | some (.ended _) | some (.waits #[] _) => true
-      | _ => false
+      | some (.ended _) => true
+      | some next => Catalog.idle next
+      | none => false
     let state : Option String := if !leaf then none else match visit.next?, ended? with
       | some (.mismatch _), _ | some (.unguarded _), _ | none, _ => some "broken"
       | some (.waits frame _), _ =>
-        if frame.inCall then some (if visit.question?.isSome then "question" else "waits")
+        if frame.size ≥ 2 then some (if visit.question?.isSome then "question" else "waits")
         else some (match ended? with
           | some (.returned _) => "done" | some (.failed _) => "failed" | some (.stopped _) => "stopped"
           | none => "waits")
@@ -311,7 +313,7 @@ def page (title : String) (data : Json) : String :=
 rather than listed, so a directory that changes constantly and means nothing — a virtual
 environment, a bytecode cache — is reported without burying the rest. -/
 def report (store : Store) (workspaces : Workspaces) (forest : Forest) (title : String)
-    (hidden : Array String := #[]) (root : Routine Agent) : Result String := do
-  pure (page title (← dataJson store workspaces forest title hidden root))
+    (hidden : Array String := #[]) (scope : Scope Agent) : Result String := do
+  pure (page title (← dataJson store workspaces forest title hidden scope))
 
 end Alaya.App.Html

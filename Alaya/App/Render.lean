@@ -122,7 +122,7 @@ def eventSummary : Event Agent → String
       labelled s!"open {call.name}" (if arguments.isEmpty then "" else (flatten arguments 60).quote)
   | .returned _ value => labelled "return" (valueSummary value)
   | .failed _ error => s!"fail: {flatten error}"
-  | .stopped reason => s!"stopped: {flatten reason}"
+  | .broke frame reason => s!"stopped {frame.render}: {flatten reason}"
   | .commented text => s!"# {flatten text}"
 
 /-- How a call ended, in a line: what it gave — `done: pass 48/48`, `done: Submitted` — or why it
@@ -140,8 +140,8 @@ def nextSummary (question? : Option Question) (ended? : Option CallEnd) : Next A
   | .waits frame _ =>
     match question?, ended? with
     | some question, _ => s!"waits for a reply: {flatten question.text 70}"
-    | none, some ended => if frame.isEmpty then endingSummary ended else s!"waits for a notice in {frame.render}"
-    | none, none => if frame.isEmpty then "waits for a call" else s!"waits for a notice in {frame.render}"
+    | none, some ended => if frame.size ≤ 1 then endingSummary ended else s!"waits for a notice in {frame.render}"
+    | none, none => if frame.size ≤ 1 then "waits for a call" else s!"waits for a notice in {frame.render}"
   | .ask call => s!"next: {call.op.describe}"
   -- A mark to come reads as it will in the log.
   | .mark event => s!"next: {eventSummary event}"
@@ -170,8 +170,8 @@ structure Row where
 
 /-- Every entry of the forest, as the tree shows it: what each log does next at its end, and on
 each root the program and the model of its first call. -/
-def rows (store : Store) (forest : Forest) (root : Routine Agent) : Result (Array Row) := do
-  let rows ← walk (root := root) store forest (#[] : Array Row) fun rows visit => do
+def rows (store : Store) (forest : Forest) (scope : Scope Agent) : Result (Array Row) := do
+  let rows ← walk (scope := scope) store forest (#[] : Array Row) fun rows visit => do
     let isLeaf := (forest.childrenOf visit.hash).isEmpty
     let status? := if !isLeaf then none else match visit.next? with
       | some next => some (nextSummary visit.question? (visit.last?.bind (·.2)) next)
@@ -180,7 +180,7 @@ def rows (store : Store) (forest : Forest) (root : Routine Agent) : Result (Arra
                       summary := eventSummary visit.entry.event, status?
                       comment := visit.entry.event matches .commented ..
                       title? := match visit.entry.event with
-                        | .opened #[_] call => some (callTitle call)
+                        | .opened #[_, _] call => some (callTitle call)
                         | _ => none })
   -- A run's title is its first call's, on its root.
   let titles : Std.HashMap Hash String := rows.foldl (init := {}) fun titles row =>

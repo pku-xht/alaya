@@ -42,13 +42,16 @@ def reconfigure (log : Log Agent) (settings : Array Settings.Setting) : Result (
   let mut accepted := settings.map fun _ => false
   for event in log do
     match event with
+    -- The calls of the catalog's programs: the run's own, the session's, is none of them.
     | .arrived (.called call) =>
+      if (Catalog.named? call.name).isNone then events := events.push event else
       let (call, _) ← reconfigureCall call settings
       events := events.push (.arrived (.called call))
-    | .opened #[i] call =>
+    | .opened frame call =>
+      if frame.size != 2 || (Catalog.named? call.name).isNone then events := events.push event else
       let (call, fits) ← reconfigureCall call settings
       accepted := (accepted.zip fits).map fun (a, b) => a || b
-      events := events.push (.opened #[i] call)
+      events := events.push (.opened frame call)
     | event => events := events.push event
   if let some (setting, _) := (settings.zip accepted).find? (!·.2) then
     throw <| .input s!"--set {setting.render} fits no call of the log"

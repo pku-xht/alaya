@@ -60,7 +60,7 @@ def addUsage (a b : Chat.TokenUsage) : Chat.TokenUsage :=
 def OpenCall.after (stack : Array OpenCall) (position : Nat) : Event Agent → Array OpenCall
   | .opened frame call => stack.push { frame, call, position }
   | .returned _ _ | .failed _ _ => stack.pop
-  | .stopped _ => stack.filter fun call => !call.frame.inCall
+  | .broke frame _ => stack.filter fun call => !call.frame.within frame
   | _ => stack
 
 /-- Where the walk is in one log. -/
@@ -75,8 +75,8 @@ private structure Place where
 
 namespace Place
 
-private def start (root : Routine Agent) : Place :=
-  { position := 0, replayer := Replayer.start root, stack := #[], last? := none, spentMs := 0
+private def start (scope : Scope Agent) : Place :=
+  { position := 0, replayer := Replayer.start scope, stack := #[], last? := none, spentMs := 0
     usage := {}, workspace? := none }
 
 /-- What a reader knows at `entry`, named `hash`, from where the walk is before it; and where
@@ -94,7 +94,7 @@ private def visit (place : Place) (hash : Hash) (entry : Entry) : Visit × Place
     | _ => place.usage
   let stack := OpenCall.after place.stack place.position event
   let last? := match event, place.last? with
-    | .opened #[_] call, _ => some (call, none)
+    | .opened #[_, _] call, _ => some (call, none)
     | event, some (call, none) => some (call, CallEnd.of? event)
     | _, last => last
   let spentMs := place.spentMs + entry.elapsedMs
@@ -109,18 +109,18 @@ private def visit (place : Place) (hash : Hash) (entry : Entry) : Visit × Place
 end Place
 
 /-- Folds `f` over every entry of the forest, depth first, from each root, parents before
-children, each log replayed by `root`, the run's routine. -/
+children, each log replayed as a run in `scope`. -/
 partial def walk (store : Store) (forest : Forest) (init : β) (f : β → Visit → Result β)
-    (root : Routine Agent) : Result β := do
+    (scope : Scope Agent) : Result β := do
   let rec go (acc : β) (place : Place) (hash : Hash) : Result β := do
     let (visit, place) := place.visit hash (← store.get forest hash)
     let acc ← f acc visit
     (forest.childrenOf hash).foldlM (init := acc) fun acc child => go acc place child
-  forest.roots.foldlM (init := init) fun acc first => go acc (Place.start root) first
+  forest.roots.foldlM (init := init) fun acc first => go acc (Place.start scope) first
 
-/-- What a reader knows at each entry of one log, replayed by `root`. -/
-def visits (root : Routine Agent) (entries : Array Entry) : Array Visit :=
-  (entries.foldl (init := (#[], Place.start root)) fun (visits, place) entry =>
+/-- What a reader knows at each entry of one log, replayed as a run in `scope`. -/
+def visits (scope : Scope Agent) (entries : Array Entry) : Array Visit :=
+  (entries.foldl (init := (#[], Place.start scope)) fun (visits, place) entry =>
     let (visit, place) := place.visit entry.hash entry
     (visits.push visit, place)).1
 

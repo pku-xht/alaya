@@ -259,7 +259,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     let rt ← Scripted.runtime noCommands none
     let project := (← scratch) / "project"
     IO.FS.createDirAll project
-    let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
+    let root ← Scripted.begin rt.store rt.workspaces run project
     let call : RoutineCall := { name := "mini-swe", arguments := agent, environment? := some Scripted.testEnvironment.toJson }
     let (called, _) ← assertOk <| Driver.append rt.store run root call.event
     -- The run reads the call and opens it; the agent's first read of its inbox takes nothing.
@@ -267,7 +267,7 @@ def agentsSuite : Suite := suite "cli.agents" #[
     do
       assertEqual "the configuration" ((argumentsAt? log { name := "mini-swe" }).map compressed) (some (compressed agent))
       let mut tip := called
-      for event in log.extract 2 log.size do
+      for event in log.extract 5 log.size do
         tip := (← assertOk <| rt.store.put (← assertOk rt.store.forest) { parent? := some tip, event }).1
       let forest ← assertOk rt.store.forest
       let tree := Render.treeLines (← assertOk <| Render.rows rt.store forest run)

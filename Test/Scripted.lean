@@ -77,6 +77,18 @@ def answeringUname (executor : Executor) : Executor :=
       if argv[0]? == some Agents.Tools.Uname.command then pure { output := testUnameOutput, exitCode? := some 0 }
       else executor.exec config workDir argv display }
 
+/-- The call that starts a run: the session. -/
+def sessionCall : RoutineCall := Catalog.sessionCall
+
+/-- Whether the driver stopped where the session waits for a call. -/
+def isIdle : Driver.Stop → Bool
+  | .waits frame none => frame == Catalog.sessionFrame
+  | _ => false
+
+/-- The calls open where a log ends, outermost first. -/
+def openCalls (log : Log Agent) : Array OpenCall :=
+  log.zipIdx.foldl (init := #[]) fun open' (event, i) => OpenCall.after open' i event
+
 /-- The configuration of the test's agent, `agent`, on `task`, with the test model. -/
 def testConfig (task : String := "t") : Json :=
   .mkObj [("model", testModelSpec.toJson), ("task", task)]
@@ -93,24 +105,25 @@ def callAgent (task : String := "t") (environment : Environment := testEnvironme
 def taskOf (config : Json) : Option String :=
   (config.getObjVal? "task" >>= Json.getStr?).toOption
 
-/-- A run of Alaya whose program `agent` runs `body` on its call's configuration, its calls
-naming routines in `scope`. Every program of the catalog is there too, the grader among them. -/
-def runWith (body : Json → Computation Agent Json) (scope : Scope Agent := .empty) : Routine Agent :=
-  Catalog.session ⟨fun name =>
+/-- A run of Alaya, the session, whose program `agent` runs `body` on its call's configuration,
+its calls naming routines in `scope`. Every program of the catalog is there too, the grader among
+them. -/
+def runWith (body : Json → Computation Agent Json) (scope : Scope Agent := .empty) : Scope Agent :=
+  Scope.of #[Catalog.session ⟨fun name =>
       if name == "agent" then
         some { name, scope, body }
-      else Catalog.scope.find name⟩
+      else Catalog.scope.find name⟩]
 
 /-- A run of Alaya whose program `agent` is `make`'s computation for the call's task, its calls
 naming routines in `scope`. -/
-def runOf (make : String → Computation Agent Json) (scope : Scope Agent := .empty) : Routine Agent :=
+def runOf (make : String → Computation Agent Json) (scope : Scope Agent := .empty) : Scope Agent :=
   runWith (fun config => make ((taskOf config).getD "")) scope
 
 /-- A run whose `agent` is the program `name` of the catalog with the configuration `config`,
 with `model` as its model and the call's task as its task, in the scope the catalog gives that
 program. -/
 def runOfConfig (name : String) (config : Json) (model : Models.Spec := testModelSpec) :
-    Except String (Routine Agent) :=
+    Except String (Scope Agent) :=
   let config := config.setObjVal! "model" model.toJson
   match Catalog.build name config with
   | .error problem => .error problem
@@ -128,7 +141,7 @@ def runOfConfig (name : String) (config : Json) (model : Models.Spec := testMode
 
 /-- A run of MiniSwe with `config`, as the program `agent`, for the test model, in the scope the
 catalog gives MiniSwe: its tools, and itself, which `subagent` calls. -/
-def miniRun (config : Agents.MiniSwe.Config := {}) : Except String (Routine Agent) :=
+def miniRun (config : Agents.MiniSwe.Config := {}) : Except String (Scope Agent) :=
   runOfConfig "mini-swe" config.toJson
 
 /-- A runtime over a store and directory workspaces of the test's own, with `executor` and
@@ -158,9 +171,18 @@ the first. -/
 def cached (model : Model) : TestM Model := do
   assertOk <| Cache.persistent model { directory := (← scratch) / s!"cache-{← IO.monoNanosNow}" }
 
+/-- Creates a run over `project` as `alaya new` does: its root, and the session, read and opened,
+waiting for a call. Gives the entry it waits at. -/
+def begin (store : Store) (workspaces : Workspaces) (run : Scope Agent) (project : System.FilePath) :
+    TestM Hash := do
+  let (root, _) ← assertOk <| Notices.create store workspaces project
+  let (tip, _) ← assertOk <| Driver.append store run root sessionCall.event
+  let settled ← assertOk <| Driver.settle store run tip
+  pure ((settled.back?.map (·.1)).getD tip)
+
 /-- Creates a run over `project` (an empty one when none), in `rt`'s store, and calls the test's
 agent on `task`. Gives the entry the log ends at. -/
-def start (rt : Driver.Runtime) (run : Routine Agent) (task : String := "t")
+def start (rt : Driver.Runtime) (run : Scope Agent) (task : String := "t")
     (project? : Option System.FilePath := none) (environment : Environment := testEnvironment) : TestM Hash := do
   let project ← match project? with
     | some project => pure project
@@ -168,12 +190,12 @@ def start (rt : Driver.Runtime) (run : Routine Agent) (task : String := "t")
       let project := rt.outputsDir.withFileName s!"project-{← IO.monoNanosNow}"
       IO.FS.createDirAll project
       pure project
-  let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
-  let (tip, _) ← assertOk <| Driver.append rt.store run root (callAgent task environment)
+  let tip ← begin rt.store rt.workspaces run project
+  let (tip, _) ← assertOk <| Driver.append rt.store run tip (callAgent task environment)
   pure tip
 
 /-- Drives `run` from a new log, with `task`, until it is over, waits, or reaches `limits`. -/
-def drive (run : Routine Agent) (executor : Executor) (model : Model) (task : String := "t")
+def drive (run : Scope Agent) (executor : Executor) (model : Model) (task : String := "t")
     (limits : Driver.Limits := {}) : TestM (Driver.Runtime × Hash × Driver.Stop) := do
   let rt ← runtime executor (some model)
   let tip ← start rt run task
@@ -194,19 +216,22 @@ def graderCall (command : String) (image : String := recordedImage) (timeoutSeco
 /-- Grades the point `tip` of a run with the grader `call`, as a person does: stops the call
 running there, if one is, calls the grader, and drives it to its end. Gives the entry the log
 ends at, and the verdict. -/
-def grade (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (call : RoutineCall) :
+def grade (rt : Driver.Runtime) (run : Scope Agent) (tip : Hash) (call : RoutineCall) :
     TestM (Hash × Json) := do
   let mut tip := tip
-  if Driver.running (next run (← logAt rt tip)) then
-    tip := (← assertOk <| Driver.append rt.store run tip (.stopped "to grade this point")).1
+  let log ← logAt rt tip
+  if Catalog.running (next run log) then
+    let frame ← assertOk <| Catalog.callToStop (openCalls log)
+    tip := (← assertOk <| Driver.append rt.store run tip (.broke frame "to grade this point")).1
+    tip := (← assertOk <| Driver.drive rt run tip).1
   tip := (← assertOk <| Driver.append rt.store run tip call.event).1
   let (graded, stop) ← assertOk <| Driver.drive rt run tip
-  check (stop matches .idle) "the grader is over"
+  check (isIdle stop) "the grader is over"
   let some (_, some (.returned verdict)) := lastCall? (← logAt rt graded) | fail "the grader gave no verdict"
   pure (graded, verdict)
 
 /-- Every sample of a log: the request replay says it answers, and the response. -/
-def samplesOf (run : Routine Agent) (log : Log Agent) : Array (Chat.Request × Chat.Response) :=
+def samplesOf (run : Scope Agent) (log : Log Agent) : Array (Chat.Request × Chat.Response) :=
   let step := fun (state : Replayer Agent × Array (Chat.Request × Chat.Response)) (event : Event Agent) =>
     let (replayer, found) := state
     let found := match replayer.next, event with
@@ -218,7 +243,7 @@ def samplesOf (run : Routine Agent) (log : Log Agent) : Array (Chat.Request × C
 
 /-- What MiniSwe's model saw last, and the response it gave: the last request's messages, then
 that response as the view shows it. -/
-def lastDialogue (config : Agents.MiniSwe.Config) (run : Routine Agent) (log : Log Agent) :
+def lastDialogue (config : Agents.MiniSwe.Config) (run : Scope Agent) (log : Log Agent) :
     Array Chat.Message :=
   match (samplesOf run log).back? with
   | none => #[]
@@ -229,13 +254,13 @@ def lastDialogue (config : Agents.MiniSwe.Config) (run : Routine Agent) (log : L
 
 /-- The log with `event` appended as the driver appends an event of the program: after the
 comments the program made since its last one. -/
-def appended (run : Routine Agent) (log : Log Agent) (event : Event Agent) : Log Agent :=
+def appended (run : Scope Agent) (log : Log Agent) (event : Event Agent) : Log Agent :=
   (log ++ (Replayer.ofLog run log).comments.map Event.commented).push event
 
 /-- The log with every mark `run` makes after it appended, and the answer to an agent's `uname`,
 the test's machine, up to what it asks of the world next, or how it ends: what the driver would
 log before its next operation, without one. -/
-partial def settle (run : Routine Agent) (log : Log Agent) : Log Agent :=
+partial def settle (run : Scope Agent) (log : Log Agent) : Log Agent :=
   match next run log with
   | .ask { frame, op := .exec command config } =>
     if command != Agents.Tools.Uname.command then log else
@@ -247,25 +272,26 @@ partial def settle (run : Routine Agent) (log : Log Agent) : Log Agent :=
 
 /-- The log with the answer to what `run` asks next appended, and then its marks: what the world
 said, as a log keeps it. -/
-def answer (run : Routine Agent) (log : Log Agent) (stored : Stored) : Log Agent :=
+def answer (run : Scope Agent) (log : Log Agent) (stored : Stored) : Log Agent :=
   match next run log with
   | .ask call => settle run (appended run log (.answered call.frame call.op.key (.ok stored)))
   | _ => log
 
 /-- The log with `response` as the model's answer to what `run` asks next. -/
-def respond (run : Routine Agent) (log : Log Agent) (response : Chat.Response) : Log Agent :=
+def respond (run : Scope Agent) (log : Log Agent) (response : Chat.Response) : Log Agent :=
   answer run log (.response response)
 
-/-- The start of a log of the test's agent: its root, the call of the agent on `task`, the run's
-read of it, and the opening of the call. -/
+/-- The start of a log of the test's agent: its root, the call of the session, its read and its
+opening, the call of the agent on `task`, the session's read of it, and the opening of the call. -/
 def opening (task : String := "t") : Log Agent :=
-  #[.arrived (.changed default "the project"), callAgent task, .heard #[] #[1], .opened ⟪"agent"⟫ (testCall task)]
+  #[.arrived (.changed default "the project"), sessionCall.event, .heard #[] #[1], .opened ⟪"session"⟫ sessionCall,
+    callAgent task, .heard ⟪"session"⟫ #[4], .opened ⟪"session", "agent"⟫ (testCall task)]
 
 /-- How the agent of a log ended: the value its frame returned, or its error. -/
 def agentResult (log : Log Agent) : Option (Except String Json) :=
   log.findSome? fun
-    | .returned ⟪"agent"⟫ value => some (.ok value)
-    | .failed ⟪"agent"⟫ error => some (.error error)
+    | .returned ⟪"session", "agent"⟫ value => some (.ok value)
+    | .failed ⟪"session", "agent"⟫ error => some (.error error)
     | _ => none
 
 /-- The status of MiniSwe's outcome, from how its frame ended. -/

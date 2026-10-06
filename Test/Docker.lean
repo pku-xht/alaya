@@ -52,30 +52,30 @@ private def runtime (settings : Docker.Settings) (model? : Option Model)
            | none => throw <| .input "a call samples its model: name a --provider" }
 
 /-- Runs `k` with MiniSwe's run, configured by `agent`. -/
-private def withRun (agent : Agents.MiniSwe.Config := miniConfig) (k : Routine Agent → TestM Unit) : TestM Unit :=
+private def withRun (agent : Agents.MiniSwe.Config := miniConfig) (k : Scope Agent → TestM Unit) : TestM Unit :=
   match Scripted.runOfConfig "mini-swe" agent.toJson with
   | .ok run => k run
   | .error problem => fail problem
 
 /-- Creates a run and calls its agent in `settings`' image, at its workdir. -/
-private def startIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Routine Agent) : TestM Hash :=
+private def startIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Scope Agent) : TestM Hash :=
   Scripted.start rt run "t" none { image := settings.image, workdir := settings.workdir }
 
 /-- Creates a run, calls its agent in `settings`' image, and drives it until the agent is about to
 read its inbox: the agent runs, and nothing has been asked of a model. -/
-private def openIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Routine Agent) : TestM Hash := do
+private def openIn (settings : Docker.Settings) (rt : Driver.Runtime) (run : Scope Agent) : TestM Hash := do
   let (tip, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 0 }
   pure tip
 
 /-- Grades the point `tip` of a run with the grader `call`: the agent stopped there, the grader
 called. Gives its verdict, and what its command left: its output and the workspace after it. -/
-private def gradeAt (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (call : RoutineCall) :
+private def gradeAt (rt : Driver.Runtime) (run : Scope Agent) (tip : Hash) (call : RoutineCall) :
     TestM (Json × Execution) := do
   let (graded, verdict) ← Scripted.grade rt run tip call
   let log ← Scripted.logAt rt graded
   -- The grader's command, in the frame of the run's call of the grader.
   let found := log.reverse.findSome? fun
-    | .answered #[step] _ (.ok (.execution e)) => if step.name == "grader" then some e else none
+    | .answered #[_, step] _ (.ok (.execution e)) => if step.name == "grader" then some e else none
     | _ => none
   let some ran := found | fail "the grader ran no command"
   pure (verdict, ran)
@@ -188,7 +188,7 @@ def suite : Suite := Testing.suite "docker" #[
         try
           let (paused, _) ← assertOk <| Driver.drive rt run (← startIn settings rt run) { samples? := some 1 }
           let log ← Scripted.logAt rt paused
-          let environment ← assertOk (environmentOf log ⟪"agent"⟫)
+          let environment ← assertOk (environmentOf log ⟪"session", "agent"⟫)
           assertEqual "the call's image, from the person's call" environment.2.image settings.image
           -- The container wrote it, the host snapshotted it.
           assertEqual "snapshot"
@@ -295,11 +295,11 @@ def suite : Suite := Testing.suite "docker" #[
           assertEqual "the exit status decides nothing" (read passed) #["\"pass\"", "1", "1", "7", "\"\""]
           -- The report shows what a grader's command changed, as any command's.
           let forest ← assertOk rt.store.forest
-          let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (root := run)
+          let page ← assertOk <| Html.dataJson rt.store rt.workspaces forest "t" (scope := run)
           let rows := ((page.getObjVal? "entries" >>= Json.getArr?).toOption.getD #[]).filter fun row =>
             -- The grader's own frame: the run's call of `grader`, the first or a later one.
             (row.getObjVal? "f").toOption.any (fun f => match f with
-              | .arr #[.str call] => call.startsWith "grader"
+              | .arr #[_, .str call] => call.startsWith "grader"
               | _ => false) &&
             (row.getObjVal? "e" >>= (·.getObjVal? "k") >>= Json.getStr?).toOption == some "exec"
           assertEqual "the graders' commands" rows.size 2
@@ -322,13 +322,13 @@ def suite : Suite := Testing.suite "docker" #[
           let spent : Driver.Limits := { budgetMs? := some 0 }
           let (paused, stop) ← assertOk <| Driver.drive rt run tip spent
           check (stop matches .paused _) "paused before the agent's first read"
-          let (stopped, _) ← assertOk <| Driver.append rt.store run paused (.stopped "out of time")
+          let (stopped, _) ← assertOk <| Driver.append rt.store run paused (.broke ⟪"session", "agent"⟫ "out of time")
           let (asked, _) ← assertOk <| Driver.append rt.store run stopped
             (Scripted.graderCall "printf '1..1\\nok 1\\n'" settings.image).event
           let (held, stop) ← assertOk <| Driver.drive rt run asked spent
           check (stop matches .paused _) "the grader pauses before its command"
           let (graded, stop) ← assertOk <| Driver.drive rt run held
-          check (stop matches .idle) "and runs on without the budget"
+          check (Scripted.isIdle stop) "and runs on without the budget"
           let some (_, some (.returned verdict)) := lastCall? (← Scripted.logAt rt graded) | fail "the grader's verdict"
           assertEqual "status" (status verdict) "pass"
         finally pure (),
@@ -360,7 +360,7 @@ def suite : Suite := Testing.suite "docker" #[
               settings.image (workdir := "/testbed"))
           assertEqual "in its own image, at its workdir" (status own) "pass"
           -- A grader whose image cannot start is no verdict: nothing is logged for its command.
-          let (stopped, _) ← assertOk <| Driver.append rt.store run tip (.stopped "to grade this point")
+          let (stopped, _) ← assertOk <| Driver.append rt.store run tip (.broke ⟪"session", "agent"⟫ "to grade this point")
           let (asked, _) ← assertOk <| Driver.append rt.store run stopped
             (Scripted.graderCall "true" "alaya.invalid/nope@sha256:0").event
           assertError "cannot start" (Driver.drive rt run asked) fun

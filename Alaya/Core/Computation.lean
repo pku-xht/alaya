@@ -41,9 +41,10 @@ structure Frame.Segment where
   occurrence : Nat := 0
   deriving BEq, Hashable, Inhabited, Repr
 
-/-- A frame is the path of calls from the root. `#[]` is the frame of a run, and in it the
-calls the run makes, each by its routine: `mini-swe`, then `grader`, a second `mini-swe` being
-`mini-swe#1`. -/
+/-- A frame is the path of calls from outside the run. `#[]` is the outside: the person and the
+driver, where nothing of the run's own runs. The run is a call made from there, in a frame of its
+own, `session`; its calls are each in theirs, by routine: `session/mini-swe`, then
+`session/grader`, a second `mini-swe` being `session/mini-swe#1`. -/
 abbrev Frame := Array Frame.Segment
 
 /-- A segment as a reader is shown it: `bash`, the first call of `bash`, or `bash#2`. -/
@@ -59,7 +60,7 @@ def Frame.Segment.parse (text : String) : Except String Frame.Segment :=
     | none => .error s!"a frame step counts its calls with a number: {text}"
   | _ => .error s!"not a frame step: {text}"
 
-/-- A frame as a reader is shown it: `mini-swe/bash#2`, or `-` for the run's own. -/
+/-- A frame as a reader is shown it: `session/mini-swe/bash#2`, or `-` for the outside. -/
 def Frame.render (frame : Frame) : String :=
   if frame.isEmpty then "-" else "/".intercalate (frame.toList.map (·.render))
 
@@ -67,8 +68,9 @@ def Frame.render (frame : Frame) : String :=
 def Frame.parse (text : String) : Except String Frame :=
   if text == "-" then .ok #[] else (text.splitOn "/").toArray.mapM Frame.Segment.parse
 
-/-- Whether the frame is a call's, or inside one: not the run's own. -/
-def Frame.inCall (frame : Frame) : Bool := !frame.isEmpty
+/-- Whether `frame` is `outer` or inside it. -/
+def Frame.within (frame outer : Frame) : Bool :=
+  outer.size ≤ frame.size && frame.extract 0 outer.size == outer
 
 /-- A call of a routine, by its name, with its arguments, and, when the caller says, where its
 commands run: what the log holds as the opening of the call. It holds no body, so it is data.
@@ -95,8 +97,8 @@ inductive Notice where
   | changed (workspace : Snapshot) (summary : String)
   /-- A person answered the question the call in frame `to` asked. -/
   | replied (to : Frame) (reply : Reply)
-  /-- A person asked the run to call a routine: its name, its arguments, and where its commands
-  run. -/
+  /-- A person asked for a call of a routine: its name, its arguments, and where its commands
+  run. The first is the run itself; later ones are for whichever computation waits for them. -/
   | called (call : RoutineCall)
   deriving Inhabited
 
@@ -113,6 +115,9 @@ and, when it waits for the reply to a question, the question. -/
 structure Wait where
   accepts : Frame → Notice → Bool
   question? : Option Question := none
+  /-- Whether the read takes only the first notice it is for, and leaves the others to later
+  reads: a wait for a call takes one call. -/
+  one : Bool := false
 
 /-- A computation: a tree of operations, each continued with its answer, or with the error when the
 world could not give one. A read of the inbox takes the messages not yet read; one that waits is
@@ -180,8 +185,10 @@ end Computation
 /-- Takes every message not yet read (`Notice.isMessage`). -/
 def inbox : Computation σ (List Notice) := .inbox none .pure
 
-/-- Waits for notices that `accepts` takes, given the frame the read is made in, and takes them. -/
-def await (accepts : Frame → Notice → Bool) : Computation σ (List Notice) := .inbox (some { accepts }) .pure
+/-- Waits for notices that `accepts` takes, given the frame the read is made in, and takes them;
+with `one`, only the first of them. -/
+def await (accepts : Frame → Notice → Bool) (one := false) : Computation σ (List Notice) :=
+  .inbox (some { accepts, one }) .pure
 
 /-- Asks a person a question, and waits for the reply. The question goes into the log where it
 is asked, and the run waits there until a person replies to the frame that asked, with a reply
@@ -222,7 +229,7 @@ scope: the routines it can call. A call is the only way into a routine, so it al
 runs in a frame of its own, and the log brackets it: its opening, with its name and its
 arguments, and its end, with its result or its failure. So the structure of an agent — its
 workflows, its sub-agents, its tools — is the nesting of its log. The run itself is a routine,
-whose computation runs in frame `#[]`, entered by no call.
+which is called from outside, in a frame of its own, like any other.
 
 Like a closure, a routine brings its scope: what a call inside it means is fixed where the
 routine is defined, not by whoever calls it. What varies from call to call comes in its
@@ -299,8 +306,9 @@ is an error when the world could not give one. The others are marks of what the 
 logged so that the log can be read without the computation: a read of the inbox, with the positions
 of the notices it took, a question asked of a person, and the opening of a call and how it
 ended, with a return or a failure.
-A stop comes from outside and ends every frame of the agent. A comment is for a reader alone,
-whoever wrote it: replay passes over it wherever it stands. -/
+A break comes from outside and ends the call open in its frame, and every call inside it: the
+caller is given `reason` as the call's failure. A comment is for a reader alone, whoever wrote
+it: replay passes over it wherever it stands. -/
 inductive Event (σ : Signature) where
   | arrived (notice : Notice)
   | heard (frame : Frame) (notices : Array Nat)
@@ -309,16 +317,16 @@ inductive Event (σ : Signature) where
   | opened (frame : Frame) (call : RoutineCall)
   | returned (frame : Frame) (value : Json)
   | failed (frame : Frame) (error : String)
-  | stopped (reason : String)
+  | broke (frame : Frame) (reason : String)
   | commented (text : String)
 
-instance : Inhabited (Event σ) := ⟨.stopped ""⟩
+instance : Inhabited (Event σ) := ⟨.commented ""⟩
 
-/-- The frame an event is in; none for a notice, a stop or a comment, which no frame makes. -/
+/-- The frame an event is in; none for a notice, a break or a comment, which no frame makes. -/
 def Event.frame? : Event σ → Option Frame
   | .heard frame _ | .asked frame _ | .answered frame .. | .opened frame _ | .returned frame _
   | .failed frame _ => some frame
-  | .arrived _ | .stopped _ | .commented _ => none
+  | .arrived _ | .broke .. | .commented _ => none
 
 /-- A log: what happened, in order, from the workspace a run starts on. -/
 abbrev Log (σ : Signature) := Array (Event σ)

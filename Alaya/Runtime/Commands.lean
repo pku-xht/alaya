@@ -6,7 +6,7 @@ import Alaya.Runtime.Executor.Docker
 
 /-! What can be done with a data directory, as functions: start a run, append what a person
 says, drive a run, copy a rebased run into a new directory, and read what a run did. Each takes
-the run's routine, `root`, so the runtime knows no catalog of programs; a front end parses its
+the scope the run's call is made in, so the runtime knows no catalog of programs; a front end parses its
 input, calls these, and shows what they give. -/
 
 namespace Alaya.Runtime
@@ -40,9 +40,11 @@ namespace Data
 
 /-! ## Starting a run -/
 
-/-- Creates the data directory at `path`, when there is none, and a new run in it, from
-`source`. Gives the run's root. -/
-def create (path : System.FilePath) (source : Source) : Result Appended := do
+/-- Creates the data directory at `path`, when there is none, and a new run in it: its workspace,
+from `source`, and its call, `call`, of a routine of `scope`, with the marks the call makes
+before it first asks the world for something or waits. Gives the entries. -/
+def create (path : System.FilePath) (source : Source) (scope : Scope Agent) (call : RoutineCall) :
+    Result (Array Appended) := do
   -- Before the data directory is created: inside the project it would become part of it.
   if let .directory project := source then
     Workspaces.refuseOverlap "snapshot" project #[path]
@@ -57,46 +59,55 @@ def create (path : System.FilePath) (source : Source) : Result Appended := do
         Executor.Docker.copyOut settings workdir work
         pure work
     let (hash, entry) ← Notices.create data.store data.workspaces project
-    pure { hash, position := 0, entry }
+    let (called, callEntry) ← Driver.append data.store scope hash call.event
+    let settled ← Driver.settle data.store scope called
+    let written := #[(hash, entry), (called, callEntry)] ++ settled
+    pure <| written.zipIdx.map fun ((hash, entry), position) => { hash, position, entry }
 
-/-! ## What a person appends -/
+/-! ## What a person appends
+
+Each is checked by the runtime only for what the log can take. What a front end allows beyond
+that it says with `admit`, given what the run does next where it would be appended. -/
 
 /-- Appends the event `event` makes of the log at the entry a reference names, and of what the
 run does next there. -/
-def append (data : Data) (root : Routine Agent) (reference : String)
+def append (data : Data) (scope : Scope Agent) (reference : String)
     (event : Log Agent → Next Agent → Result (Event Agent)) : Result Appended := do
   let (_, tip, entries) ← data.entriesAt reference
   let log := entries.map (·.event)
-  let event ← event log (next root log)
-  let (hash, entry) ← Driver.append data.store root tip event
+  let event ← event log (next scope log)
+  let (hash, entry) ← Driver.append data.store scope tip event
   pure { hash, position := entries.size, entry }
 
 /-- A call of a program, where no call is running. -/
-def call (data : Data) (root : Routine Agent) (reference : String) (call : RoutineCall) :
-    Result Appended :=
-  data.append root reference fun _ _ => pure call.event
+def call (data : Data) (scope : Scope Agent) (reference : String) (call : RoutineCall)
+    (admit : Next Agent → Result Unit := fun _ => pure ()) : Result Appended :=
+  data.append scope reference fun _ next => do admit next; pure call.event
 
 /-- A message to the run. -/
-def tell (data : Data) (root : Routine Agent) (reference text : String) : Result Appended :=
-  data.append root reference fun _ _ => pure (.arrived (.said text))
+def tell (data : Data) (scope : Scope Agent) (reference text : String)
+    (admit : Next Agent → Result Unit := fun _ => pure ()) : Result Appended :=
+  data.append scope reference fun _ next => do admit next; pure (.arrived (.said text))
 
-/-- A stop of the calls running there. -/
-def stop (data : Data) (root : Routine Agent) (reference reason : String) : Result Appended :=
-  data.append root reference fun _ _ => pure (.stopped reason)
+/-- A break of the call open in `frame`, and of every call inside it. -/
+def stop (data : Data) (scope : Scope Agent) (reference : String) (frame : Frame) (reason : String) :
+    Result Appended :=
+  data.append scope reference fun _ _ => pure (.broke frame reason)
 
 /-- A change to the workspace: the files of `dir`. No read takes it; the calls running see the
 files when they look. -/
-def commit (data : Data) (root : Routine Agent) (reference : String) (dir : System.FilePath) :
-    Result Appended := do
+def commit (data : Data) (scope : Scope Agent) (reference : String) (dir : System.FilePath)
+    (admit : Next Agent → Result Unit := fun _ => pure ()) : Result Appended := do
   let (_, tip) ← data.resolve reference
-  let event ← Notices.changed data.store data.workspaces tip dir
-  data.append root reference fun _ _ => pure event
+  data.append scope reference fun _ next => do
+    admit next
+    Notices.changed data.store data.workspaces tip dir
 
 /-- A reply to the question the run waits on: the answer's text, or `none` when the person
 cannot answer. -/
-def reply (data : Data) (root : Routine Agent) (reference : String) (answer? : Option String) :
+def reply (data : Data) (scope : Scope Agent) (reference : String) (answer? : Option String) :
     Result Appended :=
-  data.append root reference fun _ next => do
+  data.append scope reference fun _ next => do
     let some (_, question) := questionOf? next
       | throw <| .input s!"no question waits for a reply at {reference}"
     let reply ← match answer? with
@@ -150,12 +161,12 @@ def withRuntime (data : Data) (options : Executor.Docker.RunOptions)
 
 /-- Drives the run from the entry a reference names until it stops, `onEntry` told of each
 entry written. Gives the last entry, why the driver stopped, and the log there. -/
-def resume (data : Data) (root : Routine Agent) (reference : String) (runtime : Driver.Runtime)
+def resume (data : Data) (scope : Scope Agent) (reference : String) (runtime : Driver.Runtime)
     (limits : Driver.Limits := {}) (onEntry : Appended → Result Unit := fun _ => pure ()) :
     Result (Hash × Driver.Stop × Log Agent) := do
   let (_, tip, entries) ← data.entriesAt reference
   let position ← io (IO.mkRef entries.size)
-  let (last, stop) ← Driver.drive runtime root tip limits fun hash entry => do
+  let (last, stop) ← Driver.drive runtime scope tip limits fun hash entry => do
     onEntry { hash, position := ← io (position.modifyGet fun p => (p, p + 1)), entry }
   pure (last, stop, ← data.store.log (← data.store.forest) last)
 
@@ -213,19 +224,19 @@ def rebase (data : Data) (entries : Array Entry) (rebased : Rebased Agent) (targ
 /-! ## Reading -/
 
 /-- What a reader knows at each entry of the log at the entry a reference names. -/
-def visitsAt (data : Data) (root : Routine Agent) (reference : String) : Result (Array Visit) := do
+def visitsAt (data : Data) (scope : Scope Agent) (reference : String) : Result (Array Visit) := do
   let (_, _, entries) ← data.entriesAt reference
-  pure (visits root entries)
+  pure (visits scope entries)
 
 /-- What a reader knows at the entry a reference names. -/
-def visitAt (data : Data) (root : Routine Agent) (reference : String) : Result Visit := do
-  let some visit := (← data.visitsAt root reference).back? | throw <| .storage "an empty log"
+def visitAt (data : Data) (scope : Scope Agent) (reference : String) : Result Visit := do
+  let some visit := (← data.visitsAt scope reference).back? | throw <| .storage "an empty log"
   pure visit
 
 /-- Every end of a log that waits on a question: the entry, the frame that asks, the question. -/
-def waiting (data : Data) (root : Routine Agent) : Result (Array (Hash × Frame × Question)) := do
+def waiting (data : Data) (scope : Scope Agent) : Result (Array (Hash × Frame × Question)) := do
   let forest ← data.store.forest
-  walk data.store forest #[] (root := root) fun found visit =>
+  walk data.store forest #[] (scope := scope) fun found visit =>
     let leaf := (forest.childrenOf visit.hash).isEmpty
     pure <| match leaf, visit.next?, visit.question? with
       | true, some (.waits frame _), some question => found.push (visit.hash, frame, question)

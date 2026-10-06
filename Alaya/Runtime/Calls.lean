@@ -16,10 +16,10 @@ def _root_.Alaya.Core.RoutineCall.event (call : RoutineCall) : Event Agent := .a
 
 /-! ## The calls of a log -/
 
-/-- The arguments of the call the run made in frame `#[call]`, read off its opening. -/
+/-- The arguments of the call the run made in its frame's step `call`, read off its opening. -/
 def argumentsAt? (log : Log Agent) (call : Frame.Segment) : Option Json :=
   log.findSome? fun
-    | .opened #[opened] routine => if opened == call then some routine.arguments else none
+    | .opened #[_, opened] routine => if opened == call then some routine.arguments else none
     | _ => none
 
 /-- Where the commands of a frame run, and the frame whose call said so: the nearest call on its
@@ -43,22 +43,23 @@ def environmentOf (log : Log Agent) (frame : Frame) : Result (Frame × Environme
 inductive CallEnd where
   | returned (value : Json)
   | failed (error : String)
-  /-- Stopped from outside, by a person, with the reason the stop gives. -/
+  /-- Broken from outside, by a person, with the reason the break gives. -/
   | stopped (reason : String)
   deriving Inhabited
 
-/-- How a call the run made ends with an event, if the event ends one: its frame is one step. -/
+/-- How a call the run makes ends with an event, if the event ends one: its frame is two steps,
+the run's and its own; a break ends it in its frame, or in the run's. -/
 def CallEnd.of? : Event Agent → Option CallEnd
-  | .returned #[_] value => some (.returned value)
-  | .failed #[_] error => some (.failed error)
-  | .stopped reason => some (.stopped reason)
+  | .returned #[_, _] value => some (.returned value)
+  | .failed #[_, _] error => some (.failed error)
+  | .broke frame reason => if frame.size ≤ 2 then some (.stopped reason) else none
   | _ => none
 
-/-- The last call a log opens, and how it ended, once it has. -/
+/-- The last call the run makes in a log, and how it ended, once it has. -/
 def lastCall? (log : Log Agent) : Option (RoutineCall × Option CallEnd) :=
   log.foldl (init := none) fun last event =>
     match event, last with
-    | .opened #[_] call, _ => some (call, none)
+    | .opened #[_, _] call, _ => some (call, none)
     | event, some (call, none) => some (call, CallEnd.of? event)
     | _, last => last
 

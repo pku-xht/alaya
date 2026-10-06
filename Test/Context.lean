@@ -166,7 +166,7 @@ def suite : Suite := Testing.suite "context" #[
       let rt ← runtime executor (some (← refusing #[response "c1"]))
       let tip ← start rt run
       let (ended, stop) ← assertOk <| Driver.drive rt run tip
-      check (stop matches .idle) "the agent is over"
+      check (isIdle stop) "the agent is over"
       let log ← logAt rt ended
       match agentResult log with
       | some (.ok value) =>

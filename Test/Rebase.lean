@@ -20,7 +20,7 @@ private def echoing : Executor :=
 
 /-- An agent that waits for its task and runs `commands`, one after another, reading its inbox
 after each; when `comments`, it says which command it runs before each. -/
-private def agent (commands : Array String) (comments : Bool := false) : Routine Agent :=
+private def agent (commands : Array String) (comments : Bool := false) : Scope Agent :=
   runOf fun _ => do
     for command in commands do
       if comments then comment s!"running {command}"
@@ -41,7 +41,7 @@ private def comments (log : Log Agent) : Array String :=
   log.filterMap fun | .commented text => some text | _ => none
 
 /-- Drives `run` from a new log until it is over. -/
-private def driven (run : Routine Agent) : TestM (Driver.Runtime × Hash × Log Agent) := do
+private def driven (run : Scope Agent) : TestM (Driver.Runtime × Hash × Log Agent) := do
   let (rt, last, _) ← drive run echoing (← scriptedModel #[])
   pure (rt, last, ← logAt rt last)
 
@@ -61,7 +61,7 @@ private def reconfigured : TestM Unit := do
     responseWith #[call "c1" "bash" "echo one"], responseWith #[submitCall "s" "done"]]))
   let project := (← scratch) / "project"
   IO.FS.createDirAll project
-  let (root, _) ← assertOk <| Notices.create rt.store rt.workspaces project
+  let root ← begin rt.store rt.workspaces run project
   let config ← assertOk <| Catalog.resolve "mini-swe"
     #[{ path := ["model"], value := "gpt-oss-120b" }, { path := ["task"], value := "t" }]
   let swe : RoutineCall := { name := "mini-swe", arguments := config, environment? := some testEnvironment.toJson }
@@ -76,7 +76,7 @@ private def reconfigured : TestM Unit := do
   -- A field of the agent that changes no request: the whole log holds, under the new opening.
   let tuned ← rebaseWith #[← setting "context_reserve=7"]
   check tuned.divergence?.isNone "the whole log holds"
-  let some opening := tuned.log.findSome? fun | (.opened ⟪"mini-swe"⟫ opened, _) => some opened | _ => none
+  let some opening := tuned.log.findSome? fun | (.opened ⟪"session", "mini-swe"⟫ opened, _) => some opened | _ => none
     | fail "the opening of the agent"
   let reserve := (opening.arguments.getObjVal? "context_reserve").toOption
   assertEqual "the new configuration" (reserve.map (·.compress)) (some "7")
@@ -153,7 +153,7 @@ def suite : Suite := Testing.suite "rebase" #[
       assertOk <| workspaces.materialize id ((← scratch) / "check")
     let rt' := { rt with store, workspaces }
     let (end', stop) ← assertOk <| Driver.drive rt' changed tip
-    check (stop matches .idle) "the new agent is over"
+    check (isIdle stop) "the new agent is over"
     let goneOn ← logAt rt' end'
     let (_, _, fresh) ← driven changed
     assertEqual "the log the new agent makes from the start, and the note"
@@ -166,7 +166,7 @@ def suite : Suite := Testing.suite "rebase" #[
     let forest ← assertOk rt.store.forest
     let point := (forest.path last)[two]!
     let (late, _) ← assertOk <| Driver.append rt.store (agent first) point (.arrived (.said "late"))
-    let (stopped, _) ← assertOk <| Driver.append rt.store (agent first) late (.stopped "enough")
+    let (stopped, _) ← assertOk <| Driver.append rt.store (agent first) late (.broke ⟪"session", "agent"⟫ "enough")
     let rebased := rebase (agent #["echo one", "echo TWO"]) (← logAt rt stopped)
     assertEqual "the message and the stop" (rebased.dropped.map (·.1)) #[two + 1, two + 2]
     check (Rebase.droppedLines rebased |>.all (contains · "left out")) "each in a line"

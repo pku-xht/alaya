@@ -1,6 +1,6 @@
 import Alaya.Core.Computation
 
-/-! Frames in tests, written as `Frame.render` writes them: `⟪"agent", "bash#1"⟫` is the frame
+/-! Frames in tests, written as `Frame.render` writes them: `⟪"session", "agent", "bash#1"⟫` is the frame
 `agent/bash#1`, the second call of `bash` by the call of `agent`. It expands to the array of its
 segments, so it is a pattern as well as a term. -/
 
@@ -8,7 +8,7 @@ namespace Testing
 
 open Lean
 
-/-- `⟪"agent", "bash#1"⟫`: a frame by its steps, each a routine's name and, after `#`, how many
+/-- `⟪"session", "agent", "bash#1"⟫`: a frame by its steps, each a routine's name and, after `#`, how many
 calls of that name its caller made before; `⟪⟫` is the run's own. -/
 syntax "⟪" str,* "⟫" : term
 

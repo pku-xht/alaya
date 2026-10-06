@@ -221,7 +221,7 @@ def eventToJson : Event Agent → Json
   | .opened frame call => .mkObj [("type", "opened"), ("frame", frame.toJson), ("routine", call.toJson)]
   | .returned frame value => .mkObj [("type", "returned"), ("frame", frame.toJson), ("value", value)]
   | .failed frame error => .mkObj [("type", "failed"), ("frame", frame.toJson), ("error", error)]
-  | .stopped reason => .mkObj [("type", "stopped"), ("reason", reason)]
+  | .broke frame reason => .mkObj [("type", "broke"), ("frame", frame.toJson), ("reason", reason)]
   | .commented text => .mkObj [("type", "commented"), ("text", text)]
 
 def eventFromJson (json : Json) : Except String (Event Agent) := do
@@ -239,7 +239,7 @@ def eventFromJson (json : Json) : Except String (Event Agent) := do
   | "opened" => pure (.opened (← frame) (← json.getObjVal? "routine" >>= RoutineCall.fromJson))
   | "returned" => pure (.returned (← frame) (← json.getObjVal? "value"))
   | "failed" => pure (.failed (← frame) (← str json "error"))
-  | "stopped" => .stopped <$> str json "reason"
+  | "broke" => pure (.broke (← frame) (← str json "reason"))
   | "commented" => .commented <$> str json "text"
   | other => throw s!"unknown event: {other}"
 

@@ -38,17 +38,17 @@ structure Rebased (σ : Signature) where
 
 instance : Inhabited (Rebased σ) := ⟨{ log := #[] }⟩
 
-/-- Whether an event comes from outside: a notice or a stop. -/
+/-- Whether an event comes from outside: a notice or a break. -/
 def Event.fromOutside : Event σ → Bool
-  | .arrived _ | .stopped _ => true
+  | .arrived _ | .broke .. => true
   | _ => false
 
-/-- The log `old` as a run of `root` makes it: the longest prefix that is a trace of it. Its
-comments are `root`'s, each written before the event the computation comes to after it, as the
+/-- The log `old` as a run in `scope` makes it: the longest prefix that is a trace of it. Its
+comments are the run's, each written before the event the computation comes to after it, as the
 driver writes them; the comments of `old` are left out. A read of the inbox is matched by the
 notices it takes, which the new log has at positions of their own. -/
-partial def rebase (root : Routine σ) (old : Log σ) : Rebased σ :=
-  go 0 (Replayer.start root) #[] {}
+partial def rebase (scope : Scope σ) (old : Log σ) : Rebased σ :=
+  go 0 (Replayer.start scope) #[] {}
 where
   go (i : Nat) (r : Replayer σ) (new : Array (Event σ × Option Nat))
       (moved : Std.HashMap Nat Nat) : Rebased σ :=

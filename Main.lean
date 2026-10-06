@@ -81,12 +81,14 @@ private def NewArgs.cli : Cli.Spec NewArgs :=
       | ((none, none), _) => .error "the workspace is PROJECT, or the workdir of --image IMAGE"
       | ((some _, none), some _) => .error "--workdir is the directory of --image to copy"
 
-/-- Creates a run: its root, the workspace, where the run waits for a program to be called. -/
+/-- Creates a run: its root, the workspace, and its call, the session, which waits for a program
+to be called once it is resumed. -/
 private def newRun (a : NewArgs) (out : Cli.Out) : Result UInt32 := do
   let source := match a.source with
     | .inl project => .directory project
     | .inr (image, workdir) => .image image workdir
-  entryRecord out (← Data.create a.data source)
+  for appended in ← Data.create a.data source Catalog.run Catalog.sessionCall do
+    entryRecord out appended
   pure 0
 
 /-! ## What a person appends -/
@@ -129,6 +131,7 @@ private def callRun (a : CallArgs) (out : Cli.Out) : Result UInt32 := do
     let environment ← Environment.pinned a.image a.workdir
     data.call Catalog.run a.entry
       { name := a.program, arguments := config, environment? := some environment.toJson }
+      (admit := Catalog.admitsCall)
 
 /-! ## Driving a run -/
 
@@ -157,26 +160,37 @@ private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
     <*> Cli.flagD "time-budget" (.nat "S") 0
       "seconds of run time, summed along the log, after which no operation starts; 0 is no limit"
 
+/-- Whether the driver stopped where the session waits for a person to call a program. -/
+private def idle : Stop → Bool
+  | .waits frame none => frame == Catalog.sessionFrame
+  | _ => false
+
 /-- How a driver stopped, as the last object of `--json`: its status, and, when no call runs,
 how the last call ended. -/
-private def stopJson (last : Hash) (log : Log Agent) : Stop → Json
-  | .idle => match lastCall? log with
+private def stopJson (last : Hash) (log : Log Agent) (stop : Stop) : Json :=
+  if idle stop then match lastCall? log with
     | some (call, some ended) =>
       .mkObj ([("entry", (last.hex : Json)), ("call", (call.name : Json))] ++ match ended with
         | .returned value => [("status", "done"), ("value", value)]
         | .failed error => [("status", "failed"), ("error", .str error)]
         | .stopped reason => [("status", "stopped"), ("reason", .str reason)])
     | _ => .mkObj [("entry", last.hex), ("status", "idle")]
+  else match stop with
+  | .ended (.ok value) => .mkObj [("entry", last.hex), ("status", "ended"), ("value", value)]
+  | .ended (.error error) => .mkObj [("entry", last.hex), ("status", "ended"), ("error", .str error)]
   | .waits frame question? =>
     .mkObj [("entry", last.hex), ("status", "waits"), ("frame", frame.toJson),
       ("question", question?.map (·.toJson) |>.getD .null)]
   | .paused reason => .mkObj [("entry", last.hex), ("status", "paused"), ("reason", .str reason)]
 
 /-- How a driver stopped, for a person. -/
-private def stopNote (last : Hash) (log : Log Agent) : Stop → String
-  | .idle => match lastCall? log with
+private def stopNote (last : Hash) (log : Log Agent) (stop : Stop) : String :=
+  if idle stop then match lastCall? log with
     | some (call, some ended) => s!"{call.name}: {Render.endingSummary ended}"
     | _ => s!"waits for a call: `alaya call {last.hex.take 12} PROGRAM …`"
+  else match stop with
+  | .ended (.ok value) => s!"the run is over: {Render.valueSummary value}"
+  | .ended (.error error) => s!"the run is over: {error}"
   | .waits _ (some question) =>
     s!"waits for a reply to: {question.text}\nreply with `alaya reply {last.hex.take 12} ...`"
   | .waits _ none => s!"waits for a notice: `alaya tell {last.hex.take 12} TEXT`"
@@ -217,20 +231,21 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
     data.withRuntime a.options a.provider? baseUrl? (unserved := .input "a call samples its model: name a --provider") fun rt => do
       let (last, stop, log) ← data.resume Catalog.run a.entry rt limits (entryRecord out)
       reportStop out last log stop
-      pure <| match stop with
-        | .idle => idleStatus log
+      pure <| if idle stop then idleStatus log else match stop with
+        | .ended (.ok _) => 0
+        | .ended (.error _) => exitFail
         | .waits .. => exitWaiting
         | .paused _ => exitPaused
 
 private def tellRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
-  appendIn data out (·.tell Catalog.run reference text)
+  appendIn data out (·.tell Catalog.run reference text (admit := Catalog.admitsNotice))
 
 /-- A change to the workspace, and then a message that says what changed, with what the person
 adds: the change itself reaches no read, so the message is how the call running hears of it. -/
 private def commitRun (data : System.FilePath) (reference : String) (dir : System.FilePath)
     (message? : Option String) (out : Cli.Out) : Result UInt32 :=
   withData data (write := true) fun data => do
-    let changed ← tryCatch (data.commit Catalog.run reference dir) fun
+    let changed ← tryCatch (data.commit Catalog.run reference dir (admit := Catalog.admitsNotice)) fun
       | .input message => throw <| .input s!"{message}: to send a message alone, use `tell`"
       | error => throw error
     entryRecord out changed
@@ -261,8 +276,14 @@ private def replyRun (data : System.FilePath) (reference : String) (answer? : Op
 private def commentRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
   appendIn data out (·.comment reference text)
 
-private def stopRun (data : System.FilePath) (reference reason : String) (out : Cli.Out) : Result UInt32 :=
-  appendIn data out (·.stop Catalog.run reference reason)
+/-- Breaks the call open in `frame?`, or, by default, the session's call running after an entry. -/
+private def stopRun (data : System.FilePath) (reference : String) (frame? : Option String) (reason : String)
+    (out : Cli.Out) : Result UInt32 :=
+  appendIn data out fun data => do
+    let frame ← match frame? with
+      | some text => Result.fromExcept Error.input (Frame.parse text)
+      | none => Catalog.callToStop (← data.visitAt Catalog.run reference).stack
+    data.stop Catalog.run reference frame reason
 
 /-! ## Reading the forest -/
 
@@ -535,9 +556,10 @@ private def commands : Array Cli.Command := #[
     examples := #["alaya reply c61754 -- 'yes, keep it'", "alaya reply c61754 --unavailable"]
     spec := replyRun <$> dataDir <*> entryArg "the entry whose log waits for a reply" <*> replyAnswer },
   { name := "stop"
-    summary := "Stop the call running after an entry: the call is over there."
-    examples := #["alaya stop 4f2c8b:120 --reason 'enough'"]
+    summary := "Stop the call running after an entry, or the call open in --frame, and every call inside it."
+    examples := #["alaya stop 4f2c8b:120 --reason 'enough'", "alaya stop 4f2c8b:120 --frame session/mini-swe/subagent"]
     spec := stopRun <$> dataDir <*> entryArg
+      <*> Cli.flag? "frame" (.string "FRAME") "the frame of the call to stop; by default the program the session runs"
       <*> Cli.flagD "reason" .string "stopped from outside" "why, as the log keeps it" },
   { name := "comment"
     summary := "Append a comment after an entry: for whoever reads the log, and ignored by everything else."

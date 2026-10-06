@@ -28,8 +28,8 @@ open Lean (Json)
 
 /-- What waits for the value of the computation being run: the rounds of loops, and the calls it
 is in, each with the frame of the caller to go back to, the calls it will have opened, and the
-scope of the routine called: the routines it can call. The bottom is the run's own frame, with
-the scope of the run's routine, and its value is the result of the run. -/
+scope of the routine called: the routines it can call. The bottom is the outside, with the scope
+the run's call is made in, and its value is the result of the run. -/
 inductive Stack (σ : Signature) : Type → Type 1 where
   | top (scope : Scope σ) : Stack σ Json
   /-- A round of a loop; `start` is how many events the machine had read when it began. -/
@@ -71,21 +71,25 @@ instance : Inhabited (Demand σ) := ⟨.unguarded #[]⟩
 
 namespace Machine
 
-/-- The machine at the start of a run: the body of the run's routine, entered by no call, in
-`#[]`, with no arguments. -/
-def start (root : Routine σ) : Machine σ :=
-  { α := Json, computation := root.body .null, stack := .top root.scope, frame := #[], opened := #[]
-    read := 0 }
+/-- What runs outside the run, in `#[]`: it waits for the call of the run, and makes it. -/
+private def outside : Computation σ Json := do
+  match ← await (one := true) fun _ notice => notice matches .called _ with
+  | .called call :: _ => .call call fun | .ok value => .pure value | .error error => .fail error
+  | _ => .fail "the wait for the run's call ended without one"
+
+/-- The machine at the start of a run: outside it, waiting for its call, which names a routine
+of `scope`. -/
+def start (scope : Scope σ) : Machine σ :=
+  { α := Json, computation := outside, stack := .top scope, frame := #[], opened := #[], read := 0 }
 
 /-- Runs the machine until it needs something from the log. A call finds its routine in the scope
 of the routine running in the innermost frame, and pushes the scope the routine found brings. -/
 partial def advance (m : Machine σ) : Demand σ :=
   if let some result := m.result? then .finished result else
   match m with
-  | ⟨_, .pure a, .top _, frame, _, read, _⟩ =>
-    .mark (.returned frame a) { m with result? := some (.ok a), read := read + 1 }
-  | ⟨_, .fail error, .top _, frame, _, read, _⟩ =>
-    .mark (.failed frame error) { m with result? := some (.error error), read := read + 1 }
+  -- Outside, the run is over once its call is: nothing more is logged.
+  | ⟨_, .pure a, .top _, _, _, _, _⟩ => .finished (.ok a)
+  | ⟨_, .fail error, .top _, _, _, _, _⟩ => .finished (.error error)
   | ⟨_, .pure value, .call parent opened k _ rest, frame, _, read, _⟩ =>
     .mark (.returned frame value)
       { α := _, computation := k (.ok value), stack := rest, frame := parent, opened
@@ -130,27 +134,20 @@ partial def advance (m : Machine σ) : Demand σ :=
   | ⟨α, .comment text k, stack, frame, opened, read, _⟩ =>
     .comment text ⟨α, k, stack, frame, opened, read, none⟩
 
-/-- The machine after a stop from outside: every frame of the call the run made ends, whatever
-the nesting, without a mark, and the run's own computation is given the error. Nothing in the call
-can catch it. `none` when no call is running, where a stop has no place. -/
-def stop (m : Machine σ) : Option (Machine σ) :=
-  let rec unwind {α : Type} : Stack σ α → Option (Machine σ)
+/-- The machine after a break from outside in `target`: the call open in that frame ends, and
+every call inside it, whatever the nesting, without a mark, and its caller is given `reason` as
+its failure. Nothing inside the call can catch it; its caller can. `none` when no call is open in
+`target`, where a break has no place. -/
+def breakAt (m : Machine σ) (target : Frame) (reason : String) : Option (Machine σ) :=
+  let rec unwind {α : Type} (current : Frame) : Stack σ α → Option (Machine σ)
     | .top _ => none
-    | .round _ _ _ rest => unwind rest
+    | .round _ _ _ rest => unwind current rest
     | .call parent opened k _ rest =>
-      if parent.isEmpty then
-        some { α := _, computation := k (.error "stopped"), stack := rest, frame := parent
-               opened, read := m.read + 1 }
-      else unwind rest
-  match m with
-  -- the first call is about to be opened
-  | ⟨_, .call routine k, stack, #[], opened, read, none⟩ =>
-    if opened.isEmpty then
-      some { α := _, computation := k (.error "stopped"), stack, frame := #[], opened := #[routine.name]
-             read := read + 1 }
-    else none
-  | ⟨_, _, stack, _, _, _, none⟩ => unwind stack
-  | _ => none
+      if current == target then
+        some { α := _, computation := k (.error reason), stack := rest, frame := parent, opened
+               read := m.read + 1 }
+      else unwind parent rest
+  if m.result?.isSome then none else unwind m.frame m.stack
 
 end Machine
 
@@ -171,7 +168,7 @@ inductive Next (σ : Signature) where
   takes, a question, the opening of a call, its return or its failure. Appended as it is. -/
   | mark (event : Event σ)
   /-- A read that waits, and nothing it takes has arrived: for the reply to `question?`, when it
-  is a question's. In `#[]` with no question when the log has no root. -/
+  is a question's. In `#[]` until the run's call arrives. -/
   | waits (frame : Frame) (question? : Option Question)
   /-- The run is over: its result, or its failure. -/
   | ended (result : Except String Json)
@@ -189,8 +186,6 @@ structure Replayer (σ : Signature) where
   demand : Demand σ
   position : Nat := 0
   unread : Array (Nat × Notice) := #[]
-  /-- Whether the root, the first event, has been read. -/
-  rooted : Bool := false
   /-- Set when the log has turned out to be no trace of the run. -/
   broken? : Option (Next σ) := none
   /-- The comments the computation has made since the last event it read, in order: the driver
@@ -206,8 +201,8 @@ private partial def settle (r : Replayer σ) : Replayer σ :=
     settle { r with machine, demand := machine.advance, comments := r.comments.push text }
   | _ => r
 
-def start (root : Routine σ) : Replayer σ :=
-  let machine := Machine.start root
+def start (scope : Scope σ) : Replayer σ :=
+  let machine := Machine.start scope
   settle { machine, demand := machine.advance }
 
 /-- What a read takes, and what it leaves unread. A read that waits takes the notices it is for,
@@ -215,13 +210,17 @@ among those not yet read; any other takes every message not yet read. -/
 private def take (r : Replayer σ) (frame : Frame) (wait : Option Wait) :
     Array (Nat × Notice) × Array (Nat × Notice) :=
   match wait with
-  | some wait => r.unread.partition fun (_, notice) => wait.accepts frame notice
+  | some wait =>
+    let (taken, left) := r.unread.partition fun (_, notice) => wait.accepts frame notice
+    if wait.one && taken.size > 1 then
+      let first := taken[0]!
+      (#[first], r.unread.filter (·.1 != first.1))
+    else (taken, left)
   | none => r.unread.partition fun (_, notice) => notice.isMessage
 
 /-- What to do next, when the log ends here. -/
 def next (r : Replayer σ) : Next σ :=
   if let some broken := r.broken? then broken else
-  if !r.rooted then .waits #[] none else
   match r.demand with
   | .finished result => .ended result
   | .unguarded frame => .unguarded frame
@@ -242,30 +241,18 @@ private def resume (r : Replayer σ) (machine : Machine σ) : Replayer σ :=
 private def broken (r : Replayer σ) (next : Next σ) : Replayer σ :=
   { r with broken? := some next }
 
-/-- The frame of what the machine needs, which says whether a stop may end it. -/
-private def demandFrame? : Demand σ → Option Frame
-  | .ask call _ => some call.frame
-  | .mark event _ => event.frame?
-  | .read frame _ _ => some frame
-  | _ => none
-
 /-- Reads one more event of the log. -/
 def feed (r : Replayer σ) (event : Event σ) : Replayer σ :=
   if r.broken?.isSome then r else
   if let .unguarded frame := r.demand then r.broken (.unguarded frame) else
   let position := r.position
-  if !r.rooted then
-    match event with
-    | .arrived (.changed ..) => { r with rooted := true, position := 1 }
-    | _ => r.broken (.mismatch position)
-  else match event with
+  match event with
   | .commented _ => { r with position := position + 1 }
   | .arrived notice => { r with unread := r.unread.push (position, notice), position := position + 1 }
-  | .stopped _ =>
-    let inCall := (demandFrame? r.demand).any (·.inCall)
-    match inCall, r.machine.stop with
-    | true, some machine => r.resume machine
-    | _, _ => r.broken (.mismatch position)
+  | .broke frame reason =>
+    match r.machine.breakAt frame reason with
+    | some machine => r.resume machine
+    | none => r.broken (.mismatch position)
   | event =>
     match r.demand with
     | .read frame wait resume =>
@@ -292,14 +279,18 @@ def feed (r : Replayer σ) (event : Event σ) : Replayer σ :=
         if expected.sameMark event then r.resume resume else r.broken (.mismatch position)
       | _, _ => r.broken (.mismatch position)
 
-/-- Replays a whole log. -/
-def ofLog (root : Routine σ) (log : Log σ) : Replayer σ :=
-  log.foldl feed (start root)
+/-- Whether a break in `frame` has a place where the log ends: a call is open there. -/
+def canBreak (r : Replayer σ) (frame : Frame) : Bool :=
+  r.broken?.isNone && (r.machine.breakAt frame "").isSome
+
+/-- Replays a whole log of a run whose call names a routine of `scope`. -/
+def ofLog (scope : Scope σ) (log : Log σ) : Replayer σ :=
+  log.foldl feed (start scope)
 
 end Replayer
 
-/-- What a run of `root` does next after `log`: the pure function from the log that the driver
-sees. -/
-def next (root : Routine σ) (log : Log σ) : Next σ := (Replayer.ofLog root log).next
+/-- What a run whose call names a routine of `scope` does next after `log`: the pure function
+from the log that the driver sees. -/
+def next (scope : Scope σ) (log : Log σ) : Next σ := (Replayer.ofLog scope log).next
 
 end Alaya.Core

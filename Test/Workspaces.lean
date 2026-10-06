@@ -328,10 +328,10 @@ def runSuite : Suite := Testing.suite "workspaces.run" #[
     let rt : Driver.Runtime := {
       store, workspaces, workDir := work, outputsDir := (← scratch) / "outputs"
       executor := fun _ => pure executor, model := fun _ => throw <| .input "no model" }
-    let (root, _) ← assertOk <| Notices.create store workspaces project
+    let root ← Scripted.begin store workspaces run project
     let (called, _) ← assertOk <| Driver.append store run root (Scripted.callAgent)
     let (tip, stop) ← assertOk <| Driver.drive rt run called
-    check (stop matches .waits ⟪"agent"⟫ none) "the agent waits for a message"
+    check (stop matches .waits ⟪"session", "agent"⟫ none) "the agent waits for a message"
     IO.FS.writeFile (project / "README.md") "readme, by hand"
     writeSpec project #[("tests/extra.txt", "extra")]
     let event ← assertOk <| Notices.changed store workspaces tip project

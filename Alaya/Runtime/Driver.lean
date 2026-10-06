@@ -6,8 +6,8 @@ import Alaya.Runtime.Workspaces
 
 /-! The driver: the only part that carries out what a computation asks. It keeps the interpreter
 live, asks it what is next after the log, and either carries out the operation it asks for and
-appends the answer, or appends the mark it makes, an entry at a time, until no call is running,
-a call waits for a person, or this invocation reaches a limit. Each call's commands run in a
+appends the answer, or appends the mark it makes, an entry at a time, until the run is over, it
+waits for a notice, or this invocation reaches a limit. Each call's commands run in a
 container of the call's own image, and each sample is drawn from the model it names.
 "Execution is an external operation rather than a constant within type theory" (Hancock and
 Setzer 2000): this is the one loop that need not end. See `docs/agent-api.md` §10.
@@ -69,9 +69,10 @@ structure Limits where
 
 /-- Why the driver stopped. -/
 inductive Stop where
-  /-- No call is running: the run waits for a person to call a program. -/
-  | idle
-  /-- A call waits for a notice: a reply to `question?`, or, without one, any. -/
+  /-- The run is over: its result, or its failure. -/
+  | ended (result : Except String Json)
+  /-- The computation in `frame` waits for a notice: a reply to `question?`, or, without one, any
+  it waits for. -/
   | waits (frame : Frame) (question? : Option Question)
   /-- This invocation reached a limit; the next `resume` goes on from here. -/
   | paused (reason : String)
@@ -141,12 +142,12 @@ private def executorFor (rt : Runtime) (held : IO.Ref (Option (Frame × Executor
   io (held.set (some (named, executor)))
   pure (executor, true)
 
-/-- Drives the run of `root` on from the entry `tip`, appending each event as an entry and calling `onEntry`
-with it, until no call is running, a call waits for a person, or it reaches one of `limits`.
+/-- Drives the run in `scope` on from the entry `tip`, appending each event as an entry and calling `onEntry`
+with it, until the run is over, it waits for a notice, or it reaches one of `limits`.
 Gives the last entry and why it stopped. A sample takes the next draw of its request: the first
 when the tip has no other continuation that sampled, so a run that crashed takes the response
 the cache kept, and the next one when it has, so running a point again is a new draw. -/
-partial def drive (rt : Runtime) (root : Routine Agent) (tip : Hash) (limits : Limits := {})
+partial def drive (rt : Runtime) (scope : Scope Agent) (tip : Hash) (limits : Limits := {})
     (onEntry : OnEntry := fun _ _ => pure ()) : Result (Hash × Stop) := do
   let forest ← rt.store.forest
   let entries ← rt.store.entries forest tip
@@ -160,9 +161,8 @@ partial def drive (rt : Runtime) (root : Routine Agent) (tip : Hash) (limits : L
       (spent stamp samples : Nat) (checkout : Checkout) : Result (Hash × Stop) := do
     -- Which limit, if any, keeps the driver from going on in `frame`: the time budget, before
     -- anything; the samples, before a sample or a read of a call's inbox.
-    let limit? (now : Nat) (frame : Frame) (sampling : Bool) : Option String :=
-      if !frame.inCall then none
-      else if limits.budgetMs?.any (spent + (now - stamp) ≥ ·) then some "the time budget is spent"
+    let limit? (now : Nat) (sampling : Bool) : Option String :=
+      if limits.budgetMs?.any (spent + (now - stamp) ≥ ·) then some "the time budget is spent"
       else if sampling && limits.samples?.any (samples ≥ ·) then some s!"{samples} response(s) sampled"
       else none
     -- An entry's time is how long its event took the driver, except for a response whose own
@@ -185,25 +185,27 @@ partial def drive (rt : Runtime) (root : Routine Agent) (tip : Hash) (limits : L
         (spent + entry.elapsedMs) now samples checkout
     let append := appendTook none
     match replayer.next with
-    -- The run's routine never ends; a run that did is no longer calling anything.
-    | .ended _ => pure (tip, .idle)
-    | .waits frame question? => pure (tip, if frame.inCall then .waits frame question? else .idle)
+    | .ended result => pure (tip, .ended result)
+    | .waits frame question? => pure (tip, .waits frame question?)
     | .mismatch position =>
       throw <| .input <| s!"the log is no trace of its run's program: the event at {position} is not what it does; " ++
         "`alaya rebase` copies the part that is into a new data directory"
     | .unguarded frame =>
       throw <| .input s!"a loop in frame {frame.render} went round without reading an event"
     | .mark event =>
-      -- A limit is checked before a read of a call's inbox too, so that what a person adds
-      -- where the run paused is read before the next sample, not after it.
-      if let .heard frame _ := event then
-        if let some reason := limit? (← nowMs) frame (sampling := true) then
-          return (tip, .paused reason)
+      -- A limit is checked before a read of the inbox too, so that what a person adds where the
+      -- run paused is read before the next sample, not after it. A read that takes calls alone
+      -- starts no work of its own: what the call does is limited where it does it.
+      if let .heard _ taken := event then
+        let calls := !taken.isEmpty && taken.all fun i => log[i]? matches some (.arrived (.called _))
+        if !calls then
+          if let some reason := limit? (← nowMs) (sampling := true) then
+            return (tip, .paused reason)
       append event checkout samples
     | .ask call =>
       let now ← nowMs
       let timeSpent := spent + (now - stamp)
-      if let some reason := limit? now call.frame (call.op matches .sample ..) then
+      if let some reason := limit? now (call.op matches .sample ..) then
         return (tip, .paused reason)
       let version := (workspace? log).getD ⟨""⟩
       match call.op with
@@ -240,46 +242,50 @@ partial def drive (rt : Runtime) (root : Routine Agent) (tip : Hash) (limits : L
       | .time =>
         append (.answered call.frame .time
           (.ok (.timing { spentMs := timeSpent, budgetMs? := limits.budgetMs? }))) checkout samples
-  try loop forest tip log (Replayer.ofLog root log) spent started 0 {}
+  try loop forest tip log (Replayer.ofLog scope log) spent started 0 {}
   finally
     if let some (_, executor) ← io held.get then io executor.close
 
 /-! ## Notices: what a person appends -/
 
-/-- Whether a call is running where a log ends: what its run does next is in a call's frame,
-the call opened already. -/
-def running : Next Agent → Bool
-  | .ask call => call.frame.inCall
-  | .mark (.opened frame _) => frame.size > 1
-  | .mark event => event.frame?.any (·.inCall)
-  | .waits frame _ => frame.inCall
-  | _ => false
+/-- Appends the marks the run makes after `tip` with no world — a read of what has arrived, the
+opening of a call — and the comments before them, until it asks the world for something, waits,
+or ends. Gives the entries appended, in order. So a run started by a call is at its first wait
+before a person appends anything more. -/
+partial def settle (store : Store) (scope : Scope Agent) (tip : Hash) : Result (Array (Hash × Entry)) := do
+  let rec go (forest : Forest) (tip : Hash) (replayer : Replayer Agent) (written : Array (Hash × Entry)) :
+      Result (Array (Hash × Entry)) := do
+    let .mark event := replayer.next | pure written
+    let mut (forest, tip, written) := (forest, tip, written)
+    for text in replayer.comments do
+      let entry : Entry := { parent? := some tip, event := .commented text }
+      let (hash, grown) ← store.put forest entry
+      (forest, tip, written) := (grown, hash, written.push (hash, entry))
+    let entry : Entry := { parent? := some tip, event }
+    let (hash, grown) ← store.put forest entry
+    go grown hash ((replayer.comments.foldl (fun r text => r.feed (.commented text)) replayer).feed event)
+      (written.push (hash, entry))
+  let forest ← store.forest
+  go forest tip (Replayer.ofLog scope (← store.log forest tip)) #[]
 
-/-- Appends an event that comes from outside — a notice, a stop — after `tip`, after checking
-that the log can take it: a stop, a message, a change or a reply only while a call is running,
-when it has something to end or someone to read it; a call only where the run waits for one,
-no call running and none asked for yet, and only of a routine the run's scope has. Whether the
-call's arguments fit the routine is its caller's to check (`Catalog.check`): a call that
-does not fails in its frame. Gives the new entry. -/
-def append (store : Store) (root : Routine Agent) (tip : Hash) (event : Event Agent) : Result (Hash × Entry) := do
+/-- Appends an event that comes from outside — a notice, a break — after `tip`, after checking
+that the log can take it: a break only where a call is open in its frame, and a notice only
+while the run is not over, when something may read it. What a person may append beyond that —
+a call only where the run waits for one, a message only while a call runs — is the front end's
+to say. Gives the new entry. -/
+def append (store : Store) (scope : Scope Agent) (tip : Hash) (event : Event Agent) : Result (Hash × Entry) := do
   let forest ← store.forest
   let log ← store.log forest tip
-  let next := (Replayer.ofLog root log).next
-  if let .mismatch position := next then
+  let replayer := Replayer.ofLog scope log
+  if let .mismatch position := replayer.next then
     throw <| .input <| s!"the log is no trace of its run's program at position {position}; " ++
       "`alaya rebase` copies the part that is into a new data directory"
   match event with
-  | .stopped _ =>
-    if !running next then throw <| .input "no call is running: there is nothing to stop"
-  | .arrived (.called call) =>
-    if running next then
-      throw <| .input "a call is running: a program is called once it is over; `alaya stop` ends it first"
-    if !(next matches .waits #[] _) then
-      throw <| .input "the run has a call to make here already: `alaya resume` makes it"
-    if (root.scope.find call.name).isNone then throw <| .input s!"no program named {call.name}"
+  | .broke frame _ =>
+    if !replayer.canBreak frame then throw <| .input s!"no call is open in {frame.render}: there is nothing to stop"
   | .arrived _ =>
-    if !running next then
-      throw <| .input "no call is running: nothing would read a notice appended here; append it at an entry before the call's end"
+    if replayer.next matches .ended _ then
+      throw <| .input "the run is over: nothing would read a notice appended here"
   | _ => pure ()
   let entry : Entry := { parent? := some tip, event }
   let (hash, _) ← store.put forest entry

@@ -2,7 +2,7 @@ import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
 import Alaya.Agents.Grader
 import Alaya.Base.Settings
-import Alaya.Runtime.Calls
+import Alaya.Runtime.Walk
 
 /-!
 The programs a call can name, and how a call's configuration builds one: the agents, and the
@@ -138,20 +138,68 @@ def check (call : RoutineCall) : Except String Unit :=
     | .ok _ => .ok ()
     | .error problem => .error problem
 
+/-! ## The session
+
+A run that `alaya new` starts is a call of `session`: in its frame, `session`, it waits for a
+person to call a program, calls it in a frame of its own (`session/mini-swe`), and when the call
+ends waits for the next. Whether a run waits for a call, whether a call runs, and which call a
+stop ends are what the session makes of them; the runtime knows none of it. -/
+
 /-- The run of programs of `scope`: it waits for a person to call one, calls it, and waits
-again. A call's failure, or its stop, is the call's: the run goes on to wait for the next. -/
+again. A call's failure, or its break, is the call's: the run goes on to wait for the next. -/
 def session (scope : Scope Agent) : Routine Agent where
   name := "session"
   body _ := iter (fun (_ : Unit) => do
-    match ← await fun _ notice => notice matches .called _ with
+    match ← await (one := true) fun _ notice => notice matches .called _ with
     | .called call :: _ => Computation.call call fun _ => pure (.inl ())
     | _ => throw "the wait for a call ended without one") ()
   scope
 
-/-- The programs a run calls: the run's scope. -/
+/-- The programs a run calls: the session's scope. -/
 def scope : Scope Agent := Scope.of (all.map (·.routine))
 
-/-- The run of the catalog's programs. -/
-def run : Routine Agent := session scope
+/-- What a run's call may name: the session over the programs, or a program alone. -/
+def run : Scope Agent := Scope.of (#[session scope] ++ all.map (·.routine))
+
+/-- The call that starts a run of `alaya new`. -/
+def sessionCall : RoutineCall := { name := "session", arguments := .null }
+
+/-- The session's frame. -/
+def sessionFrame : Frame := #[{ name := "session" }]
+
+/-- Whether the run waits for a person to call a program: the session waits, with no question. -/
+def idle : Next Agent → Bool
+  | .waits frame none => frame == sessionFrame
+  | _ => false
+
+/-- Whether a call of the session's runs where a log ends: what the run does next is in its frame
+or inside it, the call opened already. -/
+def running : Next Agent → Bool
+  | .ask call => call.frame.size ≥ 2
+  | .mark (.opened frame _) => frame.size > 2
+  | .mark event => event.frame?.any (·.size ≥ 2)
+  | .waits frame _ => frame.size ≥ 2
+  | _ => false
+
+/-- Whether a person may call a program where the run does `next`: only where the session waits
+for one, no call running and none read yet. -/
+def admitsCall (next : Next Agent) : Result Unit := do
+  if running next then
+    throw <| .input "a call is running: a program is called once it is over; `alaya stop` ends it first"
+  if next matches .ended _ then throw <| .input "the run is over: it calls nothing more"
+  if !idle next then throw <| .input "the run has a call to make here already: `alaya resume` makes it"
+
+/-- Whether a person's notice — a message, a change, a reply — has a reader where the run does
+`next`: only while a call runs. -/
+def admitsNotice (next : Next Agent) : Result Unit := do
+  if !running next then
+    throw <| .input "no call is running: nothing would read a notice appended here; append it at an entry before the call's end"
+
+/-- The frame a stop ends by default: the session's call open at an entry, given the calls open
+there, outermost first. -/
+def callToStop (open' : Array OpenCall) : Result Frame := do
+  let some call := open'.find? (·.frame.size == 2)
+    | throw <| .input "no call is running: there is nothing to stop"
+  pure call.frame
 
 end Alaya.App.Catalog
