@@ -24,11 +24,11 @@ the Vero benchmark of verified Lean code.
 
 ## Features
 
+- **Durable runs.** A run that crashed or was interrupted resumes from its log. Every model draw
+  is cached, so resuming sends no request twice.
 - **A complete view of runs.** `alaya html` writes the whole forest as one page: every branch,
   every call in its frame, each request as it was sent, each response with its reasoning, and how
   each command changed the files.
-- **Durable runs.** A run that crashed or was interrupted resumes from its log. Every model draw
-  is cached, so resuming sends no request twice.
 - **Forks.** Any entry of any run can be continued differently, and the original stays as it was.
   The logs of a data directory form a forest that shares their common entries.
 - **Interventions at any point.** A person can send a message (`tell`), change the workspace
