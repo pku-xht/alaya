@@ -1,6 +1,10 @@
 # 困难任务中的求助实验
 
-阅读入口：[协议](PROTOCOL.md)、[当前状态](STATUS.md)、[筛选依据与服务局限](SELECTION.md)。本目录是新版 Alaya 上的新实验；旧报告和 PR #50 保持原样。
+阅读入口：**[中文导师汇报](REPORT-ZH.md) · [English report](REPORT-EN.md)**。
+
+本轮已完成 7 条 solo 筛选、2 条全新 help。Greenery help 5/26、Primepy help 8/9，两条都没有求助；代理答复和真人答复均为 0。服务限流等限制见报告，不能把这两个样本概括为所有 agent 都不提问。
+
+详细材料：[逐条结果](RESULTS.md)、[公开轨迹案例](TRACE-EXAMPLES.md)、[协议](PROTOCOL.md)、[当前状态](STATUS.md)、[筛选依据与服务局限](SELECTION.md)、[空问题包说明](QUESTIONS.md)。本目录是新版 Alaya 上的新实验；旧报告和 PR #50 保持原样。
 
 问题是：**当模型遇到经过筛选的真实解题障碍时，它会不会主动提问，答复是否被采用？** 当前回答者是 AI 助手代理，不能据此比较不同背景真人的帮助效果。
 
@@ -36,13 +40,13 @@ python3 experiments/help_on_hard_tasks/run.py advance --binary "$BINARY" --root 
 
 ## 后续真人材料
 
-真实模型问题产生后才制作问题包，注明提问时的预算、公开代码和错误、希望提供的帮助。试验用代理答案单独存放，不能给正式被试预先看。若本轮没有自然问题，明确报告“自然问题包为空”，不拿研究者补写的问题冒充。
+本轮自然问题包为空。后续真实模型问题产生后才制作问题包，注明提问时的预算、公开代码和错误、希望提供的帮助。试验用代理答案单独存放，不能给正式被试预先看，不拿研究者补写的问题冒充模型问题。[研究设计](HUMAN-STUDY-DESIGN.md) 与 [记录表](HUMAN-STUDY-FORM.md) 尚未实施。
 
 未来背景记录可包括 Lean 使用经验、相关算法／数学知识、编程经验；不能仅按学历或年级断言谁更能帮助模型。答复表记录理解题意、答复原文、自信程度、用时、参考资料及验证方法。真实招募、分组和研究协议是后续工作，本轮不执行。
 
 ## 审阅与服务观察
 
-`audit_completed.py --binary "$BINARY" --runs "$RUNS"` 对已评分运行重验实际初始请求与日志根，不采样。`summarize.py` 导出正式得分、实际问题、工具请求与执行数、停止类型、截断及注入审计。manifest 的 root 是 new 命令最后返回的 session tip；真正初始工作区是 position=0 的 changed 事件，两者分开核验。当前维护版只修正审计；本轮正在使用的采样 runner 与 Lean binary 保持冻结。
+`audit_completed.py --binary "$BINARY" --runs "$RUNS"` 对已评分运行重验实际初始请求与日志根，不采样。`summarize.py` 导出正式得分、实际问题、工具请求与执行数、停止类型、截断及注入审计。manifest 的 root 是 new 命令最后返回的 session tip；真正初始工作区是 position=0 的 changed 事件，两者分开核验。当前维护版只修正审计；本轮使用的采样 runner 与 Lean binary 保持冻结。最终统计保存为 `evidence/results.json`；`evidence/screening-progress.json` 保留七条筛选快照。
 
 `observe_http.py --study-root "$SCRATCH" --output "$SCRATCH/http-observations.jsonl"` 可只读观察本研究 curl 子进程的 HTTP 状态和有单位的 Retry-After 头；不读取凭据、请求、响应正文或进程环境。该旁路可能漏过短进程，未观察到 429 不能证明没有限流。`summarize_http.py INPUT... --output OUTPUT` 合并观察、去重并报告覆盖范围。原始 provider 错误可能带账号标识，不能直接复制进报告或 Git。
 

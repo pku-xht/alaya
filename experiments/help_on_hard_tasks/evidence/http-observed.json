@@ -20,9 +20,77 @@
       "type": "coverage_start",
       "best_effort": true,
       "scope": "/home/xht/.cache/alaya-demo/help-hard-20261007/runs"
+    },
+    {
+      "file": "http-observations-002.jsonl",
+      "observed_at": "2026-10-07T15:54:03.347253+00:00",
+      "type": "coverage_end"
     }
   ],
   "runs": [
+    {
+      "run": "greenery-help-01",
+      "observed_requests": 54,
+      "status_counts": {
+        "200": 49,
+        "429": 5
+      },
+      "first_observed": "2026-10-07T15:07:46.707332+00:00",
+      "last_observed": "2026-10-07T15:23:29.238268+00:00",
+      "observed_429": 5,
+      "retry_headers": [
+        {
+          "observed_at": "2026-10-07T15:10:48.617380+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:12:45.749971+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:14:52.026945+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:16:49.561090+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:18:51.180909+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        }
+      ]
+    },
     {
       "run": "greenery-solo-02",
       "observed_requests": 46,
@@ -158,6 +226,109 @@
         },
         {
           "observed_at": "2026-10-07T14:30:05.362774+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        }
+      ]
+    },
+    {
+      "run": "primepy-help-02",
+      "observed_requests": 89,
+      "status_counts": {
+        "200": 80,
+        "429": 9
+      },
+      "first_observed": "2026-10-07T15:25:07.826178+00:00",
+      "last_observed": "2026-10-07T15:48:11.551362+00:00",
+      "observed_429": 9,
+      "retry_headers": [
+        {
+          "observed_at": "2026-10-07T15:31:56.046295+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:36:08.720708+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:38:41.573925+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:39:42.180136+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:40:42.855233+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:41:43.526419+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:42:44.021505+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:43:55.374360+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T15:46:05.206080+00:00",
           "retry_after": [
             {
               "value": 60,

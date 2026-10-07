@@ -1,0 +1,92 @@
+{
+  "run": "greenery-help-01",
+  "recorded_seconds": 939.649,
+  "time_checks": [
+    {
+      "entry": "62240956ae736df79cdd783bb1d0f93b452244a8983ffeafd0056d77a34dabc3",
+      "seconds": 4.811,
+      "recorded_timing": {
+        "budget_ms": 1800000,
+        "spent_ms": 4811
+      }
+    },
+    {
+      "entry": "948ec3f271781fd99978dedf1cc635e7ed7ed7ca457adcae39a26bc668816de6",
+      "seconds": 535.055,
+      "recorded_timing": {
+        "budget_ms": 1800000,
+        "spent_ms": 535055
+      }
+    },
+    {
+      "entry": "2ec0313762760c4020c7e9804a3288acdc09450b481f535240915b4e23341c2c",
+      "seconds": 663.333,
+      "recorded_timing": {
+        "budget_ms": 1800000,
+        "spent_ms": 663333
+      }
+    },
+    {
+      "entry": "eb588d536989fdd9a337b207f4ed5083a12c6e821323f49e18bd98edf4d13c36",
+      "seconds": 830.318,
+      "recorded_timing": {
+        "budget_ms": 1800000,
+        "spent_ms": 830318
+      }
+    }
+  ],
+  "time_tool_returns": [
+    {
+      "entry": "daa591a43942e6d55842c0a6328c63b8e903c928554857fb05dc8166e7084a2a",
+      "seconds": 4.811,
+      "tool_value": {
+        "seconds_left": 1795
+      }
+    },
+    {
+      "entry": "559181e416d8d417d0581b05ff035d09aa398113e57c1d83cbe324bce9e30bee",
+      "seconds": 535.055,
+      "tool_value": {
+        "seconds_left": 1264
+      }
+    },
+    {
+      "entry": "fd8d1d6b7eafe99e8f5538771fc0d17b0642c435ab31005540dd6b55ac6a39de",
+      "seconds": 663.333,
+      "tool_value": {
+        "seconds_left": 1136
+      }
+    },
+    {
+      "entry": "fb6689131c451b8388899d3dec831e1f6d4ac063dd4ad704c3ff9e7316cd3f56",
+      "seconds": 830.318,
+      "tool_value": {
+        "seconds_left": 969
+      }
+    }
+  ],
+  "last_compiler_errors": [
+    {
+      "entry": "4948e59ef43c92f017c71ac7c90e5ae5eece08acf9287c6db193ef9a2acf7378",
+      "seconds": 627.764,
+      "feedback_excerpt": "Greenery/Proof/Algebra.lean:1:0: error: object file '/workspace/.lake/build/lib/lean/Greenery/Proof/Fsm.olean' of module Greenery.Proof.Fsm does not exist"
+    },
+    {
+      "entry": "297b61371e7f23ddd78347bcc6d570c784697a80c8b2d7fb0a412ac0a330843d",
+      "seconds": 663.332,
+      "feedback_excerpt": "/tmp/ax.lean:1:0: error: object file '/workspace/.lake/build/lib/lean/Greenery/Proof/Algebra.olean' of module Greenery.Proof.Algebra does not exist"
+    },
+    {
+      "entry": "a2d8473456f94d2f84b9bcc2118cec54916b19e0780b759ec3c476e5680a9666",
+      "seconds": 889.835,
+      "feedback_excerpt": "/tmp/lem.lean:26:6: error: Type mismatch: After simplification, term\n  eq_of_beq h\n has type\n  b = x\nbut is expected to have type\n  gGet? (b :: bs) 0 = some x\n/tmp/lem.lean:31:10: error: Failed to rewrite using equation theorems for `gGet?`\n\nHint: Try rewriting with `Greenery.gGet?.eq_def`"
+    }
+  ],
+  "actual_questions": [],
+  "public_submission": "Part A complete (all 7 API functions really implemented; lake build green, all frozen Test.lean #guards pass) and 5 specs discharged axiom-cleanly: accepts_fold, accepts_nil, complement_lang, double_complement, equivalent_iff_reduce_eq. Implementation uses Brzozowski double reversal + canonical relabeling for reduce, subset construction for reversed, product automata for union/inter, and finality flip for everythingbut. Exploration engine rewritten as an iterative fixpoint (verified byte-identical via conformance tests) to ease the remaining proofs. Proof/Fsm, Proof/Algebra, Proof/Joint, Impl/* all compile; no sorry/axiom/unsafe in any filled slot; Joint.lean untouched.",
+  "grade": {
+    "passed": 5,
+    "total": 26,
+    "status": "fail"
+  }
+}
