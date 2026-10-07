@@ -136,7 +136,8 @@ the grader's, whose image holds the trusted benchmark.
 
 A point of the run is graded by calling the task's grader there: `alaya stop`
 first, where the agent still runs, then `call … grader`, and `resume`. No
-provider is needed, and `resume` exits 0, 1 or 2 with a pass, a fail or an error.
+provider is needed. `resume` exits 0 once the grader has returned; the verdict
+is its value, the `value` of the status object `resume --json` ends with.
 
 ```sh
 grade() {
@@ -153,7 +154,7 @@ Any other point is graded the same way. The untouched source, for one, at the
 root `new` printed:
 
 ```sh
-grade "$ROOT" > "$RUN/blank.jsonl"   # exits 1: a fail
+grade "$ROOT" > "$RUN/blank.jsonl"   # its verdict: a fail
 ```
 
 The grader's reports are in the workspace as it left it, read at the entry of
@@ -194,7 +195,7 @@ The statuses a Vero report may contain are read from the pinned Vero, not
 written into the grader; a status outside them, a changed specification count,
 a compiler timeout or signal, or any exception is a `Bail out!`, and so an
 `error` verdict rather than a zero. The verdict's `status` — `pass`, `fail` or
-`error` — tells them apart, and `resume` exits 0, 1 or 2 by it.
+`error` — tells them apart.
 
 ## Reproduce acceptance checks
 

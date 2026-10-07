@@ -183,7 +183,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       "at least two options"
     assertContains "alone" (parse asking (Scripted.responseWith #[Scripted.askCall "q" "Keep it?", Scripted.call "c" "bash" "ls"]))
       "ask_user must be called alone"
-    assertError "an unknown kind" (Catalog.complete "mini-vero" (.mkObj [("question_types", .arr #["multiple_choice"])])) fun
+    assertError "an unknown kind" (Builtin.catalog.complete "mini-vero" (.mkObj [("question_types", .arr #["multiple_choice"])])) fun
       | .input m => contains m "must be yes_no or single_choice or open_ended, not multiple_choice"
       | _ => false,
 
@@ -234,7 +234,7 @@ def timeSuite : Suite := Testing.suite "agents/mini-vero.time" #[
     match MiniSwe.formatError? {} (turn #[call "t" "time_budget"]) with
     | some message => check (contains message "Unknown tool 'time_budget'") "unknown"
     | none => fail "mini-swe must not accept time_budget"
-    assertError "config" (Catalog.complete "mini-swe" (.mkObj [("time_budget", true)])) fun
+    assertError "config" (Builtin.catalog.complete "mini-swe" (.mkObj [("time_budget", true)])) fun
       | .input m => contains m "unknown field 'time_budget'"
       | _ => false,
 

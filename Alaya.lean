@@ -37,8 +37,10 @@ import Alaya.Agents.Grader
 import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
 import Alaya.Agents.Tools
+import Alaya.App.Builtin
 import Alaya.App.Catalog
 import Alaya.App.Cli
+import Alaya.App.Commands
 import Alaya.App.Html
 import Alaya.App.Options
 import Alaya.App.Rebase

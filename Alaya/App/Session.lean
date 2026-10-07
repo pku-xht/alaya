@@ -23,7 +23,8 @@ def «of» (scope : Scope Agent) : Routine Agent where
   scope
 
 /-- What a run's call may name: the session over the catalog's programs, or a program alone. -/
-def scope : Scope Agent := Scope.of (#[«of» Catalog.scope] ++ Catalog.all.map (·.routine))
+def scope (catalog : Catalog) : Scope Agent :=
+  Scope.of (#[«of» catalog.scope] ++ catalog.programs.map (·.routine))
 
 /-- The call that starts a run of `alaya new`. -/
 def call : RoutineCall := { name := "session", arguments := .null }

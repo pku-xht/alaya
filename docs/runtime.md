@@ -24,7 +24,7 @@ anything the log can take.
 
 ```lean
 Session.of    : Scope Agent → Routine Agent        -- wait for a call, make it, wait again
-Session.scope : Scope Agent                        -- what a run's call may name: the session, a program
+Session.scope : Catalog → Scope Agent              -- what a run's call may name: the session, a program
 
 structure Environment where                         -- where a call's commands run, as the driver
   image   : String                                  --   reads a call's environment?, which the

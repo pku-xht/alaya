@@ -53,7 +53,7 @@ def task_grader(base, benchmark, tag):
     return tag
 
 
-def grade(alaya, data, at, image, command, codes=(0, 1, 2), timeout=None, workdir=None):
+def grade(alaya, data, at, image, command, codes=(0,), timeout=None, workdir=None):
     """Grades the point `at` as a person does: stops the call running there, if one is, calls the
     grader with `command` in `image`, and resumes. The status object `resume` ends with."""
     stopped = run(alaya, "stop", at, "--reason", "to grade this point", "--data", data,
