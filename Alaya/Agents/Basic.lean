@@ -324,7 +324,9 @@ long; then answer the response. -/
 def round (config : Config) (model : Models.Spec) (items : Array Item) : Computation Agent (Array Item ⊕ Json) := do
   let items := items ++ (← heard).map .told
   let request : Chat.Request := { messages := view items, tools := (tools config).map (·.definition) }
-  let response ← try sample model request catch refusal => return .inr (refused refusal.reason)
+  let response ← try sample model request catch
+    | .refused refusal => return .inr (refused refusal)
+    | failure => throw failure
   respond (tools config) items response
 
 /-! ## The agent -/

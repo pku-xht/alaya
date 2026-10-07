@@ -200,7 +200,9 @@ def round (config : Config) (model : Models.Spec) (history : History) : Computat
   let request : Chat.Request := { messages := view history, tools := config.tools.map (·.definition) }
   if let some limit := contextLimit? config model then
     if contextTokens history request.messages >= limit then return .inr (outcome "ContextExceeded")
-  let response ← try sample model request catch refusal => return .inr (Basic.refused refusal.reason)
+  let response ← try sample model request catch
+    | .refused refusal => return .inr (Basic.refused refusal)
+    | failure => throw failure
   let measured? := match response.usage?.bind (·.input?) with
     | some input => some (request.messages, input, response.usage?.bind (·.output?))
     | none => history.measured?
