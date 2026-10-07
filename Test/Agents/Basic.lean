@@ -110,7 +110,7 @@ def suite : Suite := Testing.suite "agents/basic" #[
         | .input m => contains m s!"unknown field '{field}'"
         | _ => false
     check (Basic.tools config |>.any fun tool => tool.name == "bash" &&
-      ((tool.call (.mkObj [("command", "ls")])).arguments.getObjVal? "executor" |>.toOption
+      ((tool.arguments (.mkObj [("command", "ls")])).getObjVal? "executor" |>.toOption
         |>.any fun executor => (executor.getObjVal? "outputs").toOption == some (.bool true)))
       "every command keeps its output as a file"
     -- ask_user is offered, with its instruction, only when the configuration names kinds of question.

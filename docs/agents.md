@@ -18,34 +18,36 @@ port of mini-SWE-agent.
 
 ## 1. Tools
 
-A **tool** is described once, by the types of its arguments (`α`) and of its routine's result
-(`β`):
+A **tool** is data: what a model needs to call it, the routine a call of it calls, and the
+settings the agent adds to every call.
 
 ```lean
-structure Tool.Spec (α β : Type) where
+structure Tool where
   definition   : Chat.ToolDefinition              -- its name, description and schema, for a model
   alone        : Bool := false                    -- must be the only call of its turn
   instruction? : Option String := none            -- appended to the prompt
-  read         : Json → Except String α           -- its routine's arguments, or what is wrong with them
-  call         : Json → RoutineCall               -- the routine call a model's arguments make, settings added
-  result       : Codec β                          -- how the routine's result is written and read back
+  routine      : String := definition.name        -- the routine a call of it calls
+  settings     : Json := .mkObj []                -- merged over the model's arguments; they win
 
+Tools.make     : Array Tool → Chat.ToolCall → Computation Agent (Except String Json)
 Tools.routines : Array (Routine Agent)            -- bash, ask_user, time_budget
 ```
 
-A tool is parameterized by what the agent's configuration says of it, as `ask_user` is by the
-kinds of question: `bash` by how a command runs, which its call adds to the model's arguments;
-`subagent` by the agent itself, its name and its configuration, which its call names with the
-model's task; `ask_user` by the kinds of question, which its call adds too. The routines are
-fixed, so all of it is in the call's arguments, in the log.
+A tool is made from what the agent's configuration says of it, and that is its settings: `bash`
+holds how a command runs, and `ask_user` the kinds of question allowed. `subagent` calls the agent
+itself, its routine the agent's name and its settings the agent's configuration but its task,
+which the model's fills. The routines are fixed, so all of it is in the call's arguments, in the
+log.
 
 ### 1.1 Who checks what
 
-**Only the routine checks a call's arguments.** It reads them with its tool's `read`, whoever
-made the call: an agent for its model, the log, or another program. The agent makes each call
-as the model gave it, with its own settings added, and answers it with what the routine gave:
-its result, or why it failed. What is valid is the tool's to say; reporting a problem and showing
-a result are the agent's. The schema is what the model is told.
+**Only the routine checks a call's arguments.** Routines and agents talk in JSON. The agent makes
+each call with `Tools.make`, which merges the tool's settings over the model's arguments and calls
+the tool's routine; it checks nothing of the arguments. The routine reads the JSON it is given,
+whoever made the call: an agent for its model, the log, or another program. It refuses what it
+cannot read, failing its frame, and otherwise returns its result as JSON. The agent answers the
+call with that: the result, shown its own way, or why the routine failed. The schema is what the
+model is told.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
@@ -56,11 +58,11 @@ flowchart LR
 
   asks("the model's<br/>tool call"):::sample
   subgraph agentIn["the agent"]
-    make("1 · make the call<br/>its settings added")
+    make("1 · make the call,<br/>its settings added")
   end
   subgraph routine["the routine, in a frame of its own"]
-    reads("2 · read its arguments<br/>with the tool's read")
-    writes("3 · write its result<br/>with the tool's result")
+    reads("2 · read its arguments")
+    writes("3 · return its result<br/>as JSON")
   end
   failed("its frame fails,<br/>saying why"):::bad
   subgraph agentOut["the agent"]
@@ -78,14 +80,15 @@ flowchart LR
   linkStyle default stroke-width:1px
 ```
 
-1. **The agent makes the call**, with its settings added to the model's arguments: how a command
-   runs, which kinds of question may be asked. It checks nothing of the arguments.
-2. **The routine reads its arguments** with its tool's `read`. Arguments it cannot read fail its
-   frame, saying why, and nothing is run or asked.
-3. **The routine writes its result** with its tool's `result`, and the agent reads it back.
+1. **The agent makes the call** with `Tools.make`: the tool's settings over the model's
+   arguments, so the model cannot override them. It checks nothing of the arguments.
+2. **The routine reads its arguments.** What it cannot read fails its frame, saying why, and
+   nothing is run or asked.
+3. **The routine returns its result** as JSON.
 4. **The agent answers the call:** with the result, as it shows it (Basic's command output, §4.4;
    mini's observation, §6.3; old outputs left out, §5.6; any other text as it is, anything else
-   as JSON), or with why the routine failed.
+   as JSON), or with why the routine failed. To show a command, it reads `output`, `exit_code`,
+   `error` and `file` from the result.
 
 What the agent does check is the turn, not a tool's arguments: a call whose arguments are not
 JSON, or that names no tool offered, is answered with that and not made, and so is every call of
@@ -97,11 +100,11 @@ rejects a malformed response as a whole (§6.3).
 
 | Tool | Arguments | Its call | Result |
 | --- | --- | --- | --- |
-| `bash` | `command`, a string | `bash`: `exec command`, with the executor settings the agent adds | `output`, `exit_code`, `error`, `file` |
+| `bash` | `command`, a string | `bash`: `exec command`; settings: `executor`, how commands run | `output`, `exit_code`, `error`, `file` |
 | `time_budget` | none | `time_budget`: `time` | `seconds_left`, or that the run has no limit |
-| `ask_user` | `question_type`, `question`, `options`: a question that can be asked, of a kind the agent allows (§2) | `ask_user`: `ask` the question; the agent adds the kinds it allows | the reply |
+| `ask_user` | `question_type`, `question`, `options`: a question that can be asked, of a kind the agent allows (§2) | `ask_user`: `ask` the question; settings: `question_types`, the kinds allowed | the reply |
 | `submit` | `message`, a string; any other submits nothing | none: the agent that offers it ends with the message; called alone | |
-| `subagent` | `task`, a string that is not blank, which the sub-agent checks | the agent itself, `mini-vero`, with its configuration and the model's task | the sub-agent's outcome: `status`, `submission`, `reason` |
+| `subagent` | `task`, a string that is not blank, which the sub-agent checks | the agent itself, `mini-vero`; settings: its configuration but its task | the sub-agent's outcome: `status`, `submission`, `reason` |
 
 A tool is independent of the agent that offers it. The agent chooses which tools to offer, how
 to report a malformed call, and how to show a result to its model. Basic offers `bash`,

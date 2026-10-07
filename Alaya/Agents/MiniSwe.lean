@@ -139,7 +139,7 @@ def tools (config : Config) : Array Tool := #[Tools.Bash.tool config.executor]
 def callProblem? (config : Config) (call : Chat.ToolCall) : Option String :=
   match Tools.callProblem? (tools config) call with
   | some problem => some problem
-  | none => match (Tools.Bash.spec).read call.arguments with
+  | none => match Tools.Bash.command call.arguments with
     | .ok _ => none
     | .error problem => some problem
 
@@ -155,7 +155,7 @@ def formatError? (config : Config) (response : Chat.Response) : Option String :=
 /-- What a command printed after the sentinel `line`, when it printed the line first: mini's
 `has_finished`. -/
 def submitted? (line : String) (result : Json) : Option String := do
-  let output := (← (Tools.Bash.result.read result).toOption).output
+  let (output, _) ← Tools.Bash.ofResult? result
   match (output.output.trimAsciiStart.toString.splitOn "\n") with
   | first :: rest => if first.trimAscii.toString == line then some ("\n".intercalate rest) else none
   | [] => none
@@ -181,8 +181,8 @@ def round (config : Config) (model : Models.Spec) : Basic.Dialogue × Nat → Co
       | .ok result =>
         if let some submission := submitted? sentinel result then
           return .inr (Basic.outcome "Submitted" submission)
-        pure <| match (Tools.Bash.result.read result).toOption with
-          | some ran => observation ran.output
+        pure <| match Tools.Bash.ofResult? result with
+          | some (output, _) => observation output
           | none => result.pretty
     messages := messages.push (.tool asked.id (.str shown))
   return .inl (messages, 0)

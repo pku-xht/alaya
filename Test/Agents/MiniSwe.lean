@@ -116,7 +116,7 @@ def parseSuite : Suite := suite "agents/mini-swe.parse" #[
 
   test "a command that prints the sentinel first ends the run, and what follows it is the submission" do
     let result (output : String) : Json :=
-      Agents.Tools.Bash.result.write { output := { output, exitCode? := some 0 } }
+      Agents.Tools.Bash.result { output := { output, exitCode? := some 0 }, workspace := default }
     let submitted := submitted? sentinel
     assertEqual "the sentinel alone" (submitted (result "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n")) (some "")
     assertEqual "with what follows" (submitted (result "\n  COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT  \nmy patch\n")) (some "my patch\n")

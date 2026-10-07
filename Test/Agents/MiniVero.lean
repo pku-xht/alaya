@@ -151,8 +151,8 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       let log := after run #[.response { toolCalls := #[call] },
         .execution { output := { output := raw, exitCode? := some 0 }, workspace := default }]
       check (log.any fun | .answered _ _ (.ok (.execution e)) => e.output.output == raw | _ => false) "raw output kept"
-      let history : MiniVero.History := { items := #[.turn { toolCalls := #[call] } #[(call, .ok (Tools.Bash.result.write
-        { output := { output := raw, exitCode? := some 0 } }))]] }
+      let history : MiniVero.History := { items := #[.turn { toolCalls := #[call] } #[(call, .ok (Tools.Bash.result
+        { output := { output := raw, exitCode? := some 0 }, workspace := default }))]] }
       match (MiniVero.view history)[1]? with
       | some (Chat.Message.tool _ (Json.str text)) =>
         assertContains "view should show the end" text "[Showing lines 1001-3000 of 3000.]"
@@ -175,7 +175,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       (response.toolCalls.findSome? fun call =>
         (Basic.problem? config.tools response call).orElse fun _ =>
           (config.tools.find? (·.name == call.name)).bind fun tool =>
-            match Tools.AskUser.read (tool.call call.arguments).arguments with
+            match Tools.AskUser.read (tool.arguments call.arguments) with
             | .ok _ => none
             | .error problem => some problem).getD ""
     assertContains "not offered" (parse config (Scripted.responseWith #[Scripted.askCall "q" "Keep it?"])) "Unknown tool 'ask_user'"
@@ -196,7 +196,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
     assertStringEq "omitted" (shown (some "/alaya/outputs/7.txt") true)
       "[output omitted; full output: /alaya/outputs/7.txt]\n\nCommand exited with code 1"
     check (config.tools.any fun tool => tool.name == "bash" &&
-      ((tool.call (.mkObj [("command", "ls")])).arguments.getObjVal? "executor" |>.toOption
+      ((tool.arguments (.mkObj [("command", "ls")])).getObjVal? "executor" |>.toOption
         |>.any fun executor => (executor.getObjVal? "outputs").toOption == some (.bool true))) "every command keeps its output as a file"
 ]
 private def call (id name : String) (arguments : Lean.Json := .mkObj []) : Chat.ToolCall :=
