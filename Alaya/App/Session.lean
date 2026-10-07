@@ -19,7 +19,7 @@ def «of» (scope : Scope Agent) : Routine Agent where
   body _ := iter (fun (_ : Unit) => do
     match ← await (one := true) fun _ notice => notice matches .called _ with
     | .called call :: _ => Computation.call call fun _ => pure (.inl ())
-    | _ => throw "the wait for a call ended without one") ()
+    | _ => throw (.defect "the wait for a call ended without one")) ()
   scope
 
 /-- What a run's call may name: the session over the catalog's programs, or a program alone. -/

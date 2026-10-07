@@ -66,7 +66,7 @@
 <text x="460" y="215" class="f n" text-anchor="end">6</text>
 <text x="468" y="215" class="fr">planner</text>
 <g transform="translate(537,204.5) scale(0.9286)" stroke="#b3261e" fill="#b3261e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 3.2l7.6 7.6M10.8 3.2l-7.6 7.6" fill="none"/></g>
-<text x="556" y="215.5">fail: the request is too long</text>
+<text x="556" y="215.5">fail, refused: the request is too long</text>
 <text x="898" y="215" class="f" text-anchor="end">failed</text>
 <text x="285.5" y="215" class="e" style="fill:#b3261e" text-anchor="end">fail</text>
 <path class="a" d="M294.5,211.5H432"/><path fill="#a3abb5" d="M436,211.5l-5,-2.5v5z"/>

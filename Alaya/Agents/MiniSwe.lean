@@ -169,7 +169,7 @@ def round (config : Config) (model : Models.Spec) : Basic.Dialogue × Nat → Co
   | (messages, errors) => do
   let messages := messages ++ (← Basic.heard)
   let response ← try sample model { messages, tools := (tools config).map (·.definition) }
-    catch refusal => return .inr (Basic.refused refusal)
+    catch refusal => return .inr (Basic.refused refusal.reason)
   if let some message := formatError? config response then
     let limit := config.maxConsecutiveFormatErrors
     if limit > 0 && errors + 1 >= limit then return .inr (Basic.outcome "RepeatedFormatError")
@@ -177,7 +177,7 @@ def round (config : Config) (model : Models.Spec) : Basic.Dialogue × Nat → Co
   let mut messages := messages.push response.message
   for asked in response.toolCalls do
     let shown ← match ← Tools.make (tools config) asked with
-      | .error error => pure (Json.mkObj [("error", .str error)]).pretty
+      | .error failure => pure (Json.mkObj [("error", .str (Basic.failureMessage failure))]).pretty
       | .ok result =>
         if let some submission := submitted? sentinel result then
           return .inr (Basic.outcome "Submitted" submission)

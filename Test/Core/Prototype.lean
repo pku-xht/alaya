@@ -133,7 +133,7 @@ def bash : Tool where
   name := "bash"
   run command := do
     let output ← perform (.exec (txt command))
-    if output.exit != 0 then throw s!"exit {output.exit}: {output.text}"
+    if output.exit != 0 then throw (.refused s!"exit {output.exit}: {output.text}")
     return .str output.text
 
 def timeBudget : Tool where
@@ -155,7 +155,7 @@ def askUser : Tool where
   run arguments := do
     let question ← match Question.parse (txt arguments) with
       | .ok question => pure question
-      | .error problem => throw problem
+      | .error problem => throw (.refused problem)
     let replies ← await fun frame notice =>
       match notice with
       | .replied to reply => to == frame && question.accepts reply
@@ -173,7 +173,7 @@ def round (agent : AgentConfig) (model : ModelConfig) (listen : Bool) (dialogue 
       if agent.tools.contains asked.name then
         -- The sketch calls a routine a tool, and its interpreter says so of one that is missing.
         try (txt <$> call asked.name asked.arguments)
-        catch error => pure s!"error: {error.replace "no routine named" "no tool named"}"
+        catch error => pure s!"error: {error.reason.replace "no routine named" "no tool named"}"
       else pure s!"error: {asked.name} is not a tool of this conversation"
     results := results ++ [Message.tool result]
   let heard ← if listen then inbox else pure []
@@ -220,9 +220,9 @@ def hiddenTests : Tool where
     let ran ← perform (.external "pytest /grader" "grader@sha256:9f2c" (some ⟨"hidden"⟩) 900)
     return .str (verdict ran.stdout)
 
-def grading (_ : Except String Json) : Computation Agent Json := call "hidden_tests" (.str "")
+def grading (_ : Except Failure Json) : Computation Agent Json := call "hidden_tests" (.str "")
 
-def graded (config : Config) (after : Except String Json → Computation Agent Json := grading) : Routine Agent :=
+def graded (config : Config) (after : Except Failure Json → Computation Agent Json := grading) : Routine Agent :=
   { name := "run"
     body := fun _ => .call { name := "agent", arguments := config.json } after
     scope := scopeOf [agent config, bash, timeBudget, askUser, delegate config.model, commit, hiddenTests] }
@@ -397,7 +397,7 @@ def describe (o : Frame → List Nat) : Event Agent → String
   | .opened frame tool => s!"{o frame}  opened: {tool.name} \"{txt tool.arguments}\""
   | .returned frame value => s!"{o frame}  returned: {txt value}"
   | .failed frame error =>
-    s!"{o frame}  failed: {error.replace "no routine named" "no tool named"}"
+    s!"{o frame}  failed: {error.reason.replace "no routine named" "no tool named"}"
   | .broke frame reason => s!"-  broke {o frame}: {reason}"
   | .heard frame notices => s!"{o frame}  heard {notices.toList}"
   | .asked frame question => s!"{o frame}  asked: {question.text}"
@@ -407,8 +407,8 @@ def describeNext (o : Frame → List Nat) : Next Agent → String
   | .ask call => s!"ask {o call.frame} {call.op.describe}"
   | .mark (.opened frame tool) => s!"log the opening of {o frame}: {tool.name}"
   | .mark (.returned frame value) => s!"log the return of {o frame}: {txt value}"
-  | .mark (.failed frame error) => s!"log the failure of {o frame}: {error}"
-  | .ended (.error error) => s!"failed: {error}"
+  | .mark (.failed frame error) => s!"log the failure of {o frame}: {error.reason}"
+  | .ended (.error error) => s!"failed: {error.reason}"
   | .mark (.heard frame notices) => s!"mark the read of {o frame}, of {notices.toList}"
   | .mark (.asked frame question) => s!"log the question of {o frame}: {question.text}"
   | .mark event => s!"mark {describe o event}"
@@ -509,19 +509,19 @@ def transcript : Array String := Id.run do
     if 20 ≤ i ∧ i ≤ 28 then out := out.push s!"  {i}  {describe (ordinals thrice) event}"
   out := out.push s!"  and the run ends, after {thrice.size} events: {describeNext (ordinals thrice) ended}"
   let (missing, _) := drive world (without run "bash") #[]
-  out := out.push "with a tool that the run does not have:"
+  out := out.push "with a tool that the run does not have, a defect, which fails the agent:"
   for (event, i) in missing.zipIdx do
     if 13 ≤ i ∧ i ≤ 17 then out := out.push s!"  {i}  {describe (ordinals missing) event}"
   let (refused, _) := drive { world with model := overreaches } run #[]
   out := out.push "with a model that asks for a tool it was not offered:"
   for (event, i) in refused.zipIdx do
     if 7 ≤ i ∧ i ≤ 9 then out := out.push s!"  {i}  {describe (ordinals refused) event}"
-  let (broken, ended) := drive world (withAgent run (throw "no model")) #[]
+  let (broken, ended) := drive world (withAgent run (throw (.refused "no model"))) #[]
   out := out.push "with an agent that fails:"
   for (event, i) in broken.zipIdx do
     if i ≥ 6 then out := out.push s!"  {i}  {describe (ordinals broken) event}"
   out := out.push s!"  {describeNext (ordinals broken) ended}"
-  let (graders, ended) := drive world (graded config (after := fun _ => throw "no grader")) #[]
+  let (graders, ended) := drive world (graded config (after := fun _ => throw (.refused "no grader"))) #[]
   out := out.push s!"with graders that fail, the run ends: {describeNext (ordinals graders) ended}"
   let (empty, pending) := drive { world with arrivals := fun _ => [] } run #[]
   out := out.push s!"with no workspace yet: {describeNext (ordinals empty) pending}, after {empty.size} events"

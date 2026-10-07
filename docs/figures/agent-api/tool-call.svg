@@ -36,8 +36,8 @@
 <text x="369" y="79" class="s" text-anchor="middle">model</text>
 <path class="a d" d="M436,85.5H143.1"/><path fill="#a3abb5" d="M139.1,85.5l5,-2.5v5z"/>
 <text x="20.5" y="100" class="s">the response asks for two tools</text>
-<text x="20.5" y="117" class="s">each: check its arguments, then call the</text>
-<text x="20.5" y="131" class="s">tool's routine, the agent's settings added</text>
+<text x="20.5" y="117" class="s">each: a call of the tool's routine,</text>
+<text x="20.5" y="131" class="s">the agent's settings added</text>
 <text x="460" y="153" class="f n" text-anchor="end">12</text>
 <text x="468" y="153" class="fr">bash#2</text>
 <g transform="translate(537,142.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>

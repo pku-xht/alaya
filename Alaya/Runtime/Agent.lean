@@ -220,7 +220,8 @@ def eventToJson : Event Agent → Json
       ("error", match answer with | .ok _ => .null | .error error => .str error)]
   | .opened frame call => .mkObj [("type", "opened"), ("frame", frame.toJson), ("routine", call.toJson)]
   | .returned frame value => .mkObj [("type", "returned"), ("frame", frame.toJson), ("value", value)]
-  | .failed frame error => .mkObj [("type", "failed"), ("frame", frame.toJson), ("error", error)]
+  | .failed frame failure => .mkObj [("type", "failed"), ("frame", frame.toJson),
+      ("kind", failure.kind), ("error", failure.reason)]
   | .broke frame reason => .mkObj [("type", "broke"), ("frame", frame.toJson), ("reason", reason)]
   | .commented text => .mkObj [("type", "commented"), ("text", text)]
 
@@ -238,7 +239,11 @@ def eventFromJson (json : Json) : Except String (Event Agent) := do
     pure (.answered (← frame) key answer)
   | "opened" => pure (.opened (← frame) (← json.getObjVal? "routine" >>= RoutineCall.fromJson))
   | "returned" => pure (.returned (← frame) (← json.getObjVal? "value"))
-  | "failed" => pure (.failed (← frame) (← str json "error"))
+  | "failed" =>
+    let kind ← str json "kind"
+    let some failure := Failure.ofKind? kind (← str json "error")
+      | throw s!"unknown kind of failure: {kind} (the kinds are refused, defect, broken)"
+    pure (.failed (← frame) failure)
   | "broke" => pure (.broke (← frame) (← str json "reason"))
   | "commented" => .commented <$> str json "text"
   | other => throw s!"unknown event: {other}"

@@ -28,7 +28,7 @@ def suite : Suite := Testing.suite "agents/routines" #[
   test "a call an agent cannot run on fails in its frame, in the configuration's terms" do
     let failure (routine : Routine Agent) (arguments : Json) : Option String :=
       match routine.body arguments with
-      | .fail problem => some problem
+      | .fail problem => some problem.reason
       | _ => none
     let model := Json.mkObj [("model", testModelSpec.toJson)]
     for (label, routine, arguments, said) in [
@@ -45,7 +45,7 @@ def suite : Suite := Testing.suite "agents/routines" #[
     -- Called so, the call fails in its frame, with the same words.
     let scope := Scope.of #[MiniSwe.routine]
     let log := settle scope #[.arrived (.changed default "w"), .arrived (.called { name := "mini-swe", arguments := model })]
-    check (log.any fun | .failed ⟪"mini-swe"⟫ problem => contains problem "works on a task" | _ => false)
+    check (log.any fun | .failed ⟪"mini-swe"⟫ (.refused problem) => contains problem "works on a task" | _ => false)
       "the call fails in its frame",
 
   test "a call of a tool has its settings over the model's arguments, and its routine reads them" do

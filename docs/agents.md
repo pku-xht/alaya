@@ -44,8 +44,10 @@ its own scope, so an agent that offers it gives it a scope with itself in it: Mi
 | Who | Checks | On a problem |
 | --- | --- | --- |
 | the agent | that a call can be made: its arguments are JSON, its tool is offered, it is alone if its tool must be, and its response was not cut off | the call is answered with the problem, and not made |
-| the routine | its arguments | its frame fails, and the call is answered with why |
+| the routine | its arguments | it is refused, and the call is answered with why |
 
+A routine's failure reaches the model by its kind (`docs/language.md` §3.4): a refusal as its
+reason, a break as "A person stopped this call: …", and a defect not at all, as it fails the agent.
 The agent makes a call with `Tools.make`, the tool's settings over the model's arguments, and
 shows the result its own way. `submit` calls no routine: the agent reads its message and ends.
 MiniSwe also checks each `bash` call's arguments before it makes any, as mini does (§6.3).

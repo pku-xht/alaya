@@ -125,10 +125,10 @@ in the call's frame. -/
 def routine : Routine Agent where
   name := "grader"
   body arguments := match Config.fromJson arguments with
-    | .error problem => .fail s!"grader: {problem}"
+    | .error problem => .fail (.refused s!"grader: {problem}")
     | .ok config =>
       if config.command.trimAscii.isEmpty then
-        .fail "grader: it needs its command, which prints TAP, and its configuration names none"
+        .fail (.refused "grader: it needs its command, which prints TAP, and its configuration names none")
       else computation config
   scope := .empty
 

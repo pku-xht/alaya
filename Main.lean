@@ -172,12 +172,13 @@ private def stopJson (last : Hash) (log : Log Agent) (stop : Stop) : Json :=
     | some (call, some ended) =>
       .mkObj ([("entry", (last.hex : Json)), ("call", (call.name : Json))] ++ match ended with
         | .returned value => [("status", "done"), ("value", value)]
-        | .failed error => [("status", "failed"), ("error", .str error)]
+        | .failed failure => [("status", "failed"), ("kind", .str failure.kind), ("error", .str failure.reason)]
         | .stopped reason => [("status", "stopped"), ("reason", .str reason)])
     | _ => .mkObj [("entry", last.hex), ("status", "idle")]
   else match stop with
   | .ended (.ok value) => .mkObj [("entry", last.hex), ("status", "ended"), ("value", value)]
-  | .ended (.error error) => .mkObj [("entry", last.hex), ("status", "ended"), ("error", .str error)]
+  | .ended (.error failure) =>
+    .mkObj [("entry", last.hex), ("status", "ended"), ("kind", failure.kind), ("error", .str failure.reason)]
   | .waits frame question? =>
     .mkObj [("entry", last.hex), ("status", "waits"), ("frame", frame.toJson),
       ("question", question?.map (·.toJson) |>.getD .null)]
@@ -190,7 +191,7 @@ private def stopNote (last : Hash) (log : Log Agent) (stop : Stop) : String :=
     | _ => s!"waits for a call: `alaya call {last.hex.take 12} PROGRAM …`"
   else match stop with
   | .ended (.ok value) => s!"the run is over: {Render.valueSummary value}"
-  | .ended (.error error) => s!"the run is over: {error}"
+  | .ended (.error failure) => s!"the run is over: {failure.render}"
   | .waits _ (some question) =>
     s!"waits for a reply to: {question.text}\nreply with `alaya reply {last.hex.take 12} ...`"
   | .waits _ none => s!"waits for a notice: `alaya tell {last.hex.take 12} TEXT`"

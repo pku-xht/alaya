@@ -42,7 +42,7 @@ def environmentOf (log : Log Agent) (frame : Frame) : Result (Frame × Environme
 /-- How a call ended. -/
 inductive CallEnd where
   | returned (value : Json)
-  | failed (error : String)
+  | failed (failure : Failure)
   /-- Broken from outside, by a person, with the reason the break gives. -/
   | stopped (reason : String)
   deriving Inhabited
@@ -51,7 +51,7 @@ inductive CallEnd where
 the run's and its own; a break ends it in its frame, or in the run's. -/
 def CallEnd.of? : Event Agent → Option CallEnd
   | .returned #[_, _] value => some (.returned value)
-  | .failed #[_, _] error => some (.failed error)
+  | .failed #[_, _] failure => some (.failed failure)
   | .broke frame reason => if frame.size ≤ 2 then some (.stopped reason) else none
   | _ => none
 

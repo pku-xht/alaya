@@ -41,7 +41,9 @@ private def events : Array (Event Agent) := #[
     (.ok (.execution { output := { output := "ok 1\n", stderr? := some "e", exitCode? := some 1 }, workspace := snapshot 'e' })),
   .opened ⟪"session", "agent", "bash"⟫ { name := "bash", arguments := .mkObj [("command", "ls")] },
   .returned ⟪"session", "agent", "bash"⟫ (.mkObj [("output", "x")]),
-  .failed ⟪"session", "agent", "bash"⟫ "no routine named bash",
+  .failed ⟪"session", "agent", "bash"⟫ (.defect "no routine named bash"),
+  .failed ⟪"session", "agent", "bash#1"⟫ (.refused "The bash tool takes its command as a string."),
+  .failed ⟪"session", "agent", "subagent"⟫ (.broken "the sub-agent is stuck"),
   .broke ⟪"session", "agent"⟫ "to grade this point",
   .commented "a comment\non two lines",
   (graderCall "sh /grader/g.sh").event,
@@ -54,7 +56,7 @@ private def agentCall : RoutineCall := { name := "agent", arguments := .null }
 ends with what the agent gave: no session, so that a log of one call ends where it does. -/
 private def runOf (computation : Computation Agent Json) : Scope Agent :=
   Scope.fix fun scope => #[{ name := "agent", body := fun _ => computation, scope },
-    { name := "boom", body := fun _ => throw "it broke", scope }]
+    { name := "boom", body := fun _ => throw (.refused "it broke"), scope }]
 
 /-- The start of a log of `runOf`'s runs: the workspace, and the call of the agent. -/
 private def rootOnly : Log Agent := #[.arrived (.changed default "p"), agentCall.event]
@@ -127,7 +129,7 @@ def suite : Suite := Testing.suite "runtime/log" #[
       let .mark (.returned frame value) := next run log | fail "the call returns"
       broken "another value" log (.returned frame (.str "x"))
       broken "another frame's return" log (.returned ⟪"session", "agent", "bash#1"⟫ value)
-      broken "a failure where it returned" log (.failed frame "x")
+      broken "a failure where it returned" log (.failed frame (.refused "x"))
       match next run (log.push (.returned frame value)) with
       | .mark (.heard ⟪"session", "agent"⟫ _) => pure ()
       | _ => fail "the log as the program makes it goes on",

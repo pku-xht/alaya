@@ -338,7 +338,7 @@ def opening (task : String := "t") : Log Agent :=
 def agentResult (log : Log Agent) : Option (Except String Json) :=
   log.findSome? fun
     | .returned ⟪"session", "agent"⟫ value => some (.ok value)
-    | .failed ⟪"session", "agent"⟫ error => some (.error error)
+    | .failed ⟪"session", "agent"⟫ failure => some (.error failure.render)
     | _ => none
 
 /-- The status of MiniSwe's outcome, from how its frame ended. -/

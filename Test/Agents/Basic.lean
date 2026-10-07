@@ -124,6 +124,16 @@ def suite : Suite := Testing.suite "agents/basic" #[
     assertStringEq "its instruction follows the system message" (system asking)
       (system config ++ "\n\n" ++ Tools.AskUser.instruction #[.yesNo]),
 
+  test "a call a person stops is answered as stopped, and the run goes on" do
+    let .ok run := run | fail "basic is a run"
+    let asked := respond run (settle run (opening)) (responseWith #[call "c" "bash" "sleep 100"])
+    check ((next run asked) matches .ask { op := .exec .., .. }) "the command is due"
+    let stopped := settle run (appended run asked (.broke ⟪"session", "agent", "bash"⟫ "it hangs"))
+    match next run stopped with
+    | .ask { op := .sample _ request, .. } =>
+      assertEqual "the model is told" (answerTo request "c") (some "A person stopped this call: it hangs")
+    | _ => fail "the agent goes on to sample",
+
   test "a question asked through ask_user waits for the person, and the reply goes to the model" do
     let .ok run := runOfConfig "basic" ({ questionTypes := #[.yesNo] } : Basic.Config).toJson | fail "basic is a run"
     let ask : Chat.ToolCall :=

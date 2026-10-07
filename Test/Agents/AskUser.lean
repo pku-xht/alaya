@@ -311,7 +311,8 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
     do
       let run := runOf fun _ => Json.str <$> (·.line) <$> Alaya.Core.ask { text := " \n" }
       let log := settle run opening
-      check (log.any fun | .failed ⟪"session", "agent"⟫ error => contains error "blank" | _ => false) "a blank question fails"
+      check (log.any fun | .failed ⟪"session", "agent"⟫ (.refused error) => contains error "blank" | _ => false)
+        "a blank question is refused"
       check (!log.any (· matches .asked ..)) "and is never asked",
 
   test "ask_user lets a model ask only the kinds of question its configuration names" do

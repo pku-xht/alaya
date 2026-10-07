@@ -72,7 +72,7 @@ caller made after N others (`["session", "mini-swe", "bash#1"]`).
 | `answered` | `frame`, `op`, and `answer` or `error`, the other `null` |
 | `opened` | `frame`, `routine`: `{name, arguments}` |
 | `returned` | `frame`, `value` |
-| `failed` | `frame`, `error` |
+| `failed` | `frame`, `kind`: `refused`, `defect` or `broken` (`docs/language.md` §3.4), `error`: its reason |
 | `broke` | `frame`: the frame of the call it ends; `reason` |
 | `commented` | `text` |
 

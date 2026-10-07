@@ -95,7 +95,7 @@ function summary(i) {
       if (e.title) return 'open ' + e.title;
       return 'open ' + e.routine + ' “' + flat(e.summary, 60) + '”';
     case 'return': return 'return ' + (verdictOf(e.value) || flat(e.summary, 70));
-    case 'fail': return 'fail: ' + flat(e.error, 70);
+    case 'fail': return 'fail, ' + e.kind + ': ' + flat(e.error, 70);
     case 'stop': return 'stopped ' + (e.frame || []).join('/') + ': ' + flat(e.text, 70);
     case 'comment': return '# ' + flat(e.text, 80);
     default: return e.k;
@@ -623,7 +623,7 @@ function renderEvent(parent, i) {
       renderArguments(parent, '', e.arguments);
       break;
     case 'return': renderValue(parent, e.value, e.kind); break;
-    case 'fail': block(parent, 'error', e.error, 'bad'); break;
+    case 'fail': block(parent, e.kind, e.error, 'bad'); break;
     case 'stop': block(parent, 'reason', e.text, 'prose'); break;
     case 'comment': block(parent, null, e.text, 'prose'); break;
   }

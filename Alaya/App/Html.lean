@@ -153,7 +153,7 @@ def eventJson : Event Agent → Json
   | .returned _ value =>
     .mkObj [("k", "return"), ("value", value), ("summary", Render.valueSummary value),
       ("kind", orNull (valueKind? value) (Json.str ·.name))]
-  | .failed _ error => .mkObj [("k", "fail"), ("error", error)]
+  | .failed _ failure => .mkObj [("k", "fail"), ("kind", failure.kind), ("error", failure.reason)]
   | .broke frame reason => .mkObj [("k", "stop"), ("frame", frame.toJson), ("text", reason)]
   | .commented text => .mkObj [("k", "comment"), ("text", text)]
 

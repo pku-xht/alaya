@@ -65,10 +65,11 @@ def lone? (tools : Array Tool) (response : Chat.Response) : Option Tool :=
   else tools.find? fun tool => tool.alone && response.toolCalls.any (·.name == tool.name)
 
 /-- Makes the call a model's tool call asks for: of the routine of its tool's name, with the
-model's arguments and the tool's settings over them. Gives its result, or its error when it fails, as
-when it cannot read its arguments. -/
-def make (tools : Array Tool) (asked : Chat.ToolCall) : Computation Agent (Except String Json) := do
-  let some tool := tools.find? (·.name == asked.name) | return .error s!"Unknown tool '{asked.name}'."
+model's arguments and the tool's settings over them. Gives its result, or how it failed: refused,
+as when it cannot read its arguments, or broken, when a person stopped it. A defect it does not
+give: that fails the agent too. -/
+def make (tools : Array Tool) (asked : Chat.ToolCall) : Computation Agent (Except Failure Json) := do
+  let some tool := tools.find? (·.name == asked.name) | return .error (.refused s!"Unknown tool '{asked.name}'.")
   try .ok <$> call tool.name (tool.arguments asked.arguments)
   catch error => pure (.error error)
 
@@ -110,12 +111,12 @@ def routine : Routine Agent := {
   body := fun arguments => do
     let command ← match command arguments with
       | .ok command => pure command
-      | .error problem => throw problem
+      | .error problem => throw (.refused problem)
     let config ← match arguments.getObjVal? "executor" with
       | .error _ => pure {}
       | .ok json => match Executor.Config.fromJson json with
         | .ok config => pure config
-        | .error problem => throw s!"bash: its executor: {problem}"
+        | .error problem => throw (.defect s!"bash: its executor: {problem}")
     return result (← exec command config)
   scope := .empty }
 
@@ -246,7 +247,7 @@ def routine : Routine Agent := {
   body := fun arguments => do
     let question ← match read arguments with
       | .ok question => pure question
-      | .error problem => throw problem
+      | .error problem => throw (.refused problem)
     return result (← ask question)
   scope := .empty }
 
@@ -313,8 +314,8 @@ def read : Computation Agent Alaya.Runtime.Uname := do
   let ran ← exec command
   match ran.output.exitCode?, parse ran.output.output with
   | some 0, .ok uname => pure uname
-  | _, .error problem => throw problem
-  | _, _ => throw s!"uname: {ran.output.output}"
+  | _, .error problem => throw (.refused problem)
+  | _, _ => throw (.refused s!"uname: {ran.output.output}")
 
 end Uname
 
@@ -344,7 +345,7 @@ def routine : Routine Agent := {
   body := fun arguments => do
     let agent ← match arguments.getObjVal? "agent" >>= Json.getStr? with
       | .ok agent => pure agent
-      | .error _ => throw "The subagent tool's settings name no agent."
+      | .error _ => throw (.defect "The subagent tool's settings name no agent.")
     let config := (arguments.getObjVal? "configuration").toOption.getD (.mkObj [])
     call agent (config.setObjVal! "task" ((arguments.getObjVal? "task").toOption.getD .null))
   scope := .empty }

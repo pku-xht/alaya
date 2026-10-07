@@ -102,12 +102,12 @@ with a model that keeps failing a sub-agent:
   27  [0, 0]  heard []
   28  [0, 0]  answered: sample after "error: overloaded"
   and the run ends, after 34 events: done: fail 1/4
-with a tool that the run does not have:
+with a tool that the run does not have, a defect, which fails the agent:
   13  [0, 0]  answered: sample after "the default one"
   14  [0, 0, 1]  opened: bash "make"
   15  [0, 0, 1]  failed: no tool named bash
-  16  [0, 0]  heard []
-  17  [0, 0]  answered: sample after "error: no tool named bash"
+  16  [0, 0]  failed: no tool named bash
+  17  [0, 1]  opened: hidden_tests ""
 with a model that asks for a tool it was not offered:
   7  [0, 0]  answered: sample after "the task"
   8  [0, 0]  heard []

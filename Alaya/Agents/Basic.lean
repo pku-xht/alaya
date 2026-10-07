@@ -76,13 +76,13 @@ def agent (name : String) (fields : Fields σ) (defaults : σ) (base : σ → Co
   name
   body arguments :=
     match fields.read arguments defaults with
-    | .error problem => .fail s!"{name}: {problem}"
+    | .error problem => .fail (.refused s!"{name}: {problem}")
     | .ok config => match (base config).model?, (base config).task? with
       | some model, some task =>
-        if task.trimAscii.isEmpty then .fail s!"{name}: its task is blank"
+        if task.trimAscii.isEmpty then .fail (.refused s!"{name}: its task is blank")
         else computation config model task
-      | none, _ => .fail s!"{name}: it samples a model, and its configuration names none"
-      | _, none => .fail s!"{name}: it works on a task, and its configuration names none"
+      | none, _ => .fail (.refused s!"{name}: it samples a model, and its configuration names none")
+      | _, none => .fail (.refused s!"{name}: it works on a task, and its configuration names none")
   scope
 
 /-! ## Commands and their output -/
@@ -252,6 +252,12 @@ def reminder (response : Chat.Response) : String :=
     "Your response hit the output token limit before any tool call. Respond more briefly, and call a tool."
   else "Your response called no tool. Call a tool: run a command with bash, or call submit when the task is done."
 
+/-- What the model is told of a call that failed: why its routine refused it, or that a person
+stopped it. -/
+def failureMessage : Failure → String
+  | .broken reason => s!"A person stopped this call: {reason}"
+  | failure => failure.reason
+
 /-- Why a call of `response` is not made, if it is not: the response was cut off, so its
 arguments may be too; it calls, beside others, a tool that must be alone; or the call itself
 has a problem. -/
@@ -278,7 +284,7 @@ def respond (tools : Array Tool) (items : Array Item) (response : Chat.Response)
     | none =>
       if asked.name == Tools.Submit.definition.name then
         return .inr (outcome "Submitted" (Tools.Submit.message asked.arguments))
-      answers := answers.push (asked, ← Tools.make tools asked)
+      answers := answers.push (asked, (← Tools.make tools asked).mapError failureMessage)
   return .inl (items.push (.turn response answers))
 
 /-- The messages of a conversation: what is told as it is, and a turn as the response and a
@@ -318,7 +324,7 @@ long; then answer the response. -/
 def round (config : Config) (model : Models.Spec) (items : Array Item) : Computation Agent (Array Item ⊕ Json) := do
   let items := items ++ (← heard).map .told
   let request : Chat.Request := { messages := view items, tools := (tools config).map (·.definition) }
-  let response ← try sample model request catch refusal => return .inr (refused refusal)
+  let response ← try sample model request catch refusal => return .inr (refused refusal.reason)
   respond (tools config) items response
 
 /-! ## The agent -/
