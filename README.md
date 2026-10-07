@@ -78,8 +78,9 @@ call, a failure, a loop, a comment, a break, a question), replay, and routines a
 outside, the session, the driver, and the data directory with every command as a function.
 
 [`docs/agents.md`](docs/agents.md) — the tools agents offer, `ask_user`, how an agent is made and
-offered as a program, and the two agents included: MiniSwe, the port of mini-SWE-agent, and
-MiniVero, MiniSwe with Vero's instructions for Lean implementation and proof tasks.
+offered as a program, the two agents included (MiniSwe, the port of mini-SWE-agent, and
+MiniVero, MiniSwe with Vero's instructions for Lean implementation and proof tasks), and the
+grader: its protocol, its verdict, and how to write one.
 
 [`docs/llm-api.md`](docs/llm-api.md) — the LLM API: requests and responses as typed values,
 structured output, a model as the draws of a request, the layers a model is built from (retry,
@@ -89,8 +90,8 @@ batching, sharing of draws, a persistent cache), and the providers that serve mo
 grading, inspecting and rebasing runs, their text and JSON output, and their exit statuses.
 
 [`docs/log-schema.md`](docs/log-schema.md) — the log schema: an entry, the events as JSON, the
-forest of logs and its forks, the grader's protocol and its verdict, the data directory with its
-workspace snapshots, and the model cache entry.
+forest of logs and its forks, the data directory with its workspace snapshots, and the model
+cache entry.
 
 [`docs/style_guide.md`](docs/style_guide.md) — how Alaya looks: the colours, type, parts, icons
 and wording of the HTML report, and how the website and the diagrams take them up. It is a
