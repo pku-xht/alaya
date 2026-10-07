@@ -156,13 +156,13 @@ def check (call : RoutineCall) : Except String Unit :=
   | some definition => match completeModel call.arguments >>= definition.complete with
     | .error message => .error s!"{call.name}: {message}"
     | .ok config => match definition.routine.body config with
-      | .fail problem =>
+      | .fail failure =>
         let empty (field : String) := match config.getObjVal? field with
           | .ok .null | .ok (.str "") => true
           | _ => false
         match givenAs.find? fun (field, _) => empty field with
-        | some (_, flag) => .error s!"{problem}: give it with {flag}"
-        | none => .error problem
+        | some (_, flag) => .error s!"{failure.reason}: give it with {flag}"
+        | none => .error failure.reason
       | _ => .ok ()
 
 end Alaya.App.Catalog

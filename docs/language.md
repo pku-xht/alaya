@@ -45,7 +45,7 @@ is the command line.
 ```lean
 inductive Computation (σ : Signature) : Type → Type 1 where              -- Alaya.Core.Computation
   | pure    : α → Computation σ α                                          -- a leaf: a value
-  | fail    : String → Computation σ α                                     -- a leaf: a failure
+  | fail    : Failure → Computation σ α                                    -- a leaf: a failure
   | perform : (op : σ.Op) → (Except String (σ.Answer op) → Computation σ α) →
               Computation σ α
   -- the other constructors (inbox, ask, call, iter, comment) are omitted here; see §3
@@ -68,7 +68,7 @@ def fix : Computation Agent String := do
     if ran.output.exitCode? == some 0 then
       return "fixed"
     else
-      throw "the command failed"
+      throw (.refused "the command failed")
 ```
 
 *The computation `fix` as a tree: an operation is a node, and each answer leads to the rest of the
@@ -87,7 +87,7 @@ flowchart TD
   asked -- "a response that says make" --> ran("perform (exec “make”)"):::exec
   asked -- "an error" --> errored("fail error"):::bad
   ran -- "exit 0" --> fixed("pure “fixed”"):::ok
-  ran -- "exit 2" --> broken("fail “the command failed”"):::bad
+  ran -- "exit 2" --> broken("fail (refused “the command failed”)"):::bad
   linkStyle default stroke-width:1px
 ```
 
@@ -96,7 +96,7 @@ A computation is written in `do` notation, from eight constructs:
 | Written | Asks for | Goes on with |
 | --- | --- | --- |
 | `return a` | nothing: it ends with `a` | |
-| `throw error` | nothing: it gives up | |
+| `throw failure` | nothing: it gives up | |
 | `sample`, `exec`, `time` | an operation of the world | its answer |
 | `inbox`, `await` | the notices that arrived from outside | those it takes |
 | `ask question` | a person's answer to a question | the reply |
@@ -104,7 +104,8 @@ A computation is written in `do` notation, from eight constructs:
 | `iter step state` | a loop from `state` | the result of its last round |
 | `comment text` | a line in the log, for a reader | nothing |
 
-`try … catch` catches a failure, and `retry n c` tries a computation `c` again while it fails.
+`try … catch` catches a failure, but a defect (§3.4), and `retry n c` tries a computation `c`
+again while it fails.
 
 ## 2. The log
 
@@ -116,7 +117,7 @@ inductive Event (σ : Signature) where
   | answered  (frame : Frame) (key : σ.Key) (answer : Except String σ.Stored)
   | opened    (frame : Frame) (call : RoutineCall)           -- a call begins
   | returned  (frame : Frame) (value : Json)                 -- … and ends with its value
-  | failed    (frame : Frame) (error : String)               -- … or with its failure
+  | failed    (frame : Frame) (failure : Failure)            -- … or with its failure
   | broke     (frame : Frame) (reason : String)              -- from outside: the call open in `frame` ends
   | commented (text : String)                                -- for a reader only
 
@@ -257,7 +258,7 @@ call : (name : String) → (arguments : Json) → (environment? : Option Json :=
 3. Its commands run in the environment the call names, when it names one: an image, and where
    the workspace is mounted. Otherwise they run where its caller's do. What a call can reach is
    fixed where its routine is defined (§5); where it runs is its caller's to say.
-3. The routine ends, and the driver marks how: `returned child value`, or `failed child error`.
+3. The routine ends, and the driver marks how: `returned child value`, or `failed child failure`.
 4. The caller goes on with the value. A failure is the caller's too, unless it catches it.
 
 ![Two calls of a routine, each a bracket in the log](figures/agent-api/call.svg)
@@ -266,19 +267,27 @@ Because a call names its routine instead of holding its body, the log records it
 routine is entered through a call, so a call and the calls nested in it occupy one contiguous
 stretch of the log, between its opening and its end, apart from notices that arrive meanwhile.
 This flat encoding of nested scopes follows scoped operations (Wu, Schrijvers and Hinze 2014;
-Piróg et al. 2018). A call of a name with no routine fails in its new frame, with
+Piróg et al. 2018). A call of a name with no routine fails in its new frame, with the defect
 `no routine named …`.
 
 ### 3.4 Failures
 
-- `throw error` gives up, up to the nearest `try … catch` in the same frame, or to the end of
+A failure is of one of three kinds, each with its reason:
+
+| Kind | What it says | Caught by `try … catch` |
+| --- | --- | --- |
+| `refused` | what the computation was given cannot be used: wrong data, a question that cannot be asked, a request the world refused | yes |
+| `defect` | a bug a correct program does not have: a routine its scope lacks, settings it cannot read, a result that cannot be read back | no: it fails every call it is in, up to one whose continuation takes any failure, as the session's does |
+| `broken` | the call was broken from outside (§3.7) | yes, by its caller |
+
+- `throw failure` gives up, up to the nearest `try … catch` in the same frame, or to the end of
   the frame.
-- An operation whose answer is an error fails where it was performed. Currently, the only such
+- An operation whose answer is an error is refused where it was performed. Currently, the only such
   answer is a model's refusal of a request as too long for its context. Any other trouble with
   the world — a provider that cannot be reached, a container that cannot be started, a full disk
   — is not an answer: the driver stops, nothing is logged, and the next `alaya resume` asks again.
-- A failure that reaches the end of its frame is marked, `failed frame error`, and becomes the
-  failure of the call.
+- A failure that reaches the end of its frame is marked, `failed frame failure`, and becomes the
+  failure of the call, of the same kind.
 - `try … catch` leaves no mark. Nothing is rolled back: what a failed routine did stays in the
   log.
 
@@ -332,8 +341,8 @@ appended where a call is open in `frame`; `alaya stop` appends one.
 1. The call open in `frame` ends there, and every call inside it, whatever the nesting, with no
    marks.
 2. Nothing inside the call can catch it.
-3. Its caller goes on with `reason` as the call's failure, and may catch it. A break of the run's
-   own call ends the run.
+3. Its caller goes on with `broken reason` as the call's failure, and may catch it. A break of
+   the run's own call ends the run.
 
 ![A break ends the call open in its frame, and its caller goes on](figures/agent-api/stop.svg)
 
@@ -498,8 +507,10 @@ its scope as a closure carries its environment. In Alaya's own agents:
 
 | Routine | Its scope: the routines it can call |
 | --- | --- |
-| `basic`, `mini-swe` | `bash` |
-| `mini-vero` | `bash`, `ask_user`, `time_budget`, and `mini-vero` itself |
+| `basic` | `bash`, `ask_user` |
+| `mini-swe` | `bash` |
+| `mini-vero` | `bash`, `ask_user`, `time_budget`, `subagent`, and `mini-vero` itself |
+| `subagent`, within `mini-vero` | the same as `mini-vero`'s |
 | `bash`, `ask_user`, `time_budget` | none |
 | `grader` | none |
 
@@ -570,7 +581,7 @@ def planRound (messages : Array Chat.Message) :
     -- the model's tool call is a call of a routine
     let result ←
       try call asked.name asked.arguments
-      catch error => pure (.str s!"error: {error}")
+      catch error => pure (.str s!"error: {error.reason}")
     messages := messages.push (.tool asked.id result)
   return .inl messages
 

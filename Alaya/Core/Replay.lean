@@ -35,7 +35,7 @@ inductive Stack (σ : Signature) : Type → Type 1 where
   /-- A round of a loop; `start` is how many events the machine had read when it began. -/
   | round {S β α : Type} (step : S → Computation σ (S ⊕ β)) (k : β → Computation σ α) (start : Nat)
       (rest : Stack σ α) : Stack σ (S ⊕ β)
-  | call {α : Type} (parent : Frame) (opened : Array String) (k : Except String Json → Computation σ α)
+  | call {α : Type} (parent : Frame) (opened : Array String) (k : Except Failure Json → Computation σ α)
       (scope : Scope σ) (rest : Stack σ α) : Stack σ Json
 
 /-- The routines a call can reach: the scope of the routine running in the innermost frame. -/
@@ -54,7 +54,7 @@ structure Machine (σ : Signature) : Type 1 where
   opened : Array String
   read : Nat
   /-- The result of the run, once its end is logged. -/
-  result? : Option (Except String Json) := none
+  result? : Option (Except Failure Json) := none
 
 /-- What the machine needs next from the log: an answer to an operation, a mark it makes, a read
 of the inbox, or nothing more; or what it says before it, a comment, which it does not need. -/
@@ -63,7 +63,7 @@ private inductive Demand (σ : Signature) where
   | mark (expected : Event σ) (resume : Machine σ)
   | read (frame : Frame) (wait : Option Wait) (resume : List Notice → Machine σ)
   | comment (text : String) (resume : Machine σ)
-  | finished (result : Except String Json)
+  | finished (result : Except Failure Json)
   | unguarded (frame : Frame)
 
 instance : Inhabited (Machine σ) := ⟨⟨Json, .pure .null, .top .empty, #[], #[], 0, none⟩⟩
@@ -75,7 +75,7 @@ namespace Machine
 private def outside : Computation σ Json := do
   match ← await (one := true) fun _ notice => notice matches .called _ with
   | .called call :: _ => .call call fun | .ok value => .pure value | .error error => .fail error
-  | _ => .fail "the wait for the run's call ended without one"
+  | _ => .fail (.defect "the wait for the run's call ended without one")
 
 /-- The machine at the start of a run: outside it, waiting for its call, which names a routine
 of `scope`. -/
@@ -116,7 +116,7 @@ partial def advance (m : Machine σ) : Demand σ :=
       | _ => false }
     let answered : List Notice → Computation σ α
       | .replied _ reply :: _ => k reply
-      | _ => .fail "the wait for a reply ended without one"
+      | _ => .fail (.defect "the wait for a reply ended without one")
     .mark (.asked frame question) ⟨α, .inbox (some wait) answered, stack, frame, opened, read + 1, none⟩
   | ⟨_, .call routine k, stack, frame, opened, read, _⟩ =>
     -- The call is named by its routine, and by how many calls of that name its frame made.
@@ -124,7 +124,7 @@ partial def advance (m : Machine σ) : Demand σ :=
     let (body, inner) : Computation σ Json × Scope σ :=
       match stack.scope.find routine.name with
       | some found => (found.body routine.arguments, found.scope)
-      | none => (.fail s!"no routine named {routine.name}", .empty)
+      | none => (.fail (.defect s!"no routine named {routine.name}"), .empty)
     .mark (.opened child routine)
       { α := _, computation := body, stack := .call frame (opened.push routine.name) k inner stack
         frame := child, opened := #[], read := read + 1 }
@@ -144,7 +144,7 @@ def breakAt (m : Machine σ) (target : Frame) (reason : String) : Option (Machin
     | .round _ _ _ rest => unwind current rest
     | .call parent opened k _ rest =>
       if current == target then
-        some { α := _, computation := k (.error reason), stack := rest, frame := parent, opened
+        some { α := _, computation := k (.error (.broken reason)), stack := rest, frame := parent, opened
                read := m.read + 1 }
       else unwind parent rest
   if m.result?.isSome then none else unwind m.frame m.stack
@@ -171,7 +171,7 @@ inductive Next (σ : Signature) where
   is a question's. In `#[]` until the run's call arrives. -/
   | waits (frame : Frame) (question? : Option Question)
   /-- The run is over: its result, or its failure. -/
-  | ended (result : Except String Json)
+  | ended (result : Except Failure Json)
   /-- The event here is not what the computation does: the log is no trace of it. -/
   | mismatch (position : Nat)
   /-- A loop went round without reading an event. -/

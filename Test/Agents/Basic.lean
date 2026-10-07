@@ -68,26 +68,24 @@ def suite : Suite := Testing.suite "agents/basic" #[
       "partial\n\n\n'sleep 9' timed out after 5 seconds",
 
   test "a call with a problem is answered with it, and not made" do
-    let tools := Basic.tools config.executor
+    let tools := Basic.tools config
     let problem (response : Chat.Response) : List (Option String) :=
       response.toolCalls.toList.map (Basic.problem? tools response)
     assertEqual "fine" (problem (responseWith #[call "a" "bash" "ls", call "b" "bash" "pwd"])) [none, none]
     check ((problem (responseWith #[call "a" "python" "ls"])).head!.any (contains · "Unknown tool 'python'")) "unknown"
     check ((problem (responseWith #[{ (Scripted.call "a" "bash" "ls") with invalidArguments? := some "{\"command\":" }])).head!.any
       (contains · "Error parsing tool call arguments")) "not JSON"
-    check ((problem (responseWith #[{ id := "a", name := "bash", arguments := .mkObj [] }])).head!.any
-      (contains · "Missing 'command'")) "no command"
+    assertEqual "no command is the routine's to refuse" (problem (responseWith #[{ id := "a", name := "bash", arguments := .mkObj [] }]))
+      [none]
     let mixed := problem (responseWith #[call "a" "bash" "ls", submitCall "s"])
     check (mixed.all (·.any (contains · "submit must be called alone"))) s!"submit beside another: {mixed}"
-    let bare : Chat.ToolCall := { id := "s", name := "submit", arguments := .mkObj [] }
-    check ((problem (responseWith #[bare])).head!.any (contains · "Invalid arguments for the submit tool"))
-      "arguments that do not fit the tool's schema"
     let cut := problem (responseWith #[call "a" "bash" "ls"] (finish := "length"))
     check (cut.all (·.any (contains · "hit the output token limit"))) "a response cut off",
 
   test "a run goes on past every problem, and ends where the model submits" do
     let prose : Chat.Response := { content? := some "Let me look.", finishReason? := some "stop" }
-    let (log, requests) ← driven #[prose, responseWith #[call "a" "python" "ls", call "b" "bash" "echo hi"],
+    let (log, requests) ← driven #[prose, responseWith #[call "a" "python" "ls", call "b" "bash" "echo hi",
+        { id := "d", name := "bash", arguments := .mkObj [] }],
       responseWith #[call "c" "bash" "ls", submitCall "s"], responseWith #[submitCall "s" "done"]]
     assertEqual "submitted" (agentResult log |>.bind (·.toOption) |>.map (·.compress))
       (some (Agents.Basic.outcome "Submitted" "done").compress)
@@ -99,20 +97,58 @@ def suite : Suite := Testing.suite "agents/basic" #[
     check (requests[1]!.messages.any fun | .assistant (some "Let me look.") .. => true | _ => false) "what it said is kept"
     assertEqual "the unknown tool" ((answerTo requests[2]! "a").map (contains · "Unknown tool")) (some true)
     assertEqual "the call beside it is made" (answerTo requests[2]! "b") (some "hi\n")
+    assertEqual "a command its routine cannot read fails its frame, and is answered with that"
+      (answerTo requests[2]! "d") (some "The bash tool takes its command as a string.")
     assertEqual "nothing of a mixed response is made" ((answerTo requests[3]! "c").map (contains · "alone")) (some true),
 
   test "only basic's own fields configure it" do
     let complete ← assertOk <| Catalog.complete "basic" (.mkObj [])
     assertEqual "its fields" (match complete with | .obj kvs => kvs.toList.map (·.1) | _ => [])
-      ["executor", "model", "task"]
-    for field in ["max_consecutive_format_errors", "question_types", "mode"] do
+      ["executor", "model", "question_types", "task"]
+    for field in ["max_consecutive_format_errors", "mode", "context_reserve"] do
       assertError s!"no {field}" (Catalog.complete "basic" (.mkObj [(field, 1)])) fun
         | .input m => contains m s!"unknown field '{field}'"
         | _ => false
-    check (Basic.tools config.executor |>.any fun tool => tool.name == "bash" &&
-      ((tool.call (.mkObj [("command", "ls")])).arguments.getObjVal? "executor" |>.toOption
+    check (Basic.tools config |>.any fun tool => tool.name == "bash" &&
+      ((tool.arguments (.mkObj [("command", "ls")])).getObjVal? "executor" |>.toOption
         |>.any fun executor => (executor.getObjVal? "outputs").toOption == some (.bool true)))
       "every command keeps its output as a file"
+    -- ask_user is offered, with its instruction, only when the configuration names kinds of question.
+    assertEqual "by default" ((Basic.tools config).map (·.name)) #["bash", "submit"]
+    let asking : Basic.Config := { questionTypes := #[.yesNo] }
+    assertEqual "asking" ((Basic.tools asking).map (·.name)) #["bash", "submit", "ask_user"]
+    let system (config : Basic.Config) : String :=
+      match (Basic.openingMessages config "t" testUname)[0]? with
+      | some (Chat.Message.system text) => text
+      | _ => ""
+    assertStringEq "its instruction follows the system message" (system asking)
+      (system config ++ "\n\n" ++ Tools.AskUser.instruction #[.yesNo]),
+
+  test "a call a person stops is answered as stopped, and the run goes on" do
+    let .ok run := run | fail "basic is a run"
+    let asked := respond run (settle run (opening)) (responseWith #[call "c" "bash" "sleep 100"])
+    check ((next run asked) matches .ask { op := .exec .., .. }) "the command is due"
+    let stopped := settle run (appended run asked (.broke ⟪"session", "agent", "bash"⟫ "it hangs"))
+    match next run stopped with
+    | .ask { op := .sample _ request, .. } =>
+      assertEqual "the model is told" (answerTo request "c") (some "A person stopped this call: it hangs")
+    | _ => fail "the agent goes on to sample",
+
+  test "a question asked through ask_user waits for the person, and the reply goes to the model" do
+    let .ok run := runOfConfig "basic" ({ questionTypes := #[.yesNo] } : Basic.Config).toJson | fail "basic is a run"
+    let ask : Chat.ToolCall :=
+      { id := "q", name := "ask_user", arguments := .mkObj [("question_type", "yes_no"), ("question", "Keep the API?")] }
+    let rt ← runtime echoingCommands (some (← scriptedModel #[responseWith #[ask], responseWith #[submitCall "s" "kept"]]))
+    let (waiting, stop) ← assertOk <| Driver.drive rt run (← start rt run)
+    let .waits frame (some question) := stop | fail "the run waits for the person"
+    assertEqual "in the tool's frame" frame ⟪"session", "agent", "ask_user"⟫
+    assertEqual "a yes/no question" question.form .yesNo
+    let event ← assertOk <| Result.fromExcept Error.input (replyTo (next run (← logAt rt waiting)) .yes)
+    let (replied, _) ← assertOk <| Driver.append rt.store run waiting event
+    let (last, _) ← assertOk <| Driver.drive rt run replied
+    let log ← logAt rt last
+    assertEqual "submitted" (agentStatus log) "Submitted"
+    assertEqual "the model is shown the answer" (answerTo ((samplesOf run log).back!.1) "q") (some "yes")
 ]
 
 /-- A run whose commands run in the test container. -/

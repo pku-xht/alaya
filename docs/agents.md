@@ -18,48 +18,74 @@ port of mini-SWE-agent.
 
 ## 1. Tools
 
-A **tool** is what a model needs to call it, and the routine call its arguments make:
+A **tool** is data: what a model needs to call it, and the settings the agent adds to every call.
+A call of it calls the routine of its name.
 
 ```lean
 structure Tool where
   definition   : Chat.ToolDefinition              -- its name, description and schema, for a model
   alone        : Bool := false                    -- must be the only call of its turn
   instruction? : Option String := none            -- appended to the prompt
-  check        : Json → Except String Unit        -- what is wrong with a call's arguments; by default, its schema's
-  call         : Json → RoutineCall               -- the call the model's arguments make
+  settings     : Json := .mkObj []                -- merged over the model's arguments; they win
 
+Tools.make     : Array Tool → Chat.ToolCall → Computation Agent (Except String Json)
 Tools.routines : Array (Routine Agent)            -- bash, ask_user, time_budget
+Tools.Subagent.routine : Routine Agent            -- given its agent's scope by the agent
 ```
 
-A tool is parameterized by what the agent's configuration says of it, as `ask_user` is by the
-kinds of question: `bash` by how a command runs, which its call adds to the model's arguments;
-`subagent` by the agent itself, its name and its configuration, which its call names with the
-model's task. The routines are fixed, so all of it is in the call's arguments, in the log.
+A tool is made from what the agent's configuration says of it, and that is its settings: `bash`
+holds how a command runs, `ask_user` the kinds of question allowed, and `subagent` the agent to
+call and its configuration but its task, which the model's fills. The routines are fixed, so all
+of it is in the call's arguments, in the log. The `subagent` routine finds the agent by name in
+its own scope, so an agent that offers it gives it a scope with itself in it: MiniVero's.
 
-A model's tool call becomes a call of a routine in four steps:
+### 1.1 Who checks what
 
-1. The agent samples a request that offers the tools' `definition`s.
-2. The response names tools and gives arguments. The agent checks each call with the tool's
-   `check`, by default whether the arguments fit the tool's schema; a call that is wrong is
-   answered with its problem and is not made.
-3. The agent makes each tool's call of the model's arguments, `tool.call asked.arguments`. The
-   routine runs in a frame of its own.
-4. The agent puts each result in the next request, as a tool message. A tool that failed gives
-   its error as its result.
+| Who | Checks | On a problem |
+| --- | --- | --- |
+| the agent | that a call can be made: its arguments are JSON, its tool is offered, it is alone if its tool must be, and its response was not cut off | the call is answered with the problem, and not made |
+| the routine | its arguments | it is refused, and the call is answered with why |
+
+A routine's failure reaches the model by its kind (`docs/language.md` §3.4): a refusal as its
+reason, a break as "A person stopped this call: …", and a defect not at all, as it fails the agent.
+The agent makes a call with `Tools.make`, the tool's settings over the model's arguments, and
+shows the result its own way. `submit` calls no routine: the agent reads its message and ends.
+MiniSwe also checks each `bash` call's arguments before it makes any, as mini does (§6.3).
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
+flowchart LR
+  classDef sample stroke:#3567a0
+  classDef exec stroke:#2b6f6f
+  classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
+  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
+
+  asks("tool call"):::sample --> can("agent:<br/>can it be made?")
+  can -- "no" --> problem("the problem"):::bad
+  can -- "submit" --> ends("the agent ends"):::ok
+  can -- "yes" --> reads("routine:<br/>reads its arguments"):::exec
+  reads -- "cannot" --> failed("its failure"):::bad
+  reads -- "reads" --> result("its result"):::exec
+  problem --> answer("the agent<br/>answers the call"):::sample
+  failed --> answer
+  result --> answer
+  linkStyle default stroke-width:1px
+```
 
 ![A response that asks for two tools, and the two calls it becomes](figures/agent-api/tool-call.svg)
 
 | Tool | Arguments | Its call | Result |
 | --- | --- | --- | --- |
-| `bash` | `command` | `bash`: `exec command`, with the executor settings the agent adds | `output`, `exit_code`, `error`, `file` |
+| `bash` | `command`, a string | `bash`: `exec command`; settings: `executor`, how commands run | `output`, `exit_code`, `error`, `file` |
 | `time_budget` | none | `time_budget`: `time` | `seconds_left`, or that the run has no limit |
-| `ask_user` | `question_type`, `question`, `options` | `ask_user`: `ask` the question (§2) | the reply |
-| `submit` | `message` | none: the agent that offers it ends with the message; called alone | |
-| `subagent` | `task` | the agent itself, `mini-vero`, with its configuration and the model's task | the sub-agent's outcome |
+| `ask_user` | `question_type`, `question`, `options`: a question that can be asked, of a kind the agent allows (§2) | `ask_user`: `ask` the question; settings: `question_types`, the kinds allowed | the reply |
+| `submit` | `message`, a string; any other submits nothing | none: the agent that offers it ends with the message; called alone | |
+| `subagent` | `task`, a string that is not blank, which the sub-agent checks | `subagent`: calls the agent, `mini-vero`; settings: `agent` and its `configuration` but its task | the sub-agent's outcome: `status`, `submission`, `reason` |
 
 A tool is independent of the agent that offers it. The agent chooses which tools to offer, how
-to report a malformed call, and how to show a result to its model. Basic offers `bash` and
-`submit`, MiniVero offers them all (§5), and MiniSwe offers `bash` alone.
+to report a malformed call, and how to show a result to its model. Basic offers `bash`,
+`submit` and, when asked to, `ask_user`; MiniVero offers them all (§5); and MiniSwe offers `bash`
+alone.
 
 ## 2. `ask_user`: a model asks a person
 
@@ -72,9 +98,9 @@ defined by the core; the tool only adapts them to a model:
 | decides | whether a reply answers a question | which kinds of question the model may ask |
 | translates | nothing | a call's arguments into a question, and a reply into what the model is shown |
 
-1. **The kinds are chosen in advance.** MiniVero's `question_types` names the kinds of
-   question the model may ask. It offers `ask_user` only when the list is not empty, and
-   MiniSwe never does.
+1. **The kinds are chosen in advance.** The `question_types` of Basic and MiniVero names the
+   kinds of question the model may ask. Either offers `ask_user` only when the list is not
+   empty, and MiniSwe never does.
 
    ```sh
    --set 'question_types=["yes_no","single_choice"]'
@@ -90,13 +116,14 @@ defined by the core; the tool only adapts them to a model:
     "options": ["Keep them, in order.", "Drop them."]}
    ```
 
-4. **The call is checked.** A kind that is not allowed, a blank question, options on a question
-   that is not a choice, or a candidate that says "none of the above" is a format error, and
-   nothing is asked.
-5. **The tool asks.** Its routine reads the question from the arguments and performs `ask`: the
+4. **The routine reads the question** from the call, with the kinds the agent allows (§1.1). A
+   kind that is not allowed, a blank question, options on a question that is not a choice, or an
+   option that says "none of the above" fails its frame, saying why, and nothing is asked.
+5. **The tool asks.** Its routine performs `ask`: the
    question is marked in the log, and the run waits (`docs/language.md` §3.8).
 6. **A person replies**, with `alaya reply` (`docs/cli.md`).
-7. **The model is told.** The call returns the reply as the tool encodes it:
+7. **The model is told.** The call returns the reply as the tool encodes it, and the model is
+   shown a text as it is, and anything else as JSON:
 
    | Reply | The call returns |
    | --- | --- |
@@ -232,8 +259,8 @@ answers of commands, and changes from outside.
 
 ## 4. Basic
 
-`Alaya.Agents.Basic` is the basic agent: a model with `bash` and `submit`, as simple as an agent
-can be and still robust. Its command output follows [pi](https://github.com/earendil-works/pi):
+`Alaya.Agents.Basic` is the basic agent: a model with `bash` and `submit`, and `ask_user` when its
+configuration names kinds of question, as simple as an agent can be and still robust. Its command output follows [pi](https://github.com/earendil-works/pi):
 the end of an output, a note that names a file with all of it, and how the command ended. It is
 the base of MiniVero (§5).
 
@@ -248,6 +275,7 @@ A field left out is its default, and a misspelt one is an error.
 | `task` | none | the task, verbatim; required. `--set-file task=FILE` reads it from a file |
 | `executor.timeout_seconds` | 300 | the time a command may take |
 | `executor.env` | none | environment overrides for every command |
+| `question_types` | `[]` | the kinds of question `ask_user` lets the model ask: any of `yes_no`, `single_choice`, `open_ended`; none offers no `ask_user` (§2) |
 
 ### 4.2 The loop
 
@@ -255,38 +283,38 @@ Each round reads what a person said, samples a response, and answers every tool 
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
-flowchart TD
+flowchart LR
   classDef sample stroke:#3567a0
   classDef exec stroke:#2b6f6f
   classDef notice stroke:#7556a3
   classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
+  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
   classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
-  listen("listen: read the inbox"):::notice --> sample("sample request"):::sample
-  sample -- "refused as too long" --> context("return ContextExceeded"):::wait
-  sample -- "no tool call" --> remind("tell the model to call a tool")
-  sample -- "tool calls" --> each("each call, in order")
-  each -- "submit" --> submitted("return Submitted"):::ok
-  each -- "a problem" --> problem("answer the call with its problem")
-  each -- "otherwise" --> tool("call name arguments<br/>its result, or its failure, is the answer"):::exec
-  remind --> again("next round")
-  problem --> again
-  tool --> again
+  listen("read the inbox"):::notice --> sample("sample"):::sample
+  sample -- "refused as too long" --> context("ContextExceeded"):::wait
+  sample -- "no tool call" --> remind("a reminder")
+  sample -- "tool calls" --> can("each call, in order:<br/>can it be made?")
+  can -- "no" --> problem("the problem"):::bad
+  can -- "submit" --> submitted("Submitted"):::ok
+  can -- "yes" --> routine("routine:<br/>its result, or its failure"):::exec
+  remind --> next("next round")
+  problem --> next
+  routine --> next
   linkStyle default stroke-width:1px
 ```
 
-**Every tool call is answered.** A call is not made, and its answer is the problem, when:
+**Every tool call is answered.** A call cannot be made, and its answer is the problem, when:
 
 | The call | Its answer |
 | --- | --- |
 | has arguments that are not JSON | "Error parsing tool call arguments: …" |
 | names a tool that is not offered | "Unknown tool '…'." |
-| has arguments its tool refuses, such as a `bash` call with no `command` | what is wrong with them |
 | comes with others in a response that calls `submit` | "submit must be called alone: no call of this response was made." |
 | is in a response cut off at the output token limit | that its arguments may be cut off, and to call again |
 
-A call that is made is answered with its result. A routine that fails is answered with its
-error. Whatever the model sends, the run goes on.
+A call that is made is answered with its routine's result, or with why it failed, as when it
+cannot read its arguments (§1.1). Whatever the model sends, the run goes on.
 
 **A response with no tool call** is kept when it says something, and answered with a reminder to
 call a tool. A response cut off before any call is told so, and asked to be brief.
@@ -341,14 +369,14 @@ Nothing else ends it.
 ## 5. MiniVero
 
 `Alaya.Agents.MiniVero` is Alaya's agent for the Lean implementation and proof tasks of the Vero
-benchmark. It is Basic (§4): its `bash` and `submit`, its answers to every call, and its command
-output. It goes round a loop of its own, with Vero's instructions, and with every extension on:
+benchmark. It is Basic (§4): its tools, `ask_user` among them when `question_types` names kinds
+of question; its answers to every call; and its command output. It goes round a loop of its own,
+with Vero's instructions, and with every extension on:
 
 - **`time_budget`** tells the model how much of the run's time is left (§5.5).
 - **`subagent`** hands a task to another MiniVero, with the same configuration.
 - **Masking**: the outputs of turns older than the last 20 are left out of the view (§5.6).
 - **A context limit**: a request that would not fit the model's context ends the agent first.
-- **`ask_user`** is offered when `question_types` names kinds of question (§2).
 
 ### 5.1 Options
 
@@ -356,10 +384,9 @@ output. It goes round a loop of its own, with Vero's instructions, and with ever
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `model`, `task`, `executor` | | as Basic's (§4.1) |
+| `model`, `task`, `executor`, `question_types` | | as Basic's (§4.1) |
 | `mode` | `proof` | Vero's evaluation mode for the run: `proof` or `codeproof` |
 | `context_reserve` | 8000 | tokens kept free for the next response |
-| `question_types` | `[]` | the kinds of question `ask_user` lets the model ask: any of `yes_no`, `single_choice`, `open_ended`; none offers no `ask_user` |
 
 A codeproof run calls `mini-vero --set mode=codeproof`.
 
@@ -502,11 +529,12 @@ def round (config : Config) (model : Models.Spec) :          -- the messages, th
 iter (round config model) (opening, 0)                       -- go round until it ends
 ```
 
-*One round (`MiniSwe.round`).*
+*One round (`MiniSwe.round`). Mini checks every call before it makes any, so a malformed
+response runs nothing.*
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
-flowchart TD
+flowchart LR
   classDef sample stroke:#3567a0
   classDef exec stroke:#2b6f6f
   classDef notice stroke:#7556a3
@@ -514,22 +542,21 @@ flowchart TD
   classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
   classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
-  listen("listen: read the inbox"):::notice --> sample("sample request"):::sample
-  sample -- "refused as too long" --> context("return ContextExceeded"):::wait
-  sample -- "a response" --> parsed("read its tool calls")
-  parsed -- "malformed" --> format("tell the model the format error")
-  format -- "too many in a row" --> repeated("return RepeatedFormatError"):::bad
-  format -- "otherwise" --> again("next round, with the new state")
-  parsed -- "calls" --> each("each call, in order")
-  each --> tool("call name arguments<br/>its failure is given to the model as its result"):::exec
-  tool -- "printed the sentinel first" --> submitted("return Submitted"):::ok
-  tool --> again
+  listen("read the inbox"):::notice --> sample("sample"):::sample
+  sample -- "refused as too long" --> context("ContextExceeded"):::wait
+  sample -- "a response" --> can("every call:<br/>can it be made,<br/>bash's arguments too?")
+  can -- "no" --> format("the format error"):::bad
+  format -- "too many in a row" --> repeated("RepeatedFormatError"):::bad
+  format -- "otherwise" --> next("next round")
+  can -- "yes" --> routine("each call, in order:<br/>bash's result, or its failure"):::exec
+  routine -- "printed the sentinel first" --> submitted("Submitted"):::ok
+  routine --> next
   linkStyle default stroke-width:1px
 ```
 
 The state of the loop is mini's linear context: the messages so far, each appended once and
-kept, with a format error in place of each malformed response. Each request is all of them. The agent ends by returning its outcome, a status and a submission, as the value of its
-frame (§6.4).
+kept, with a format error in place of each malformed response. Each request is all of them. The
+agent ends by returning its outcome, a status and a submission, as the value of its frame (§6.4).
 
 ### 6.3 What the model is sent
 
@@ -595,6 +622,8 @@ A command runs as Basic's does (§4.4); the model sees it as mini's observation 
   they would put the machine a run was created on into the prompt.
 - **A format error names one problem**, where mini concatenates every problem found. A
   `command` that is not a string is a format error, where Python would run a list.
+- **A malformed `bash` call is named in the routine's words** (§1.1): "The bash tool takes its
+  command as a string." where mini says "Missing 'command' argument in bash tool call."
 - **Error texts are plain**, not Python's exception messages, and invalid UTF-8 in output is
   replaced byte by byte.
 - **The environment is a snapshot of the workspace**, not a persistent machine: what a command

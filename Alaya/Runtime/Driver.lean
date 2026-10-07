@@ -70,7 +70,7 @@ structure Limits where
 /-- Why the driver stopped. -/
 inductive Stop where
   /-- The run is over: its result, or its failure. -/
-  | ended (result : Except String Json)
+  | ended (result : Except Failure Json)
   /-- The computation in `frame` waits for a notice: a reply to `question?`, or, without one, any
   it waits for. -/
   | waits (frame : Frame) (question? : Option Question)

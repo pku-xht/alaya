@@ -20,7 +20,8 @@ open Lean (Json)
 /-- How it runs a command: a five-minute limit, and no overrides. -/
 def defaultExecutor : Executor.Config := { timeoutSeconds := 300 }
 
-structure Config where
+/-- What every agent's configuration holds: the model, the task, and how commands run. -/
+structure Common where
   /-- The model it samples: its complete spec. There is no default: whoever calls the agent
   names one. -/
   model? : Option Models.Spec := none
@@ -30,16 +31,36 @@ structure Config where
   executor : Executor.Config := defaultExecutor
   deriving Inhabited
 
+/-- The basic agent's configuration: the common fields, and the kinds of question `ask_user`
+lets the model ask; none, the default, offers no `ask_user`. -/
+structure Config extends Common where
+  questionTypes : Array Question.Kind := #[]
+  deriving Inhabited
+
 /-- How commands run, as a configuration holds it: their time limit, and their environment. -/
 def executorFields : Fields Executor.Config := #[
   .of "timeout_seconds" .nat (·.timeoutSeconds) fun v e => { e with timeoutSeconds := v },
   .of "env" .pairs (·.env) fun v e => { e with env := v }]
 
-/-- The fields of its configuration, which an agent built on it has too. -/
-def fields : Fields Config := #[
+/-- The fields every agent's configuration has. -/
+def commonFields : Fields Common := #[
   .of "model" (.option Models.Spec.codec) (·.model?) fun v c => { c with model? := v },
   .of "task" (.option .string) (·.task?) fun v c => { c with task? := v },
   .record "executor" executorFields (·.executor) fun v c => { c with executor := v }]
+
+/-- Kinds of question, each named once. -/
+def questionTypesCodec : Codec (Array Question.Kind) :=
+  let kinds := Codec.array (.enum Question.Kind.name Question.Kind.all.toList)
+  { kinds with read := fun json => do
+      let read ← kinds.read json
+      for kind in read do
+        if (read.filter (· == kind)).size > 1 then throw s!"names {kind.name} twice"
+      pure read }
+
+/-- The fields of its configuration, which an agent built on it has too. -/
+def fields : Fields Config :=
+  commonFields.lift (·.toCommon) (fun b c => { c with toCommon := b }) ++ #[
+  .of "question_types" questionTypesCodec (·.questionTypes) fun v c => { c with questionTypes := v }]
 
 /-- The configuration as JSON: what a run records, and what `alaya config` shows. -/
 def Config.toJson (config : Config) : Json := fields.toJson config
@@ -50,16 +71,18 @@ def Config.fromJson (json : Json) : Except String Config := fields.read json {}
 /-- An agent's routine: its configuration read from a call's arguments, `fields` over
 `defaults`, and its computation run on the model and the task the configuration names. A call
 it cannot run on fails in the call's frame, saying why in the configuration's terms. -/
-def agent (name : String) (fields : Fields σ) (defaults : σ) (base : σ → Config)
+def agent (name : String) (fields : Fields σ) (defaults : σ) (base : σ → Common)
     (computation : σ → Models.Spec → String → Computation Agent Json) (scope : Scope Agent) : Routine Agent where
   name
   body arguments :=
     match fields.read arguments defaults with
-    | .error problem => .fail s!"{name}: {problem}"
+    | .error problem => .fail (.refused s!"{name}: {problem}")
     | .ok config => match (base config).model?, (base config).task? with
-      | some model, some task => computation config model task
-      | none, _ => .fail s!"{name}: it samples a model, and its configuration names none"
-      | _, none => .fail s!"{name}: it works on a task, and its configuration names none"
+      | some model, some task =>
+        if task.trimAscii.isEmpty then .fail (.refused s!"{name}: its task is blank")
+        else computation config model task
+      | none, _ => .fail (.refused s!"{name}: it samples a model, and its configuration names none")
+      | _, none => .fail (.refused s!"{name}: it works on a task, and its configuration names none")
   scope
 
 /-! ## Commands and their output -/
@@ -164,9 +187,19 @@ with a reminder. The run ends at `submit`. -/
 /-- The context a sample is conditioned on. -/
 abbrev Dialogue := Array Chat.Message
 
-/-- The tools it offers: `bash`, each command's output kept as a file, and `submit`. -/
-def tools (executor : Executor.Config) : Array Tool :=
-  #[Tools.Bash.tool { executor with outputs := true }, Tools.Submit.tool]
+/-- The tools it offers: `bash`, each command's output kept as a file; `submit`; and `ask_user`,
+for the kinds of question its configuration names. -/
+def tools (config : Config) : Array Tool :=
+  #[Tools.Bash.tool { config.executor with outputs := true }, Tools.Submit.tool] ++
+    (if config.questionTypes.isEmpty then #[] else #[Tools.AskUser.tool config.questionTypes])
+
+/-- `text` with the instructions of `tools` after it, a blank line before each: what a tool adds
+to the prompt, which is only ever added. -/
+def withInstructions (tools : Array Tool) (text : String) : String :=
+  tools.foldl (init := text) fun text tool =>
+    match tool.instruction? with
+    | some instruction => text ++ "\n\n" ++ instruction
+    | none => text
 
 /-- The system message, which names the machine the commands run on: its system and its
 architecture, as `uname -sm` reads them. -/
@@ -177,9 +210,9 @@ def systemMessage (uname : Uname) : String :=
   "variable does not last to the next command. A long output is cut to its end; the note after " ++
   s!"it names a file that holds all of it. The commands run on {uname.system} {uname.machine}."
 
-/-- The opening of a conversation: the system message, and the task. -/
-def openingMessages (task : String) (uname : Uname) : Array Chat.Message :=
-  #[.system (systemMessage uname), .user task]
+/-- The opening of a conversation: the system message, with what its tools add, and the task. -/
+def openingMessages (config : Config) (task : String) (uname : Uname) : Array Chat.Message :=
+  #[.system (withInstructions (tools config) (systemMessage uname)), .user task]
 
 /-- What a call is answered with: its routine's result, or why it was not made, or how its
 routine failed. -/
@@ -219,6 +252,12 @@ def reminder (response : Chat.Response) : String :=
     "Your response hit the output token limit before any tool call. Respond more briefly, and call a tool."
   else "Your response called no tool. Call a tool: run a command with bash, or call submit when the task is done."
 
+/-- What the model is told of a call that failed: why its routine refused it, or that a person
+stopped it. -/
+def failureMessage : Failure → String
+  | .broken reason => s!"A person stopped this call: {reason}"
+  | failure => failure.reason
+
 /-- Why a call of `response` is not made, if it is not: the response was cut off, so its
 arguments may be too; it calls, beside others, a tool that must be alone; or the call itself
 has a problem. -/
@@ -245,7 +284,7 @@ def respond (tools : Array Tool) (items : Array Item) (response : Chat.Response)
     | none =>
       if asked.name == Tools.Submit.definition.name then
         return .inr (outcome "Submitted" (Tools.Submit.message asked.arguments))
-      answers := answers.push (asked, ← Tools.make tools asked)
+      answers := answers.push (asked, (← Tools.make tools asked).mapError failureMessage)
   return .inl (items.push (.turn response answers))
 
 /-- The messages of a conversation: what is told as it is, and a turn as the response and a
@@ -267,11 +306,13 @@ def viewWith (shown : Nat → Chat.ToolCall → Json → String) (items : Array 
         messages := messages.push (.tool call.id (.str text))
   return messages
 
-/-- A call's result as the model sees it: a command's as its `observation`, any other as JSON. -/
+/-- A call's result as the model sees it: a command's as its `observation`, a text as it is, and
+any other as JSON. -/
 def shown (call : Chat.ToolCall) (result : Json) : String :=
-  match call.name, Tools.Bash.ofResult? result with
-  | "bash", some (output, file?) => observation output file?
-  | _, _ => result.pretty
+  match call.name, Tools.Bash.ofResult? result, result with
+  | "bash", some (output, file?), _ => observation output file?
+  | _, _, .str text => text
+  | _, _, _ => result.pretty
 
 /-- Every turn, each call's result as `shown`. -/
 def view (items : Array Item) : Dialogue :=
@@ -282,9 +323,11 @@ model in this round's request; sample, and end when the provider refuses the req
 long; then answer the response. -/
 def round (config : Config) (model : Models.Spec) (items : Array Item) : Computation Agent (Array Item ⊕ Json) := do
   let items := items ++ (← heard).map .told
-  let request : Chat.Request := { messages := view items, tools := (tools config.executor).map (·.definition) }
-  let response ← try sample model request catch refusal => return .inr (refused refusal)
-  respond (tools config.executor) items response
+  let request : Chat.Request := { messages := view items, tools := (tools config).map (·.definition) }
+  let response ← try sample model request catch
+    | .refused refusal => return .inr (refused refusal)
+    | failure => throw failure
+  respond (tools config) items response
 
 /-! ## The agent -/
 
@@ -292,10 +335,10 @@ def round (config : Config) (model : Models.Spec) (items : Array Item) : Computa
 def computation (config : Config) (model : Models.Spec) (task : String) : Computation Agent Json := do
   -- The opening names the machine the commands run on, as the container says.
   let uname ← Tools.Uname.read
-  iter (round config model) ((openingMessages task uname).map .told)
+  iter (round config model) ((openingMessages config task uname).map .told)
 
-/-- The basic agent as a routine. Its scope is its tool. -/
+/-- The basic agent as a routine. Its scope is its tools' routines. -/
 def routine : Routine Agent :=
-  agent "basic" fields {} id computation (Scope.of #[Tools.Bash.routine])
+  agent "basic" fields {} (·.toCommon) computation (Scope.of #[Tools.Bash.routine, Tools.AskUser.routine])
 
 end Alaya.Agents.Basic

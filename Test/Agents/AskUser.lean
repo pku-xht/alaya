@@ -16,14 +16,27 @@ open Alaya.Agents
 /-- MiniVero's configuration: the agent that offers `ask_user`. -/
 private abbrev Config := MiniVero.Config
 
-/-- A response as MiniVero reads it: the calls it makes, or the first call's problem. -/
+/-- A response as MiniVero, and the routines of its calls, take it: the calls that ask, or the
+first refusal. -/
 private inductive Parsed where
   | calls (calls : Array Chat.ToolCall)
   | formatError (problem : String)
 
-/-- How MiniVero, configured so, reads a response. -/
+/-- What MiniVero, configured so, refuses of a call, or the `ask_user` routine refuses of the
+call its tool makes. -/
+private def refusal? (config : Config) (response : Chat.Response) (call : Chat.ToolCall) : Option String :=
+  match Basic.problem? config.tools response call, config.tools.find? (·.name == call.name) with
+  | some problem, _ => some problem
+  | none, some tool =>
+    if call.name != "ask_user" then none
+    else match Tools.AskUser.read (tool.arguments call.arguments) with
+      | .ok _ => none
+      | .error problem => some problem
+  | none, none => none
+
+/-- How MiniVero, configured so, and its routines take a response. -/
 private def parseActions (response : Chat.Response) (config : Config := {}) : Parsed :=
-  match response.toolCalls.findSome? (Basic.problem? config.tools response) with
+  match response.toolCalls.findSome? (refusal? config response) with
   | some problem => .formatError problem
   | none => .calls response.toolCalls
 open Lean (Json)
@@ -81,13 +94,18 @@ private def withRun (agent : String × Json) (k : Scope Agent → TestM Unit) : 
   | .ok run => k run
   | .error problem => fail problem
 
-/-- What the model was shown as the result of the call `q`: the observation, read back. -/
-private def shownResult (request : Chat.Request) : TestM Json := do
+/-- What the model was shown as the result of the call `q`. -/
+private def shownResult (request : Chat.Request) : TestM String := do
   let some shown := request.messages.findSome? fun
       | .tool "q" (.str text) => some text
       | _ => none
     | fail "the answer must be the asking call's observation"
-  assertOk <| Result.fromExcept Error.protocol (Json.parse shown)
+  pure shown
+
+/-- A result as the model is shown it: a text as it is, anything else as JSON. -/
+private def asShown : Json → String
+  | .str text => text
+  | json => json.pretty
 
 /-- Appends a reply to the question the log at `tip` waits on, read from `text` against the
 question's form, or that the person cannot answer. -/
@@ -124,18 +142,18 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       ((opening {}).replace ("\n\n" ++ Tools.TimeBudget.instruction)
         ("\n\n" ++ Tools.AskUser.instruction Question.Kind.all ++ "\n\n" ++ Tools.TimeBudget.instruction)),
 
-  test "single choice adds a platform answer while retaining model candidates verbatim" do
+  test "single choice offers None of the above beside the model's options, kept verbatim" do
     let question := "  Which rule applies?\nContext: α < β.  "
     let candidates := #[" Keep α ", "Change β\nwith evidence"]
-    let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question Question.Kind.all (args question candidates))
+    let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.read (args question candidates))
     assertEqual "a choice of the original candidates" form.form (.singleChoice candidates)
     assertEqual "original question" form.text question
     let rendered := form.render
     check (rendered.startsWith question) "the question and context must retain their original wording"
     check (contains rendered "\n1.  Keep α \n2. Change β\nwith evidence")
       "numbered candidates must retain their wording"
-    check (contains rendered "none_of_above. None of the above") "the platform adds its reserved answer"
-    assertEqual "one platform label" (rendered.splitOn "None of the above").length 2
+    check (contains rendered "none_of_above: None of the above") "None of the above is offered"
+    assertEqual "once" (rendered.splitOn "None of the above").length 2
     check (contains rendered "Select exactly one answer") "the answer is single choice"
     match parseActions (response #[askOne "q" (args question candidates)]) enabled with
     | .calls calls => assertEqual "the call" (calls.map (·.name)) #["ask_user"]
@@ -143,7 +161,7 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
     for (questionType, expectedForm) in #[("yes_no", Question.Form.yesNo),
         ("open_ended", Question.Form.openEnded)] do
       let arguments := args question #[] questionType
-      let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question Question.Kind.all arguments)
+      let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.read arguments)
       assertEqual "question form" form.form expectedForm
       assertEqual "original question" form.text question
       check (!contains form.render "none_of_above") s!"{questionType} must not offer the reserved single-choice answer",
@@ -167,8 +185,12 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       -- Every choice has this answer already; the model may not offer it as a candidate.
       args "q" #["a", "None of the above"], args "q" #["a", " none_of_above "],
       args "q" #["yes", "no"] "yes_no",
-      args "q" #["a", "b"] "open_ended",
-      (args).setObjVal! "unexpected" true]
+      args "q" #["a", "b"] "open_ended"]
+    -- A key the routine does not know is ignored, as a routine's arguments hold the agent's
+    -- settings besides the model's.
+    match parseActions (response #[askOne "q" ((args).setObjVal! "unexpected" true)]) enabled with
+    | .calls _ => pure ()
+    | .formatError problem => fail s!"an unknown key was refused: {problem}"
     let cases := malformed.map (fun json => response #[askOne "q" json]) ++ #[
       response #[bash, askOne], response #[askOne, bash], response #[askOne, submit],
       response #[submit, askOne], response #[askOne, askOne "second"],
@@ -219,7 +241,7 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
           if isIdle stop then assertEqual "submitted after the reply" (agentStatus (← logAt rt final)) "Submitted"
           else fail "the run must go on after the reply"
           let some request := (← requests.get).back? | fail "no request after the reply"
-          assertEqual s!"{questionType} answer in the model's view" (← shownResult request).compress shown.compress
+          assertEqual s!"{questionType} answer in the model's view" (← shownResult request) (asShown shown)
         let forest ← assertOk rt.store.forest
         assertEqual "one branch per answer" (forest.childrenOf waiting).size answers.size
         assertEqual "one question and one continuation each" (← requests.get).size (1 + answers.size)
@@ -248,12 +270,12 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
 
   test "a call's arguments read as a question only when it can be asked" do
     let question ← assertOk <| Result.fromExcept Error.protocol
-      (Tools.AskUser.question Question.Kind.all (args "Which?" #["first", "second"]))
+      (Tools.AskUser.read (args "Which?" #["first", "second"]))
     assertEqual "its form" question.form (.singleChoice #["first", "second"])
     for arguments in #[Json.null, args " \n" #["a", "b"], args "q" #["only"], args "q" #["same", " same "],
         args "q" #["valid", " \n"], args "q" #["valid", "None of the above"], args "q" #["a", "b"] "yes_no",
         (args).setObjVal! "question_type" "unknown", (args).setObjVal! "options" "not an array"] do
-      check (Tools.AskUser.question Question.Kind.all arguments).toOption.isNone
+      check (Tools.AskUser.read arguments).toOption.isNone
         s!"a question was read from {arguments.compress}",
 
   test "a program asks without any tool: the question is in the log, and a reply to its frame answers it" do
@@ -289,7 +311,8 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
     do
       let run := runOf fun _ => Json.str <$> (·.line) <$> Alaya.Core.ask { text := " \n" }
       let log := settle run opening
-      check (log.any fun | .failed ⟪"session", "agent"⟫ error => contains error "blank" | _ => false) "a blank question fails"
+      check (log.any fun | .failed ⟪"session", "agent"⟫ (.refused error) => contains error "blank" | _ => false)
+        "a blank question is refused"
       check (!log.any (· matches .asked ..)) "and is never asked",
 
   test "ask_user lets a model ask only the kinds of question its configuration names" do
@@ -309,10 +332,11 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       match parseActions (response #[askOne "q" refused]) yesNo with
       | .formatError _ => pure ()
       | .calls _ => fail s!"a kind that is not allowed was accepted: {refused.compress}"
-    -- With every kind, the words are the ones the tool always had.
-    check (contains (Tools.AskUser.instruction Question.Kind.all)
-      "choose question_type: yes_no for a yes/no answer, single_choice to select exactly one of at least two distinct candidates, or open_ended for a nonblank free-text answer.")
-      "the instruction for every kind"
+    -- With a choice among the kinds, the instruction says what the schema cannot.
+    assertStringEq "the instruction for every kind" (Tools.AskUser.instruction Question.Kind.all)
+      ("You may ask the person a question with ask_user. Give enough context to answer it. " ++
+       "A single_choice question needs at least two distinct options; the person may also answer " ++
+       "None of the above, so do not list it yourself.")
     -- The kinds are named, each once.
     for (kinds, problem) in (#[(Json.arr #["yes_no", "maybe"], "not maybe"),
         (.arr #["yes_no", "yes_no"], "twice"), (.str "yes_no", "must be an array")] : Array (Json × String)) do

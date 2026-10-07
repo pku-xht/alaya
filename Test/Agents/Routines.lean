@@ -14,18 +14,21 @@ def suite : Suite := Testing.suite "agents/routines" #[
   test "an agent brings its scope: its tools and itself, fixed where it is defined" do
     let names := #["bash", "submit", "ask_user", "time_budget", "subagent", "mini-swe", "mini-vero", "grader"]
     let reach (routine : Routine Agent) := names.filter fun name => (routine.scope.find name).isSome
-    assertEqual "inside the basic agent" (reach Basic.routine) #["bash"]
+    assertEqual "inside the basic agent" (reach Basic.routine) #["bash", "ask_user"]
     assertEqual "inside MiniSwe" (reach MiniSwe.routine) #["bash"]
-    assertEqual "inside MiniVero" (reach MiniVero.routine) #["bash", "ask_user", "time_budget", "mini-vero"]
+    assertEqual "inside MiniVero" (reach MiniVero.routine) #["bash", "ask_user", "time_budget", "subagent", "mini-vero"]
     assertEqual "inside the grader" (reach Grader.routine) #[]
-    -- MiniVero in its own scope has that same scope: what lets a sub-agent call it in turn.
+    -- MiniVero in its own scope has that same scope, and so has the subagent routine there:
+    -- what lets a sub-agent find MiniVero, and call it in turn.
     check ((MiniVero.routine.scope.find "mini-vero").any fun inner => (inner.scope.find "bash").isSome)
-      "MiniVero in its own scope has the same scope",
+      "MiniVero in its own scope has the same scope"
+    check ((MiniVero.routine.scope.find "subagent").any fun sub => (sub.scope.find "mini-vero").isSome)
+      "the subagent routine finds MiniVero in its scope",
 
   test "a call an agent cannot run on fails in its frame, in the configuration's terms" do
     let failure (routine : Routine Agent) (arguments : Json) : Option String :=
       match routine.body arguments with
-      | .fail problem => some problem
+      | .fail problem => some problem.reason
       | _ => none
     let model := Json.mkObj [("model", testModelSpec.toJson)]
     for (label, routine, arguments, said) in [
@@ -42,8 +45,29 @@ def suite : Suite := Testing.suite "agents/routines" #[
     -- Called so, the call fails in its frame, with the same words.
     let scope := Scope.of #[MiniSwe.routine]
     let log := settle scope #[.arrived (.changed default "w"), .arrived (.called { name := "mini-swe", arguments := model })]
-    check (log.any fun | .failed ⟪"mini-swe"⟫ problem => contains problem "works on a task" | _ => false)
-      "the call fails in its frame"
+    check (log.any fun | .failed ⟪"mini-swe"⟫ (.refused problem) => contains problem "works on a task" | _ => false)
+      "the call fails in its frame",
+
+  test "a call of a tool has its settings over the model's arguments, and its routine reads them" do
+    let ask (kinds : Array Question.Kind) (arguments : Json) : Except String Question :=
+      Tools.AskUser.read ((Tools.AskUser.tool kinds).arguments arguments)
+    let yesNo := Json.mkObj [("question_type", "yes_no"), ("question", "Keep it?")]
+    assertEqual "a yes/no question with no options" ((ask #[.yesNo] yesNo).toOption.map (·.form))
+      (some Question.Form.yesNo)
+    check (match ask #[.openEnded] yesNo with
+      | .error problem => contains problem "question_type: open_ended"
+      | .ok _ => false) "a kind the agent did not allow, refused by the routine"
+    check ((ask #[.yesNo] (yesNo.setObjVal! "question_types" (.arr #["single_choice"]))).toOption.isSome)
+      "the model cannot widen the kinds: the settings win"
+    let bash := Tools.Bash.tool { timeoutSeconds := 7 }
+    let made := bash.arguments (.mkObj [("command", "ls"), ("executor", .mkObj [("timeout_seconds", 1)])])
+    assertEqual "a command, as its routine reads it" (Tools.Bash.command made).toOption (some "ls")
+    assertEqual "the agent's executor, not the model's"
+      ((made.getObjVal? "executor" >>= (·.getObjVal? "timeout_seconds") >>= Json.getNat?).toOption) (some 7)
+    let sub := Tools.Subagent.tool "mini-vero" (.mkObj [("task", "the parent's"), ("mode", "proof")])
+    assertEqual "a sub-agent: the agent, its configuration but its task, and the model's task"
+      (sub.arguments (.mkObj [("task", "write b.txt")])).compress
+      "{\"agent\":\"mini-vero\",\"configuration\":{\"mode\":\"proof\"},\"task\":\"write b.txt\"}"
 ]
 
 end AgentRoutinesTests

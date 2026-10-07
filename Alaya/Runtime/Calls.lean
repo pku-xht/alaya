@@ -42,7 +42,7 @@ def environmentOf (log : Log Agent) (frame : Frame) : Result (Frame × Environme
 /-- How a call ended. -/
 inductive CallEnd where
   | returned (value : Json)
-  | failed (error : String)
+  | failed (failure : Failure)
   /-- Broken from outside, by a person, with the reason the break gives. -/
   | stopped (reason : String)
   deriving Inhabited
@@ -51,7 +51,7 @@ inductive CallEnd where
 the run's and its own; a break ends it in its frame, or in the run's. -/
 def CallEnd.of? : Event Agent → Option CallEnd
   | .returned #[_, _] value => some (.returned value)
-  | .failed #[_, _] error => some (.failed error)
+  | .failed #[_, _] failure => some (.failed failure)
   | .broke frame reason => if frame.size ≤ 2 then some (.stopped reason) else none
   | _ => none
 
@@ -101,7 +101,7 @@ def callTitle (call : RoutineCall) : String := (agentTitle? call).getD call.name
 
 /-- What a value is, when it has the shape one of Alaya's own writes: a grader's verdict
 (`verdictJson`), a command's result (`Tools.Bash.result`), an agent's outcome
-(`MiniSwe.outcome`). Any routine may return any value, so a value is of a kind only when it has
+(`Basic.outcome`). Any routine may return any value, so a value is of a kind only when it has
 every field of the kind, each of its type, and no other; anything else is of no kind, and is
 shown as what it holds. -/
 inductive ValueKind where

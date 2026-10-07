@@ -113,7 +113,7 @@ With `--json`, a command prints one object a line:
 | Command | Object |
 | --- | --- |
 | a command that appends | each entry: `{entry, parent, position, frame, summary, event, elapsed_ms}` |
-| `resume` | then how it stopped: `{entry, status, …}`. Where the session waits for a call, `call` names the last call, and `status` is `done` with `value`, `failed` with `error`, or `stopped` with `reason`; or `idle` before any call. Or `waits` with `frame` and `question`; or `paused` with `reason`; or `ended` with `value` or `error`, once the run's own call is over |
+| `resume` | then how it stopped: `{entry, status, …}`. Where the session waits for a call, `call` names the last call, and `status` is `done` with `value`, `failed` with `kind` and `error`, or `stopped` with `reason`; or `idle` before any call. Or `waits` with `frame` and `question`; or `paused` with `reason`; or `ended` with `value`, or `kind` and `error`, once the run's own call is over |
 | `config` | a line for each `{program, config}`, `{model}` and `{provider}`; with `--program`, the one `{program, config}` that `call` would record |
 | `tree` | every entry: `{entry, parent, position, summary, status}` |
 | `log` | every entry of the log: `{entry, position, frame, event, elapsed_ms}`, then `{next}` |
@@ -304,13 +304,13 @@ Ends the call running at an entry: the program the session runs, or the call ope
 
 ```sh
 alaya stop 4f2c8b --reason 'wrong approach'
-alaya stop 4f2c8b --frame session/mini-vero/mini-vero --reason 'the sub-agent is stuck'
+alaya stop 4f2c8b --frame session/mini-vero/subagent --reason 'the sub-agent is stuck'
 ```
 
 ![stop: a stop is appended, and the call is over](figures/cli/stop.svg)
 
 A stop appends `broke FRAME REASON`: the call open in `FRAME` ends there, with every call inside
-it (`docs/language.md` §3.7). Its caller is told it failed with the reason: the session waits
+it (`docs/language.md` §3.7). Its caller is told it was broken, with the reason: the session waits
 for the next call, and an agent whose sub-agent was stopped goes on. A stop is refused where no
 call is open in its frame.
 

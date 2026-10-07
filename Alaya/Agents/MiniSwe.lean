@@ -21,13 +21,13 @@ def defaultExecutor : Executor.Config := {
 
 /-- The basic agent's configuration, with mini's command settings, and how many malformed
 responses in a row end it: mini's limit, 0 for none. -/
-structure Config extends Basic.Config where
+structure Config extends Basic.Common where
   executor := defaultExecutor
   maxConsecutiveFormatErrors : Nat := 3
   deriving Inhabited
 
 def fields : Fields Config :=
-  Basic.fields.lift (·.toConfig) (fun b c => { c with toConfig := b }) ++ #[
+  Basic.commonFields.lift (·.toCommon) (fun b c => { c with toCommon := b }) ++ #[
   .of "max_consecutive_format_errors" .nat (·.maxConsecutiveFormatErrors)
     fun v c => { c with maxConsecutiveFormatErrors := v }]
 
@@ -134,12 +134,22 @@ and otherwise makes each tool call in order, until a command prints the sentinel
 /-- The tools it offers: mini's `bash`, alone. -/
 def tools (config : Config) : Array Tool := #[Tools.Bash.tool config.executor]
 
+/-- What is wrong with a call, as mini checks it before it makes any: it can be made, and its
+`bash` routine can read its arguments. -/
+def callProblem? (config : Config) (call : Chat.ToolCall) : Option String :=
+  match Tools.callProblem? (tools config) call with
+  | some problem => some problem
+  | none => match Tools.Bash.command call.arguments with
+    | .ok _ => none
+    | .error problem => some problem
+
 /-- The format error a response is answered with, mini's `parse_actions`: of its first problem,
-no call at all or the first call with a problem; `none` when every call can be made. -/
+no call at all or the first call with a problem; `none` when every call can be made. Mini checks
+every call before it makes any, so a malformed response runs nothing. -/
 def formatError? (config : Config) (response : Chat.Response) : Option String :=
   let problem? := if response.toolCalls.isEmpty
     then some "No tool calls found in the response. Every response MUST include at least one tool call."
-    else response.toolCalls.findSome? (Tools.callProblem? (tools config))
+    else response.toolCalls.findSome? (callProblem? config)
   problem?.map (formatErrorMessage · (!response.toolCalls.isEmpty) response.finishReason?)
 
 /-- What a command printed after the sentinel `line`, when it printed the line first: mini's
@@ -159,7 +169,9 @@ def round (config : Config) (model : Models.Spec) : Basic.Dialogue × Nat → Co
   | (messages, errors) => do
   let messages := messages ++ (← Basic.heard)
   let response ← try sample model { messages, tools := (tools config).map (·.definition) }
-    catch refusal => return .inr (Basic.refused refusal)
+    catch
+      | .refused refusal => return .inr (Basic.refused refusal)
+      | failure => throw failure
   if let some message := formatError? config response then
     let limit := config.maxConsecutiveFormatErrors
     if limit > 0 && errors + 1 >= limit then return .inr (Basic.outcome "RepeatedFormatError")
@@ -167,7 +179,7 @@ def round (config : Config) (model : Models.Spec) : Basic.Dialogue × Nat → Co
   let mut messages := messages.push response.message
   for asked in response.toolCalls do
     let shown ← match ← Tools.make (tools config) asked with
-      | .error error => pure (Json.mkObj [("error", .str error)]).pretty
+      | .error failure => pure (Json.mkObj [("error", .str (Basic.failureMessage failure))]).pretty
       | .ok result =>
         if let some submission := submitted? sentinel result then
           return .inr (Basic.outcome "Submitted" submission)
@@ -187,6 +199,6 @@ def computation (config : Config) (model : Models.Spec) (task : String) : Comput
 
 /-- MiniSwe as a routine. Its scope is its tool. -/
 def routine : Routine Agent :=
-  Basic.agent "mini-swe" fields {} (·.toConfig) computation (Scope.of #[Tools.Bash.routine])
+  Basic.agent "mini-swe" fields {} (·.toCommon) computation (Scope.of #[Tools.Bash.routine])
 
 end Alaya.Agents.MiniSwe

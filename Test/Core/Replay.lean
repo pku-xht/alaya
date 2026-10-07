@@ -52,7 +52,7 @@ def scopeOf (routines : Array (String × (Json → Computation Toy Json))) : Sco
 def awaitMessage : Computation Toy Json := do
   match ← await fun _ notice => notice matches .said _ with
   | .said message :: _ => pure (.str message)
-  | _ => throw "no message"
+  | _ => throw (.refused "no message")
 
 def describe (next : Next Toy) : String :=
   match next with
@@ -60,7 +60,7 @@ def describe (next : Next Toy) : String :=
   | .mark event => s!"mark in {(event.frame?.map Frame.render).getD "-"}"
   | .waits frame _ => s!"waits in {Frame.render frame}"
   | .ended (.ok value) => s!"ended {value.compress}"
-  | .ended (.error error) => s!"failed {error}"
+  | .ended (.error error) => s!"failed {error.render}"
   | .mismatch position => s!"mismatch at {position}"
   | .unguarded frame => s!"unguarded in {Frame.render frame}"
 
@@ -85,9 +85,9 @@ def startSuite : Suite := suite "core/replay.start" #[
 
   test "a run whose call names no routine of the scope fails in the call's frame" do
     let log := drive (scopeOf #[("run", fun _ => pure .null)]) #[calledEvent "nowhere"]
-    check (log.any fun | .failed ⟪"nowhere"⟫ message => contains message "no routine named nowhere" | _ => false)
+    check (log.any fun | .failed ⟪"nowhere"⟫ (.defect message) => contains message "no routine named nowhere" | _ => false)
       "the call fails in its frame"
-    assertNext "and the run with it" (scopeOf #[]) log "failed no routine named nowhere",
+    assertNext "and the run with it" (scopeOf #[]) log "failed defect: no routine named nowhere",
 
   test "a call after the run is over is read by no one, and the run stays over" do
     let scope := scopeOf #[("run", fun _ => pure "done")]
@@ -100,7 +100,7 @@ def startSuite : Suite := suite "core/replay.start" #[
     let session : Json → Computation Toy Json := fun _ => iter (fun (_ : Unit) => do
       match ← await (one := true) fun _ notice => notice matches .called _ with
       | .called call :: _ => Computation.call call fun _ => pure (.inl ())
-      | _ => throw "no call") ()
+      | _ => throw (.refused "no call")) ()
     let scope := scopeOf #[("session", session), ("a", fun _ => step "a"), ("b", fun _ => step "b")]
     let log := drive scope #[calledEvent "session", calledEvent "a", calledEvent "b"]
     let reads := log.filterMap fun | .heard ⟪"session"⟫ taken => some taken | _ => none
@@ -148,7 +148,7 @@ def readSuite : Suite := suite "core/replay.reads" #[
 
   test "an answer is matched by its frame and its key, and a failed one goes on as a failure" do
     let scope := scopeOf #[("run", fun _ => do
-      let a ← try step "a" catch error => pure (.str s!"caught {error}")
+      let a ← try step "a" catch error => pure (.str s!"caught {error.reason}")
       pure a)]
     let start := drive scope #[calledEvent "run"] (fun _ => .error "not now")
     assertNext "a failed answer is caught where it was asked" scope start "ended \"caught not now\""
@@ -173,7 +173,7 @@ def readSuite : Suite := suite "core/replay.reads" #[
 def breakSuite : Suite := suite "core/replay.breaks" #[
   test "a break ends the call open in its frame and every call inside it, with no marks, and its caller is told why" do
     let scope := scopeOf #[
-      ("run", fun _ => try call "child" .null catch error => pure (.str s!"caught {error}")),
+      ("run", fun _ => try call "child" .null catch error => pure (.str s!"caught {error.reason}")),
       ("child", fun _ => call "grandchild" .null),
       ("grandchild", fun _ => awaitMessage)]
     let waiting := drive scope #[calledEvent "run"]
@@ -184,12 +184,12 @@ def breakSuite : Suite := suite "core/replay.breaks" #[
     assertNext "the caller caught the reason" scope broken "ended \"caught enough\""
     -- The same break of the innermost call: its caller, the child, does not catch it, so it fails.
     let inner := drive scope (waiting.push (.broke ⟪"run", "child", "grandchild"⟫ "no"))
-    check (inner.any (· matches .failed ⟪"run", "child"⟫ "no")) "the child fails with the reason"
+    check (inner.any (· matches .failed ⟪"run", "child"⟫ (.broken "no"))) "the child fails with the reason, as broken"
     assertNext "and the run catches that" scope inner "ended \"caught no\"",
 
   test "nothing inside a broken call catches the break, a loop included" do
     let scope := scopeOf #[
-      ("run", fun _ => try call "child" .null catch error => pure (.str s!"run caught {error}")),
+      ("run", fun _ => try call "child" .null catch error => pure (.str s!"run caught {error.reason}")),
       ("child", fun _ => try (iter (fun (_ : Unit) => do let _ ← awaitMessage; pure (.inl ())) ())
         catch _ => pure "child caught")]
     let waiting := drive scope #[calledEvent "run"]
@@ -198,7 +198,7 @@ def breakSuite : Suite := suite "core/replay.breaks" #[
     assertNext "its caller's did" scope broken "ended \"run caught stop\"",
 
   test "a break right after an opening ends the call before it asks for anything" do
-    let scope := scopeOf #[("run", fun _ => try call "child" .null catch error => pure (.str error)),
+    let scope := scopeOf #[("run", fun _ => try call "child" .null catch error => pure (.str error.reason)),
       ("child", fun _ => step "never")]
     let opened := (drive scope #[calledEvent "run"]).filter fun | .answered .. => false | _ => true
     let opened := opened.extract 0 (opened.findIdx? (· matches .opened ⟪"run", "child"⟫ _) |>.map (· + 1) |>.getD 0)
@@ -210,7 +210,7 @@ def breakSuite : Suite := suite "core/replay.breaks" #[
   test "a break of the run's own call ends the run with its reason" do
     let scope := scopeOf #[("run", fun _ => try awaitMessage catch _ => pure "caught")]
     let waiting := drive scope #[calledEvent "run"]
-    assertNext "the run is over" scope (waiting.push (.broke ⟪"run"⟫ "enough")) "failed enough",
+    assertNext "the run is over" scope (waiting.push (.broke ⟪"run"⟫ "enough")) "failed broken: enough",
 
   test "a break has no place where no call is open in its frame" do
     let scope := scopeOf #[("run", fun _ => do let _ ← step "a"; awaitMessage)]
@@ -232,31 +232,31 @@ def computationSuite : Suite := suite "core/replay.computations" #[
   test "a failure is caught around a loop, around a call, or by no one" do
     let rounds : Computation Toy Json := iter (fun (n : Nat) => do
       let _ ← step s!"round {n}"
-      if n == 2 then throw s!"gave up at {n}" else pure (Sum.inl (n + 1))) 0
-    let caught := scopeOf #[("run", fun _ => try rounds catch error => pure (.str s!"caught: {error}"))]
+      if n == 2 then throw (.refused s!"gave up at {n}") else pure (Sum.inl (n + 1))) 0
+    let caught := scopeOf #[("run", fun _ => try rounds catch error => pure (.str s!"caught: {error.reason}"))]
     let log := drive caught #[calledEvent "run"]
     assertEqual "three rounds, each in the log" (log.filter (· matches .answered ..)).size 3
     assertNext "the handler's value" caught log "ended \"caught: gave up at 2\""
     let uncaught := scopeOf #[("run", fun _ => rounds)]
     let failing := drive uncaught #[calledEvent "run"]
-    check (failing.any (· matches .failed ⟪"run"⟫ "gave up at 2")) "the call fails"
-    assertNext "and the run" uncaught failing "failed gave up at 2"
+    check (failing.any (· matches .failed ⟪"run"⟫ (.refused "gave up at 2"))) "the call fails"
+    assertNext "and the run" uncaught failing "failed refused: gave up at 2"
     -- Inside a round, a try catches each round's failure and the loop goes on.
     let perRound := scopeOf #[("run", fun _ => iter (fun (n : Nat) => do
       let _ ← try step s!"r{n}" catch _ => pure .null
       pure (if n == 2 then Sum.inr (Json.num n) else Sum.inl (n + 1))) 0)]
     assertNext "every round ran" perRound (drive perRound #[calledEvent "run"] (fun _ => .error "x")) "ended 2"
     -- A handler that throws is a failure of its own.
-    let rethrows := scopeOf #[("run", fun _ => try step "a" catch error => throw s!"again: {error}")]
+    let rethrows := scopeOf #[("run", fun _ => try step "a" catch error => throw (.refused s!"again: {error.reason}"))]
     assertNext "a handler's failure" rethrows (drive rethrows #[calledEvent "run"] (fun _ => .error "x"))
-      "failed again: x",
+      "failed refused: again: x",
 
   test "a retry tries again while it fails, every try in the log, each call in a frame of its own" do
     let scope := scopeOf #[("run", fun _ => retry 2 (call "flaky" .null)), ("flaky", fun _ => step "try")]
     let log := drive scope #[calledEvent "run"] (fun _ => .error "busy")
     let frames := log.filterMap fun | .opened frame { name := "flaky", .. } => some frame | _ => none
     assertEqual "three calls" frames #[⟪"run", "flaky"⟫, ⟪"run", "flaky#1"⟫, ⟪"run", "flaky#2"⟫]
-    assertNext "then it fails" scope log "failed busy"
+    assertNext "then it fails" scope log "failed refused: busy"
     let once := scopeOf #[("run", fun _ => retry 0 (step "a"))]
     assertEqual "retry 0 tries once" ((drive once #[calledEvent "run"] (fun _ => .error "x")).filter (· matches .answered ..)).size 1,
 
@@ -294,7 +294,7 @@ def computationSuite : Suite := suite "core/replay.computations" #[
       ("bad-arguments", fun _ => call "double" "not a number")]
     assertNext "a round trip" scope (drive scope #[calledEvent "run" (Json.num 21)]) "ended 42"
     let log := drive scope #[calledEvent "bad-arguments"]
-    check (log.any fun | .failed ⟪"bad-arguments", "double"⟫ message => contains message "double: its arguments cannot be read" | _ => false)
+    check (log.any fun | .failed ⟪"bad-arguments", "double"⟫ (.refused message) => contains message "double: its arguments cannot be read" | _ => false)
       "unreadable arguments fail in the callee's frame",
 
   test "a scope keeps the first routine of a name, lets routines defined together call each other, and can lose one" do
@@ -310,8 +310,21 @@ def computationSuite : Suite := suite "core/replay.computations" #[
     let deep := scopeOf #[("run", fun _ => call "mid" .null), ("mid", fun _ => call "leaf" .null),
       ("leaf", fun _ => pure "leaf")]
     let log := drive (deep.without "leaf") #[calledEvent "run"]
-    check (log.any fun | .failed ⟪"run", "mid", "leaf"⟫ message => contains message "no routine named leaf" | _ => false)
-      "the routine is gone two calls down"
+    check (log.any fun | .failed ⟪"run", "mid", "leaf"⟫ (.defect message) => contains message "no routine named leaf" | _ => false)
+      "the routine is gone two calls down",
+
+  test "a refusal and a break are caught; a defect is not, and fails every call up to the run" do
+    let scope := scopeOf #[
+      ("refuses", fun _ => try call "no" .null catch error => pure (.str s!"caught {error.kind}")),
+      ("no", fun _ => throw (.refused "wrong data")),
+      ("buggy", fun _ => try call "mid" .null catch _ => pure "caught"),
+      ("mid", fun _ => try call "nowhere" .null catch _ => pure "caught too")]
+    assertNext "a refusal is caught" scope (drive scope #[calledEvent "refuses"]) "ended \"caught refused\""
+    let log := drive scope #[calledEvent "buggy"]
+    check (log.any (· matches .failed ⟪"buggy", "mid"⟫ (.defect "no routine named nowhere")))
+      "the caller of the missing routine fails with the defect, its handler passed over"
+    check (!log.any (· matches .returned ..)) "no handler ran"
+    assertNext "and the run ends with it" scope log "failed defect: no routine named nowhere"
 ]
 
 def rebaseSuite : Suite := suite "core/rebase" #[

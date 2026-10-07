@@ -119,6 +119,43 @@ structure Wait where
   reads: a wait for a call takes one call. -/
   one : Bool := false
 
+/-- Why a computation failed: one of three kinds, each with what happened, in words. -/
+inductive Failure where
+  /-- What it was given cannot be used: wrong data, a question that cannot be asked, a request
+  the world refused. Whoever called it may recover, as an agent does by telling its model. -/
+  | refused (reason : String)
+  /-- A bug, which a correct program never has: a routine its scope lacks, settings a routine
+  cannot read, a result that cannot be read back. Nothing catches it: it fails every call it is
+  in, up to the one whose continuation takes any failure, as the session's does. -/
+  | defect (reason : String)
+  /-- The call was broken from outside, by a person who stopped it. Its caller may go on. -/
+  | broken (reason : String)
+  deriving BEq, Repr, Inhabited
+
+namespace Failure
+
+def reason : Failure → String
+  | .refused reason | .defect reason | .broken reason => reason
+
+/-- The kind's name, wherever a failure is written: in a log, a command's output. -/
+def kind : Failure → String
+  | .refused _ => "refused"
+  | .defect _ => "defect"
+  | .broken _ => "broken"
+
+/-- The failure of kind `kind`, with `reason`. -/
+def ofKind? (kind reason : String) : Option Failure :=
+  match kind with
+  | "refused" => some (.refused reason)
+  | "defect" => some (.defect reason)
+  | "broken" => some (.broken reason)
+  | _ => none
+
+/-- A failure in a line: its kind, and why. -/
+def render (failure : Failure) : String := s!"{failure.kind}: {failure.reason}"
+
+end Failure
+
 /-- A computation: a tree of operations, each continued with its answer, or with the error when the
 world could not give one. A read of the inbox takes the messages not yet read; one that waits is
 for some notices only, which it says given the frame it is made in, and is made once one of them
@@ -129,13 +166,14 @@ loop is data, where a continuation is not. A comment says something to whoever r
 and to no one else: nothing depends on it. -/
 inductive Computation (σ : Signature) : Type → Type 1 where
   | pure : α → Computation σ α
-  /-- Gives up, up to the call it is in, unless something catches it first. -/
-  | fail : (error : String) → Computation σ α
+  /-- Gives up, up to the call it is in, unless something catches it first; a defect, nothing
+  does. -/
+  | fail : (failure : Failure) → Computation σ α
   | perform : (op : σ.Op) → (Except String (σ.Answer op) → Computation σ α) → Computation σ α
   | inbox : (wait : Option Wait) → (List Notice → Computation σ α) → Computation σ α
   /-- Asks a person, and waits for a reply to the frame it is asked in, of a kind that fits. -/
   | ask : Question → (Reply → Computation σ α) → Computation σ α
-  | call : RoutineCall → (Except String Json → Computation σ α) → Computation σ α
+  | call : RoutineCall → (Except Failure Json → Computation σ α) → Computation σ α
   | iter : {S β : Type} → (S → Computation σ (S ⊕ β)) → S → (β → Computation σ α) → Computation σ α
   | comment : (text : String) → Computation σ α → Computation σ α
 
@@ -155,12 +193,13 @@ def bind : Computation σ α → (α → Computation σ β) → Computation σ �
 
 instance : Monad (Computation σ) := { pure := .pure, bind := .bind }
 
-/-- A computation made to give its value or its failure: what `try` and `catch` are. It does not
-reach into a routine that is called, whose failure the call has caught already, and nothing is
-logged for it. -/
-def attempt : Computation σ α → Computation σ (Except String α)
+/-- A computation made to give its value or its failure: what `try` and `catch` are. A defect it
+does not give: that goes on failing. It does not reach into a routine that is called, whose
+failure the call has caught already, and nothing is logged for it. -/
+def attempt : Computation σ α → Computation σ (Except Failure α)
   | .pure a => .pure (.ok a)
-  | .fail error => .pure (.error error)
+  | .fail (.defect reason) => .fail (.defect reason)
+  | .fail failure => .pure (.error failure)
   | .perform op k => .perform op fun answer => (k answer).attempt
   | .inbox wait k => .inbox wait fun notices => (k notices).attempt
   | .ask question k => .ask question fun reply => (k reply).attempt
@@ -174,7 +213,7 @@ def attempt : Computation σ α → Computation σ (Except String α)
       | .error error => .pure (.error error)
   | .comment text k => .comment text k.attempt
 
-instance : MonadExcept String (Computation σ) where
+instance : MonadExcept Failure (Computation σ) where
   throw := .fail
   tryCatch body handler := body.attempt.bind fun
     | .ok a => .pure a
@@ -197,11 +236,12 @@ that fits the question: no other notice ends the wait. A question that cannot be
 def ask (question : Question) : Computation σ Reply :=
   match question.validate with
   | .ok () => .ask question .pure
-  | .error problem => .fail problem
+  | .error problem => .fail (.refused problem)
 
-/-- Performs an operation, and fails where it was performed when the world could not answer. -/
+/-- Performs an operation, and fails where it was performed when the world could not answer: the
+world refused it. -/
 def perform (op : σ.Op) : Computation σ (σ.Answer op) :=
-  .perform op fun | .ok answer => .pure answer | .error error => .fail error
+  .perform op fun | .ok answer => .pure answer | .error error => .fail (.refused error)
 
 /-- Tries a computation again while it fails, up to `attempts` times more. Every try is in the log. -/
 def retry (attempts : Nat) (computation : Computation σ α) : Computation σ α :=
@@ -210,7 +250,8 @@ def retry (attempts : Nat) (computation : Computation σ α) : Computation σ α
   | attempts + 1 => try computation catch _ => retry attempts computation
 
 /-- Calls a routine by its name, its commands to run in `environment?` when one is given, and
-where the caller's do otherwise. Its failure is its caller's too, unless the caller catches it. -/
+where the caller's do otherwise. Its failure is its caller's too, of the same kind, unless the
+caller catches it. -/
 def call (name : String) (arguments : Json) (environment? : Option Json := none) :
     Computation σ Json :=
   .call { name, arguments, environment? } fun | .ok value => .pure value | .error error => .fail error
@@ -288,12 +329,12 @@ def routine [ToJson α] [FromJson α] [ToJson β] [FromJson β] (name : String)
   body arguments :=
     match fromJson? arguments with
     | .ok a => toJson <$> body a
-    | .error problem => .fail s!"{name}: its arguments cannot be read: {problem}"
+    | .error problem => .fail (.refused s!"{name}: its arguments cannot be read: {problem}")
   call a := do
     let result ← call name (toJson a)
     match fromJson? result with
     | .ok b => pure b
-    | .error problem => throw s!"{name}: its result cannot be read: {problem}"
+    | .error problem => throw (.defect s!"{name}: its result cannot be read: {problem}")
 
 /-- What the driver is asked to do: an operation, and the frame that asked. -/
 structure OpRequest (σ : Signature) where
@@ -316,7 +357,7 @@ inductive Event (σ : Signature) where
   | answered (frame : Frame) (key : σ.Key) (answer : Except String σ.Stored)
   | opened (frame : Frame) (call : RoutineCall)
   | returned (frame : Frame) (value : Json)
-  | failed (frame : Frame) (error : String)
+  | failed (frame : Frame) (failure : Failure)
   | broke (frame : Frame) (reason : String)
   | commented (text : String)
 

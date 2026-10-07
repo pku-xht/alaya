@@ -170,11 +170,17 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
     assertContains "ask_user's instruction" (opening asking) (Tools.AskUser.instruction #[.yesNo, .singleChoice])
     check (!contains (opening config) "ask_user") "no ask_user without kinds of question"
     assertContains "subagent's instruction" (opening config) Tools.Subagent.instruction
+    -- Refused by the agent, or by the routine of the call its tool makes.
     let parse (config : MiniVero.Config) (response : Chat.Response) : String :=
-      (response.toolCalls.findSome? (Basic.problem? config.tools response)).getD ""
+      (response.toolCalls.findSome? fun call =>
+        (Basic.problem? config.tools response call).orElse fun _ =>
+          (config.tools.find? (·.name == call.name)).bind fun tool =>
+            match Tools.AskUser.read (tool.arguments call.arguments) with
+            | .ok _ => none
+            | .error problem => some problem).getD ""
     assertContains "not offered" (parse config (Scripted.responseWith #[Scripted.askCall "q" "Keep it?"])) "Unknown tool 'ask_user'"
     assertContains "its own refusal" (parse asking (Scripted.responseWith #[Scripted.askCall "q" "Which?" "single_choice" #["only"]]))
-      "at least two candidates"
+      "at least two options"
     assertContains "alone" (parse asking (Scripted.responseWith #[Scripted.askCall "q" "Keep it?", Scripted.call "c" "bash" "ls"]))
       "ask_user must be called alone"
     assertError "an unknown kind" (Catalog.complete "mini-vero" (.mkObj [("question_types", .arr #["multiple_choice"])])) fun
@@ -190,7 +196,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
     assertStringEq "omitted" (shown (some "/alaya/outputs/7.txt") true)
       "[output omitted; full output: /alaya/outputs/7.txt]\n\nCommand exited with code 1"
     check (config.tools.any fun tool => tool.name == "bash" &&
-      ((tool.call (.mkObj [("command", "ls")])).arguments.getObjVal? "executor" |>.toOption
+      ((tool.arguments (.mkObj [("command", "ls")])).getObjVal? "executor" |>.toOption
         |>.any fun executor => (executor.getObjVal? "outputs").toOption == some (.bool true))) "every command keeps its output as a file"
 ]
 private def call (id name : String) (arguments : Lean.Json := .mkObj []) : Chat.ToolCall :=
@@ -292,10 +298,11 @@ def containerSuite : Suite := Testing.suite "agents/mini-vero.container" #[
     assertEqual "the agent's outcome" (Scripted.agentStatus log) "Submitted"
     assertEqual "the calls: the session, the agent, MiniVero itself in its frame, its bash in the sub-agent's"
       (log.filterMap fun | .opened frame opened => some (frame, opened.name) | _ => none)
-      #[(⟪"session"⟫, "session"), (⟪"session", "agent"⟫, "agent"), (⟪"session", "agent", "mini-vero"⟫, "mini-vero"),
-        (⟪"session", "agent", "mini-vero", "bash"⟫, "bash")]
+      #[(⟪"session"⟫, "session"), (⟪"session", "agent"⟫, "agent"), (⟪"session", "agent", "subagent"⟫, "subagent"),
+        (⟪"session", "agent", "subagent", "mini-vero"⟫, "mini-vero"),
+        (⟪"session", "agent", "subagent", "mini-vero", "bash"⟫, "bash")]
     check (log.any fun
-        | .opened ⟪"session", "agent", "mini-vero"⟫ { name := "mini-vero", arguments := delegated, environment? := none } =>
+        | .opened ⟪"session", "agent", "subagent", "mini-vero"⟫ { name := "mini-vero", arguments := delegated, environment? := none } =>
           Scripted.taskOf delegated == some "write b.txt"
         | _ => false)
       "the sub-agent's call is the agent's configuration, with the model's task, and no environment"

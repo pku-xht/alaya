@@ -43,7 +43,7 @@ def planner : Routine.Typed Agent Task Plan := routine "planner" fun task => do
     let mut messages := messages.push response.message
     for asked in response.toolCalls do
       -- The model's call is a call of the routine it names, with the arguments it gave.
-      let result ← try Alaya.Core.call asked.name asked.arguments catch error => pure (.str s!"error: {error}")
+      let result ← try Alaya.Core.call asked.name asked.arguments catch error => pure (.str s!"error: {error.reason}")
       messages := messages.push (.tool asked.id result)
     return Sum.inl messages) opening
   return { steps := ((answer.splitOn "\n").filter (!·.isEmpty)).toArray }
@@ -129,9 +129,9 @@ def suite : Suite := Testing.suite "runtime/routines" #[
 
   test "a routine is entered by a call alone, and what crosses the call must be what it takes" do
     -- Called with arguments it cannot read, a routine fails; its caller may catch that.
-    withRun (fun _ => try Alaya.Core.call "step" (.mkObj [("command", "make")]) catch error => pure (.str error)) fun run => do
+    withRun (fun _ => try Alaya.Core.call "step" (.mkObj [("command", "make")]) catch error => pure (.str error.reason)) fun run => do
       let log := settle run opening
-      check (log.any fun | .failed ⟪"session", "agent", "step"⟫ error => contains error "step: its arguments cannot be read" | _ => false)
+      check (log.any fun | .failed ⟪"session", "agent", "step"⟫ (.refused error) => contains error "step: its arguments cannot be read" | _ => false)
         "the routine failed, in its own frame"
       check ((next run log) matches .waits ⟪"session"⟫ _) "and the agent went on, to its end"
     -- A handle that expects another result than the routine gives fails where the result is read.
@@ -139,12 +139,13 @@ def suite : Suite := Testing.suite "runtime/routines" #[
     withRun (fun _ => toJson <$> mistaken.call "make") fun run => do
       let log := answer run (settle run opening) (executed)
       check (log.any fun | .returned ⟪"session", "agent", "step"⟫ value => value.compress == "0" | _ => false) "the routine returned its status"
-      check (log.any fun | .failed ⟪"session", "agent"⟫ error => contains error "step: its result cannot be read" | _ => false)
-        "the caller could not read it"
+      check (log.any fun | .failed ⟪"session", "agent"⟫ (.defect error) => contains error "step: its result cannot be read" | _ => false)
+        "the caller could not read it: a defect"
     -- The grader is a program a person calls, no routine: nothing an agent calls reaches it.
     withRun (fun _ => Alaya.Core.call "grader" (.mkObj [("command", "true")])) fun run => do
       let log := settle run opening
-      check (log.any fun | .failed ⟪"session", "agent", "grader"⟫ "no routine named grader" => true | _ => false) "there is no such routine"
+      check (log.any fun | .failed ⟪"session", "agent", "grader"⟫ (.defect "no routine named grader") => true | _ => false)
+        "there is no such routine: a defect"
 
 ]
 

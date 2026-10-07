@@ -23,8 +23,7 @@ private def response (id : String) (usage? : Option Chat.TokenUsage := none) : C
 /-- A turn: the call `id`, whose command printed `output`, kept whole in its file. -/
 private def turn (id : String) (output : String) (usage? : Option Chat.TokenUsage := none) : Item :=
   .turn (response id usage?) #[(bashCall id, .ok (Agents.Tools.Bash.result
-    { output := { output, exitCode? := some 0 }, workspace := default
-      file? := some s!"/alaya/outputs/{id}.txt" }))]
+    { output := { output, exitCode? := some 0 }, workspace := default, file? := some s!"/alaya/outputs/{id}.txt" }))]
 
 /-- `n` turns, each a call `c<i>` whose output is 500 characters, after a task message. -/
 private def turns (n : Nat) : History :=

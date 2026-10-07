@@ -121,7 +121,7 @@ def eventSummary : Event Agent → String
       let arguments := argumentsSummary call.arguments
       labelled s!"open {call.name}" (if arguments.isEmpty then "" else (flatten arguments 60).quote)
   | .returned _ value => labelled "return" (valueSummary value)
-  | .failed _ error => s!"fail: {flatten error}"
+  | .failed _ failure => s!"fail, {failure.kind}: {flatten failure.reason}"
   | .broke frame reason => s!"stopped {frame.render}: {flatten reason}"
   | .commented text => s!"# {flatten text}"
 
@@ -129,14 +129,14 @@ def eventSummary : Event Agent → String
 ended. -/
 def endingSummary : CallEnd → String
   | .returned value => s!"done: {valueSummary value}"
-  | .failed error => s!"failed: {flatten error}"
+  | .failed failure => s!"failed, {failure.kind}: {flatten failure.reason}"
   | .stopped reason => s!"stopped: {flatten reason}"
 
 /-- What a run does next, in a line: what it waits for, or what it asks. `ended?` is how its last
 call ended, once it has: a run that calls nothing stands as that call ended. -/
 def nextSummary (question? : Option Question) (ended? : Option CallEnd) : Next Agent → String
   | .ended (.ok value) => s!"done: {valueSummary value}"
-  | .ended (.error error) => s!"failed: {flatten error}"
+  | .ended (.error failure) => s!"failed, {failure.kind}: {flatten failure.reason}"
   | .waits frame _ =>
     match question?, ended? with
     | some question, _ => s!"waits for a reply: {flatten question.text 70}"

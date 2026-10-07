@@ -75,7 +75,7 @@ def suite : Suite := Testing.suite "app/render" #[
       (.opened ⟪"session", "agent", "ask_user"⟫ { name := "ask_user", arguments := (askCall "q" "Keep it?").arguments }, "open ask_user \"Keep it?\""),
       (.opened ⟪"session", "agent", "time_budget"⟫ { name := "time_budget", arguments := .mkObj [] }, "open time_budget"),
       (.returned ⟪"session", "agent"⟫ (json "{\"status\":\"Submitted\",\"submission\":\"done\"}"), "return Submitted: done"),
-      (.failed ⟪"session", "agent", "bash"⟫ "no routine named bash", "fail: no routine named bash"),
+      (.failed ⟪"session", "agent", "bash"⟫ (.defect "no routine named bash"), "fail, defect: no routine named bash"),
             (.broke ⟪"session", "agent"⟫ "to grade this point", "stopped session/agent: to grade this point"),
       (.commented "the parser goes wrong here\nsee 5.7", "# the parser goes wrong here see 5.7")]
     for (event, line) in lines do
@@ -91,7 +91,7 @@ def suite : Suite := Testing.suite "app/render" #[
     let request : Chat.Request := { messages := #[.user "a", .user "b"] }
     let lines : Array (Option Question × Next Agent × String) := #[
       (none, .ended (.ok (json "{\"status\":\"Submitted\",\"submission\":\"\"}")), "done: Submitted"),
-      (none, .ended (.error "it broke"), "failed: it broke"),
+      (none, .ended (.error (.refused "it broke")), "failed, refused: it broke"),
       (some question, .waits ⟪"session", "agent", "ask_user"⟫ (some question), "waits for a reply: Keep the old API?"),
       (none, .waits ⟪"session", "agent"⟫ none, "waits for a notice in session/agent"),
       (none, .waits #[] none, "waits for a call"),
@@ -102,7 +102,7 @@ def suite : Suite := Testing.suite "app/render" #[
       (none, .mark (.heard ⟪"session", "agent"⟫ #[2]), "next: inbox: takes [2]"),
       (none, .mark (.opened ⟪"session", "agent", "bash"⟫ { name := "bash", arguments := .mkObj [("command", "ls")] }), "next: open bash \"ls\""),
       (none, .mark (.returned ⟪"session", "agent", "bash"⟫ .null), "next: return null"),
-      (none, .mark (.failed ⟪"session", "agent", "bash"⟫ "x"), "next: fail: x"),
+      (none, .mark (.failed ⟪"session", "agent", "bash"⟫ (.refused "x")), "next: fail, refused: x"),
       (none, .mismatch 7, "broken: the event at 7 is no trace of the run"),
       (none, .unguarded ⟪"session", "agent"⟫, "broken: a loop in session/agent reads no event")]
     for (question?, next, line) in lines do
@@ -115,7 +115,7 @@ def suite : Suite := Testing.suite "app/render" #[
       (.returned outcome, "done: Submitted: all done"),
       (.returned fail, "done: fail 352/464"),
             (.stopped "to grade this point", "stopped: to grade this point"),
-      (.failed "it broke", "failed: it broke")]
+      (.failed (.refused "it broke"), "failed, refused: it broke")]
     for (ended, line) in standings do
       assertEqual line (Render.nextSummary none (some ended) (.waits #[] none)) line
     assertEqual "a call that waits is no ending" (Render.nextSummary none (some (.returned outcome)) (.waits ⟪"session", "grader"⟫ none))
@@ -215,7 +215,7 @@ def suite : Suite := Testing.suite "app/render" #[
     let rows ← assertOk <| Render.rows store forest Session.scope
     assertEqual "every entry" rows.size 7
     assertEqual "the run is named by its call" (rows[0]!.title?) (some "an-agent-of-another-version, gpt-oss-120b")
-    assertEqual "and its end says the call fails" (rows.back?.bind (·.status?)) (some "next: fail: no routine named an-agent-of-another-version")
+    assertEqual "and its end says the call fails" (rows.back?.bind (·.status?)) (some "next: fail, defect: no routine named an-agent-of-another-version")
 ]
 
 end RenderTests
