@@ -24,38 +24,29 @@ the Vero benchmark of verified Lean code.
 
 ## Features
 
-- **A complete view of every run.** `alaya html` writes the whole forest as one self-contained,
-  read-only page. It shows every branch and every call nested in the call that made it. Each
-  model request appears exactly as it was sent, with the response, its reasoning and its tool
-  calls. Each command shows how it changed the files, with the text of each change. Questions,
-  verdicts, time and token usage are shown where they happened.
-- **A run is a trace of its program.** Replaying an agent against its log gives back exactly the
-  run, and a log the agent could not have written is refused rather than misread. A crashed run
-  resumes where it stopped, and every model draw is cached, so no request is sent twice.
-- **Counterfactuals at any point.** Any entry of any run can be continued differently: with
-  another draw of the same request, a message, a changed file, an answer to the agent's question,
-  or a stop of any call by its frame. The original stays as it was, and branches share their
-  common entries.
-- **Grading at any point.** A grader is a program called on the log, in an image of its own, so
-  the middle of a run, or a fork of it, is graded like its end. Every benchmark is graded through
-  one protocol: its tests print TAP, and the verdict is pass, fail or error, with a score.
-- **Rebase onto a new version of an agent.** When an agent changes, `rebase` copies a run as the
-  new version makes it, keeping every entry that still holds. An expensive prefix is reused rather
-  than run again.
-- **Models recorded, providers interchangeable.** A run records the complete spec of the model it
-  used, independent of who served it. Any provider that can serve that spec as recorded may resume
-  the run. One that cannot is refused before any request, so changing providers never changes
-  what the model is sent.
-- **Agents built from routines.** An agent is a Lean program whose workflows, sub-agents and tools
-  are calls to routines with lexical scopes, each in a frame of its own in the log. MiniSwe and
-  MiniVero are included. A model can ask a person a typed question with `ask_user`, and the run
-  waits for the answer as long as it takes.
-- **Every point's files.** Every command runs in a container of its call's image, pinned by
-  digest, with no network by default. The workspace is versioned after every command, so the files
-  at any point of any run can be listed, read, compared or checked out.
+- **A complete view of runs.** `alaya html` writes the whole forest as one page: every branch,
+  every call in its frame, each request as it was sent, each response with its reasoning, and how
+  each command changed the files.
+- **Durable runs.** A run that crashed or was interrupted resumes from its log. Every model draw
+  is cached, so resuming sends no request twice.
+- **Forks.** Any entry of any run can be continued differently, and the original stays as it was.
+  The logs of a data directory form a forest that shares their common entries.
+- **Interventions at any point.** A person can send a message (`tell`), change the workspace
+  (`commit`), answer an agent's question (`reply`), or stop any call by its frame (`stop`).
+- **Grading at any point.** A grader is a program called on the log, in an image of its own. It
+  reads TAP from the benchmark's tests and gives a verdict: pass, fail or error, with a score.
+- **Rebase.** After an agent changes, `rebase` copies a run into a new data directory as the new
+  version makes it, keeping every entry that still holds.
+- **Isolated execution.** Every command runs in a container of its call's image, pinned by
+  digest, with no network by default. The workspace is versioned after every command, so any
+  point of a run can be listed, read, compared or checked out.
+- **Provider-independent runs.** A run records the model it used, not who served it. Another
+  provider may resume it only if it sends the model the same requests, and is refused otherwise.
+- **Agents.** MiniSwe and MiniVero are included, with the tools `bash`, `submit`, `ask_user`,
+  `time_budget` and `subagent`. An agent is a Lean program, built from routines with lexical
+  scopes, and its log shows every call it made.
 - **An agent-native command line.** Every command takes `--json`, every failure has a typed exit
-  status, and `alaya help --json` describes every command as data. An external agent such as
-  Claude Code can run, fork, grade and read experiments on its own.
+  status, and `alaya help --json` describes every command as data.
 
 ## Getting started
 
