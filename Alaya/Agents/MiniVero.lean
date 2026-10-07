@@ -128,4 +128,17 @@ def computation (config : Config) (model : Models.Spec) (task : String)
                                       contextLimit? := MiniSwe.contextLimit? config.base model, itself }
     (openingMessages config task uname)
 
+/-- MiniVero as a routine. A call's arguments are its configuration, its model and its task
+among it; one it cannot run on fails in the call's frame. Its scope is its tools, and itself,
+which `subagent` calls with its configuration and another task. -/
+def routine : Routine Agent :=
+  let body (arguments : Lean.Json) : Computation Agent Lean.Json :=
+    match Config.fromJson arguments with
+    | .error problem => .fail s!"mini-vero: {problem}"
+    | .ok config => match config.base.model?, config.base.task? with
+      | some model, some task => computation config model task ("mini-vero", config.toJson)
+      | none, _ => .fail "mini-vero: it samples a model, and its configuration names none"
+      | _, none => .fail "mini-vero: it works on a task, and its configuration names none"
+  { name := "mini-vero", body, scope := Scope.fix fun scope => Tools.routines.push { name := "mini-vero", body, scope } }
+
 end Alaya.Agents.MiniVero

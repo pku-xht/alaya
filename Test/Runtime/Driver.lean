@@ -297,18 +297,18 @@ def suite : Suite := Testing.suite "runtime/driver" #[
         | _ => false
       -- The session says what a person may append: a message only while a call runs, a program
       -- only once none does, and only one of the catalog.
-      assertError "a message after the end" (Catalog.admitsNotice (next run (← logAt rt ended))) fun
+      assertError "a message after the end" (Session.admitsNotice (next run (← logAt rt ended))) fun
         | .input _ => true
         | _ => false
-      assertError "a call while the agent runs" (Catalog.admitsCall (next run (← logAt rt paused))) fun
+      assertError "a call while the agent runs" (Session.admitsCall (next run (← logAt rt paused))) fun
         | .input message => contains message "a call is running"
         | _ => false
-      assertOk <| Catalog.admitsCall (next run (← logAt rt ended))
+      assertOk <| Session.admitsCall (next run (← logAt rt ended))
       let grader := (graderCall "true").event
       let (asked, _) ← assertOk <| Driver.append rt.store run ended grader
       let log ← logAt rt asked
       check ((next run log) matches .mark (.heard ⟪"session"⟫ _)) "the session takes the call"
-      assertError "a second call, before the first is made" (Catalog.admitsCall (next run log)) fun
+      assertError "a second call, before the first is made" (Session.admitsCall (next run log)) fun
         | .input message => contains message "a call to make here already"
         | _ => false
       -- The grader is a call of its own: its command is asked for in its frame, and a stop ends it.
@@ -320,7 +320,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
         let (hash, grown) ← assertOk <| rt.store.put forest { parent? := some during, event }
         during := hash
         forest := grown
-      assertError "a call while the grader runs" (Catalog.admitsCall (next run (← logAt rt during))) fun
+      assertError "a call while the grader runs" (Session.admitsCall (next run (← logAt rt during))) fun
         | .input message => contains message "a call is running"
         | _ => false
       let (halted, _) ← assertOk <| Driver.append rt.store run during (.broke ⟪"session", "grader"⟫ "no need")
@@ -373,7 +373,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
     -- stop or a message is refused, and on a log that is no trace of its run.
     let (after, _) ← assertOk <| Notices.comment rt.store first "after the end"
     check ((next run (← logAt rt after)) matches .waits ⟪"session"⟫ _) "the run stands as it stood"
-    assertError "a message there" (Catalog.admitsNotice (next run (← logAt rt after))) fun
+    assertError "a message there" (Session.admitsNotice (next run (← logAt rt after))) fun
       | .input _ => true
       | _ => false
     let forest ← assertOk rt.store.forest

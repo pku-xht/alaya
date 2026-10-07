@@ -212,7 +212,7 @@ def suite : Suite := Testing.suite "app/render" #[
       let (hash, grown) ← assertOk <| store.put forest { parent?, event }
       forest := grown
       parent? := some hash
-    let rows ← assertOk <| Render.rows store forest Catalog.run
+    let rows ← assertOk <| Render.rows store forest Session.scope
     assertEqual "every entry" rows.size 7
     assertEqual "the run is named by its call" (rows[0]!.title?) (some "an-agent-of-another-version, gpt-oss-120b")
     assertEqual "and its end says the call fails" (rows.back?.bind (·.status?)) (some "next: fail: no routine named an-agent-of-another-version")

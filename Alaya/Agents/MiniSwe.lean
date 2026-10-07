@@ -140,7 +140,7 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array St
   let model? ← match ← object.field? "model" with
     | none => pure defaults.model?
     | some .null => pure none
-    | some json => match Models.read json with
+    | some json => match Models.Spec.read json with
       | .ok spec => pure (some spec)
       | .error problem => throw s!"'model': {problem}"
   let task? ← match ← object.field? "task" with
@@ -481,5 +481,18 @@ def computation (config : Config) (model : Models.Spec) (task : String)
   let uname ← Tools.Uname.read
   converse { config with model? := some model, contextLimit? := contextLimit? config model, itself }
     (openingMessages config task uname)
+
+/-- MiniSwe as a routine. A call's arguments are its configuration, its model and its task
+among it; one it cannot run on fails in the call's frame. Its scope is its tools, and itself,
+which `subagent` calls with its configuration and another task. -/
+def routine : Routine Agent :=
+  let body (arguments : Json) : Computation Agent Json :=
+    match Config.fromJson arguments with
+    | .error problem => .fail s!"mini-swe: {problem}"
+    | .ok config => match config.model?, config.task? with
+      | some model, some task => computation config model task ("mini-swe", config.toJson)
+      | none, _ => .fail "mini-swe: it samples a model, and its configuration names none"
+      | _, none => .fail "mini-swe: it works on a task, and its configuration names none"
+  { name := "mini-swe", body, scope := Scope.fix fun scope => Tools.routines.push { name := "mini-swe", body, scope } }
 
 end Alaya.Agents.MiniSwe

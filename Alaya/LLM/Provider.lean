@@ -4,12 +4,12 @@ import Alaya.LLM.Provider.Responses
 import Alaya.LLM.Provider.Dgx
 
 /-!
-Who serves a model: chosen per invocation (`run --provider NAME`), never recorded. A provider
+Who serves a model: chosen per invocation (`resume --provider NAME`), never recorded. A provider
 is data — its API key variable, its URL, and how it serves particular models — and serving a
 model through one first checks the model's recorded requirements against what the provider
 declares, so that changing providers either sends the model the same requests or fails before
 any is sent. The agent may behave differently with different models; never with different
-providers.
+providers. Which providers a person can name is the app's (`Alaya.App.Catalog`).
 -/
 
 namespace Alaya.LLM.Provider
@@ -59,27 +59,6 @@ structure Provider where
   /-- Whether it serves every model under its own name, or only those in `routes`. -/
   anyModel : Bool := true
   deriving Inhabited
-
-def all : Array Provider := #[
-  { name := "yunwu", baseUrl := "https://yunwu.ai/v1", baseUrlVar? := some "YUNWU_BASE_URL",
-    keyVar := "YUNWU_API_KEY" },
-  { name := "closeai", baseUrl := "https://api.openai-proxy.org/v1", keyVar := "CLOSEAI_API_KEY" },
-  { name := "xmcp", baseUrl := "https://llm.xmcp.ltd", keyVar := "XMCP_API_KEY"
-    routes := [("deepseek-v4.1-flash", { name := "ds/deepseek-v4-flash" }),
-      ("gpt-5.6-luna", { name := "closeai/gpt-5.6-luna" })] },
-  { name := "apiyi", baseUrl := "https://api.apiyi.com/v1", baseUrlVar? := some "APIYI_BASE_URL",
-    keyVar := "APIYI_API_KEY"
-    routes := [("gpt-6-luna", { name := "gpt-6-luna", api := .responses })] },
-  { name := "fireworks", baseUrl := "https://api.fireworks.ai/inference/v1",
-    baseUrlVar? := some "FIREWORKS_BASE_URL", keyVar := "FIREWORKS_API_KEY", anyModel := false
-    routes := [("deepseek-v4.1-flash", { name := "accounts/fireworks/models/deepseek-v4p1-flash" })] },
-  -- A DGX Spark's vLLM server, which needs no credential; `--url`/`--port` address it.
-  { name := "dgx", baseUrl := ({} : Dgx.Endpoint).baseUrl, baseUrlVar? := some "DGX_BASE_URL",
-    keyVar := "DGX_API_KEY", defaultKey? := some "EMPTY" }]
-
-def names : String := ", ".intercalate (all.map (·.name)).toList
-
-def named? (name : String) : Option Provider := all.find? (·.name == name)
 
 /-- How `provider` serves `model`, or why it does not. -/
 def Provider.route (provider : Provider) (model : String) : Except String Route :=

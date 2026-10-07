@@ -48,4 +48,16 @@ def computation (config : Config) : Computation Agent Json := do
   let ran ← exec config.command { timeoutSeconds := config.timeoutSeconds, merge := false }
   return verdictJson (Grader.verdict ran.output.output ran.output.failure?) ran.output
 
+/-- The grader as a routine. A call's arguments are its configuration; one with no command fails
+in the call's frame. -/
+def routine : Routine Agent where
+  name := "grader"
+  body arguments := match Config.fromJson arguments with
+    | .error problem => .fail s!"grader: {problem}"
+    | .ok config =>
+      if config.command.trimAscii.isEmpty then
+        .fail "grader: it needs its command, which prints TAP, and its configuration names none"
+      else computation config
+  scope := .empty
+
 end Alaya.Agents.Grader

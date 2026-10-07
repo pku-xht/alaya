@@ -1,5 +1,5 @@
 import Alaya.App.Render
-import Alaya.App.Catalog
+import Alaya.App.Session
 import Alaya.Runtime.Workspaces
 
 /-!
@@ -195,7 +195,7 @@ def dataJson (store : Store) (workspaces : Workspaces) (forest : Forest) (title 
     -- A run that calls nothing stands as its last call ended.
     let idle := match visit.next? with
       | some (.ended _) => true
-      | some next => Catalog.idle next
+      | some next => Session.idle next
       | none => false
     let state : Option String := if !leaf then none else match visit.next?, ended? with
       | some (.mismatch _), _ | some (.unguarded _), _ | none, _ => some "broken"

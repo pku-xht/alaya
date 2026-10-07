@@ -87,7 +87,7 @@ private def newRun (a : NewArgs) (out : Cli.Out) : Result UInt32 := do
   let source := match a.source with
     | .inl project => .directory project
     | .inr (image, workdir) => .image image workdir
-  for appended in ← Data.create a.data source Catalog.run Catalog.sessionCall do
+  for appended in ← Data.create a.data source Session.scope Session.call do
     entryRecord out appended
   pure 0
 
@@ -129,15 +129,15 @@ private def callRun (a : CallArgs) (out : Cli.Out) : Result UInt32 := do
     throw <| .input problem
   appendIn a.data out fun data => do
     let environment ← Environment.pinned a.image a.workdir
-    data.call Catalog.run a.entry
+    data.call Session.scope a.entry
       { name := a.program, arguments := config, environment? := some environment.toJson }
-      (admit := Catalog.admitsCall)
+      (admit := Session.admitsCall)
 
 /-! ## Driving a run -/
 
 /-- `--provider NAME`: who serves the models of the run's calls, for this invocation. -/
 private def providerName : Cli.Value Provider.Provider :=
-  .enum "NAME" (Provider.all.map fun p => (p.name, p)).toList
+  .enum "NAME" (Catalog.providers.map fun p => (p.name, p)).toList
 
 private structure ResumeArgs where
   data : System.FilePath
@@ -153,7 +153,7 @@ private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
     <$> dataDir
     <*> entryArg "the entry to go on from; any unambiguous prefix, or PREFIX:N"
     <*> Cli.flag? "provider" providerName
-      s!"who serves the models: {Provider.names}; needed only when a call samples"
+      s!"who serves the models: {Catalog.providerNames}; needed only when a call samples"
     <*> Provider.endpointCli
     <*> Executor.Docker.RunOptions.cli
     <*> Cli.flagD "samples" .nat 0 "responses this invocation may sample; 0 is no limit"
@@ -162,7 +162,7 @@ private def ResumeArgs.cli : Cli.Spec ResumeArgs :=
 
 /-- Whether the driver stopped where the session waits for a person to call a program. -/
 private def idle : Stop → Bool
-  | .waits frame none => frame == Catalog.sessionFrame
+  | .waits frame none => frame == Session.frame
   | _ => false
 
 /-- How a driver stopped, as the last object of `--json`: its status, and, when no call runs,
@@ -229,7 +229,7 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
       samples? := if a.samples == 0 then none else some a.samples
       budgetMs? := if a.budget == 0 then none else some (a.budget * 1000) }
     data.withRuntime a.options a.provider? baseUrl? (unserved := .input "a call samples its model: name a --provider") fun rt => do
-      let (last, stop, log) ← data.resume Catalog.run a.entry rt limits (entryRecord out)
+      let (last, stop, log) ← data.resume Session.scope a.entry rt limits (entryRecord out)
       reportStop out last log stop
       pure <| if idle stop then idleStatus log else match stop with
         | .ended (.ok _) => 0
@@ -238,14 +238,14 @@ private def resumeRun (a : ResumeArgs) (out : Cli.Out) : Result UInt32 := do
         | .paused _ => exitPaused
 
 private def tellRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
-  appendIn data out (·.tell Catalog.run reference text (admit := Catalog.admitsNotice))
+  appendIn data out (·.tell Session.scope reference text (admit := Session.admitsNotice))
 
 /-- A change to the workspace, and then a message that says what changed, with what the person
 adds: the change itself reaches no read, so the message is how the call running hears of it. -/
 private def commitRun (data : System.FilePath) (reference : String) (dir : System.FilePath)
     (message? : Option String) (out : Cli.Out) : Result UInt32 :=
   withData data (write := true) fun data => do
-    let changed ← tryCatch (data.commit Catalog.run reference dir (admit := Catalog.admitsNotice)) fun
+    let changed ← tryCatch (data.commit Session.scope reference dir (admit := Session.admitsNotice)) fun
       | .input message => throw <| .input s!"{message}: to send a message alone, use `tell`"
       | error => throw error
     entryRecord out changed
@@ -254,7 +254,7 @@ private def commitRun (data : System.FilePath) (reference : String) (dir : Syste
       | _ => ""
     let lines := (summary.splitOn "\n").map ("  " ++ ·) ++ (message?.toList)
     let text := "\n".intercalate ("I changed the workspace:" :: lines)
-    entryRecord out (← data.tell Catalog.run changed.hash.hex text)
+    entryRecord out (← data.tell Session.scope changed.hash.hex text)
     pure 0
 
 /-- A person's reply: the answer's text, or `none` when they cannot answer. -/
@@ -270,7 +270,7 @@ private def replyAnswer : Cli.Spec (Option String) :=
 
 private def replyRun (data : System.FilePath) (reference : String) (answer? : Option String)
     (out : Cli.Out) : Result UInt32 :=
-  appendIn data out (·.reply Catalog.run reference answer?)
+  appendIn data out (·.reply Session.scope reference answer?)
 
 /-- Appends a person's comment after an entry. -/
 private def commentRun (data : System.FilePath) (reference text : String) (out : Cli.Out) : Result UInt32 :=
@@ -282,15 +282,15 @@ private def stopRun (data : System.FilePath) (reference : String) (frame? : Opti
   appendIn data out fun data => do
     let frame ← match frame? with
       | some text => Result.fromExcept Error.input (Frame.parse text)
-      | none => Catalog.callToStop (← data.visitAt Catalog.run reference).stack
-    data.stop Catalog.run reference frame reason
+      | none => Session.callToStop (← data.visitAt Session.scope reference).stack
+    data.stop Session.scope reference frame reason
 
 /-! ## Reading the forest -/
 
 private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
     let forest ← data.store.forest
-    let rows ← Render.rows data.store forest Catalog.run
+    let rows ← Render.rows data.store forest Session.scope
     if out.json then
       for row in rows do
         out.record (.mkObj [("entry", row.hash.hex), ("parent", row.parent?.map (Json.str ·.hex) |>.getD .null),
@@ -301,7 +301,7 @@ private def treeRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
 
 private def waitingRun (data : System.FilePath) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
-    for (hash, frame, question) in ← data.waiting Catalog.run do
+    for (hash, frame, question) in ← data.waiting Session.scope do
       out.record (.mkObj [("entry", hash.hex), ("frame", frame.toJson), ("question", question.text),
           ("question_type", question.form.name),
           ("options", .arr (question.form.options.map Json.str))])
@@ -314,7 +314,7 @@ private def statusOf (visit : Visit) : String :=
 
 private def logRun (data : System.FilePath) (reference : String) (out : Cli.Out) : Result UInt32 :=
   withData data fun data => do
-    let visits ← data.visitsAt Catalog.run reference
+    let visits ← data.visitsAt Session.scope reference
     for visit in visits do
       let entry := visit.entry
       let frame := (entry.event.frame?.map Frame.render).getD "-"
@@ -330,7 +330,7 @@ private def logRun (data : System.FilePath) (reference : String) (out : Cli.Out)
 private def showRun (data : System.FilePath) (reference : String) (request : Bool) (out : Cli.Out) :
     Result UInt32 := do
   withData data fun data => do
-    let visit ← data.visitAt Catalog.run reference
+    let visit ← data.visitAt Session.scope reference
     let { hash, entry, position, spentMs := spent, usage, stack, .. } := visit
     let asked? := match visit.asked? with
       | some { op := .sample _ request, .. } => some request
@@ -428,7 +428,7 @@ private def htmlRun (data : System.FilePath) (file : System.FilePath) (hide : Ar
     let forest ← data.store.forest
     if forest.entries.isEmpty then
       throw <| .input "nothing to report: the data directory holds no runs"
-    let page ← Html.report data.store data.workspaces forest s!"alaya {data.path}" hidden Catalog.run
+    let page ← Html.report data.store data.workspaces forest s!"alaya {data.path}" hidden Session.scope
     Result.fromIO Error.storage (IO.FS.writeFile file page)
     out.record (.mkObj [("file", file.toString), ("bytes", page.length)])
       s!"wrote {file} ({page.length} bytes)"
@@ -452,7 +452,7 @@ private def rebaseRun (data : System.FilePath) (reference : String) (target : Sy
     let settings ← settings.mapM (·.read)
     let (_, tip, entries) ← data.entriesAt reference
     let log ← Rebase.reconfigure (entries.map (·.event)) settings
-    let rebased := rebase Catalog.run log
+    let rebased := rebase Session.scope log
     let summary := Rebase.summary rebased log.size
     let source ← Result.fromIO Error.storage (IO.FS.realPath data.path)
     let written ← data.rebase entries rebased target s!"rebased from {tip.hex} in {source}: {summary}"
@@ -504,9 +504,9 @@ private def configRun (program? : Option String) (settings : Array Settings.Give
       let config ← Catalog.resolve definition.name #[]
       out.record (.mkObj [("program", definition.name), ("config", config)])
         s!"program {definition.name} {config.pretty}"
-    for spec in Models.all do
+    for spec in Catalog.models do
       out.record (.mkObj [("model", spec.toJson)]) s!"model {spec.toJson.pretty}"
-    for provider in Provider.all do
+    for provider in Catalog.providers do
       out.record (.mkObj [("provider", providerJson provider)]) (providerText provider)
     return 0
   let name := program?.getD ""

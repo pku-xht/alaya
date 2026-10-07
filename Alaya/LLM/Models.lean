@@ -2,12 +2,11 @@ import Alaya.Base.ConfigJson
 import Alaya.Base.Error
 
 /-!
-The models a run can use, independent of who serves them. A model is named by its ID as its
-creator publishes it (`gpt-oss-120b`, `deepseek-v4.1-flash`), and its defaults are in this
-table. An agent's configuration names one (`--set model=NAME`), a later setting overrides any
-field (`--set model.params.reasoning_effort=high`), and the call holds the complete spec, from
-which every later command builds the same model again, through whichever provider serves it
-(`Alaya.LLM.Provider`).
+A model, independent of who serves it: its spec, what a run records. A model is named by its ID
+as its creator publishes it (`gpt-oss-120b`, `deepseek-v4.1-flash`), and a call holds its
+complete spec, from which every later command builds the same model again, through whichever
+provider serves it (`Alaya.LLM.Provider`). Which models a person can name, with their defaults,
+is the app's (`Alaya.App.Catalog`).
 -/
 
 namespace Alaya.LLM.Models
@@ -88,42 +87,13 @@ def Spec.fromJson (json : Lean.Json) (defaults : Spec) : Except String Spec := d
     contextTokens? := ← natOrNull object "context_tokens" defaults.contextTokens?
     outputTokens? := ← natOrNull object "output_tokens" defaults.outputTokens? }
 
-/-- The models alaya knows, with their defaults. A size left `none` is not known; `--set`
-gives it. -/
-def all : Array Spec := #[
-  { name := "gpt-oss-120b", contextTokens? := some 131072 },
-  { name := "gpt-5.6-luna" },
-  -- OpenAI's light GPT-6, released 2026-09-22: 1,050,000 tokens of context, of which up to
-  -- 128,000 may be output. An OpenAI reasoning model, so it keeps its reasoning across tool
-  -- calls only through the Responses API, which returns it as encrypted items to send back.
-  { name := "gpt-6-luna", echoReasoning := .items, contextTokens? := some 1050000,
-    outputTokens? := some 128000 },
-  -- A thinking-mode DeepSeek model: with tool calls, its API rejects a request whose earlier
-  -- assistant messages lack their reasoning, and a gateway may need it on every reasoned turn
-  -- to reconstruct the conversation. 1,000,000 tokens of context, per DeepSeek's documentation.
-  { name := "deepseek-v4.1-flash", echoReasoning := .text, contextTokens? := some 1000000 }]
-
-def names : String := ", ".intercalate (all.map (·.name)).toList
-
-def named? (name : String) : Option Spec := all.find? (·.name == name)
-
-/-- The spec a recorded or given configuration describes, or what is wrong with it: a name alone
-is the model's defaults. -/
-def read (json : Lean.Json) : Except String Spec := do
-  let json := match json with
-    | .str name => .mkObj [("name", name)]
-    | json => json
+/-- A spec as a configuration or a log holds it: its name, and the fields it sets, each one left
+out at the spec's own default. No list of models is consulted: the spec is what is written,
+whoever wrote it. -/
+def Spec.read (json : Lean.Json) : Except String Spec := do
   let name ← match json.getObjVal? "name" with
     | .ok (.str name) => pure name
-    | _ => throw s!"a model needs a \"name\": one of {names}"
-  let some defaults := named? name
-    | throw s!"unknown model: {name} (use {names})"
-  match Spec.fromJson json defaults with
-  | .ok spec => pure spec
-  | .error message => throw s!"{name}: {message}"
-
-/-- `read`, as a command reads a configuration: what is wrong with it is the caller's to fix. -/
-def fromJson (json : Lean.Json) : Result Spec :=
-  Result.fromExcept Error.input (read json)
+    | _ => throw "a model needs a \"name\""
+  Spec.fromJson json { name }
 
 end Alaya.LLM.Models

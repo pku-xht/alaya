@@ -75,7 +75,7 @@ def agent : Routine Agent :=
   (routine "agent" fun (config : Config) => workflow.call { goal := config.task }).within scope
 
 /-- The run: the run's routine, whose scope has the agent, so that a person's call of it finds it. -/
-def run : Scope Agent := Scope.of #[Catalog.session (Scope.of #[agent])]
+def run : Scope Agent := Scope.of #[Session.of (Scope.of #[agent])]
 
 /-- Runs `k` with the run of `make`'s computation for the task, in the scope above. -/
 private def withRun (make : String → Computation Agent Json) (k : Scope Agent → TestM Unit) : TestM Unit :=
