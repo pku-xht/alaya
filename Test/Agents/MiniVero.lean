@@ -127,7 +127,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       let call : Chat.ToolCall := { id := "c", name := "bash", arguments := .mkObj [("command", "lake lean Proof.lean")] }
       let asked := after run #[.response { toolCalls := #[call] }]
       match next run asked with
-      | .ask { op := .exec "lake lean Proof.lean" { timeoutSeconds := 600, .. }, frame } =>
+      | .ask { op := .exec "lake lean Proof.lean" { timeoutSeconds := 300, .. }, frame } =>
         assertEqual "in the call's frame" frame ⟪"session", "agent", "bash"⟫
       | _ => fail "expected the command run, as the response's first call"
       let ran := after run #[.response { toolCalls := #[call] },
@@ -135,7 +135,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       match next run ran with
       | .ask { op := .sample _ request, .. } =>
         match request.messages.back? with
-        | some (Chat.Message.tool "c" (Json.str text)) => check (contains text "\"exit_code\": 1") "exit code shown"
+        | some (Chat.Message.tool "c" (Json.str text)) => assertStringEq "exit code shown" text "Lean type mismatch\n\nCommand exited with code 1"
         | _ => fail "missing the output"
       | _ => fail "should continue after compiler feedback",
   test "submit is terminal but is not claimed to be a passing evaluation" do
@@ -146,15 +146,15 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
   test "long output stays in the raw log" do
     withVero config fun run => do
       let call : Chat.ToolCall := { id := "c", name := "bash", arguments := .mkObj [("command", "lake build")] }
-      let raw := String.ofList (List.replicate 12000 'x')
+      let raw := String.join (List.replicate 3000 "x\n")
       let log := after run #[.response { toolCalls := #[call] },
         .execution { output := { output := raw, exitCode? := some 0 }, workspace := default }]
       check (log.any fun | .answered _ _ (.ok (.execution e)) => e.output.output == raw | _ => false) "raw output kept"
-      let history : MiniVero.History := { items := #[.turn { toolCalls := #[call] } #[(call, Tools.Bash.result
-        { output := { output := raw, exitCode? := some 0 }, workspace := default })]] }
+      let history : MiniVero.History := { items := #[.turn { toolCalls := #[call] } #[(call, .ok (Tools.Bash.result
+        { output := { output := raw, exitCode? := some 0 }, workspace := default }))]] }
       match (MiniVero.view history)[1]? with
       | some (Chat.Message.tool _ (Json.str text)) =>
-        check ((text.splitOn "elided_chars").length > 1) "view should truncate"
+        assertContains "view should show the end" text "[Showing lines 1001-3000 of 3000.]"
         check (text.length < raw.length) "view should be smaller"
       | _ => fail "missing view observation",
 
@@ -170,9 +170,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
     check (!contains (opening config) "ask_user") "no ask_user without kinds of question"
     assertContains "subagent's instruction" (opening config) Tools.Subagent.instruction
     let parse (config : MiniVero.Config) (response : Chat.Response) : String :=
-      match MiniVero.parseActions config response with
-      | .formatError message => message
-      | .calls _ => ""
+      (response.toolCalls.findSome? (Basic.problem? config.tools response)).getD ""
     assertContains "not offered" (parse config (Scripted.responseWith #[Scripted.askCall "q" "Keep it?"])) "Unknown tool 'ask_user'"
     assertContains "its own refusal" (parse asking (Scripted.responseWith #[Scripted.askCall "q" "Which?" "single_choice" #["only"]]))
       "at least two candidates"
@@ -182,19 +180,17 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       | .input m => contains m "unknown kind of question"
       | _ => false,
 
-  test "a long output's warning names the file that holds it, and a format error names the submit tool" do
-    let long := String.ofList (List.replicate 20000 'x')
-    let shown (file? : Option String) : String := MiniVero.observe { output := long, exitCode? := some 0 } file? false
-    assertContains "with its file" (shown (some "/alaya/outputs/7.txt")) "[output truncated; full output: /alaya/outputs/7.txt]"
-    assertContains "with none" (shown none) "Output too long."
+  test "a long output's note names the file that holds it, and an old one is that file alone" do
+    let long := String.join (List.replicate 3000 "x\n")
+    let shown (file? : Option String) (omitted := false) : String :=
+      MiniVero.observe { output := long, exitCode? := some 1 } file? omitted
+    assertContains "with its file" (shown (some "/alaya/outputs/7.txt")) "Full output: /alaya/outputs/7.txt]"
+    check (!contains (shown none) "Full output") "with none, no file"
+    assertStringEq "omitted" (shown (some "/alaya/outputs/7.txt") true)
+      "[output omitted; full output: /alaya/outputs/7.txt]\n\nCommand exited with code 1"
     check (config.tools.any fun tool => tool.name == "bash" &&
       ((tool.call (.mkObj [("command", "ls")])).arguments.getObjVal? "executor" |>.toOption
         |>.any fun executor => (executor.getObjVal? "outputs").toOption == some (.bool true))) "every command keeps its output as a file"
-    let message := MiniVero.formatErrorMessage config "Unknown tool 'python'." true (some "stop")
-    assertContains "the submit tool" message "If you want to end the task, call the `submit` tool"
-    check (!contains message "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT") "no sentinel"
-    assertContains "a tool call" message "Every response needs at least one tool call."
-    assertContains "the tools' instructions" message Tools.Subagent.instruction
 ]
 private def call (id name : String) (arguments : Lean.Json := .mkObj []) : Chat.ToolCall :=
   { id, name, arguments }
@@ -228,9 +224,9 @@ def timeSuite : Suite := Testing.suite "agents/mini-vero.time" #[
 
   test "mini-swe neither offers time_budget nor accepts it in its configuration" do
     assertEqual "tools" ((MiniSwe.tools {}).map (·.name)) #["bash"]
-    match MiniSwe.parseActions {} (turn #[call "t" "time_budget"]) with
-    | .formatError message => check (contains message "Unknown tool 'time_budget'") "unknown"
-    | .calls _ => fail "mini-swe must not accept time_budget"
+    match MiniSwe.formatError? {} (turn #[call "t" "time_budget"]) with
+    | some message => check (contains message "Unknown tool 'time_budget'") "unknown"
+    | none => fail "mini-swe must not accept time_budget"
     assertError "config" (Catalog.complete "mini-swe" (.mkObj [("time_budget", true)])) fun
       | .input m => contains m "unknown field 'time_budget'"
       | _ => false,

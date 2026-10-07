@@ -14,6 +14,7 @@ def suite : Suite := Testing.suite "agents/routines" #[
   test "an agent brings its scope: its tools and itself, fixed where it is defined" do
     let names := #["bash", "submit", "ask_user", "time_budget", "subagent", "mini-swe", "mini-vero", "grader"]
     let reach (routine : Routine Agent) := names.filter fun name => (routine.scope.find name).isSome
+    assertEqual "inside the basic agent" (reach Basic.routine) #["bash"]
     assertEqual "inside MiniSwe" (reach MiniSwe.routine) #["bash"]
     assertEqual "inside MiniVero" (reach MiniVero.routine) #["bash", "ask_user", "time_budget", "mini-vero"]
     assertEqual "inside the grader" (reach Grader.routine) #[]

@@ -37,33 +37,31 @@ def Tool.name (tool : Tool) : String := tool.definition.name
 
 namespace Tools
 
-/-- The first problem a response's tool calls have against the tools offered: no call at all, a
-call that must be alone beside another, arguments that are not JSON, a tool not offered, or a
-call its tool refuses; `none` when every call can be made. -/
-def problem? (tools : Array Tool) (response : Chat.Response) : Option String := Id.run do
-  if response.toolCalls.isEmpty then
-    return some "No tool calls found in the response. Every response MUST include at least one tool call."
-  if response.toolCalls.size != 1 then
-    if let some tool := tools.find? fun tool =>
-        tool.alone && response.toolCalls.any (·.name == tool.name) then
-      return some s!"{tool.name} must be called alone."
-  for call in response.toolCalls do
-    if let some raw := call.invalidArguments? then
-      return some ("Error parsing tool call arguments: " ++
-        (match Lean.Json.parse raw with | .error e => e | .ok _ => "invalid JSON") ++ ".")
-    match tools.find? (·.name == call.name) with
-    | none => return some s!"Unknown tool '{call.name}'."
-    | some tool => if let .error problem := tool.check call.arguments then return some problem
-  return none
+/-- What is wrong with one tool call against the tools offered: arguments that are not JSON, a
+tool not offered, or arguments its tool refuses; `none` when it can be made. -/
+def callProblem? (tools : Array Tool) (call : Chat.ToolCall) : Option String :=
+  if let some raw := call.invalidArguments? then
+    some ("Error parsing tool call arguments: " ++
+      (match Lean.Json.parse raw with | .error e => e | .ok _ => "invalid JSON") ++ ".")
+  else match tools.find? (·.name == call.name) with
+    | none => some s!"Unknown tool '{call.name}'."
+    | some tool => match tool.check call.arguments with
+      | .ok () => none
+      | .error problem => some problem
+
+/-- The tool that must be alone in a response with other calls, if any. -/
+def lone? (tools : Array Tool) (response : Chat.Response) : Option Tool :=
+  if response.toolCalls.size ≤ 1 then none
+  else tools.find? fun tool => tool.alone && response.toolCalls.any (·.name == tool.name)
 
 /-- Makes the call a model's tool call asks for: the routine call its tool makes of the model's
-arguments. A call that fails gives its error as its result. -/
-def make (tools : Array Tool) (asked : Chat.ToolCall) : Computation Agent Json := do
+arguments. Gives its result, or its error when it fails. -/
+def make (tools : Array Tool) (asked : Chat.ToolCall) : Computation Agent (Except String Json) := do
   let made : RoutineCall := match tools.find? (·.name == asked.name) with
     | some tool => tool.call asked.arguments
     | none => { name := asked.name, arguments := asked.arguments }
-  try call made.name made.arguments
-  catch error => pure (.mkObj [("error", .str error)])
+  try .ok <$> call made.name made.arguments
+  catch error => pure (.error error)
 
 /-! ## bash: a command in the workspace -/
 
@@ -82,17 +80,9 @@ def command (arguments : Lean.Json) : Except String String :=
   | .ok _ => .error "The 'command' argument of the bash tool must be a string."
   | .error _ => .error "Missing 'command' argument in bash tool call."
 
-/-- The fields saying how a command ended, after `fields`. -/
-private def withStatus (o : Output) (fields : List (String × Lean.Json)) : Lean.Json :=
-  let fields := fields ++ [("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null)]
-  let fields := match o.error? with
-    | some error => fields ++ [("error", Lean.Json.str error)]
-    | none => fields
-  .mkObj fields
-
 /-- A command's result, as its call gives it: the whole output, how it ended, and the file a
 later command finds the output in, when the command was run so. What a model is shown of it is
-its agent's to say (`observation`). -/
+its agent's to say. -/
 def result (execution : Execution) : Json :=
   .mkObj [("output", execution.output.output),
     ("exit_code", execution.output.exitCode?.map (fun c => Json.num c.toNat) |>.getD .null),
@@ -128,31 +118,6 @@ def tool (config : Executor.Config := {}) : Tool := {
   check := fun arguments => (command arguments).map fun _ => ()
   call := fun arguments => { name := definition.name, arguments := arguments.setObjVal! "executor" config.toJson } }
 
-/-- What an omitted output says in its place. -/
-def omittedNotice (file : String) : String := s!"[output omitted; full output: {file}]"
-
-/-- How the model sees an `Output`: as JSON, with `output` cut to its first and last `limit / 2`
-characters when it is `limit` or longer — mini's `observation_template`. With `file?`, where
-the whole output can be read, the warning names it instead, as the DeepSeek harness does. -/
-def observation (o : Output) (limit : Nat) (file? : Option String := none) : Lean.Json :=
-  let length := o.output.length
-  let fields : List (String × Lean.Json) :=
-    if length < limit then [("output", o.output)]
-    else
-      let half := limit / 2
-      [("output_head", String.ofList (o.output.toList.take half)),
-       ("output_tail", String.ofList (o.output.toList.drop (length - half))),
-       ("elided_chars", (length - limit : Nat)),
-       ("warning", match file? with
-         | none => "Output too long."
-         | some file => s!"[output truncated; full output: {file}]")]
-  withStatus o fields
-
-/-- How the model sees an `Output` it is no longer shown: the file holding it, in place of
-`output`, and how the command ended. -/
-def omitted (o : Output) (file : String) : Lean.Json :=
-  withStatus o [("output", omittedNotice file)]
-
 end Bash
 
 /-! ## submit: the end of a run -/
@@ -171,9 +136,9 @@ def message (arguments : Lean.Json) : String :=
   | .ok (.str message) => message
   | _ => ""
 
-/-- Ends the agent, its message the submission. An agent that offers it ends when the call is
-the next to make, and calls no routine. -/
-def tool : Tool := { definition }
+/-- Ends the agent, its message the submission; alone in its turn, so that nothing is left
+unmade. An agent that offers it ends at the call, and calls no routine. -/
+def tool : Tool := { definition, alone := true }
 
 end Submit
 

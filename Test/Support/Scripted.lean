@@ -289,15 +289,15 @@ def samplesOf (run : Scope Agent) (log : Log Agent) : Array (Chat.Request × Cha
   (log.foldl step (Replayer.start run, #[])).2
 
 /-- What an agent's model saw last, and the response it gave: the last request's messages, then
-that response as the agent's view shows it, as `parse` reads it. -/
-def lastDialogue (parse : Chat.Response → Agents.MiniSwe.Parsed) (run : Scope Agent) (log : Log Agent) :
+that response as the agent's view shows it: itself, or the format error it is answered with. -/
+def lastDialogue (formatError? : Chat.Response → Option String) (run : Scope Agent) (log : Log Agent) :
     Array Chat.Message :=
   match (samplesOf run log).back? with
   | none => #[]
   | some (request, response) =>
-    request.messages.push <| match parse response with
-      | .calls _ => response.message
-      | .formatError message => .user message
+    request.messages.push <| match formatError? response with
+      | none => response.message
+      | some message => .user message
 
 /-- The log with `event` appended as the driver appends an event of the program: after the
 comments the program made since its last one. -/

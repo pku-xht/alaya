@@ -498,7 +498,7 @@ its scope as a closure carries its environment. In Alaya's own agents:
 
 | Routine | Its scope: the routines it can call |
 | --- | --- |
-| `mini-swe` | `bash` |
+| `basic`, `mini-swe` | `bash` |
 | `mini-vero` | `bash`, `ask_user`, `time_budget`, and `mini-vero` itself |
 | `bash`, `ask_user`, `time_budget` | none |
 | `grader` | none |

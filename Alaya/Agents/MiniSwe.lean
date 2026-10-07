@@ -1,11 +1,9 @@
-import Alaya.Agents.Tools
-import Alaya.LLM.Models
-import Alaya.Base.ConfigJson
+import Alaya.Agents.Basic
 
 /-! A port of mini-SWE-agent's default tool-calling agent: mini's prompts, its one `bash` tool,
 its sentinel that ends a run, its observations, and its loop, whose context keeps every turn.
-The pieces of the loop that do not depend on mini's terms are public, for an agent built on it.
-See `docs/agents.md` §4. -/
+What does not depend on mini's terms, reading a configuration and a person's messages and how
+an agent ends, is the basic agent's. See `docs/agents.md` §6. -/
 
 namespace Alaya.Agents.MiniSwe
 
@@ -39,30 +37,7 @@ def Config.toJson (config : Config) : Json :=
     ("model", config.model?.map (·.toJson) |>.getD .null),
     ("task", config.task?.map Json.str |>.getD .null),
     ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Json)),
-    ("executor", .mkObj [
-      ("timeout_seconds", (config.executor.timeoutSeconds : Json)),
-      ("env", .arr (config.executor.env.map fun (name, value) => .arr #[.str name, .str value]))])]
-
-/-- The executor settings a configuration's `executor` field gives, over `defaults`. -/
-def executorFromJson (json : Json) (defaults : Executor.Config) : Except String Executor.Config := do
-  let object ← ConfigJson.object json #["timeout_seconds", "env"]
-  let env ← match ← object.field? "env" with
-    | none => pure defaults.env
-    | some json => ConfigJson.pairs json
-  pure { timeoutSeconds := ← object.nat "timeout_seconds" defaults.timeoutSeconds, env }
-
-/-- A model a configuration names: its complete spec, or none. -/
-def modelFromJson : Json → Except String (Option Models.Spec)
-  | .null => pure none
-  | json => match Models.Spec.read json with
-    | .ok spec => pure (some spec)
-    | .error problem => throw s!"'model': {problem}"
-
-/-- A task a configuration gives, or none. -/
-def taskFromJson : Json → Except String (Option String)
-  | .null => pure none
-  | .str task => pure (some task)
-  | other => throw s!"'task' must be a string, not {other.compress}"
+    ("executor", Basic.executorToJson config.executor)]
 
 /-- Reads a configuration; a field left out is its default, and an unknown one is an error. -/
 def Config.fromJson (json : Json) : Except String Config := do
@@ -70,13 +45,13 @@ def Config.fromJson (json : Json) : Except String Config := do
   let defaults : Config := {}
   let model? ← match ← object.field? "model" with
     | none => pure defaults.model?
-    | some json => modelFromJson json
+    | some json => Basic.modelFromJson json
   let task? ← match ← object.field? "task" with
     | none => pure defaults.task?
-    | some json => taskFromJson json
+    | some json => Basic.taskFromJson json
   let executor ← match ← object.field? "executor" with
     | none => pure defaults.executor
-    | some json => executorFromJson json defaults.executor
+    | some json => Basic.executorFromJson json defaults.executor
   pure { model?, task?, executor
          maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors }
 
@@ -129,18 +104,14 @@ def instanceMessage (task system machine : String) : String :=
 def openingMessages (task : String) (uname : Uname) : Array Chat.Message :=
   #[.system systemMessage, .user (instanceMessage task uname.system uname.machine)]
 
-/-- Whether the provider cut the response off before a tool call: mini's test in its
-`format_error_template`. -/
-def truncated (hasToolCalls : Bool) (finishReason? : Option String) : Bool :=
-  match finishReason? with
-  | some "length" => true
-  | some "tool_calls" => !hasToolCalls
-  | _ => false
-
-/-- The user turn a malformed response is answered with: mini's `format_error_template`. -/
+/-- The user turn a malformed response is answered with: mini's `format_error_template`, which
+says so when the provider cut the response off before a tool call. -/
 def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : Option String) : String :=
-  if truncated hasToolCalls finishReason? then
-    formatErrorCut.replace "{{ finish_reason }}" (finishReason?.getD "")
+  let cut := match finishReason? with
+    | some "length" => true
+    | some "tool_calls" => !hasToolCalls
+    | _ => false
+  if cut then formatErrorCut.replace "{{ finish_reason }}" (finishReason?.getD "")
   else rendered (formatErrorTemplate.replace "{{error}}" error)
 
 /-! ## Observations -/
@@ -174,99 +145,20 @@ def observation (o : Output) : String :=
 
 /-! ## The loop
 
-Mini's `DefaultAgent`: each round reads what a person said, samples a response, answers a
-malformed one with the format error, and otherwise makes each of its tool calls in order, until a
-command prints the sentinel first. -/
-
-/-- The context a sample is conditioned on. -/
-abbrev Dialogue := Array Chat.Message
+Mini's `DefaultAgent`: its context is the messages so far, each appended once and kept. A round
+reads what a person said, samples a response, answers a malformed one with the format error,
+and otherwise makes each tool call in order, until a command prints the sentinel first. -/
 
 /-- The tools it offers: mini's `bash`, alone. -/
 def tools (config : Config) : Array Tool := #[Tools.Bash.tool config.executor]
 
-/-- A parsed model turn: the calls to make, in order, or a format-error message to send back as
-a user turn. -/
-inductive Parsed where
-  | calls (calls : Array Chat.ToolCall)
-  | formatError (message : String)
-
-/-- Reads a response's tool calls against `tools`: the first problem makes the turn a format
-error, as `formatError` words it. -/
-def parse (tools : Array Tool) (formatError : String → Bool → Option String → String)
-    (response : Chat.Response) : Parsed :=
-  match Tools.problem? tools response with
-  | some problem => .formatError (formatError problem (!response.toolCalls.isEmpty) response.finishReason?)
-  | none => .calls response.toolCalls
-
-/-- Mini's `parse_actions`, on its tools and in its format error. -/
-def parseActions (config : Config) (response : Chat.Response) : Parsed :=
-  parse (tools config) formatErrorMessage response
-
-/-- One thing a conversation holds: a message told, the model's turn with each of its calls and
-what the call gave, or a malformed response, which the model is shown as the format error. -/
-inductive Item where
-  | told (message : Chat.Message)
-  | turn (response : Chat.Response) (results : Array (Chat.ToolCall × Json))
-  | malformed (message : String)
-
-/-- The state of the loop: the conversation, and the malformed responses since the last
-well-formed one. A person's message in between does not reset the count. -/
-structure History where
-  items : Array Item := #[]
-  formatErrors : Nat := 0
-
-/-- The conversation with a malformed response, counted. -/
-def History.malformed (history : History) (message : String) : History :=
-  { history with items := history.items.push (.malformed message), formatErrors := history.formatErrors + 1 }
-
-/-- The messages of a conversation: what is told as it is, a turn as the response and a tool
-message for each call, its result as `shown` gives it with the turn's number, from 1, and a
-malformed response as the format error, as a user turn. -/
-def viewWith (shown : Nat → Chat.ToolCall → Json → String) (items : Array Item) : Dialogue := Id.run do
-  let mut messages : Dialogue := #[]
-  let mut turn := 0
-  for item in items do
-    match item with
-    | .told message => messages := messages.push message
-    | .malformed message =>
-      turn := turn + 1
-      messages := messages.push (.user message)
-    | .turn response results =>
-      turn := turn + 1
-      messages := messages.push response.message
-      for (call, result) in results do
-        messages := messages.push (.tool call.id (.str (shown turn call result)))
-  return messages
-
-/-- Mini's linear context: every turn, a command as its observation, and a tool that failed as
-its error. -/
-def view (history : History) : Dialogue :=
-  viewWith (items := history.items) fun _ _ result => match Tools.Bash.ofResult? result with
-    | some (output, _) => observation output
-    | none => result.pretty
-
-/-- How the agent ends: a status, what it submitted, and, where the status alone does not say,
-why. -/
-def outcome (status : String) (submission : String := "") (reason? : Option String := none) : Json :=
-  .mkObj ([("status", (status : Json)), ("submission", (submission : Json))] ++
-    (reason?.map fun reason => ("reason", (reason : Json))).toList)
-
-/-- How the agent ends when the provider refuses a request as too long: the one failure of a
-sample the driver answers with. -/
-def refused (refusal : String) : Json :=
-  outcome "ContextExceeded" (reason? := some s!"the provider refused the request: {refusal}")
-
-/-- What a notice tells the model: a person's message, in an envelope that says it came from a
-person while the agent was paused. No other notice reaches a read of the agent's. -/
-def noticeMessage : Notice → Option Chat.Message
-  | .said message =>
-    some (.user s!"<intervention>\nA person sent you a message while you were paused.\n{message}\n</intervention>")
-  | _ => none
-
-/-- The conversation with what has arrived since the last read of the inbox. -/
-def listen (items : Array Item) : Computation Agent (Array Item) := do
-  let heard ← inbox
-  return items ++ (heard.toArray.filterMap noticeMessage).map .told
+/-- The format error a response is answered with, mini's `parse_actions`: of its first problem,
+no call at all or the first call with a problem; `none` when every call can be made. -/
+def formatError? (config : Config) (response : Chat.Response) : Option String :=
+  let problem? := if response.toolCalls.isEmpty
+    then some "No tool calls found in the response. Every response MUST include at least one tool call."
+    else response.toolCalls.findSome? (Tools.callProblem? (tools config))
+  problem?.map (formatErrorMessage · (!response.toolCalls.isEmpty) response.finishReason?)
 
 /-- What a command printed after the sentinel `line`, when it printed the line first: mini's
 `has_finished`. -/
@@ -276,29 +168,32 @@ def submitted? (line : String) (result : Json) : Option String := do
   | first :: rest => if first.trimAscii.toString == line then some ("\n".intercalate rest) else none
   | [] => none
 
-/-- One round of mini's `DefaultAgent.run`: read the inbox, so that what a person said while the
-run was paused reaches the model in this round's request; sample, and end when the provider
-refuses the request as too long; answer a malformed response with the format error, and end
-after too many in a row; otherwise make each call in order, until a command prints the
-sentinel first. -/
-def round (config : Config) (model : Models.Spec) (history : History) : Computation Agent (History ⊕ Json) := do
-  let history := { history with items := ← listen history.items }
-  let request : Chat.Request := { messages := view history, tools := (tools config).map (·.definition) }
-  let response ← try sample model request catch refusal => return .inr (refused refusal)
-  match parseActions config response with
-  | .formatError message =>
-    let history := history.malformed message
+/-- One round of mini's `DefaultAgent.run`, on the messages so far and the malformed responses
+in a row: read the inbox, so that what a person said while the run was paused reaches the model;
+sample, and end when the provider refuses the request as too long; answer a malformed response
+with the format error, and end after too many in a row; otherwise make each call in order, each
+shown as its observation or its error, until a command prints the sentinel first. -/
+def round (config : Config) (model : Models.Spec) : Basic.Dialogue × Nat → Computation Agent (Basic.Dialogue × Nat ⊕ Json)
+  | (messages, errors) => do
+  let messages := messages ++ (← Basic.heard)
+  let response ← try sample model { messages, tools := (tools config).map (·.definition) }
+    catch refusal => return .inr (Basic.refused refusal)
+  if let some message := formatError? config response then
     let limit := config.maxConsecutiveFormatErrors
-    if limit > 0 && history.formatErrors >= limit then return .inr (outcome "RepeatedFormatError")
-    return .inl history
-  | .calls calls =>
-    let mut results : Array (Chat.ToolCall × Json) := #[]
-    for asked in calls do
-      let result ← Tools.make (tools config) asked
-      if let some submission := submitted? sentinel result then
-        return .inr (outcome "Submitted" submission)
-      results := results.push (asked, result)
-    return .inl { history with items := history.items.push (.turn response results), formatErrors := 0 }
+    if limit > 0 && errors + 1 >= limit then return .inr (Basic.outcome "RepeatedFormatError")
+    return .inl (messages.push (.user message), errors + 1)
+  let mut messages := messages.push response.message
+  for asked in response.toolCalls do
+    let shown ← match ← Tools.make (tools config) asked with
+      | .error error => pure (Json.mkObj [("error", .str error)]).pretty
+      | .ok result =>
+        if let some submission := submitted? sentinel result then
+          return .inr (Basic.outcome "Submitted" submission)
+        pure <| match Tools.Bash.ofResult? result with
+          | some (output, _) => observation output
+          | none => result.pretty
+    messages := messages.push (.tool asked.id (.str shown))
+  return .inl (messages, 0)
 
 /-! ## The agent -/
 
@@ -306,7 +201,7 @@ def round (config : Config) (model : Models.Spec) (history : History) : Computat
 def computation (config : Config) (model : Models.Spec) (task : String) : Computation Agent Json := do
   -- The opening names the machine the commands run on, as the container says.
   let uname ← Tools.Uname.read
-  iter (round config model) { items := (openingMessages task uname).map .told }
+  iter (round config model) (openingMessages task uname, 0)
 
 /-- MiniSwe as a routine. A call's arguments are its configuration, its model and its task
 among it; one it cannot run on fails in the call's frame. Its scope is its tool. -/

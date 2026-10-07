@@ -457,7 +457,7 @@ def settingsSuite : Suite := Testing.suite "runtime/executor" #[
     assertEqual "what the agent is told" out.error? (some Executor.couldNotRun)
     assertEqual "the detail, for a reader of the log" out.detail? (some said)
     -- What a model is shown of it holds nothing docker said.
-    let shown := (Agents.Tools.Bash.observation out Agents.MiniSwe.outputLimit).compress
+    let shown := Agents.Basic.observation out none
     for leaked in ["3f9a1c", "/data/tmp", "daemon"] do
       check (!contains shown leaked) s!"the observation holds {leaked}: {shown}"
     check (contains shown Executor.couldNotRun) "and says the command could not be run",

@@ -32,6 +32,7 @@ import Alaya.Runtime.Store
 import Alaya.Runtime.Walk
 import Alaya.Runtime.Workspaces
 import Alaya.Runtime.Workspaces.Restic
+import Alaya.Agents.Basic
 import Alaya.Agents.Grader
 import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero

@@ -11,7 +11,7 @@ namespace ContextTests
 
 open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Alaya.Agents.MiniVero
-open Alaya.Agents.MiniSwe (Dialogue Item outcome)
+open Alaya.Agents.Basic (Dialogue Item outcome)
 open Lean (Json)
 
 private def bashCall (id : String) : Chat.ToolCall :=
@@ -22,9 +22,9 @@ private def response (id : String) (usage? : Option Chat.TokenUsage := none) : C
 
 /-- A turn: the call `id`, whose command printed `output`, kept whole in its file. -/
 private def turn (id : String) (output : String) (usage? : Option Chat.TokenUsage := none) : Item :=
-  .turn (response id usage?) #[(bashCall id, Agents.Tools.Bash.result
+  .turn (response id usage?) #[(bashCall id, .ok (Agents.Tools.Bash.result
     { output := { output, exitCode? := some 0 }, workspace := default
-      file? := some s!"/alaya/outputs/{id}.txt" })]
+      file? := some s!"/alaya/outputs/{id}.txt" }))]
 
 /-- `n` turns, each a call `c<i>` whose output is 500 characters, after a task message. -/
 private def turns (n : Nat) : History :=
@@ -33,8 +33,7 @@ private def turns (n : Nat) : History :=
 
 private def shownOutput (dialogue : Dialogue) (id : String) : String :=
   dialogue.findSome? (fun
-    | .tool callId (.str shown) => if callId != id then none else
-      (Json.parse shown).toOption >>= fun json => (json.getObjVal? "output" >>= Json.getStr?).toOption
+    | .tool callId (.str shown) => if callId != id then none else some shown
     | _ => none) |>.getD ""
 
 private def stored (dialogue : Dialogue) : List String :=

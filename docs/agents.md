@@ -3,16 +3,18 @@
 An agent is a routine of the language (`docs/language.md`) that works on a task with a model:
 it talks to the model in a loop, and the model acts through tools, each a routine of its own.
 This page is the tools agents offer, `ask_user`, which lets a model ask a person, the grader,
-which grades any point of a run, and the two agents Alaya includes:
-MiniSwe, a faithful port of mini-SWE-agent, and MiniVero, Alaya's agent for Vero's tasks.
+which grades any point of a run, and the three agents Alaya includes: Basic, a model with `bash`
+and `submit`; MiniVero, Basic with Vero's instructions and more tools; and MiniSwe, a faithful
+port of mini-SWE-agent.
 
 | § | What | Where |
 | --- | --- | --- |
 | 1 | **tools**: routines a model can call | `Alaya.Agents.Tools` |
 | 2 | `ask_user`: a model asks a person | `Alaya.Agents.Tools` |
 | 3 | the **grader**: its protocol, its verdict, and how to write one | `Alaya.Agents.Grader` |
-| 4 | **MiniSwe**: mini-SWE-agent's loop | `Alaya.Agents.MiniSwe` |
-| 5 | **MiniVero** | `Alaya.Agents.MiniVero` |
+| 4 | **Basic**: `bash` and `submit` | `Alaya.Agents.Basic` |
+| 5 | **MiniVero**: Basic for Vero's tasks | `Alaya.Agents.MiniVero` |
+| 6 | **MiniSwe**: mini-SWE-agent | `Alaya.Agents.MiniSwe` |
 
 ## 1. Tools
 
@@ -51,12 +53,12 @@ A model's tool call becomes a call of a routine in four steps:
 | `bash` | `command` | `bash`: `exec command`, with the executor settings the agent adds | `output`, `exit_code`, `error`, `file` |
 | `time_budget` | none | `time_budget`: `time` | `seconds_left`, or that the run has no limit |
 | `ask_user` | `question_type`, `question`, `options` | `ask_user`: `ask` the question (§2) | the reply |
-| `submit` | `message` | none: the agent that offers it ends with the message | |
-| `subagent` | `task` | the agent itself, `mini-swe` or `mini-vero`, with its configuration and the model's task | the sub-agent's outcome |
+| `submit` | `message` | none: the agent that offers it ends with the message; called alone | |
+| `subagent` | `task` | the agent itself, `mini-vero`, with its configuration and the model's task | the sub-agent's outcome |
 
 A tool is independent of the agent that offers it. The agent chooses which tools to offer, how
-to report a malformed call, and how to show a result to its model. MiniSwe offers `bash` alone;
-MiniVero offers them all (§5).
+to report a malformed call, and how to show a result to its model. Basic offers `bash` and
+`submit`, MiniVero offers them all (§5), and MiniSwe offers `bash` alone.
 
 ## 2. `ask_user`: a model asks a person
 
@@ -227,39 +229,28 @@ first's end, in the same log. A grader that reads only the workspace gives one v
 version of it, so the points worth grading are the entries that leave a new version: the
 answers of commands, and changes from outside.
 
-## 4. MiniSwe
+## 4. Basic
 
-`Alaya.Agents.MiniSwe` is a faithful port of
-[mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent)'s default tool-calling agent. It
-keeps what defines that agent: its prompts, its one `bash` tool, its sentinel that ends a run,
-its observations, its format errors, and its loop, whose context keeps every turn.
+`Alaya.Agents.Basic` is the basic agent: a model with `bash` and `submit`, as simple as an agent
+can be and still robust. Its command output follows [pi](https://github.com/earendil-works/pi):
+the end of an output, a note that names a file with all of it, and how the command ended. It is
+the base of MiniVero (§5).
 
 ### 4.1 Options
 
-Set at `call` with `--set FIELD=VALUE`; `alaya config --program mini-swe` prints the defaults.
+Set at `call` with `--set FIELD=VALUE`; `alaya config --program basic` prints the defaults.
 A field left out is its default, and a misspelt one is an error.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `model` | none | the model it samples: its spec (`docs/llm-api.md`), a name alone being that model's defaults; required |
 | `task` | none | the task, verbatim; required. `--set-file task=FILE` reads it from a file |
-| `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
-| `executor.timeout_seconds` | 30 | the time a command may take |
-| `executor.env` | mini's | environment overrides for every command: `PAGER=cat` and the like |
+| `executor.timeout_seconds` | 300 | the time a command may take |
+| `executor.env` | none | environment overrides for every command |
 
 ### 4.2 The loop
 
-Mini's `DefaultAgent.run`: each round reads what a person said, samples a response, answers a
-malformed one with the format error, and otherwise makes each of its tool calls in order.
-
-```lean
-def round (config : Config) (model : Models.Spec) (history : History) :
-    Computation Agent (History ⊕ Json)                       -- the next state, or how it ended
-
-iter (round config model) { items := opening.map .told }     -- go round until it ends
-```
-
-*One round (`MiniSwe.round`).*
+Each round reads what a person said, samples a response, and answers every tool call in it.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
@@ -268,116 +259,92 @@ flowchart TD
   classDef exec stroke:#2b6f6f
   classDef notice stroke:#7556a3
   classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
-  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
   classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
   listen("listen: read the inbox"):::notice --> sample("sample request"):::sample
   sample -- "refused as too long" --> context("return ContextExceeded"):::wait
-  sample -- "a response" --> parsed("read its tool calls")
-  parsed -- "malformed" --> format("tell the model the format error")
-  format -- "too many in a row" --> repeated("return RepeatedFormatError"):::bad
-  format -- "otherwise" --> again("next round, with the new state")
-  parsed -- "calls" --> each("each call, in order")
-  each --> tool("call name arguments<br/>its failure is given to the model as its result"):::exec
-  tool -- "printed the sentinel first" --> submitted("return Submitted"):::ok
+  sample -- "no tool call" --> remind("tell the model to call a tool")
+  sample -- "tool calls" --> each("each call, in order")
+  each -- "submit" --> submitted("return Submitted"):::ok
+  each -- "a problem" --> problem("answer the call with its problem")
+  each -- "otherwise" --> tool("call name arguments<br/>its result, or its failure, is the answer"):::exec
+  remind --> again("next round")
+  problem --> again
   tool --> again
   linkStyle default stroke-width:1px
 ```
 
-The state of the loop is the conversation so far: what the model was told, each turn with the
-results of its calls, and each malformed response. Each round builds its request from this
-state. The agent ends by returning its outcome, a status and a submission, as the value of its
-frame (§4.4).
+**Every tool call is answered.** A call is not made, and its answer is the problem, when:
+
+| The call | Its answer |
+| --- | --- |
+| has arguments that are not JSON | "Error parsing tool call arguments: …" |
+| names a tool that is not offered | "Unknown tool '…'." |
+| has arguments its tool refuses, such as a `bash` call with no `command` | what is wrong with them |
+| comes with others in a response that calls `submit` | "submit must be called alone: no call of this response was made." |
+| is in a response cut off at the output token limit | that its arguments may be cut off, and to call again |
+
+A call that is made is answered with its result. A routine that fails is answered with its
+error. Whatever the model sends, the run goes on.
+
+**A response with no tool call** is kept when it says something, and answered with a reminder to
+call a tool. A response cut off before any call is told so, and asked to be brief.
+
+There is no limit on malformed responses. How long a run may go is the driver's to bound:
+`alaya resume --samples N` and `--time-budget` (`docs/cli.md`).
 
 ### 4.3 What the model is sent
 
-**The opening** is mini's two messages, rendered from its `mini.yaml`: the system message, and
-the task with a line naming the machine. The line holds the system and the architecture, as
-`uname -sm` reads them in the call's container.
-
-**The tool** is mini's `bash`, with its description and schema. No other tool is offered.
+**The opening** is a short system message, then the task. The system message says that the agent
+acts only through tools, calls `submit` alone when the task is done, and calls a tool in every
+response. It also says that each command runs in a new shell at the repository's root, that a long
+output is cut to its end with a note naming a file, and which machine the commands run on: the
+system and the architecture, as `uname -sm` reads them in the call's container.
 
 **The view** is every turn, in order:
 
 - A person's message or change to the workspace is told as an `<intervention>`.
-- A turn is the model's message and a tool message for each call.
-- A malformed response is not shown. In its place the model sees a user message with the
-  format error, so it does not try to continue its own broken output. This is mini's protocol.
+- A turn is the model's message, and a tool message answering each call.
 
-**An observation** is mini's `observation_template`:
+### 4.4 Commands and their output
 
-```json
-{
-  "returncode": 0,
-  "output": "hello\n"
-}
+A command runs through `/bin/sh` in the run's container, at its workdir, with stderr merged into
+stdout and no standard input. A command that fails or runs out of time still gets an answer.
+
+The model is shown the output as text, as pi shows it. When it is longer than 2 000 lines or
+50 KB, the model sees its last lines, as many as fit, and a note:
+
+```
+[Showing lines 1001-3000 of 3000. Full output: /alaya/outputs/3f9a1c2b7d4e.txt]
 ```
 
-An output of 10 000 characters or more is shown as `output_head` and `output_tail`, its first
-and last 5 000, with `elided_chars` and a `warning`. A command that did not end on its own has
-`returncode` -1 and an `exception_info`. The log keeps the whole output.
+A last line too long to show whole is shown as its end. The file holds the whole output, and the
+model can read any part of it with `bash`. It is named by a hash of the output, so the same output
+has the same name in every run.
 
-**A format error** is the whole turn's answer when its first problem is one of these:
+When a command did not end well, how it ended follows the output: `Command exited with code 2`,
+or what went wrong, such as a timeout. An empty output of a command that ended well is shown as
+`(no output)`. The log keeps the whole output either way.
 
-| The response | Format error |
-| --- | --- |
-| has no tool call | "No tool calls found in the response…" |
-| has a call whose arguments are not JSON | "Error parsing tool call arguments: …" |
-| calls a tool that is not `bash` | "Unknown tool '…'." |
-| has a `bash` call with no `command` | what is wrong with it |
-
-The message is mini's `format_error_template`, which wraps the problem in mini's guidance on
-calling the tool. When the provider cut the response off (`finish_reason` is `length`, or
-`tool_calls` with no call), it says so and asks for a shorter response instead.
-
-### 4.4 How it ends
+### 4.5 How it ends
 
 The agent returns `{status, submission}`:
 
 | Status | When |
 | --- | --- |
-| `Submitted` | a command printed `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as its first line; the rest of its output is the submission. Calls after it in the same response do not run |
-| `RepeatedFormatError` | `max_consecutive_format_errors` malformed responses in a row |
+| `Submitted` | the model called `submit`; its message is the submission |
 | `ContextExceeded` | the provider refused a request as too long; `reason` holds the provider's words |
 
-A tool that fails does not end the agent: the model is shown the error as the call's result.
-
-### 4.5 Commands
-
-A command runs through `/bin/sh` in the run's container, at its workdir, with stderr merged into
-stdout and no standard input. A command that fails or runs out of time still gets an answer,
-which the model sees.
-
-### 4.6 Differences from mini-SWE-agent
-
-- **The machine line is the image's system and architecture**, such as `Linux x86_64`. Mini
-  gives the whole `uname`; in a container its kernel release and version are the host's, so
-  they would put the machine a run was created on into the prompt.
-- **A format error names one problem**, where mini concatenates every problem found. A
-  `command` that is not a string is a format error, where Python would run a list.
-- **Error texts are plain**, not Python's exception messages, and invalid UTF-8 in output is
-  replaced byte by byte.
-- **The environment is a snapshot of the workspace**, not a persistent machine: what a command
-  installs outside the workspace lasts only until a later `resume` starts a new container.
-- **A refused request ends the agent** with `ContextExceeded`, where mini raises its exception.
-- **No cost accounting or step limit**: mini's `cost_limit` and `step_limit` are not enforced,
-  and the agent never ends with `LimitsExceeded`. `alaya resume --samples N` pauses a run after `N`
-  responses instead, and a later `resume` goes on from there (`docs/cli.md`).
-- **A person can speak to it**: what a person says reaches the model at the start of its next
-  round, and so does a change to the workspace, through the message `alaya commit` appends
-  after it.
+Nothing else ends it.
 
 ## 5. MiniVero
 
 `Alaya.Agents.MiniVero` is Alaya's agent for the Lean implementation and proof tasks of the Vero
-benchmark. It is built on MiniSwe: it reuses MiniSwe's pieces (reading tool calls, the view, a
-person's messages, the outcome) and goes round a loop of its own (§4.2), with Vero's
-instructions and every extension of mini's loop on:
+benchmark. It is Basic (§4): its `bash` and `submit`, its answers to every call, and its command
+output. It goes round a loop of its own, with Vero's instructions, and with every extension on:
 
-- **`submit`** ends the run with its message, in place of mini's sentinel.
 - **`time_budget`** tells the model how much of the run's time is left (§5.5).
 - **`subagent`** hands a task to another MiniVero, with the same configuration.
-- **Recovered outputs**: the warning on a cut output names a file that holds all of it (§5.6).
 - **Masking**: the outputs of turns older than the last 20 are left out of the view (§5.6).
 - **A context limit**: a request that would not fit the model's context ends the agent first.
 - **`ask_user`** is offered when `question_types` names kinds of question (§2).
@@ -388,11 +355,8 @@ instructions and every extension of mini's loop on:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `model`, `task` | none | as MiniSwe's; required |
+| `model`, `task`, `executor` | | as Basic's (§4.1) |
 | `mode` | `proof` | Vero's evaluation mode for the run: `proof` or `codeproof` |
-| `max_consecutive_format_errors` | 3 | as MiniSwe's |
-| `executor.timeout_seconds` | 600 | the time a command may take |
-| `executor.env` | none | environment overrides for every command |
 | `context_reserve` | 8000 | tokens kept free for the next response |
 | `question_types` | `[]` | the kinds of question `ask_user` lets the model ask: any of `yes_no`, `single_choice`, `open_ended`; none offers no `ask_user` |
 
@@ -471,23 +435,14 @@ to pace itself by it.
 - The budget is checked before each thing the agent does and never cuts one short, so a run
   can overrun it by one command or one response.
 
-### 5.6 Long outputs
+### 5.6 Old outputs
 
-A command's result is JSON with `output`, `exit_code`, `error` and `file`. An output of 10 000
-characters or more is cut to its first and last 5 000, as MiniSwe's is. The warning names a file
-that holds the whole output, which the model can read with `bash`:
+A command's output is shown as Basic shows it (§4.4). Over a long run, old outputs fill the
+context. The outputs of turns older than the last 20 are replaced by a note that names their
+file, followed by how the command ended when it did not end well:
 
 ```
-[output truncated; full output: /alaya/outputs/3f9a1c2b7d4e.txt]
-```
-
-The file is named by a hash of the output, so the same output has the same name in every run.
-
-Over a long run, old outputs fill the context too. The outputs of turns older than the last 20
-are replaced by a note that names their file:
-
-```json
-{"output": "[output omitted; full output: /alaya/outputs/8b21e0c47a19.txt]", "exit_code": 0}
+[output omitted; full output: /alaya/outputs/8b21e0c47a19.txt]
 ```
 
 The boundary moves 10 turns at a time, so between its moves the conversation only grows at its
@@ -511,3 +466,142 @@ alaya cat GRADED:N .grade/report.md         # N: the position of the grader's co
 The grader is Vero's own, in an image of the task's: the Vero grader image with the trusted
 benchmark added at `/grader` (§3). Vero remains the source of the
 benchmark definitions and the grading rules.
+
+## 6. MiniSwe
+
+`Alaya.Agents.MiniSwe` is a faithful port of
+[mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent)'s default tool-calling agent. It
+keeps what defines that agent: its prompts, its one `bash` tool, its sentinel that ends a run,
+its observations, its format errors, and its loop, whose context keeps every turn. Where Basic
+answers each malformed call, MiniSwe answers a malformed response as mini does: as a whole, with
+a format error, ending after too many in a row.
+
+### 6.1 Options
+
+Set at `call` with `--set FIELD=VALUE`; `alaya config --program mini-swe` prints the defaults.
+A field left out is its default, and a misspelt one is an error.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `model` | none | the model it samples: its spec (`docs/llm-api.md`), a name alone being that model's defaults; required |
+| `task` | none | the task, verbatim; required. `--set-file task=FILE` reads it from a file |
+| `max_consecutive_format_errors` | 3 | malformed responses in a row before `RepeatedFormatError`; 0 is no limit |
+| `executor.timeout_seconds` | 30 | the time a command may take |
+| `executor.env` | mini's | environment overrides for every command: `PAGER=cat` and the like |
+
+### 6.2 The loop
+
+Mini's `DefaultAgent.run`: each round reads what a person said, samples a response, answers a
+malformed one with the format error, and otherwise makes each of its tool calls in order.
+
+```lean
+def round (config : Config) (model : Models.Spec) :          -- the messages, the errors in a row
+    Dialogue × Nat → Computation Agent (Dialogue × Nat ⊕ Json)  -- the next state, or how it ended
+
+iter (round config model) (opening, 0)                       -- go round until it ends
+```
+
+*One round (`MiniSwe.round`).*
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
+flowchart TD
+  classDef sample stroke:#3567a0
+  classDef exec stroke:#2b6f6f
+  classDef notice stroke:#7556a3
+  classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
+  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
+  classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
+
+  listen("listen: read the inbox"):::notice --> sample("sample request"):::sample
+  sample -- "refused as too long" --> context("return ContextExceeded"):::wait
+  sample -- "a response" --> parsed("read its tool calls")
+  parsed -- "malformed" --> format("tell the model the format error")
+  format -- "too many in a row" --> repeated("return RepeatedFormatError"):::bad
+  format -- "otherwise" --> again("next round, with the new state")
+  parsed -- "calls" --> each("each call, in order")
+  each --> tool("call name arguments<br/>its failure is given to the model as its result"):::exec
+  tool -- "printed the sentinel first" --> submitted("return Submitted"):::ok
+  tool --> again
+  linkStyle default stroke-width:1px
+```
+
+The state of the loop is mini's linear context: the messages so far, each appended once and
+kept, with a format error in place of each malformed response. Each request is all of them. The agent ends by returning its outcome, a status and a submission, as the value of its
+frame (§6.4).
+
+### 6.3 What the model is sent
+
+**The opening** is mini's two messages, rendered from its `mini.yaml`: the system message, and
+the task with a line naming the machine. The line holds the system and the architecture, as
+`uname -sm` reads them in the call's container.
+
+**The tool** is mini's `bash`, with its description and schema. No other tool is offered.
+
+**The view** is every turn, in order:
+
+- A person's message or change to the workspace is told as an `<intervention>`.
+- A turn is the model's message and a tool message for each call.
+- A malformed response is not shown. In its place the model sees a user message with the
+  format error, so it does not try to continue its own broken output. This is mini's protocol.
+
+**An observation** is mini's `observation_template`:
+
+```json
+{
+  "returncode": 0,
+  "output": "hello\n"
+}
+```
+
+An output of 10 000 characters or more is shown as `output_head` and `output_tail`, its first
+and last 5 000, with `elided_chars` and a `warning`. A command that did not end on its own has
+`returncode` -1 and an `exception_info`. The log keeps the whole output.
+
+**A format error** is the whole turn's answer when its first problem is one of these:
+
+| The response | Format error |
+| --- | --- |
+| has no tool call | "No tool calls found in the response…" |
+| has a call whose arguments are not JSON | "Error parsing tool call arguments: …" |
+| calls a tool that is not `bash` | "Unknown tool '…'." |
+| has a `bash` call with no `command` | what is wrong with it |
+
+The message is mini's `format_error_template`, which wraps the problem in mini's guidance on
+calling the tool. When the provider cut the response off (`finish_reason` is `length`, or
+`tool_calls` with no call), it says so and asks for a shorter response instead.
+
+### 6.4 How it ends
+
+The agent returns `{status, submission}`:
+
+| Status | When |
+| --- | --- |
+| `Submitted` | a command printed `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as its first line; the rest of its output is the submission. Calls after it in the same response do not run |
+| `RepeatedFormatError` | `max_consecutive_format_errors` malformed responses in a row |
+| `ContextExceeded` | the provider refused a request as too long; `reason` holds the provider's words |
+
+A tool that fails does not end the agent: the model is shown the error as the call's result.
+
+### 6.5 Commands
+
+A command runs as Basic's does (§4.4); the model sees it as mini's observation (§6.3).
+
+### 6.6 Differences from mini-SWE-agent
+
+- **The machine line is the image's system and architecture**, such as `Linux x86_64`. Mini
+  gives the whole `uname`; in a container its kernel release and version are the host's, so
+  they would put the machine a run was created on into the prompt.
+- **A format error names one problem**, where mini concatenates every problem found. A
+  `command` that is not a string is a format error, where Python would run a list.
+- **Error texts are plain**, not Python's exception messages, and invalid UTF-8 in output is
+  replaced byte by byte.
+- **The environment is a snapshot of the workspace**, not a persistent machine: what a command
+  installs outside the workspace lasts only until a later `resume` starts a new container.
+- **A refused request ends the agent** with `ContextExceeded`, where mini raises its exception.
+- **No cost accounting or step limit**: mini's `cost_limit` and `step_limit` are not enforced,
+  and the agent never ends with `LimitsExceeded`. `alaya resume --samples N` pauses a run after `N`
+  responses instead, and a later `resume` goes on from there (`docs/cli.md`).
+- **A person can speak to it**: what a person says reaches the model at the start of its next
+  round, and so does a change to the workspace, through the message `alaya commit` appends
+  after it.

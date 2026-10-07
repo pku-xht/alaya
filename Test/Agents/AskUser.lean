@@ -16,9 +16,16 @@ open Alaya.Agents
 /-- MiniVero's configuration: the agent that offers `ask_user`. -/
 private abbrev Config := MiniVero.Config
 
+/-- A response as MiniVero reads it: the calls it makes, or the first call's problem. -/
+private inductive Parsed where
+  | calls (calls : Array Chat.ToolCall)
+  | formatError (problem : String)
+
 /-- How MiniVero, configured so, reads a response. -/
-private def parseActions (response : Chat.Response) (config : Config := {}) : MiniSwe.Parsed :=
-  MiniVero.parseActions config response
+private def parseActions (response : Chat.Response) (config : Config := {}) : Parsed :=
+  match response.toolCalls.findSome? (Basic.problem? config.tools response) with
+  | some problem => .formatError problem
+  | none => .calls response.toolCalls
 open Lean (Json)
 
 private def args (question : String := "Which interpretation?\nThe examples disagree.")
@@ -170,13 +177,14 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       match parseActions bad enabled with
       | .formatError _ => pure ()
       | .calls _ => fail s!"accepted malformed or mixed response: {bad.toolCalls.map (·.name)}"
-    -- Driven, a malformed question is a format error: the run never waits, and nothing runs.
-    withRun (asking [("max_consecutive_format_errors", 1)]) fun run => do
+    -- Driven, a malformed question is answered with its problem: the run never waits, nothing
+    -- of the response runs, and the run goes on.
+    withRun (asking) fun run => do
       for bad in cases.extract 0 4 ++ cases.extract (cases.size - 6) cases.size do
         let (executor, calls) ← countingExecutor
-        let (model, _) ← scripted #[bad]
+        let (model, _) ← scripted #[bad, response #[submit]]
         let (rt, last, stop) ← drive run executor model
-        if isIdle stop then assertEqual "rejected turn outcome" (agentStatus (← logAt rt last)) "RepeatedFormatError"
+        if isIdle stop then assertEqual "the run goes on" (agentStatus (← logAt rt last)) "Submitted"
         else fail "an invalid question must not wait for an answer"
         assertEqual "executor calls" (← calls.get) 0,
 
@@ -315,12 +323,6 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
     assertEqual "it records the kinds" ((one.getObjVal? "question_types").toOption.map (·.compress))
       (some "[\"open_ended\"]"),
 
-  test "asking adds its instruction to a format error, where the tool stands among the others" do
-    let plain := MiniVero.formatErrorMessage {} "x" true none
-    assertStringEq "the format error" (MiniVero.formatErrorMessage enabled "x" true none)
-      (plain.replace ("\n\n" ++ Tools.TimeBudget.instruction)
-        ("\n\n" ++ Tools.AskUser.instruction Question.Kind.all ++ "\n\n" ++ Tools.TimeBudget.instruction)),
-
   test "a question consumes its model turn and a reply leads to the next one" do
     withRun (asking) fun run => do
       let (executor, calls) ← countingExecutor
@@ -336,39 +338,21 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       assertEqual "sample count" (← requests.get).size 1
       assertEqual "executor count" (← calls.get) 0,
 
-  test "invalid asks count as consecutive format errors and a valid askOne resets the streak" do
+  test "a bad question, and a response with no call, are answered, and the run goes on" do
     let bad := response #[askOne "bad" (args "q" #["only one"])]
     let prose : Chat.Response := { content? := some "no tool", finishReason? := some "stop" }
-    withRun (asking [("max_consecutive_format_errors", 2)]) fun run => do
-      let (executor, _) ← countingExecutor
-      let (model, requests) ← scripted #[prose, response #[askOne], bad, bad]
-      let rt ← runtime executor (some model)
-      let (waiting, _) ← assertOk <| Driver.drive rt run (← start rt run)
-      let replied ← assertOk <| replyAt rt run waiting (some "none_of_above")
-      let (final, _) ← assertOk <| Driver.drive rt run replied
-      assertEqual "two in a row after the askOne" (agentStatus (← logAt rt final)) "RepeatedFormatError"
-      assertEqual "the askOne reset the streak" (← requests.get).size 4,
-
-  test "the format-error limit can be turned off, and a person's message does not reset the streak" do
-    let prose : Chat.Response := { content? := some "no tool", finishReason? := some "stop" }
-    withRun (asking [("max_consecutive_format_errors", 0)]) fun run => do
-      let (executor, _) ← countingExecutor
-      let (model, requests) ← scripted #[prose, prose, prose, prose, response #[submit]]
+    withRun (asking) fun run => do
+      let (executor, calls) ← countingExecutor
+      let (model, requests) ← scripted #[prose, bad, response #[submit]]
       let (rt, last, _) ← drive run executor model
-      assertEqual "no limit" (agentStatus (← logAt rt last)) "Submitted"
-      assertEqual "every response was sampled" (← requests.get).size 5
-    withRun (asking [("max_consecutive_format_errors", 2)]) fun run => do
-      let (executor, _) ← countingExecutor
-      let (model, requests) ← scripted #[prose, prose]
-      let rt ← runtime executor (some model)
-      let (paused, stop) ← assertOk <| Driver.drive rt run (← start rt run) { samples? := some 1 }
-      check (stop matches .paused _) "paused after the first malformed response"
-      let (told, _) ← assertOk <| Driver.append rt.store run paused (.arrived (.said "call a tool"))
-      let (final, _) ← assertOk <| Driver.drive rt run told
-      assertEqual "two in a row, a person's message between them" (agentStatus (← logAt rt final)) "RepeatedFormatError"
-      let some request := (← requests.get)[1]? | fail "no second request"
-      check (request.messages.any fun | .user text => contains text "call a tool" | _ => false)
-        "the message reached the model",
+      assertEqual "submitted in the end" (agentStatus (← logAt rt last)) "Submitted"
+      let some second := (← requests.get)[1]? | fail "no second request"
+      check (second.messages.any fun | .user text => text == Basic.reminder prose | _ => false)
+        "a response with no call is answered with the reminder"
+      let some third := (← requests.get)[2]? | fail "no third request"
+      check (third.messages.any fun | .tool "bad" (.str text) => contains text "at least two" | _ => false)
+        "a bad question is answered with its problem"
+      assertEqual "nothing ran" (← calls.get) 0,
 
   test "a reply adds nothing to the run's time, however long the person took" do
     withRun (asking) fun run => do

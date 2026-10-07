@@ -25,14 +25,12 @@ private def portOf (miniText : String) : String :=
 
 /-- The calls a response makes, by id and name, when it parses. -/
 private def callsOf (response : Chat.Response) : Option (Array (String × String)) :=
-  match parseActions {} response with
-  | .calls calls => some (calls.map fun call => (call.id, call.name))
-  | .formatError _ => none
+  match formatError? {} response with
+  | none => some (response.toolCalls.map fun call => (call.id, call.name))
+  | some _ => none
 
 private def formatErrorOf (response : Chat.Response) : String :=
-  match parseActions {} response with
-  | .formatError message => message
-  | .calls _ => ""
+  (formatError? {} response).getD ""
 
 /-! ## Mini's texts -/
 
@@ -127,7 +125,7 @@ def parseSuite : Suite := suite "agents/mini-swe.parse" #[
 
   test "a person's message is told to the model as an intervention, and nothing else is" do
     let told (notice : Notice) : String :=
-      ((noticeMessage notice).map (·.toStored.compress)).getD "nothing"
+      ((Agents.Basic.noticeMessage notice).map (·.toStored.compress)).getD "nothing"
     assertStringEq "a message" (told (.said "keep the old API"))
       (Chat.Message.user "<intervention>\nA person sent you a message while you were paused.\nkeep the old API\n</intervention>").toStored.compress
     assertStringEq "a change is no one's to read" (told (.changed default "M a.txt")) "nothing"
@@ -150,7 +148,7 @@ private def runAgent (config : Config) (responses : Array Chat.Response) (inCont
     let (last, _) ← assertOk <| Driver.drive rt run (← start rt run)
     let log ← logAt rt last
     let some (.ok outcome) := agentResult log | fail s!"the agent did not return: {agentStatus log}"
-    pure (lastDialogue (parseActions config) run log, (workspace? log).getD default, outcome)
+    pure (lastDialogue (formatError? config) run log, (workspace? log).getD default, outcome)
 
 private def status (outcome : Json) : String := (outcome.getObjVal? "status" >>= Json.getStr?).toOption.getD ""
 
@@ -177,7 +175,7 @@ def dialogueSuite : Suite := suite "agents/mini-swe.dialogue" #[
     let (_, _, outcome) ← runAgent (inContainer := false) {} #[
       responseWith #[call "a" "bash" "echo first", sentinelCall "s", call "b" "bash" "echo never"]]
     assertEqual "submitted, with nothing after the sentinel" outcome.compress
-      (Agents.MiniSwe.outcome "Submitted" "").compress
+      (Agents.Basic.outcome "Submitted" "").compress
 ]
 
 /-- Runs whose commands do matter, in the test container. -/
@@ -186,7 +184,7 @@ def runSuite : Suite := suite "agents/mini-swe.container" #[
     let (dialogue, env, outcome) ← runAgent {} #[
       responseWith #[call "c1" "bash" "echo hello > a.txt"],
       responseWith #[call "c2" "bash" "printf 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\\nmy patch\\n'"]]
-    assertEqual "outcome" outcome.compress (Agents.MiniSwe.outcome "Submitted" "my patch\n").compress
+    assertEqual "outcome" outcome.compress (Agents.Basic.outcome "Submitted" "my patch\n").compress
     -- system, instance, assistant#1, observation#1, assistant#2: the sentinel's command is not observed.
     assertEqual "dialogue length" dialogue.size 5
     match dialogue[3]? with
