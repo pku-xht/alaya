@@ -1,5 +1,6 @@
 import Test.App.Cli
 import Test.App.Catalog
+import Test.App.Session
 import Test.App.Render
 import Test.App.Html
 import Test.App.Rebase
@@ -14,7 +15,7 @@ namespace AppTests
 open Testing
 
 def suites : Array Suite := #[
-  CliTests.specSuite, CliTests.taskSuite, CatalogTests.suite, RenderTests.suite, HtmlTests.suite,
+  CliTests.specSuite, CliTests.taskSuite, CatalogTests.suite, SessionTests.suite, RenderTests.suite, HtmlTests.suite,
   { HtmlTests.pageSuite with needs := #[node] }, AppRebaseTests.suite,
   { CommandsTests.suite with needs := #[binary, docker] }]
 

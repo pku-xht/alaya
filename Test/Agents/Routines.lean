@@ -26,7 +26,7 @@ def suite : Suite := Testing.suite "agents/routines" #[
       match routine.body arguments with
       | .fail problem => some problem
       | _ => none
-    let model := Json.mkObj [("model", "gpt-oss-120b")]
+    let model := Json.mkObj [("model", testModelSpec.toJson)]
     for (label, routine, arguments, said) in [
         ("no task", MiniSwe.routine, model, "mini-swe: it works on a task, and its configuration names none"),
         ("no model", MiniSwe.routine, Json.mkObj [("task", "t")], "mini-swe: it samples a model, and its configuration names none"),

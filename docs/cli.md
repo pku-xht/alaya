@@ -203,7 +203,7 @@ alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grad
   order given.
 - **Every program is called the same way:** its configuration and its image. An agent's
   model and task are fields of its configuration. `--set model=NAME` names the model by its ID
-  as its creator publishes it, with the defaults of the model table, and a later setting
+  as its creator publishes it, with the defaults the catalog lists for it, and a later setting
   changes one of its fields (`model.params.reasoning_effort=high`). `--set task=TEXT` or
   `--set-file task=FILE` gives the task. A grader has neither field.
 - **The image** is resolved to a digest and recorded: every command of the call runs in a

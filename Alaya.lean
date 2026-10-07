@@ -43,3 +43,4 @@ import Alaya.App.Html
 import Alaya.App.Options
 import Alaya.App.Rebase
 import Alaya.App.Render
+import Alaya.App.Session

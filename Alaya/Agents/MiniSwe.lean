@@ -140,7 +140,7 @@ def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array St
   let model? ← match ← object.field? "model" with
     | none => pure defaults.model?
     | some .null => pure none
-    | some json => match Models.read json with
+    | some json => match Models.Spec.read json with
       | .ok spec => pure (some spec)
       | .error problem => throw s!"'model': {problem}"
   let task? ← match ← object.field? "task" with

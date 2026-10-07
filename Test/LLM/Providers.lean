@@ -59,22 +59,8 @@ def suite : Suite := Testing.suite "llm/providers" #[
     let problems ← problemsOf "bad url" (baseUrlOf ["--url", ":9000"])
     check (problems.size == 1 && problems[0]!.startsWith "--url is not an endpoint") s!"{problems}",
 
-  test "a provider serves a model under its own name, or the name its route gives" do
-    let route (provider model : String) : TestM (Except String Provider.Route) := do
-      let some p := Provider.named? provider | fail s!"no provider {provider}"
-      pure (p.route model)
-    let nameOf (provider model : String) : TestM (Option String) := do
-      pure ((← route provider model).toOption.map (·.name))
-    assertEqual "apiyi, its own name" (← nameOf "apiyi" "deepseek-v4.1-flash") (some "deepseek-v4.1-flash")
-    assertEqual "xmcp's name" (← nameOf "xmcp" "deepseek-v4.1-flash") (some "ds/deepseek-v4-flash")
-    assertEqual "fireworks' name" (← nameOf "fireworks" "deepseek-v4.1-flash")
-      (some "accounts/fireworks/models/deepseek-v4p1-flash")
-    match ← route "fireworks" "gpt-oss-120b" with
-    | .error m => check ((m.splitOn "does not serve gpt-oss-120b").length > 1) m
-    | .ok _ => fail "fireworks serves only its routes",
-
   test "a route that cannot meet the recorded model refuses it before any request" do
-    let some dgx := Provider.named? "dgx" | fail "no dgx"
+    let dgx : Provider.Provider := { name := "dgx", baseUrl := "http://localhost/v1", keyVar := "DGX_API_KEY", defaultKey? := some "EMPTY" }
     let spec : Models.Spec := { name := "m", echoReasoning := .text, contextTokens? := some 100000 }
     let refused (label : String) (route : Provider.Route) (expected : String) : TestM Unit := do
       match Provider.check dgx spec route with
@@ -113,40 +99,17 @@ def suite : Suite := Testing.suite "llm/providers" #[
       ((echoed.extract 0 prefix_.size).map (·.compress)).toList,
 
   test "a served model's identity is its recorded spec, whoever serves it" do
-    let spec ← assertOk <| Models.fromJson (.mkObj [("name", "deepseek-v4.1-flash"),
-      ("params", .mkObj [("reasoning_effort", "high")])])
-    let some dgx := Provider.named? "dgx" | fail "no dgx"
+    let some spec := (Models.Spec.read (.mkObj [("name", "deepseek-v4.1-flash"),
+      ("params", .mkObj [("reasoning_effort", "high")])])).toOption | fail "a spec"
+    let dgx : Provider.Provider := { name := "dgx", baseUrl := "http://localhost/v1", keyVar := "DGX_API_KEY", defaultKey? := some "EMPTY" }
     let viaDgx ← assertOk <| Provider.serve dgx spec
     let viaOther ← assertOk <| Provider.serve { dgx with name := "other", baseUrl := "http://elsewhere/v1" } spec
     assertEqual "identity" viaDgx.identity.compress spec.toJson.compress
     assertEqual "provider-independent" viaDgx.identity.compress viaOther.identity.compress
     assertError "a missing key" (Provider.serve { dgx with keyVar := "ALAYA_TEST_UNSET_KEY", defaultKey? := none } spec) fun
       | .environment m => (m.splitOn "ALAYA_TEST_UNSET_KEY is not set").length > 1
-      | _ => false,
-
-  test "a model's name alone is its defaults, and settings over an agent's model are checked" do
-    let defaults ← assertOk <| Models.fromJson "gpt-oss-120b"
-    assertEqual "context from the table" defaults.contextTokens? (some 131072)
-    let modelOf (config : Lean.Json) : TestM Models.Spec := assertOk <| Models.fromJson
-      ((config.getObjVal? "model").toOption.getD .null)
-    let set ← modelOf (← assertOk <| Catalog.resolve "mini-swe"
-      #[agentSet ["model"] "gpt-oss-120b", agentSet ["model", "params", "temperature"] (1 : Nat),
-        agentSet ["model", "context_tokens"] (65536 : Nat)])
-    assertEqual "params" set.params.compress "{\"temperature\":1}"
-    assertEqual "context" set.contextTokens? (some 65536)
-    for (label, settings, expected) in [
-        ("unknown", #[agentSet ["model", "temperature"] (1 : Nat)], "unknown field 'temperature'"),
-        ("protected", #[agentSet ["model", "params", "model"] "x"], "params cannot set 'model'"),
-        ("name", #[agentSet ["name"] "x"], "unknown field 'name'")] do
-      assertError label (Catalog.resolve "mini-swe" (#[agentSet ["model"] "gpt-oss-120b"] ++ settings)) fun
-        | .input m => (m.splitOn expected).length > 1
-        | _ => false
-    assertError "unknown model" (Models.fromJson (.mkObj [("name", "nope")])) fun
-      | .input m => m.startsWith "unknown model: nope"
       | _ => false
-    match Settings.parse "model.params.reasoning_effort=high" with
-    | .ok s => check (s.path == ["model", "params", "reasoning_effort"] && s.value == "high") "parsed"
-    | .error m => fail m
+
 ]
 
 end ProvidersTests

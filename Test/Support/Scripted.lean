@@ -69,11 +69,11 @@ def answeringUname (executor : Executor) : Executor :=
       else executor.exec config workDir argv display }
 
 /-- The call that starts a run: the session. -/
-def sessionCall : RoutineCall := Catalog.sessionCall
+def sessionCall : RoutineCall := Session.call
 
 /-- Whether the driver stopped where the session waits for a call. -/
 def isIdle : Driver.Stop → Bool
-  | .waits frame none => frame == Catalog.sessionFrame
+  | .waits frame none => frame == Session.frame
   | _ => false
 
 /-- The calls open where a log ends, outermost first. -/
@@ -100,7 +100,7 @@ def taskOf (config : Json) : Option String :=
 its calls naming routines in `scope`. Every program of the catalog is there too, the grader among
 them. -/
 def runWith (body : Json → Computation Agent Json) (scope : Scope Agent := .empty) : Scope Agent :=
-  Scope.of #[Catalog.session ⟨fun name =>
+  Scope.of #[Session.of ⟨fun name =>
       if name == "agent" then
         some { name, scope, body }
       else Catalog.scope.find name⟩]
@@ -244,8 +244,8 @@ def grade (rt : Driver.Runtime) (run : Scope Agent) (tip : Hash) (call : Routine
     TestM (Hash × Json) := do
   let mut tip := tip
   let log ← logAt rt tip
-  if Catalog.running (next run log) then
-    let frame ← assertOk <| Catalog.callToStop (openCalls log)
+  if Session.running (next run log) then
+    let frame ← assertOk <| Session.callToStop (openCalls log)
     tip := (← assertOk <| Driver.append rt.store run tip (.broke frame "to grade this point")).1
     tip := (← assertOk <| Driver.drive rt run tip).1
   tip := (← assertOk <| Driver.append rt.store run tip call.event).1

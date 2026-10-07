@@ -36,7 +36,7 @@ flowchart TD
 | 3 | **structured output**: an answer of a fixed JSON shape | `Alaya.LLM.Chat` |
 | 4 | a **model**: a request has a sequence of draws | `Alaya.LLM.Model` |
 | 5 | **layers**: retry, batch, sharing of draws, the persistent cache | `Alaya.LLM.Model`, `Alaya.LLM.Cache` |
-| 6 | **models and providers**: what is asked, and who serves it | `Alaya.LLM.Models`, `Alaya.LLM.Provider` |
+| 6 | **models and providers**: what is asked, and who serves it | `Alaya.LLM.Models`, `Alaya.LLM.Provider`; the lists, `Alaya.App.Catalog` |
 | 7 | **errors** | `Alaya.Base.Error` |
 
 ## 1. A request
@@ -288,7 +288,12 @@ structure Route where              -- how a provider serves one model
   contextTokens? outputTokens? : Option Nat
 
 Provider.serve : Provider → Models.Spec → Result Model
+Models.Spec.read : Json → Except String Spec   -- a spec as written: fields left out at the spec's own defaults
 ```
+
+The library knows no particular model or provider. Which a person can name, with their defaults,
+is the app's catalog (`Alaya.App.Catalog`): a model named alone becomes its whole spec there,
+before a call records it, so a log holds complete specs and reads back without the list.
 
 `Provider.serve provider spec` gives the innermost `Model`, the transport, after checking that
 the provider can serve the model as the run recorded it:
@@ -326,6 +331,8 @@ flowchart TD
 ```
 
 So changing providers either sends the model the same requests or fails before any is sent.
+
+The providers the catalog offers:
 
 | Provider | Default endpoint | Key variable | Serves |
 | --- | --- | --- | --- |

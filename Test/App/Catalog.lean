@@ -57,7 +57,7 @@ def suite : Suite := Testing.suite "app/catalog" #[
 
   test "a run's configuration is the opening of its agent's call, and the tree names it" do
     let agent ← assertOk <| Catalog.complete "mini-swe" (.mkObj [("model", "gpt-oss-120b"), ("context_reserve", 7)])
-    let run := Catalog.run
+    let run := Session.scope
     let rt ← Scripted.runtime noCommands none
     let project := (← scratch) / "project"
     IO.FS.createDirAll project
@@ -75,30 +75,6 @@ def suite : Suite := Testing.suite "app/catalog" #[
       let tree := Render.treeLines (← assertOk <| Render.rows rt.store forest run)
       check (tree.any fun l => (l.splitOn "root  mini-swe, gpt-oss-120b").length > 1) s!"tree names the agent: {tree}",
 
-  test "a grader is a call like any: the run waits for it, opens it in a frame of its own, and it gives the verdict" do
-    match miniRun with
-    | .error problem => fail problem
-    | .ok run =>
-      -- The agent ends, and the run waits for the next call.
-      let log := respond run (settle run opening) (responseWith #[submitCall "s" "done"])
-      check ((next run log) matches .waits ⟪"session"⟫ none) "the run waits for a call"
-      check (((lastCall? log).bind (·.2)) matches some (.returned _)) "the agent returned"
-      -- The grader: the run takes the call, opens it in `grader`, and its command is asked for there,
-      -- with its stderr apart.
-      let called := log.size
-      let log := settle run (log.push (graderCall "sh g.sh").event)
-      check (log.any fun | .heard ⟪"session"⟫ notices => notices == #[called] | _ => false) "the session takes the call"
-      check (log.any fun | .opened ⟪"session", "grader"⟫ { name := "grader", .. } => true | _ => false) "the grader opens in a frame of its own"
-      let .ask first := next run log | fail "the grader's command is asked for"
-      assertEqual "in its frame" first.frame ⟪"session", "grader"⟫
-      check (first.op matches .exec "sh g.sh" { merge := false, .. }) "the command, its stderr apart"
-      -- Its verdict is the value of its call, and the run waits again.
-      let graded := answer run log (.execution { output := { output := "1..1\nok 1\n", stderr? := some "", exitCode? := some 0 }, workspace := default })
-      check ((next run graded) matches .waits ⟪"session"⟫ none) "the run waits for the next call"
-      match lastCall? graded with
-      | some (opened, some (.returned verdict)) =>
-        assertEqual "the grader's verdict" (opened.name, Agents.Grader.verdictStatus verdict) ("grader", "pass")
-      | _ => fail "the grader returned its verdict",
   test "a call fits its program only with every field its program takes, and none it does not" do
     check (match Catalog.check { testCall with name := "nothing" } with
       | .error message => contains message "unknown program: nothing"
@@ -119,49 +95,6 @@ def suite : Suite := Testing.suite "app/catalog" #[
       | .error message => contains message "task"
       | .ok () => false) "a grader takes no task: it has no such field",
 
-  test "the session admits a call only where it waits for one, and a notice only while a call runs" do
-    let sample : OpRequest Agent := { frame := ⟪"session", "mini-swe"⟫, op := .time }
-    let question : Question := { text := "Go on?", form := .yesNo }
-    let opened (frame : Frame) : Next Agent := .mark (.opened frame { name := "x", arguments := .null })
-    -- What the run does next, whether a call may be appended there, and whether a notice may.
-    let table : Array (String × Next Agent × Option String × Bool) := #[
-      ("the session waits", .waits ⟪"session"⟫ none, none, false),
-      ("a call runs", .ask sample, some "a call is running", true),
-      ("a call waits for a message", .waits ⟪"session", "mini-swe"⟫ none, some "a call is running", true),
-      ("a question waits", .waits ⟪"session", "mini-swe", "ask_user"⟫ (some question), some "a call is running", true),
-      ("a call read, not yet opened", opened ⟪"session", "mini-swe"⟫, some "a call to make here already", false),
-      ("a tool opens in a call", opened ⟪"session", "mini-swe", "bash"⟫, some "a call is running", true),
-      ("a call returns", .mark (.returned ⟪"session", "mini-swe"⟫ .null), some "a call is running", true),
-      ("the outside waits for the run's call", .waits ⟪⟫ none, some "a call to make here already", false),
-      ("the run is over", .ended (.ok .null), some "the run is over", false)]
-    for (label, next, refusal?, notice) in table do
-      match refusal? with
-      | none => assertOk <| Catalog.admitsCall next
-      | some refusal => assertInput s!"{label}: a call" (Catalog.admitsCall next) refusal
-      if notice then assertOk <| Catalog.admitsNotice next
-      else assertInput s!"{label}: a notice" (Catalog.admitsNotice next) "no call is running",
-
-  test "a stop ends the session's call, however deep the calls open inside it" do
-    let open' (frames : Array Frame) : Array OpenCall :=
-      frames.zipIdx.map fun (frame, position) => { frame, call := { name := "x", arguments := .null }, position }
-    assertEqual "the session's call" (← assertOk <| Catalog.callToStop (open' #[⟪"session"⟫, ⟪"session", "mini-swe"⟫,
-      ⟪"session", "mini-swe", "mini-swe"⟫, ⟪"session", "mini-swe", "mini-swe", "bash"⟫])) ⟪"session", "mini-swe"⟫
-    assertInput "the session alone" (Catalog.callToStop (open' #[⟪"session"⟫])) "nothing to stop"
-    assertInput "nothing open" (Catalog.callToStop #[]) "nothing to stop",
-
-  test "a run of the session starts waiting, takes one call at a time, and goes on after a call is stopped" do
-    match miniRun with
-    | .error problem => fail problem
-    | .ok run =>
-      check (Catalog.idle (next run (settle run (opening "t").pop.pop.pop))) "the session waits for a call"
-      let running := settle run (opening "t")
-      check (Catalog.running (next run running)) "the agent runs"
-      let frame ← assertOk <| Catalog.callToStop (openCalls running)
-      assertEqual "a stop ends the agent" frame ⟪"session", "agent"⟫
-      let stopped := settle run (running.push (.broke frame "enough"))
-      check (Catalog.idle (next run stopped)) "and the session waits for the next"
-      assertEqual "the agent's call ended, stopped" ((lastCall? stopped).bind (·.2) |>.map Render.endingSummary) (some "stopped: enough"),
-
   test "the command line says how to give a field the configuration leaves empty" do
     for (program, arguments, flag) in [("mini-swe", Json.mkObj [("task", "t")], "--set model=NAME"),
         ("mini-swe", Json.mkObj [("model", "gpt-oss-120b")], "--set task=TEXT or --set-file task=FILE"),
@@ -171,7 +104,63 @@ def suite : Suite := Testing.suite "app/catalog" #[
       | .error message => assertContains program message flag
     match Catalog.check { name := "mini-swe", arguments := Json.mkObj [("tsak", "t")] } with
     | .ok () => fail "an unknown field fits"
-    | .error message => check (!contains message "--set") "a field no program takes has no flag to give"
+    | .error message => check (!contains message "--set") "a field no program takes has no flag to give",
+
+  test "a provider serves a model under its own name, or the name its route gives" do
+    let route (provider model : String) : TestM (Except String Provider.Route) := do
+      let some p := Catalog.provider? provider | fail s!"no provider {provider}"
+      pure (p.route model)
+    let nameOf (provider model : String) : TestM (Option String) := do
+      pure ((← route provider model).toOption.map (·.name))
+    assertEqual "apiyi, its own name" (← nameOf "apiyi" "deepseek-v4.1-flash") (some "deepseek-v4.1-flash")
+    assertEqual "xmcp's name" (← nameOf "xmcp" "deepseek-v4.1-flash") (some "ds/deepseek-v4-flash")
+    assertEqual "fireworks' name" (← nameOf "fireworks" "deepseek-v4.1-flash")
+      (some "accounts/fireworks/models/deepseek-v4p1-flash")
+    match ← route "fireworks" "gpt-oss-120b" with
+    | .error m => check ((m.splitOn "does not serve gpt-oss-120b").length > 1) m
+    | .ok _ => fail "fireworks serves only its routes",
+  test "a run that sends items back needs a Responses route, and apiyi serves gpt-6-luna through one" do
+    let some spec := Catalog.model? "gpt-6-luna" | fail "no luna"
+    assertEqual "luna sends items back" (toString spec.echoReasoning) "items"
+    let some apiyi := Catalog.provider? "apiyi" | fail "no apiyi"
+    let route ← assertOk <| Result.fromExcept Error.input (apiyi.route "gpt-6-luna")
+    check (route.api == .responses) "apiyi's route for luna is not Responses"
+    check (Provider.check apiyi spec route).toOption.isSome "apiyi refuses luna"
+    let some yunwu := Catalog.provider? "yunwu" | fail "no yunwu"
+    let chat ← assertOk <| Result.fromExcept Error.input (yunwu.route "gpt-6-luna")
+    match Provider.check yunwu spec chat with
+    | .error m => check ((m.splitOn "need the Responses API").length > 1) m
+    | .ok _ => fail "luna through Chat Completions",
+  test "a model's name alone is its defaults, and settings over an agent's model are checked" do
+    let some defaults := Catalog.model? "gpt-oss-120b" | fail "no gpt-oss-120b"
+    assertEqual "context from the list" defaults.contextTokens? (some 131072)
+    let modelOf (config : Lean.Json) : TestM Models.Spec :=
+      match Models.Spec.read ((config.getObjVal? "model").toOption.getD .null) with
+      | .ok spec => pure spec
+      | .error problem => fail problem
+    let set ← modelOf (← assertOk <| Catalog.resolve "mini-swe"
+      #[agentSet ["model"] "gpt-oss-120b", agentSet ["model", "params", "temperature"] (1 : Nat),
+        agentSet ["model", "context_tokens"] (65536 : Nat)])
+    assertEqual "params" set.params.compress "{\"temperature\":1}"
+    assertEqual "context" set.contextTokens? (some 65536)
+    for (label, settings, expected) in [
+        ("unknown", #[agentSet ["model", "temperature"] (1 : Nat)], "unknown field 'temperature'"),
+        ("protected", #[agentSet ["model", "params", "model"] "x"], "params cannot set 'model'"),
+        ("name", #[agentSet ["name"] "x"], "unknown field 'name'")] do
+      assertError label (Catalog.resolve "mini-swe" (#[agentSet ["model"] "gpt-oss-120b"] ++ settings)) fun
+        | .input m => (m.splitOn expected).length > 1
+        | _ => false
+    assertInput "a model named alone that the list does not name" (Catalog.resolve "mini-swe" #[agentSet ["model"] "nope"])
+      "unknown model: nope"
+    -- A whole spec of a model the list does not name, as a log holds one, is kept as it is written.
+    let unlisted : Models.Spec := { name := "a-model-of-another-day", contextTokens? := some 4096 }
+    let kept ← assertOk <| Catalog.complete "mini-swe" (.mkObj [("model", unlisted.toJson), ("task", "t")])
+    assertEqual "kept" ((kept.getObjVal? "model").toOption.map (·.compress)) (some unlisted.toJson.compress)
+    let ran := Agents.MiniSwe.routine.body kept
+    check (!(ran matches Computation.fail _)) "and the agent runs on it, with no list to consult"
+    match Settings.parse "model.params.reasoning_effort=high" with
+    | .ok s => check (s.path == ["model", "params", "reasoning_effort"] && s.value == "high") "parsed"
+    | .error m => fail m
 ]
 
 end CatalogTests

@@ -612,7 +612,7 @@ def agent : Routine Agent :=
   (routine "agent" fun (config : Config) => workflow.call { goal := config.task }).within scope
 
 /-- The run: the session, whose scope has the agent, so that a person's call of it finds it. -/
-def run : Scope Agent := Scope.of #[Catalog.session (Scope.of #[agent])]
+def run : Scope Agent := Scope.of #[Session.of (Scope.of #[agent])]
 ```
 
 *The calls made when this agent runs, as a tree of frames.*
@@ -801,15 +801,15 @@ A run is a workspace and a call made from outside, of a routine of the scope the
 replayed in. Outside, in `#[]`, the run waits for its call, takes it, and makes it in a frame of
 its own; the run is over when that call is. The core knows nothing more of it.
 
-The command line starts every run as a call of `session`, a program of the app
-(`Alaya.App.Catalog`). It is a loop: it waits for a call, calls the program the call names in a
+The command line starts every run as a call of `session`, a routine of the app
+(`Alaya.App.Session`). It is a loop: it waits for a call, calls the program the call names in a
 frame of its own, and waits again. Its scope is the catalog. What a person may do at a point of
 a run — call a program, say something, stop a call — is the session's to say: the runtime takes
 anything the log can take.
 
 ```lean
-Catalog.session : Scope Agent → Routine Agent      -- wait for a call, make it, wait again
-Catalog.run     : Scope Agent                      -- what a run's call may name: the session, a program
+Session.of    : Scope Agent → Routine Agent        -- wait for a call, make it, wait again
+Session.scope : Scope Agent                        -- what a run's call may name: the session, a program
 
 structure Environment where                         -- where a call's commands run, as the driver
   image   : String                                  --   reads a call's environment?, which the
@@ -888,7 +888,7 @@ replays the log first, and refuses what the log cannot take:
 
 What a person may append beyond that is the front end's to say. The command line takes a message,
 a change or a reply only while a call of the session runs, and a call only where the session
-waits for one (`Catalog.admitsNotice`, `Catalog.admitsCall`).
+waits for one (`Session.admitsNotice`, `Session.admitsCall`).
 
 Appending at an entry that already goes on is a fork: the entry has two continuations, and
 each is a log.

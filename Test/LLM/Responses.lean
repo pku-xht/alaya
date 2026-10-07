@@ -98,25 +98,12 @@ def suite : Suite := Testing.suite "llm/responses" #[
     check (!((model.cacheKey (request none_)).splitOn "reasoning_items").length > 1)
       "a request with no items keys as before",
 
-  test "a run that sends items back needs a Responses route, and apiyi serves gpt-6-luna through one" do
-    let spec ← assertOk <| Models.fromJson "gpt-6-luna"
-    assertEqual "luna sends items back" (toString spec.echoReasoning) "items"
-    let some apiyi := Provider.named? "apiyi" | fail "no apiyi"
-    let route ← assertOk <| Result.fromExcept Error.input (apiyi.route "gpt-6-luna")
-    check (route.api == .responses) "apiyi's route for luna is not Responses"
-    check (Provider.check apiyi spec route).toOption.isSome "apiyi refuses luna"
-    let some yunwu := Provider.named? "yunwu" | fail "no yunwu"
-    let chat ← assertOk <| Result.fromExcept Error.input (yunwu.route "gpt-6-luna")
-    match Provider.check yunwu spec chat with
-    | .error m => check ((m.splitOn "need the Responses API").length > 1) m
-    | .ok _ => fail "luna through Chat Completions",
-
   iotest "echo_reasoning is none, text or items" do
     for (value, expected) in [("none", some "none"), ("text", some "text"), ("items", some "items"),
         ("\"true\"", none), ("true", none)] do
       let raw := if value.startsWith "\"" || value == "true" then value else s!"\"{value}\""
-      let parsed := (Models.fromJson (json s!"\{\"name\":\"gpt-6-luna\",\"echo_reasoning\":{raw}}")).toBaseIO
-      match ← parsed, expected with
+      let parsed := Models.Spec.read (json s!"\{\"name\":\"gpt-6-luna\",\"echo_reasoning\":{raw}}")
+      match parsed, expected with
       | .ok spec, some name => if toString spec.echoReasoning != name then throw <| IO.userError s!"{value}: {spec.echoReasoning}"
       | .error _, none => pure ()
       | .ok _, none => throw <| IO.userError s!"{value} accepted"

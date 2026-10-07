@@ -2,11 +2,14 @@ import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
 import Alaya.Agents.Grader
 import Alaya.Base.Settings
-import Alaya.Runtime.Walk
+import Alaya.LLM.Provider
 
 /-!
-The programs a call can name, and how a call's configuration builds one: the agents, and the
-grader.
+What this installation offers a person by name: the programs a call can name, the agents and
+the grader; the models an agent's configuration can name, with their defaults; and the
+providers that serve them. A program is its agent's routine, and how its configuration is
+completed: a model named alone becomes its whole spec here, so a log holds complete specs and
+reads back without this list.
 
 A program's defaults are in code, in its definition. A call names a program (`alaya call ENTRY
 NAME`) and overrides any of its fields on the command line (`--set FIELD=VALUE`), and the
@@ -30,6 +33,68 @@ structure Definition where
 
 def Definition.name (definition : Definition) : String := definition.routine.name
 
+/-! ## Models and providers -/
+
+/-- The models a person can name, with their defaults. A size left `none` is not known;
+`--set` gives it. -/
+def models : Array Models.Spec := #[
+  { name := "gpt-oss-120b", contextTokens? := some 131072 },
+  { name := "gpt-5.6-luna" },
+  -- OpenAI's light GPT-6, released 2026-09-22: 1,050,000 tokens of context, of which up to
+  -- 128,000 may be output. An OpenAI reasoning model, so it keeps its reasoning across tool
+  -- calls only through the Responses API, which returns it as encrypted items to send back.
+  { name := "gpt-6-luna", echoReasoning := .items, contextTokens? := some 1050000,
+    outputTokens? := some 128000 },
+  -- A thinking-mode DeepSeek model: with tool calls, its API rejects a request whose earlier
+  -- assistant messages lack their reasoning, and a gateway may need it on every reasoned turn
+  -- to reconstruct the conversation. 1,000,000 tokens of context, per DeepSeek's documentation.
+  { name := "deepseek-v4.1-flash", echoReasoning := .text, contextTokens? := some 1000000 }]
+
+def modelNames : String := ", ".intercalate (models.map (·.name)).toList
+
+def model? (name : String) : Option Models.Spec := models.find? (·.name == name)
+
+/-- The providers a person can name with `--provider`. -/
+def providers : Array Provider.Provider := #[
+  { name := "yunwu", baseUrl := "https://yunwu.ai/v1", baseUrlVar? := some "YUNWU_BASE_URL",
+    keyVar := "YUNWU_API_KEY" },
+  { name := "closeai", baseUrl := "https://api.openai-proxy.org/v1", keyVar := "CLOSEAI_API_KEY" },
+  { name := "xmcp", baseUrl := "https://llm.xmcp.ltd", keyVar := "XMCP_API_KEY"
+    routes := [("deepseek-v4.1-flash", { name := "ds/deepseek-v4-flash" }),
+      ("gpt-5.6-luna", { name := "closeai/gpt-5.6-luna" })] },
+  { name := "apiyi", baseUrl := "https://api.apiyi.com/v1", baseUrlVar? := some "APIYI_BASE_URL",
+    keyVar := "APIYI_API_KEY"
+    routes := [("gpt-6-luna", { name := "gpt-6-luna", api := .responses })] },
+  { name := "fireworks", baseUrl := "https://api.fireworks.ai/inference/v1",
+    baseUrlVar? := some "FIREWORKS_BASE_URL", keyVar := "FIREWORKS_API_KEY", anyModel := false
+    routes := [("deepseek-v4.1-flash", { name := "accounts/fireworks/models/deepseek-v4p1-flash" })] },
+  -- A DGX Spark's vLLM server, which needs no credential; `--url`/`--port` address it.
+  { name := "dgx", baseUrl := ({} : Provider.Dgx.Endpoint).baseUrl, baseUrlVar? := some "DGX_BASE_URL",
+    keyVar := "DGX_API_KEY", defaultKey? := some "EMPTY" }]
+
+def providerNames : String := ", ".intercalate (providers.map (·.name)).toList
+
+def provider? (name : String) : Option Provider.Provider := providers.find? (·.name == name)
+
+/-- A configuration's `model` as a person gives it, completed: a name alone, or a name with the
+fields it changes, over that model's defaults. A model this list does not name is refused by
+name alone, and kept as it is written when its spec is whole, as a log holds it. -/
+def completeModel (config : Json) : Except String Json :=
+  match config.getObjVal? "model" with
+  | .ok (.str name) => match model? name with
+    | some spec => .ok (config.setObjVal! "model" spec.toJson)
+    | none => .error s!"'model': unknown model: {name} (use {modelNames})"
+  | .ok json@(.obj _) => match json.getObjVal? "name" with
+    | .ok (.str name) => match model? name with
+      | some defaults => match Models.Spec.fromJson json defaults with
+        | .ok spec => .ok (config.setObjVal! "model" spec.toJson)
+        | .error problem => .error s!"'model': {name}: {problem}"
+      | none => .ok config
+    | _ => .error s!"'model': a model needs a \"name\": one of {modelNames}"
+  | _ => .ok config
+
+/-! ## Programs -/
+
 def miniSwe : Definition :=
   { routine := MiniSwe.routine, complete := fun json => (MiniSwe.Config.fromJson json).map (·.toJson) }
 
@@ -50,7 +115,7 @@ with it: every field, those left out at their defaults. -/
 def complete (name : String) (json : Json) : Result Json :=
   match named? name with
   | none => throw <| .input s!"unknown program: {name} (use {names})"
-  | some definition => match definition.complete json with
+  | some definition => match completeModel json >>= definition.complete with
     | .ok config => pure config
     | .error message => throw <| .input s!"{name}: {message}"
 
@@ -67,6 +132,9 @@ def applying (name : String) (config : Json) (settings : Array Settings.Setting)
     | .error message => throw <| .input message
   complete name applied
 
+/-- The programs a run calls: the session's scope. -/
+def scope : Scope Agent := Scope.of (all.map (·.routine))
+
 /-- The complete configuration of the program `name` with `settings` over its defaults. -/
 def resolve (name : String) (settings : Array Settings.Setting) : Result Json := do
   applying name (← complete name (.mkObj [])) settings
@@ -81,7 +149,7 @@ configuration leaves empty, the command line adds how to give it. -/
 def check (call : RoutineCall) : Except String Unit :=
   match named? call.name with
   | none => .error s!"unknown program: {call.name} (use {names})"
-  | some definition => match definition.complete call.arguments with
+  | some definition => match completeModel call.arguments >>= definition.complete with
     | .error message => .error s!"{call.name}: {message}"
     | .ok config => match definition.routine.body config with
       | .fail problem =>
@@ -92,69 +160,5 @@ def check (call : RoutineCall) : Except String Unit :=
         | some (_, flag) => .error s!"{problem}: give it with {flag}"
         | none => .error problem
       | _ => .ok ()
-
-/-! ## The session
-
-A run that `alaya new` starts is a call of `session`: in its frame, `session`, it waits for a
-person to call a program, calls it in a frame of its own (`session/mini-swe`), and when the call
-ends waits for the next. Whether a run waits for a call, whether a call runs, and which call a
-stop ends are what the session makes of them; the runtime knows none of it. -/
-
-/-- The run of programs of `scope`: it waits for a person to call one, calls it, and waits
-again. A call's failure, or its break, is the call's: the run goes on to wait for the next. -/
-def session (scope : Scope Agent) : Routine Agent where
-  name := "session"
-  body _ := iter (fun (_ : Unit) => do
-    match ← await (one := true) fun _ notice => notice matches .called _ with
-    | .called call :: _ => Computation.call call fun _ => pure (.inl ())
-    | _ => throw "the wait for a call ended without one") ()
-  scope
-
-/-- The programs a run calls: the session's scope. -/
-def scope : Scope Agent := Scope.of (all.map (·.routine))
-
-/-- What a run's call may name: the session over the programs, or a program alone. -/
-def run : Scope Agent := Scope.of (#[session scope] ++ all.map (·.routine))
-
-/-- The call that starts a run of `alaya new`. -/
-def sessionCall : RoutineCall := { name := "session", arguments := .null }
-
-/-- The session's frame. -/
-def sessionFrame : Frame := #[{ name := "session" }]
-
-/-- Whether the run waits for a person to call a program: the session waits, with no question. -/
-def idle : Next Agent → Bool
-  | .waits frame none => frame == sessionFrame
-  | _ => false
-
-/-- Whether a call of the session's runs where a log ends: what the run does next is in its frame
-or inside it, the call opened already. -/
-def running : Next Agent → Bool
-  | .ask call => call.frame.size ≥ 2
-  | .mark (.opened frame _) => frame.size > 2
-  | .mark event => event.frame?.any (·.size ≥ 2)
-  | .waits frame _ => frame.size ≥ 2
-  | _ => false
-
-/-- Whether a person may call a program where the run does `next`: only where the session waits
-for one, no call running and none read yet. -/
-def admitsCall (next : Next Agent) : Result Unit := do
-  if running next then
-    throw <| .input "a call is running: a program is called once it is over; `alaya stop` ends it first"
-  if next matches .ended _ then throw <| .input "the run is over: it calls nothing more"
-  if !idle next then throw <| .input "the run has a call to make here already: `alaya resume` makes it"
-
-/-- Whether a person's notice — a message, a change, a reply — has a reader where the run does
-`next`: only while a call runs. -/
-def admitsNotice (next : Next Agent) : Result Unit := do
-  if !running next then
-    throw <| .input "no call is running: nothing would read a notice appended here; append it at an entry before the call's end"
-
-/-- The frame a stop ends by default: the session's call open at an entry, given the calls open
-there, outermost first. -/
-def callToStop (open' : Array OpenCall) : Result Frame := do
-  let some call := open'.find? (·.frame.size == 2)
-    | throw <| .input "no call is running: there is nothing to stop"
-  pure call.frame
 
 end Alaya.App.Catalog
