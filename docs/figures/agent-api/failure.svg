@@ -1,15 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 429" width="920" height="429">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 343" width="920" height="343">
 <title>A failed sample ends its routine, and the caller catches the failure</title>
 <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}</style>
-<rect width="920" height="429" fill="#fff"/>
+<rect width="920" height="343" fill="#fff"/>
 <text x="12" y="14" class="s">computation</text>
 <text x="304" y="14" class="s">carried out by</text>
 <text x="447" y="14" class="s">log</text>
-<rect x="440.5" y="22.5" width="474" height="402" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
-<path fill="#fafbfc" d="M12.5,420.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V420.5H12.5Z"/><path class="bx" d="M12.5,420.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V420.5"/>
-<path fill="#fff" d="M26.5,412.5V178.5Q26.5,172.5 32.5,172.5H287.5Q293.5,172.5 293.5,178.5V412.5Q293.5,418.5 287.5,418.5H32.5Q26.5,418.5 26.5,412.5Z"/><path class="bx" d="M26.5,412.5V178.5Q26.5,172.5 32.5,172.5H287.5Q293.5,172.5 293.5,178.5V412.5Q293.5,418.5 287.5,418.5H32.5Q26.5,418.5 26.5,412.5"/>
-<path fill="#fafbfc" d="M40.5,286.5V202.5Q40.5,196.5 46.5,196.5H283.5Q289.5,196.5 289.5,202.5V286.5Q289.5,292.5 283.5,292.5H46.5Q40.5,292.5 40.5,286.5Z"/><path class="bx" d="M40.5,286.5V202.5Q40.5,196.5 46.5,196.5H283.5Q289.5,196.5 289.5,202.5V286.5Q289.5,292.5 283.5,292.5H46.5Q40.5,292.5 40.5,286.5"/>
-<path fill="#fafbfc" d="M40.5,388.5V333.5Q40.5,327.5 46.5,327.5H283.5Q289.5,327.5 289.5,333.5V388.5Q289.5,394.5 283.5,394.5H46.5Q40.5,394.5 40.5,388.5Z"/><path class="bx" d="M40.5,388.5V333.5Q40.5,327.5 46.5,327.5H283.5Q289.5,327.5 289.5,333.5V388.5Q289.5,394.5 283.5,394.5H46.5Q40.5,394.5 40.5,388.5"/>
+<rect x="440.5" y="22.5" width="474" height="316" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
+<path fill="#fafbfc" d="M12.5,326.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V326.5Q297.5,332.5 291.5,332.5H18.5Q12.5,332.5 12.5,326.5Z"/><path class="bx" d="M12.5,326.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V326.5Q297.5,332.5 291.5,332.5H18.5Q12.5,332.5 12.5,326.5"/>
+<path fill="#fff" d="M26.5,214.5V130.5Q26.5,124.5 32.5,124.5H287.5Q293.5,124.5 293.5,130.5V214.5Q293.5,220.5 287.5,220.5H32.5Q26.5,220.5 26.5,214.5Z"/><path class="bx" d="M26.5,214.5V130.5Q26.5,124.5 32.5,124.5H287.5Q293.5,124.5 293.5,130.5V214.5Q293.5,220.5 287.5,220.5H32.5Q26.5,220.5 26.5,214.5"/>
+<path fill="#fff" d="M26.5,302.5V247.5Q26.5,241.5 32.5,241.5H287.5Q293.5,241.5 293.5,247.5V302.5Q293.5,308.5 287.5,308.5H32.5Q26.5,308.5 26.5,302.5Z"/><path class="bx" d="M26.5,302.5V247.5Q26.5,241.5 32.5,241.5H287.5Q293.5,241.5 293.5,247.5V302.5Q293.5,308.5 287.5,308.5H32.5Q26.5,308.5 26.5,302.5"/>
 <text x="460" y="42" class="f n" text-anchor="end">0</text>
 <text x="468" y="42" class="fr">-</text>
 <g transform="translate(537,31.5) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
@@ -21,7 +20,7 @@
 <text x="460" y="66" class="f n" text-anchor="end">1</text>
 <text x="468" y="66" class="fr">-</text>
 <g transform="translate(537,55.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
-<text x="556" y="66.5" style="fill:#7556a3">call session</text>
+<text x="556" y="66.5" style="fill:#7556a3">call agent “fix the build”</text>
 <text x="898" y="66" class="f" text-anchor="end">arrived</text>
 <text x="304" y="59.5" class="s">a person</text>
 <path class="a" d="M307,67.5H432"/><path fill="#a3abb5" d="M436,67.5l-5,-2.5v5z"/>
@@ -38,97 +37,70 @@
 <text x="369" y="85" class="s" text-anchor="middle">the log</text>
 <path class="a d" d="M436,91.5H69.3"/><path fill="#a3abb5" d="M65.3,91.5l5,-2.5v5z"/>
 <text x="460" y="114" class="f n" text-anchor="end">3</text>
-<text x="468" y="114" class="fr">session</text>
+<text x="468" y="114" class="fr">agent</text>
 <g transform="translate(537,103.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="556" y="114.5">open session</text>
+<text x="556" y="114.5">open agent</text>
 <text x="898" y="114" class="f" text-anchor="end">opened</text>
-<text x="20.5" y="114" class="s b">session</text>
+<text x="20.5" y="114" class="s b">agent</text>
 <path class="a" d="M298.5,110.5H432"/><path fill="#a3abb5" d="M436,110.5l-5,-2.5v5z"/>
 <text x="460" y="138" class="f n" text-anchor="end">4</text>
-<text x="468" y="138" class="fr">-</text>
-<g transform="translate(537,127.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
-<text x="556" y="138.5" style="fill:#7556a3">call agent “fix the build”</text>
-<text x="898" y="138" class="f" text-anchor="end">arrived</text>
-<text x="304" y="131.5" class="s">a person</text>
-<path class="a" d="M307,139.5H432"/><path fill="#a3abb5" d="M436,139.5l-5,-2.5v5z"/>
-<circle cx="307" cy="139.5" r="2.5" fill="#7556a3"/>
+<text x="468" y="138" class="fr">planner</text>
+<g transform="translate(537,127.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="556" y="138.5">open planner “ship it”</text>
+<text x="898" y="138" class="f" text-anchor="end">opened</text>
+<text x="34.5" y="138" class="s b">planner</text>
+<path class="a" d="M294.5,134.5H432"/><path fill="#a3abb5" d="M436,134.5l-5,-2.5v5z"/>
 <text x="460" y="162" class="f n" text-anchor="end">5</text>
-<text x="468" y="162" class="fr">session</text>
-<g transform="translate(537,151.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
-<text x="556" y="162.5">inbox: takes 4</text>
-<text x="898" y="162" class="f" text-anchor="end">heard</text>
-<rect x="21.0" y="149.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
-<text x="27" y="162" class="ch">await</text>
-<path class="a" d="M73.8,153.5H432"/><path fill="#a3abb5" d="M436,153.5l-5,-2.5v5z"/>
-<rect x="346.9" y="147.0" width="44.1" height="13" fill="#fff"/>
-<text x="369" y="157" class="s" text-anchor="middle">the log</text>
-<path class="a d" d="M436,163.5H77.8"/><path fill="#a3abb5" d="M73.8,163.5l5,-2.5v5z"/>
-<text x="460" y="186" class="f n" text-anchor="end">6</text>
-<text x="468" y="186" class="fr">agent</text>
-<g transform="translate(537,175.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="556" y="186.5">open agent</text>
-<text x="898" y="186" class="f" text-anchor="end">opened</text>
-<text x="34.5" y="186" class="s b">agent</text>
-<path class="a" d="M294.5,182.5H432"/><path fill="#a3abb5" d="M436,182.5l-5,-2.5v5z"/>
-<text x="460" y="210" class="f n" text-anchor="end">7</text>
-<text x="468" y="210" class="fr">planner</text>
-<g transform="translate(537,199.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="556" y="210.5">open planner “ship it”</text>
-<text x="898" y="210" class="f" text-anchor="end">opened</text>
-<text x="48.5" y="210" class="s b">planner</text>
-<path class="a" d="M290.5,206.5H432"/><path fill="#a3abb5" d="M436,206.5l-5,-2.5v5z"/>
-<text x="460" y="234" class="f n" text-anchor="end">8</text>
-<text x="468" y="234" class="fr">planner</text>
-<g transform="translate(537,223.5) scale(0.9286)" stroke="#b3261e" fill="#b3261e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 3.2l7.6 7.6M10.8 3.2l-7.6 7.6" fill="none"/></g>
-<text x="556" y="234.5">sample failed: the request is too long</text>
-<text x="898" y="234" class="f" text-anchor="end">answered</text>
-<rect x="49.0" y="221.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#b3261e"/>
-<text x="55" y="234" class="ch">sample request</text>
-<path class="a" d="M167.1,225.5H432"/><path fill="#a3abb5" d="M436,225.5l-5,-2.5v5z"/>
-<rect x="348.9" y="219.0" width="40.2" height="13" fill="#fff"/>
-<text x="369" y="229" class="s" text-anchor="middle">model</text>
-<path class="a d" d="M436,235.5H171.1"/><path fill="#a3abb5" d="M167.1,235.5l5,-2.5v5z"/>
-<text x="48.5" y="250" class="s">the answer is an error: the operation</text>
-<text x="48.5" y="264" class="s">fails where it was performed</text>
-<text x="460" y="287" class="f n" text-anchor="end">9</text>
-<text x="468" y="287" class="fr">planner</text>
-<g transform="translate(537,276.5) scale(0.9286)" stroke="#b3261e" fill="#b3261e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 3.2l7.6 7.6M10.8 3.2l-7.6 7.6" fill="none"/></g>
-<text x="556" y="287.5">fail: the request is too long</text>
-<text x="898" y="287" class="f" text-anchor="end">failed</text>
-<text x="281.5" y="287" class="e" style="fill:#b3261e" text-anchor="end">fail</text>
-<path class="a" d="M290.5,283.5H432"/><path fill="#a3abb5" d="M436,283.5l-5,-2.5v5z"/>
-<text x="34.5" y="305" class="s"><tspan class="m">try … catch</tspan>: the caller</text>
-<text x="34.5" y="319" class="s">catches the error; no mark</text>
-<text x="460" y="341" class="f n" text-anchor="end">10</text>
-<text x="468" y="341" class="fr">step</text>
-<g transform="translate(537,330.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="556" y="341.5">open step “make”</text>
-<text x="898" y="341" class="f" text-anchor="end">opened</text>
-<text x="48.5" y="341" class="s b">step</text>
-<path class="a" d="M290.5,337.5H432"/><path fill="#a3abb5" d="M436,337.5l-5,-2.5v5z"/>
-<text x="460" y="365" class="f n" text-anchor="end">11</text>
-<text x="468" y="365" class="fr">step</text>
-<g transform="translate(537,354.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
-<text x="556" y="365.5">exec make → exit 0</text>
-<text x="898" y="365" class="f" text-anchor="end">answered</text>
-<rect x="49.0" y="352.0" width="91.9" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
-<text x="55" y="365" class="ch">exec "make"</text>
-<path class="a" d="M145.4,356.5H432"/><path fill="#a3abb5" d="M436,356.5l-5,-2.5v5z"/>
-<rect x="341.4" y="350.0" width="55.1" height="13" fill="#fff"/>
-<text x="369" y="360" class="s" text-anchor="middle">executor</text>
-<path class="a d" d="M436,366.5H149.4"/><path fill="#a3abb5" d="M145.4,366.5l5,-2.5v5z"/>
-<text x="460" y="389" class="f n" text-anchor="end">12</text>
-<text x="468" y="389" class="fr">step</text>
-<g transform="translate(537,378.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
-<text x="556" y="389.5">return 0</text>
-<text x="898" y="389" class="f" text-anchor="end">returned</text>
-<text x="281.5" y="389" class="e" style="fill:#2a7a4b" text-anchor="end">return 0</text>
-<path class="a" d="M290.5,385.5H432"/><path fill="#a3abb5" d="M436,385.5l-5,-2.5v5z"/>
-<text x="460" y="413" class="f n" text-anchor="end">13</text>
-<text x="468" y="413" class="fr">agent</text>
-<g transform="translate(537,402.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
-<text x="556" y="413.5">return built without a plan</text>
-<text x="898" y="413" class="f" text-anchor="end">returned</text>
-<text x="285.5" y="413" class="e" style="fill:#2a7a4b" text-anchor="end">return</text>
-<path class="a" d="M294.5,409.5H432"/><path fill="#a3abb5" d="M436,409.5l-5,-2.5v5z"/>
+<text x="468" y="162" class="fr">planner</text>
+<g transform="translate(537,151.5) scale(0.9286)" stroke="#b3261e" fill="#b3261e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 3.2l7.6 7.6M10.8 3.2l-7.6 7.6" fill="none"/></g>
+<text x="556" y="162.5">sample failed: the request is too long</text>
+<text x="898" y="162" class="f" text-anchor="end">answered</text>
+<rect x="35.0" y="149.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#b3261e"/>
+<text x="41" y="162" class="ch">sample request</text>
+<path class="a" d="M153.1,153.5H432"/><path fill="#a3abb5" d="M436,153.5l-5,-2.5v5z"/>
+<rect x="348.9" y="147.0" width="40.2" height="13" fill="#fff"/>
+<text x="369" y="157" class="s" text-anchor="middle">model</text>
+<path class="a d" d="M436,163.5H157.1"/><path fill="#a3abb5" d="M153.1,163.5l5,-2.5v5z"/>
+<text x="34.5" y="178" class="s">the answer is an error: the operation</text>
+<text x="34.5" y="192" class="s">fails where it was performed</text>
+<text x="460" y="215" class="f n" text-anchor="end">6</text>
+<text x="468" y="215" class="fr">planner</text>
+<g transform="translate(537,204.5) scale(0.9286)" stroke="#b3261e" fill="#b3261e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 3.2l7.6 7.6M10.8 3.2l-7.6 7.6" fill="none"/></g>
+<text x="556" y="215.5">fail: the request is too long</text>
+<text x="898" y="215" class="f" text-anchor="end">failed</text>
+<text x="285.5" y="215" class="e" style="fill:#b3261e" text-anchor="end">fail</text>
+<path class="a" d="M294.5,211.5H432"/><path fill="#a3abb5" d="M436,211.5l-5,-2.5v5z"/>
+<text x="20.5" y="233" class="s"><tspan class="m">try … catch</tspan>: the caller catches the error; no mark</text>
+<text x="460" y="255" class="f n" text-anchor="end">7</text>
+<text x="468" y="255" class="fr">step</text>
+<g transform="translate(537,244.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="556" y="255.5">open step “make”</text>
+<text x="898" y="255" class="f" text-anchor="end">opened</text>
+<text x="34.5" y="255" class="s b">step</text>
+<path class="a" d="M294.5,251.5H432"/><path fill="#a3abb5" d="M436,251.5l-5,-2.5v5z"/>
+<text x="460" y="279" class="f n" text-anchor="end">8</text>
+<text x="468" y="279" class="fr">step</text>
+<g transform="translate(537,268.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="556" y="279.5">exec make → exit 0</text>
+<text x="898" y="279" class="f" text-anchor="end">answered</text>
+<rect x="35.0" y="266.0" width="91.9" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
+<text x="41" y="279" class="ch">exec "make"</text>
+<path class="a" d="M131.4,270.5H432"/><path fill="#a3abb5" d="M436,270.5l-5,-2.5v5z"/>
+<rect x="341.4" y="264.0" width="55.1" height="13" fill="#fff"/>
+<text x="369" y="274" class="s" text-anchor="middle">executor</text>
+<path class="a d" d="M436,280.5H135.4"/><path fill="#a3abb5" d="M131.4,280.5l5,-2.5v5z"/>
+<text x="460" y="303" class="f n" text-anchor="end">9</text>
+<text x="468" y="303" class="fr">step</text>
+<g transform="translate(537,292.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="556" y="303.5">return 0</text>
+<text x="898" y="303" class="f" text-anchor="end">returned</text>
+<text x="285.5" y="303" class="e" style="fill:#2a7a4b" text-anchor="end">return 0</text>
+<path class="a" d="M294.5,299.5H432"/><path fill="#a3abb5" d="M436,299.5l-5,-2.5v5z"/>
+<text x="460" y="327" class="f n" text-anchor="end">10</text>
+<text x="468" y="327" class="fr">agent</text>
+<g transform="translate(537,316.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="556" y="327.5">return built without a plan</text>
+<text x="898" y="327" class="f" text-anchor="end">returned</text>
+<text x="289.5" y="327" class="e" style="fill:#2a7a4b" text-anchor="end">return</text>
+<path class="a" d="M298.5,323.5H432"/><path fill="#a3abb5" d="M436,323.5l-5,-2.5v5z"/>
 </svg>

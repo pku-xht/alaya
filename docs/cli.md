@@ -12,7 +12,7 @@ flowchart TD
   classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
   new("<b>new</b><br/>create a run")
-  call("<b>call</b><br/>an agent, a grader")
+  calling("<b>call</b><br/>an agent, a grader")
   resume("<b>resume</b><br/>drive it on")
   idle("the session waits for a call<br/>exit 0, or 1 if it failed;<br/>a grader: by its verdict"):::ok
   paused("paused at a limit<br/>exit 4"):::wait
@@ -21,15 +21,15 @@ flowchart TD
   tell("<b>tell</b> · <b>commit</b><br/>say or change something")
   reply("<b>reply</b><br/>answer the question")
 
-  new --> call
-  call --> resume
+  new --> calling
+  calling --> resume
   resume --> idle
-  idle -- "call the next" --> call
+  idle -- "call the next" --> calling
   resume --> paused
   paused -- "resume again" --> resume
   paused --> tell
   paused --> stop
-  stop --> call
+  stop --> calling
   tell --> resume
   resume --> waits
   waits --> reply

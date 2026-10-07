@@ -438,24 +438,25 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
 
 
 def SESSION(by=None):
-    """The start of every log: the root, the call of the run, the session, its read and its opening."""
+    """The start of a log of a run the command line starts: the root, the run's call of the session,
+    its read and its opening."""
     root = R(0, "-", "the workspace the run starts from", **({"by": by} if by else {}))
     return [root, R(1, "-", "call session", **({"by": by} if by else {})),
             R(2, "-", "inbox: takes 1", chip="await"), R(3, "session", "open session")]
 
 
 def CALLED(task="fix the build", program="agent"):
-    """The start of every log: the session, a person's call of the agent, the session's read of it,
-    and the opening of the call."""
-    return SESSION() + [R(4, "-", f"call {program} “{task}”"), R(5, "session", "inbox: takes 4", chip="await"),
-                        R(6, program, f"open {program}")]
+    """The start of a log of an agent: the root, the run's call of the agent, the outside's read of
+    it, and the opening of the call."""
+    return [R(0, "-", "the workspace the run starts from"), R(1, "-", f"call {program} “{task}”"),
+            R(2, "-", "inbox: takes 1", chip="await"), R(3, program, f"open {program}")]
 
 
 figure("log", "The log of a small agent, beside its computation", CALLED() + [
-    R(7, "agent", "inbox: nothing"),
-    R(8, "agent", "sample → says “run make”"),
-    R(9, "agent", "exec make → exit 0"),
-    R(10, "agent", "return fixed", end='return "fixed"'),
+    R(4, "agent", "inbox: nothing"),
+    R(5, "agent", "sample → says “run make”"),
+    R(6, "agent", "exec make → exit 0"),
+    R(7, "agent", "return fixed", end='return "fixed"'),
 ], heads=True, legend=True)
 
 figure("perform", "Three operations, each answered by its part of the world", [
@@ -464,110 +465,97 @@ figure("perform", "Three operations, each answered by its part of the world", [
     R(8, "agent", "exec pytest -q → exit 1"),
     R(9, "agent", "time 4 min 12 s of 1 h"),
     GAP(),
-], inside=["session", "agent"])
+], inside=["agent"])
 
 figure("workspace", "The versions of the workspace along a log", [
     R(0, "-", "the workspace the run starts from", ws="w0"),
-    R(1, "-", "call session"),
-    R(3, "session", "open session"),
-    R(4, "-", "call agent “fix the build”"),
-    R(6, "agent", "open agent"),
+    R(1, "-", "call agent “fix the build”"),
+    R(3, "agent", "open agent"),
     GAP(on="bash"),
-    R(10, "bash", "exec make → exit 0", ws="w1", on="w0"),
+    R(7, "bash", "exec make → exit 0", ws="w1", on="w0"),
     GAP(off=1),
-    R(14, "-", "workspace changed: fixed Makefile", ws="w2"),
+    R(11, "-", "workspace changed: fixed Makefile", ws="w2"),
     GAP(on="bash#1"),
-    R(17, "bash#1", "exec make test → exit 0", ws="w3", on="w2"),
-    GAP(off=2),
-    R(43, "-", "call grader “pytest /grader”"),
-    R(45, "grader", "open grader"),
-    R(46, "grader", "exec pytest /grader → exit 0", ws="w4", on="w3"),
-], workspace="a grader’s command, too, leaves a version: its reports are in `w4`")
+    R(14, "bash#1", "exec make test → exit 0", ws="w3", on="w2"),
+], workspace="a change from outside leaves a version, as a command does")
 
 figure("inbox", "Notices arrive from outside, and reads take them", CALLED() + [
-    R(7, "agent", "inbox: nothing", note="a read takes what has arrived, possibly nothing"),
-    R(8, "agent", "sample → bash make"),
+    R(4, "agent", "inbox: nothing", note="a read takes what has arrived, possibly nothing"),
+    R(5, "agent", "sample → bash make"),
     GAP(),
-    R(12, "-", "said “use ninja, not make”", by="at any time"),
+    R(9, "-", "said “use ninja, not make”", by="at any time"),
     GAP(),
-    R(15, "agent", "inbox: takes 12"),
-    R(16, "agent", "sample → bash ninja"),
+    R(12, "agent", "inbox: takes 9"),
+    R(13, "agent", "sample → bash ninja"),
     GAP(),
-    R(20, "agent", "inbox: nothing"),
+    R(17, "agent", "inbox: nothing"),
     GAP(),
 ], takes=True)
 
 figure("call", "Two calls of a routine, each a bracket in the log", CALLED() + [
-    R(7, "step", "open step “make”"),
-    R(8, "step", "exec make → exit 0"),
-    R(9, "step", "return 0", end="return 0"),
-    R(10, "step#1", "open step “make test”"),
-    R(11, "step#1", "exec make test → exit 1"),
-    R(12, "step#1", "return 1", end="return 1"),
-    R(13, "agent", "return 2 steps, 1 failed"),
+    R(4, "step", "open step “make”"),
+    R(5, "step", "exec make → exit 0"),
+    R(6, "step", "return 0", end="return 0"),
+    R(7, "step#1", "open step “make test”"),
+    R(8, "step#1", "exec make test → exit 1"),
+    R(9, "step#1", "return 1", end="return 1"),
+    R(10, "agent", "return 2 steps, 1 failed"),
 ], foot=["a child frame is its caller’s and a step: the routine, and how many calls of it came before"])
 
 figure("failure", "A failed sample ends its routine, and the caller catches the failure", CALLED() + [
-    R(7, "planner", "open planner “ship it”"),
-    R(8, "planner", "sample failed: the request is too long",
+    R(4, "planner", "open planner “ship it”"),
+    R(5, "planner", "sample failed: the request is too long",
       note="the answer is an error: the operation fails where it was performed"),
-    R(9, "planner", "fail: the request is too long"),
+    R(6, "planner", "fail: the request is too long"),
     NOTE("`try … catch`: the caller catches the error; no mark"),
-    R(10, "step", "open step “make”"),
-    R(11, "step", "exec make → exit 0"),
-    R(12, "step", "return 0", end="return 0"),
-    R(13, "agent", "return built without a plan"),
+    R(7, "step", "open step “make”"),
+    R(8, "step", "exec make → exit 0"),
+    R(9, "step", "return 0", end="return 0"),
+    R(10, "agent", "return built without a plan"),
 ])
 
 figure("loop", "A loop of three rounds: the log holds their events, flat", CALLED() + [
     ROUND("round 1 · state: 2 messages", 4),
-    R(7, "agent", "sample → bash make"),
-    R(8, "bash", "open bash “make”"),
-    R(9, "bash", "exec make → exit 2"),
-    R(10, "bash", "return exit 2: no rule to make target"),
+    R(4, "agent", "sample → bash make"),
+    R(5, "bash", "open bash “make”"),
+    R(6, "bash", "exec make → exit 2"),
+    R(7, "bash", "return exit 2: no rule to make target"),
     ROUND("round 2 · 4 messages", 4),
-    R(11, "agent", "sample → bash ninja"),
-    R(12, "bash#1", "open bash “ninja”"),
-    R(13, "bash#1", "exec ninja → exit 0"),
-    R(14, "bash#1", "return exit 0: build ok"),
+    R(8, "agent", "sample → bash ninja"),
+    R(9, "bash#1", "open bash “ninja”"),
+    R(10, "bash#1", "exec ninja → exit 0"),
+    R(11, "bash#1", "return exit 0: build ok"),
     ROUND("round 3 · 6 messages → result", 1),
-    R(15, "agent", "sample → says “fixed: use ninja”"),
-    R(16, "agent", "return fixed: use ninja"),
+    R(12, "agent", "sample → says “fixed: use ninja”"),
+    R(13, "agent", "return fixed: use ninja"),
 ], foot=["a loop writes nothing of its own; every round reads an event"])
 
-figure("stop", "A break ends the call open in its frame, and the session waits for the next", SESSION() + [
-    R(4, "-", "call agent “ship it”"),
-    R(5, "session", "inbox: takes 4", chip="await"),
-    R(6, "agent", "open agent"),
-    R(7, "workflow", "open workflow “ship it”"),
-    R(8, "planner", "open planner “ship it”"),
-    R(9, "planner", "sample → lookup build"),
-    R(10, "-", "stopped session/agent: to grade", note="the call and every call in it end; no marks"),
-    DIV("the session's call failed: it waits for the next"),
-    R(11, "-", "call grader “pytest /grader”"),
-    R(12, "session", "inbox: takes 11", chip="await"),
-    R(13, "grader", "open grader"),
-    R(14, "grader", "exec pytest /grader → exit 1"),
-    R(15, "grader", "return fail 12/48", end="return verdict"),
+figure("stop", "A break ends the call open in its frame, and its caller goes on", CALLED("ship it") + [
+    R(4, "workflow", "open workflow “ship it”"),
+    R(5, "planner", "open planner “ship it”"),
+    R(6, "planner", "sample → lookup build"),
+    R(7, "-", "stopped agent/workflow: enough", note="the call and every call in it end; no marks"),
+    NOTE("`try … catch` in the agent: it catches the reason as the workflow's failure"),
+    R(8, "agent", "return stopped: enough", end='return "stopped: enough"'),
 ])
 
 figure("routines", "The log of the workflow, its sub-agent and their tools", CALLED("ship it") + [
-    R(7, "workflow", "open workflow “ship it”"),
-    R(8, "planner", "open planner “ship it”"),
-    R(9, "planner", "sample → lookup build"),
-    R(10, "lookup", "open lookup “build”"),
-    R(11, "lookup", "exec grep build notes.txt → exit 0"),
-    R(12, "lookup", "return build: make"),
-    R(13, "planner", "sample → says “make make test”"),
-    R(14, "planner", "return steps: make, make test"),
-    R(15, "step", "open step “make”"),
-    R(16, "step", "exec make → exit 0"),
-    R(17, "step", "return 0"),
-    R(18, "step#1", "open step “make test”"),
-    R(19, "step#1", "exec make test → exit 1"),
-    R(20, "step#1", "return 1"),
-    R(21, "workflow", "return 2 steps, 1 failed"),
-    R(22, "agent", "return 2 steps, 1 failed"),
+    R(4, "workflow", "open workflow “ship it”"),
+    R(5, "planner", "open planner “ship it”"),
+    R(6, "planner", "sample → lookup build"),
+    R(7, "lookup", "open lookup “build”"),
+    R(8, "lookup", "exec grep build notes.txt → exit 0"),
+    R(9, "lookup", "return build: make"),
+    R(10, "planner", "sample → says “make make test”"),
+    R(11, "planner", "return steps: make, make test"),
+    R(12, "step", "open step “make”"),
+    R(13, "step", "exec make → exit 0"),
+    R(14, "step", "return 0"),
+    R(15, "step#1", "open step “make test”"),
+    R(16, "step#1", "exec make test → exit 1"),
+    R(17, "step#1", "return 1"),
+    R(18, "workflow", "return 2 steps, 1 failed"),
+    R(19, "agent", "return 2 steps, 1 failed"),
 ])
 
 figure("tool-call", "A response that asks for two tools, and the two calls it becomes", [
@@ -584,7 +572,7 @@ figure("tool-call", "A response that asks for two tools, and the two calls it be
     R(18, "agent", "inbox: nothing"),
     R(19, "agent", "sample → says “one test fails”", note="the next request holds both results"),
     GAP(),
-], inside=["session", "agent"])
+], inside=["agent"])
 
 figure("ask-user", "A question: the tool asks, the run waits, a person replies, the call returns", [
     GAP(),
@@ -592,14 +580,14 @@ figure("ask-user", "A question: the tool asks, the run waits, a person replies, 
     R(11, "agent", "sample → ask_user Keep duplicates?"),
     R(12, "ask_user", "open ask_user “Keep duplicates?”"),
     R(13, "ask_user", "ask “Keep duplicates?”", note="the question is in the log, whoever asks it"),
-    DIV("the driver stops: the run waits for a reply to session/agent/ask_user"),
-    R(14, "-", "replied to session/agent/ask_user: yes", by="`alaya reply`"),
+    DIV("the driver stops: the run waits for a reply to agent/ask_user"),
+    R(14, "-", "replied to agent/ask_user: yes", by="`alaya reply`"),
     R(15, "ask_user", "inbox: takes 14", chip="the reply"),
     R(16, "ask_user", "return yes", end='return "yes"'),
     R(17, "agent", "inbox: nothing", note="a plain read leaves replies"),
     R(18, "agent", "sample → bash sort -u names.txt", note="the model is shown `yes` as the tool’s result"),
     GAP(),
-], inside=["session", "agent"], takes=True)
+], inside=["agent"], takes=True)
 
 figure("run", "A whole run: the session, the agent, then a grader, each in a frame of its own", SESSION(by="`alaya new`") + [
     R(4, "-", "call mini-swe “Implement SPEC.md”", by="`alaya call`"),

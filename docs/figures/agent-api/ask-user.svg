@@ -7,10 +7,8 @@
 <text x="447" y="14" class="s">log</text>
 <rect x="440.5" y="22.5" width="474" height="326" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
 <path fill="#fafbfc" d="M12.5,344.5V26.5H297.5V344.5H12.5Z"/><path class="bx" d="M12.5,344.5V26.5M297.5,26.5V344.5"/>
-<path fill="#fff" d="M26.5,344.5V26.5H293.5V344.5H26.5Z"/><path class="bx" d="M26.5,344.5V26.5M293.5,26.5V344.5"/>
-<path fill="#fafbfc" d="M40.5,240.5V100.5Q40.5,94.5 46.5,94.5H283.5Q289.5,94.5 289.5,100.5V240.5Q289.5,246.5 283.5,246.5H46.5Q40.5,246.5 40.5,240.5Z"/><path class="bx" d="M40.5,240.5V100.5Q40.5,94.5 46.5,94.5H283.5Q289.5,94.5 289.5,100.5V240.5Q289.5,246.5 283.5,246.5H46.5Q40.5,246.5 40.5,240.5"/>
-<text x="20.5" y="39" class="s b">session</text>
-<text x="34.5" y="39" class="s b">agent</text>
+<path fill="#fff" d="M26.5,240.5V100.5Q26.5,94.5 32.5,94.5H287.5Q293.5,94.5 293.5,100.5V240.5Q293.5,246.5 287.5,246.5H32.5Q26.5,246.5 26.5,240.5Z"/><path class="bx" d="M26.5,240.5V100.5Q26.5,94.5 32.5,94.5H287.5Q293.5,94.5 293.5,100.5V240.5Q293.5,246.5 287.5,246.5H32.5Q26.5,246.5 26.5,240.5"/>
+<text x="20.5" y="39" class="s b">agent</text>
 <circle cx="456" cy="31" r="0.9" fill="#a3abb5"/>
 <circle cx="456" cy="35" r="0.9" fill="#a3abb5"/>
 <circle cx="456" cy="39" r="0.9" fill="#a3abb5"/>
@@ -19,45 +17,45 @@
 <g transform="translate(537,49.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
 <text x="556" y="60.5">inbox: nothing</text>
 <text x="898" y="60" class="f" text-anchor="end">heard</text>
-<rect x="35.0" y="47.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
-<text x="41" y="60" class="ch">inbox</text>
-<path class="a" d="M87.8,51.5H432"/><path fill="#a3abb5" d="M436,51.5l-5,-2.5v5z"/>
+<rect x="21.0" y="47.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
+<text x="27" y="60" class="ch">inbox</text>
+<path class="a" d="M73.8,51.5H432"/><path fill="#a3abb5" d="M436,51.5l-5,-2.5v5z"/>
 <rect x="346.9" y="45.0" width="44.1" height="13" fill="#fff"/>
 <text x="369" y="55" class="s" text-anchor="middle">the log</text>
-<path class="a d" d="M436,61.5H91.8"/><path fill="#a3abb5" d="M87.8,61.5l5,-2.5v5z"/>
+<path class="a d" d="M436,61.5H77.8"/><path fill="#a3abb5" d="M73.8,61.5l5,-2.5v5z"/>
 <text x="460" y="84" class="f n" text-anchor="end">11</text>
 <text x="468" y="84" class="fr">agent</text>
 <g transform="translate(537,73.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
 <text x="556" y="84.5">sample → ask_user Keep duplicates?</text>
 <text x="898" y="84" class="f" text-anchor="end">answered</text>
-<rect x="35.0" y="71.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
-<text x="41" y="84" class="ch">sample request</text>
-<path class="a" d="M153.1,75.5H432"/><path fill="#a3abb5" d="M436,75.5l-5,-2.5v5z"/>
+<rect x="21.0" y="71.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
+<text x="27" y="84" class="ch">sample request</text>
+<path class="a" d="M139.1,75.5H432"/><path fill="#a3abb5" d="M436,75.5l-5,-2.5v5z"/>
 <rect x="348.9" y="69.0" width="40.2" height="13" fill="#fff"/>
 <text x="369" y="79" class="s" text-anchor="middle">model</text>
-<path class="a d" d="M436,85.5H157.1"/><path fill="#a3abb5" d="M153.1,85.5l5,-2.5v5z"/>
+<path class="a d" d="M436,85.5H143.1"/><path fill="#a3abb5" d="M139.1,85.5l5,-2.5v5z"/>
 <text x="460" y="108" class="f n" text-anchor="end">12</text>
 <text x="468" y="108" class="fr">ask_user</text>
 <g transform="translate(537,97.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
 <text x="556" y="108.5">open ask_user “Keep duplicates?”</text>
 <text x="898" y="108" class="f" text-anchor="end">opened</text>
-<text x="48.5" y="108" class="s b">ask_user</text>
-<path class="a" d="M290.5,104.5H432"/><path fill="#a3abb5" d="M436,104.5l-5,-2.5v5z"/>
+<text x="34.5" y="108" class="s b">ask_user</text>
+<path class="a" d="M294.5,104.5H432"/><path fill="#a3abb5" d="M436,104.5l-5,-2.5v5z"/>
 <text x="460" y="132" class="f n" text-anchor="end">13</text>
 <text x="468" y="132" class="fr">ask_user</text>
 <g transform="translate(537,121.5) scale(0.9286)" stroke="#a8690f" fill="#a8690f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 5.3a2.4 2.4 0 1 1 3.3 2.2c-.6.3-.9.7-.9 1.4" fill="none"/><circle cx="7" cy="11.2" r=".8" stroke="none"/></g>
 <text x="556" y="132.5">ask “Keep duplicates?”</text>
 <text x="898" y="132" class="f" text-anchor="end">asked</text>
-<rect x="49.0" y="119.0" width="99.1" height="18" rx="4" fill="#f6f7f9" stroke="#a8690f"/>
-<text x="55" y="132" class="ch">ask question</text>
-<path class="a" d="M152.6,128.5H432"/><path fill="#a3abb5" d="M436,128.5l-5,-2.5v5z"/>
-<text x="48.5" y="148" class="s">the question is in the log, whoever asks it</text>
-<path stroke="#a8690f" stroke-dasharray="4 3" d="M4,166.5H548M927.9,166.5H914"/>
-<text x="556" y="170" class="s" style="fill:#a8690f">the driver stops: the run waits for a reply to session/agent/ask_user</text>
+<rect x="35.0" y="119.0" width="99.1" height="18" rx="4" fill="#f6f7f9" stroke="#a8690f"/>
+<text x="41" y="132" class="ch">ask question</text>
+<path class="a" d="M138.6,128.5H432"/><path fill="#a3abb5" d="M436,128.5l-5,-2.5v5z"/>
+<text x="34.5" y="148" class="s">the question is in the log, whoever asks it</text>
+<path stroke="#a8690f" stroke-dasharray="4 3" d="M4,166.5H548M881.9,166.5H914"/>
+<text x="556" y="170" class="s" style="fill:#a8690f">the driver stops: the run waits for a reply to agent/ask_user</text>
 <text x="460" y="193" class="f n" text-anchor="end">14</text>
 <text x="468" y="193" class="fr">-</text>
 <g transform="translate(537,182.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5L2.5 7 6 10.5" fill="none"/><path d="M2.5 7h5.5a3 3 0 0 1 3 3v1.5" fill="none"/></g>
-<text x="556" y="193.5" style="fill:#7556a3">replied to session/agent/ask_user: yes</text>
+<text x="556" y="193.5" style="fill:#7556a3">replied to agent/ask_user: yes</text>
 <text x="898" y="193" class="f" text-anchor="end">arrived</text>
 <text x="304" y="186.5" class="s">a person · <tspan class="m">alaya reply</tspan></text>
 <path class="a" d="M307,194.5H432"/><path fill="#a3abb5" d="M436,194.5l-5,-2.5v5z"/>
@@ -67,43 +65,43 @@
 <g transform="translate(537,206.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
 <text x="556" y="217.5">inbox: takes 14</text>
 <text x="898" y="217" class="f" text-anchor="end">heard</text>
-<rect x="49.0" y="204.0" width="77.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
-<text x="55" y="217" class="ch">the reply</text>
-<path class="a" d="M130.8,208.5H432"/><path fill="#a3abb5" d="M436,208.5l-5,-2.5v5z"/>
+<rect x="35.0" y="204.0" width="77.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
+<text x="41" y="217" class="ch">the reply</text>
+<path class="a" d="M116.8,208.5H432"/><path fill="#a3abb5" d="M436,208.5l-5,-2.5v5z"/>
 <rect x="346.9" y="202.0" width="44.1" height="13" fill="#fff"/>
 <text x="369" y="212" class="s" text-anchor="middle">the log</text>
-<path class="a d" d="M436,218.5H134.8"/><path fill="#a3abb5" d="M130.8,218.5l5,-2.5v5z"/>
+<path class="a d" d="M436,218.5H120.8"/><path fill="#a3abb5" d="M116.8,218.5l5,-2.5v5z"/>
 <text x="460" y="241" class="f n" text-anchor="end">16</text>
 <text x="468" y="241" class="fr">ask_user</text>
 <g transform="translate(537,230.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
 <text x="556" y="241.5">return yes</text>
 <text x="898" y="241" class="f" text-anchor="end">returned</text>
-<text x="281.5" y="241" class="e" style="fill:#2a7a4b" text-anchor="end">return "yes"</text>
-<path class="a" d="M290.5,237.5H432"/><path fill="#a3abb5" d="M436,237.5l-5,-2.5v5z"/>
+<text x="285.5" y="241" class="e" style="fill:#2a7a4b" text-anchor="end">return "yes"</text>
+<path class="a" d="M294.5,237.5H432"/><path fill="#a3abb5" d="M436,237.5l-5,-2.5v5z"/>
 <text x="460" y="265" class="f n" text-anchor="end">17</text>
 <text x="468" y="265" class="fr">agent</text>
 <g transform="translate(537,254.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
 <text x="556" y="265.5">inbox: nothing</text>
 <text x="898" y="265" class="f" text-anchor="end">heard</text>
-<rect x="35.0" y="252.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
-<text x="41" y="265" class="ch">inbox</text>
-<path class="a" d="M87.8,256.5H432"/><path fill="#a3abb5" d="M436,256.5l-5,-2.5v5z"/>
+<rect x="21.0" y="252.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
+<text x="27" y="265" class="ch">inbox</text>
+<path class="a" d="M73.8,256.5H432"/><path fill="#a3abb5" d="M436,256.5l-5,-2.5v5z"/>
 <rect x="346.9" y="250.0" width="44.1" height="13" fill="#fff"/>
 <text x="369" y="260" class="s" text-anchor="middle">the log</text>
-<path class="a d" d="M436,266.5H91.8"/><path fill="#a3abb5" d="M87.8,266.5l5,-2.5v5z"/>
-<text x="34.5" y="281" class="s">a plain read leaves replies</text>
+<path class="a d" d="M436,266.5H77.8"/><path fill="#a3abb5" d="M73.8,266.5l5,-2.5v5z"/>
+<text x="20.5" y="281" class="s">a plain read leaves replies</text>
 <text x="460" y="304" class="f n" text-anchor="end">18</text>
 <text x="468" y="304" class="fr">agent</text>
 <g transform="translate(537,293.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
 <text x="556" y="304.5">sample → bash sort -u names.txt</text>
 <text x="898" y="304" class="f" text-anchor="end">answered</text>
-<rect x="35.0" y="291.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
-<text x="41" y="304" class="ch">sample request</text>
-<path class="a" d="M153.1,295.5H432"/><path fill="#a3abb5" d="M436,295.5l-5,-2.5v5z"/>
+<rect x="21.0" y="291.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
+<text x="27" y="304" class="ch">sample request</text>
+<path class="a" d="M139.1,295.5H432"/><path fill="#a3abb5" d="M436,295.5l-5,-2.5v5z"/>
 <rect x="348.9" y="289.0" width="40.2" height="13" fill="#fff"/>
 <text x="369" y="299" class="s" text-anchor="middle">model</text>
-<path class="a d" d="M436,305.5H157.1"/><path fill="#a3abb5" d="M153.1,305.5l5,-2.5v5z"/>
-<text x="34.5" y="320" class="s">the model is shown <tspan class="m">yes</tspan> as the tool’s result</text>
+<path class="a d" d="M436,305.5H143.1"/><path fill="#a3abb5" d="M139.1,305.5l5,-2.5v5z"/>
+<text x="20.5" y="320" class="s">the model is shown <tspan class="m">yes</tspan> as the tool’s result</text>
 <circle cx="456" cy="332" r="0.9" fill="#a3abb5"/>
 <circle cx="456" cy="336" r="0.9" fill="#a3abb5"/>
 <circle cx="456" cy="340" r="0.9" fill="#a3abb5"/>

@@ -148,13 +148,14 @@ inductive Notice where
 
 A **frame** says which call of a routine (`call name arguments`, §3.3) an event happened in. It
 lists, from the outermost call inward, each call by the routine's name and by how many calls of
-that name its caller made before it. The run is itself a call, made from outside (`docs/runtime.md` §1): `session`
-is the run, `session/mini-swe` the agent it calls, and `session/mini-swe/bash#2` the agent's
-third call of `bash`. `#[]` is the outside, where nothing of the run runs; it is written `-`.
+that name its caller made before it. A run is itself a call, made from outside
+(`docs/runtime.md` §1): in a run of MiniSwe, `mini-swe` is the agent's call, and
+`mini-swe/bash#2` its third call of `bash`. `#[]` is the outside, where nothing of the run runs;
+it is written `-`.
 
 A frame keeps its identity when a program changes around it: a call of one routine does not
 move the calls of another. An agent that comes to call `subagent` first still has its first
-`bash` in `session/mini-swe/bash`.
+`bash` in `mini-swe/bash`.
 
 *The log of the agent below.*
 
@@ -162,17 +163,16 @@ move the calls of another. An agent that comes to call `subagent` first still ha
 
 ```lean
 def agent (task : String) : Computation Agent Json := do
-  let _ ← inbox                                             -- 7: read what a person said
-  let response ← sample model (request task …)              -- 8
-  let ran ← exec "make"                                     -- 9
-  return "fixed"                                            -- 10
+  let _ ← inbox                                             -- 4: read what a person said
+  let response ← sample model (request task …)              -- 5
+  let ran ← exec "make"                                     -- 6
+  return "fixed"                                            -- 7
 ```
 
 Every log begins the same way. Position 0 is the **root**, `arrived (changed …)`: the
 **workspace**, the filesystem directory the agent works in, as the run starts. Position 1 is the
-call of the run, a notice; position 2 the outside's read of it, and position 3 the opening of the
-run's call, `session`. A person's call of the agent follows, with the session's read of it and the
-opening of the agent's call (`docs/runtime.md` §1).
+run's call, here of the agent, a notice; position 2 the outside's read of it, and position 3 the
+opening of the call (`docs/runtime.md` §1).
 
 ## 3. What each construct writes
 
@@ -251,7 +251,7 @@ call : (name : String) → (arguments : Json) → (environment? : Option Json :=
 1. The computation calls a routine by its name. The driver marks the call,
    `opened child ⟨name, arguments⟩`. The **child frame** is the caller's frame and a step for
    the call: the routine's name, and how many calls of it the caller made before, as in
-   `session/mini-swe/bash`, then `session/mini-swe/bash#1`.
+   `mini-swe/bash`, then `mini-swe/bash#1`.
 2. The routine the caller's scope has under that name (§5) runs in the child frame: its
    operations are performed there, and its own calls open frames nested in it.
 3. Its commands run in the environment the call names, when it names one: an image, and where
@@ -332,10 +332,10 @@ appended where a call is open in `frame`; `alaya stop` appends one.
 1. The call open in `frame` ends there, and every call inside it, whatever the nesting, with no
    marks.
 2. Nothing inside the call can catch it.
-3. Its caller goes on with `reason` as the call's failure, and may catch it. The session goes on
-   to wait for its next call (`docs/runtime.md` §1); a break of the run's own call ends the run.
+3. Its caller goes on with `reason` as the call's failure, and may catch it. A break of the run's
+   own call ends the run.
 
-![A break ends the call open in its frame, and the session waits for the next](figures/agent-api/stop.svg)
+![A break ends the call open in its frame, and its caller goes on](figures/agent-api/stop.svg)
 
 ### 3.8 Questions: `ask`
 
@@ -494,14 +494,13 @@ found routine's own scope, not in the caller's.
 
 So the routines a call can reach depend only on the routine the call is written in. They do not
 depend on who called that routine, or from where. This is lexical scoping: a routine carries
-its scope as a closure carries its environment. In Alaya's own run:
+its scope as a closure carries its environment. In Alaya's own agents:
 
 | Routine | Its scope: the routines it can call |
 | --- | --- |
-| `session`, the run's | `mini-swe`, `mini-vero`, `grader`: the catalog |
 | `mini-swe` | `bash`, `ask_user`, `time_budget`, and `mini-swe` itself |
 | `bash`, `ask_user`, `time_budget` | none |
-| `grader` | `grader` itself, which it never calls |
+| `grader` | none |
 
 A call of `bash` made by `mini-swe` finds `bash` in `mini-swe`'s scope. The same call made by the
 run finds nothing, since the catalog has no `bash`, and fails with `no routine named bash`. A
@@ -607,17 +606,17 @@ structure Config where
 routines of `scope`. -/
 def agent : Routine Agent :=
   (routine "agent" fun (config : Config) => workflow.call { goal := config.task }).within scope
-
-/-- The run: the session, whose scope has the agent, so that a person's call of it finds it. -/
-def run : Scope Agent := Scope.of #[Session.of (Scope.of #[agent])]
 ```
+
+A run of this agent is a call of `agent`, made from outside, with its configuration as its
+arguments.
 
 *The calls made when this agent runs, as a tree of frames.*
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
 flowchart TD
-  run("run · -") --> agent("agent") --> workflow("agent/workflow")
+  agent("agent") --> workflow("agent/workflow")
   workflow --> planner("agent/workflow/planner")
   workflow --> make("step “make” · agent/workflow/step")
   workflow --> test("step “make test” · agent/workflow/step#1")

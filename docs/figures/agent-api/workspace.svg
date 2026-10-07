@@ -1,17 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 394" width="920" height="394">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 256" width="920" height="256">
 <title>The versions of the workspace along a log</title>
 <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}</style>
-<rect width="920" height="394" fill="#fff"/>
+<rect width="920" height="256" fill="#fff"/>
 <text x="12" y="14" class="s">computation</text>
 <text x="270" y="14" class="s">carried out by</text>
 <text x="413" y="14" class="s">log</text>
 <text x="914" y="14" class="s" text-anchor="end">workspace</text>
-<rect x="406.5" y="22.5" width="404" height="343" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
-<path fill="#fafbfc" d="M12.5,361.5V82.5Q12.5,76.5 18.5,76.5H257.5Q263.5,76.5 263.5,82.5V361.5H12.5Z"/><path class="bx" d="M12.5,361.5V82.5Q12.5,76.5 18.5,76.5H257.5Q263.5,76.5 263.5,82.5V361.5"/>
-<path fill="#fff" d="M26.5,286.5V130.5Q26.5,124.5 32.5,124.5H253.5Q259.5,124.5 259.5,130.5V286.5H26.5Z"/><path class="bx" d="M26.5,286.5V130.5Q26.5,124.5 32.5,124.5H253.5Q259.5,124.5 259.5,130.5V286.5"/>
-<path fill="#fff" d="M26.5,361.5V322.5Q26.5,316.5 32.5,316.5H253.5Q259.5,316.5 259.5,322.5V361.5H26.5Z"/><path class="bx" d="M26.5,361.5V322.5Q26.5,316.5 32.5,316.5H253.5Q259.5,316.5 259.5,322.5V361.5"/>
-<path fill="#fafbfc" d="M40.5,202.5V149.5H255.5V202.5H40.5Z"/><path class="bx" d="M40.5,202.5V149.5M255.5,149.5V202.5"/>
-<path fill="#fafbfc" d="M40.5,286.5V233.5H255.5V286.5H40.5Z"/><path class="bx" d="M40.5,286.5V233.5M255.5,233.5V286.5"/>
+<rect x="406.5" y="22.5" width="404" height="205" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
+<path fill="#fafbfc" d="M12.5,223.5V82.5Q12.5,76.5 18.5,76.5H257.5Q263.5,76.5 263.5,82.5V223.5H12.5Z"/><path class="bx" d="M12.5,223.5V82.5Q12.5,76.5 18.5,76.5H257.5Q263.5,76.5 263.5,82.5V223.5"/>
+<path fill="#fff" d="M26.5,154.5V101.5H259.5V154.5H26.5Z"/><path class="bx" d="M26.5,154.5V101.5M259.5,101.5V154.5"/>
+<path fill="#fff" d="M26.5,223.5V185.5H259.5V223.5H26.5Z"/><path class="bx" d="M26.5,223.5V185.5M259.5,185.5V223.5"/>
 <text x="426" y="42" class="f n" text-anchor="end">0</text>
 <text x="434" y="42" class="fr">-</text>
 <g transform="translate(503,31.5) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
@@ -23,116 +21,69 @@
 <text x="426" y="66" class="f n" text-anchor="end">1</text>
 <text x="434" y="66" class="fr">-</text>
 <g transform="translate(503,55.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
-<text x="522" y="66.5" style="fill:#7556a3">call session</text>
+<text x="522" y="66.5" style="fill:#7556a3">call agent “fix the build”</text>
 <text x="802" y="66" class="f" text-anchor="end">arrived</text>
 <text x="270" y="59.5" class="s">a person</text>
 <path class="a" d="M273,67.5H398"/><path fill="#a3abb5" d="M402,67.5l-5,-2.5v5z"/>
 <circle cx="273" cy="67.5" r="2.5" fill="#7556a3"/>
 <text x="426" y="90" class="f n" text-anchor="end">3</text>
-<text x="434" y="90" class="fr">session</text>
+<text x="434" y="90" class="fr">agent</text>
 <g transform="translate(503,79.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="522" y="90.5">open session</text>
+<text x="522" y="90.5">open agent</text>
 <text x="802" y="90" class="f" text-anchor="end">opened</text>
-<text x="20.5" y="90" class="s b">session</text>
+<text x="20.5" y="90" class="s b">agent</text>
 <path class="a" d="M264.5,86.5H398"/><path fill="#a3abb5" d="M402,86.5l-5,-2.5v5z"/>
-<text x="426" y="114" class="f n" text-anchor="end">4</text>
-<text x="434" y="114" class="fr">-</text>
-<g transform="translate(503,103.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
-<text x="522" y="114.5" style="fill:#7556a3">call agent “fix the build”</text>
-<text x="802" y="114" class="f" text-anchor="end">arrived</text>
-<text x="270" y="107.5" class="s">a person</text>
-<path class="a" d="M273,115.5H398"/><path fill="#a3abb5" d="M402,115.5l-5,-2.5v5z"/>
-<circle cx="273" cy="115.5" r="2.5" fill="#7556a3"/>
-<text x="426" y="138" class="f n" text-anchor="end">6</text>
-<text x="434" y="138" class="fr">agent</text>
-<g transform="translate(503,127.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="522" y="138.5">open agent</text>
-<text x="802" y="138" class="f" text-anchor="end">opened</text>
-<text x="34.5" y="138" class="s b">agent</text>
-<path class="a" d="M260.5,134.5H398"/><path fill="#a3abb5" d="M402,134.5l-5,-2.5v5z"/>
-<circle cx="422" cy="151" r="0.9" fill="#a3abb5"/>
-<circle cx="422" cy="155" r="0.9" fill="#a3abb5"/>
-<circle cx="422" cy="159" r="0.9" fill="#a3abb5"/>
-<text x="48.5" y="159" class="s b">bash</text>
-<text x="426" y="180" class="f n" text-anchor="end">10</text>
-<text x="434" y="180" class="fr">bash</text>
-<g transform="translate(503,169.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
-<text x="522" y="180.5">exec make → exit 0</text>
-<text x="802" y="180" class="f" text-anchor="end">answered</text>
-<rect x="49.0" y="167.0" width="91.9" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
-<text x="55" y="180" class="ch">exec "make"</text>
-<path class="a" d="M145.4,171.5H398"/><path fill="#a3abb5" d="M402,171.5l-5,-2.5v5z"/>
-<rect x="307.4" y="165.0" width="55.1" height="13" fill="#fff"/>
-<text x="335" y="175" class="s" text-anchor="middle">executor</text>
-<path class="a d" d="M402,181.5H149.4"/><path fill="#a3abb5" d="M145.4,181.5l5,-2.5v5z"/>
-<circle cx="422" cy="193" r="0.9" fill="#a3abb5"/>
-<circle cx="422" cy="197" r="0.9" fill="#a3abb5"/>
-<circle cx="422" cy="201" r="0.9" fill="#a3abb5"/>
-<text x="426" y="222" class="f n" text-anchor="end">14</text>
-<text x="434" y="222" class="fr">-</text>
-<g transform="translate(503,211.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1.6L12.4 7 7 12.4 1.6 7z" fill="none"/></g>
-<text x="522" y="222.5" style="fill:#7556a3">workspace changed: fixed Makefile</text>
-<text x="802" y="222" class="f" text-anchor="end">arrived</text>
-<text x="270" y="215.5" class="s">a person</text>
-<path class="a" d="M273,223.5H398"/><path fill="#a3abb5" d="M402,223.5l-5,-2.5v5z"/>
-<circle cx="273" cy="223.5" r="2.5" fill="#7556a3"/>
-<circle cx="422" cy="235" r="0.9" fill="#a3abb5"/>
-<circle cx="422" cy="239" r="0.9" fill="#a3abb5"/>
-<circle cx="422" cy="243" r="0.9" fill="#a3abb5"/>
-<text x="48.5" y="243" class="s b">bash#1</text>
-<text x="426" y="264" class="f n" text-anchor="end">17</text>
-<text x="434" y="264" class="fr">bash#1</text>
-<g transform="translate(503,253.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
-<text x="522" y="264.5">exec make test → exit 0</text>
-<text x="802" y="264" class="f" text-anchor="end">answered</text>
-<rect x="49.0" y="251.0" width="128.2" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
-<text x="55" y="264" class="ch">exec "make test"</text>
-<path class="a" d="M181.7,255.5H398"/><path fill="#a3abb5" d="M402,255.5l-5,-2.5v5z"/>
-<rect x="307.4" y="249.0" width="55.1" height="13" fill="#fff"/>
-<text x="335" y="259" class="s" text-anchor="middle">executor</text>
-<path class="a d" d="M402,265.5H185.7"/><path fill="#a3abb5" d="M181.7,265.5l5,-2.5v5z"/>
-<circle cx="422" cy="277" r="0.9" fill="#a3abb5"/>
-<circle cx="422" cy="281" r="0.9" fill="#a3abb5"/>
-<circle cx="422" cy="285" r="0.9" fill="#a3abb5"/>
-<text x="426" y="306" class="f n" text-anchor="end">43</text>
-<text x="434" y="306" class="fr">-</text>
-<g transform="translate(503,295.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
-<text x="522" y="306.5" style="fill:#7556a3">call grader “pytest /grader”</text>
-<text x="802" y="306" class="f" text-anchor="end">arrived</text>
-<text x="270" y="299.5" class="s">a person</text>
-<path class="a" d="M273,307.5H398"/><path fill="#a3abb5" d="M402,307.5l-5,-2.5v5z"/>
-<circle cx="273" cy="307.5" r="2.5" fill="#7556a3"/>
-<text x="426" y="330" class="f n" text-anchor="end">45</text>
-<text x="434" y="330" class="fr">grader</text>
-<g transform="translate(503,319.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="522" y="330.5">open grader</text>
-<text x="802" y="330" class="f" text-anchor="end">opened</text>
-<text x="34.5" y="330" class="s b">grader</text>
-<path class="a" d="M260.5,326.5H398"/><path fill="#a3abb5" d="M402,326.5l-5,-2.5v5z"/>
-<text x="426" y="354" class="f n" text-anchor="end">46</text>
-<text x="434" y="354" class="fr">grader</text>
-<g transform="translate(503,343.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
-<text x="522" y="354.5">exec pytest /grader → exit 0</text>
-<text x="802" y="354" class="f" text-anchor="end">answered</text>
-<rect x="35.0" y="341.0" width="164.5" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
-<text x="41" y="354" class="ch">exec "pytest /grader"</text>
-<path class="a" d="M204,345.5H398"/><path fill="#a3abb5" d="M402,345.5l-5,-2.5v5z"/>
-<rect x="307.4" y="339.0" width="55.1" height="13" fill="#fff"/>
-<text x="335" y="349" class="s" text-anchor="middle">executor</text>
-<path class="a d" d="M402,355.5H208"/><path fill="#a3abb5" d="M204,355.5l5,-2.5v5z"/>
-<path class="a" d="M892.5,38.0V362.0"/>
+<circle cx="422" cy="103" r="0.9" fill="#a3abb5"/>
+<circle cx="422" cy="107" r="0.9" fill="#a3abb5"/>
+<circle cx="422" cy="111" r="0.9" fill="#a3abb5"/>
+<text x="34.5" y="111" class="s b">bash</text>
+<text x="426" y="132" class="f n" text-anchor="end">7</text>
+<text x="434" y="132" class="fr">bash</text>
+<g transform="translate(503,121.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="522" y="132.5">exec make → exit 0</text>
+<text x="802" y="132" class="f" text-anchor="end">answered</text>
+<rect x="35.0" y="119.0" width="91.9" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
+<text x="41" y="132" class="ch">exec "make"</text>
+<path class="a" d="M131.4,123.5H398"/><path fill="#a3abb5" d="M402,123.5l-5,-2.5v5z"/>
+<rect x="307.4" y="117.0" width="55.1" height="13" fill="#fff"/>
+<text x="335" y="127" class="s" text-anchor="middle">executor</text>
+<path class="a d" d="M402,133.5H135.4"/><path fill="#a3abb5" d="M131.4,133.5l5,-2.5v5z"/>
+<circle cx="422" cy="145" r="0.9" fill="#a3abb5"/>
+<circle cx="422" cy="149" r="0.9" fill="#a3abb5"/>
+<circle cx="422" cy="153" r="0.9" fill="#a3abb5"/>
+<text x="426" y="174" class="f n" text-anchor="end">11</text>
+<text x="434" y="174" class="fr">-</text>
+<g transform="translate(503,163.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1.6L12.4 7 7 12.4 1.6 7z" fill="none"/></g>
+<text x="522" y="174.5" style="fill:#7556a3">workspace changed: fixed Makefile</text>
+<text x="802" y="174" class="f" text-anchor="end">arrived</text>
+<text x="270" y="167.5" class="s">a person</text>
+<path class="a" d="M273,175.5H398"/><path fill="#a3abb5" d="M402,175.5l-5,-2.5v5z"/>
+<circle cx="273" cy="175.5" r="2.5" fill="#7556a3"/>
+<circle cx="422" cy="187" r="0.9" fill="#a3abb5"/>
+<circle cx="422" cy="191" r="0.9" fill="#a3abb5"/>
+<circle cx="422" cy="195" r="0.9" fill="#a3abb5"/>
+<text x="34.5" y="195" class="s b">bash#1</text>
+<text x="426" y="216" class="f n" text-anchor="end">14</text>
+<text x="434" y="216" class="fr">bash#1</text>
+<g transform="translate(503,205.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="522" y="216.5">exec make test → exit 0</text>
+<text x="802" y="216" class="f" text-anchor="end">answered</text>
+<rect x="35.0" y="203.0" width="128.2" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
+<text x="41" y="216" class="ch">exec "make test"</text>
+<path class="a" d="M167.7,207.5H398"/><path fill="#a3abb5" d="M402,207.5l-5,-2.5v5z"/>
+<rect x="307.4" y="201.0" width="55.1" height="13" fill="#fff"/>
+<text x="335" y="211" class="s" text-anchor="middle">executor</text>
+<path class="a d" d="M402,217.5H171.7"/><path fill="#a3abb5" d="M167.7,217.5l5,-2.5v5z"/>
+<path class="a" d="M892.5,38.0V224.0"/>
 <circle cx="892.5" cy="38" r="3.5" fill="#fff" stroke="#6f7985"/>
 <text x="900.5" y="42" class="s m">w0</text>
-<circle cx="892.5" cy="176" r="3.5" fill="#fff" stroke="#6f7985"/>
-<text x="900.5" y="180" class="s m">w1</text>
-<text x="883.5" y="180" class="s" text-anchor="end">runs on <tspan class="m">w0</tspan> →</text>
-<circle cx="892.5" cy="218" r="3.5" fill="#fff" stroke="#6f7985"/>
-<text x="900.5" y="222" class="s m">w2</text>
-<circle cx="892.5" cy="260" r="3.5" fill="#fff" stroke="#6f7985"/>
-<text x="900.5" y="264" class="s m">w3</text>
-<text x="883.5" y="264" class="s" text-anchor="end">runs on <tspan class="m">w2</tspan> →</text>
-<circle cx="892.5" cy="350" r="3.5" fill="#fff" stroke="#6f7985"/>
-<text x="900.5" y="354" class="s m">w4</text>
-<text x="883.5" y="354" class="s" text-anchor="end">runs on <tspan class="m">w3</tspan> →</text>
-<text x="914" y="382" class="s" text-anchor="end">a grader’s command, too, leaves a version: its reports are in <tspan class="m">w4</tspan></text>
+<circle cx="892.5" cy="128" r="3.5" fill="#fff" stroke="#6f7985"/>
+<text x="900.5" y="132" class="s m">w1</text>
+<text x="883.5" y="132" class="s" text-anchor="end">runs on <tspan class="m">w0</tspan> →</text>
+<circle cx="892.5" cy="170" r="3.5" fill="#fff" stroke="#6f7985"/>
+<text x="900.5" y="174" class="s m">w2</text>
+<circle cx="892.5" cy="212" r="3.5" fill="#fff" stroke="#6f7985"/>
+<text x="900.5" y="216" class="s m">w3</text>
+<text x="883.5" y="216" class="s" text-anchor="end">runs on <tspan class="m">w2</tspan> →</text>
+<text x="914" y="244" class="s" text-anchor="end">a change from outside leaves a version, as a command does</text>
 </svg>
