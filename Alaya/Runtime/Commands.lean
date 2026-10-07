@@ -22,6 +22,7 @@ structure Appended where
   hash : Hash
   position : Nat
   entry : Entry
+  deriving Inhabited
 
 /-- Where a new run's workspace comes from: a directory, or the work directory of an image,
 `""` for the one the image names. -/
@@ -43,12 +44,12 @@ namespace Data
 /-- Creates the data directory at `path`, when there is none, and a new run in it: its workspace,
 from `source`, and its call, `call`, of a routine of `scope`, with the marks the call makes
 before it first asks the world for something or waits. Gives the entries. -/
-def create (path : System.FilePath) (source : Source) (scope : Scope Agent) (call : RoutineCall) :
-    Result (Array Appended) := do
+def create (path : System.FilePath) (source : Source) (scope : Scope Agent) (call : RoutineCall)
+    (workspaces : Opener := restic) : Result (Array Appended) := do
   -- Before the data directory is created: inside the project it would become part of it.
   if let .directory project := source then
     Workspaces.refuseOverlap "snapshot" project #[path]
-  Data.with path (write := true) (create := true) fun data => do
+  Data.with path (write := true) (create := true) (workspaces := workspaces) fun data => do
     let project ← match source with
       | .directory project => pure project
       | .image image workdir =>

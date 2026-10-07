@@ -25,11 +25,14 @@ the Vero benchmark of verified Lean code.
 ## Getting started
 
 ```sh
-lake build        # the alaya executable, in .lake/build/bin/
-lake exe tests    # the test suite
+lake build                 # the alaya executable, in .lake/build/bin/
+lake exe tests             # the test suite
+lake exe tests core/ llm/  # the suites of two layers; --list names the cases
 ```
 
 Alaya also needs `curl`, a running Docker daemon, and [`restic`](https://restic.net) 0.17 or later.
+The tests are arranged by the library's layers, `Test/Base` to `Test/App`. A suite that needs
+docker, restic, node or the built binary is skipped where they are missing, and the run then fails.
 
 A session on the [Bija benchmark](benchmarks/bija/README.md): an agent is given a project with
 the specification of a small language and a few sample programs, implements the language, and is
