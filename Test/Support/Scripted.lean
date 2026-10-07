@@ -18,6 +18,14 @@ open Lean (Json)
 def echoing (output : String := "ok") : Executor :=
   { exec := fun _ _ _ _ => pure { output, exitCode? := some 0 } }
 
+/-- An executor that runs nothing, but answers `echo TEXT` with `TEXT` as a shell does, and
+anything else with `ok`: enough for mini's sentinel. -/
+def echoingCommands : Executor :=
+  { exec := fun _ _ argv _ => do
+      let command := argv[0]?.getD ""
+      let output := if command.startsWith "echo " then (command.drop 5).toString ++ "\n" else "ok"
+      pure { output, exitCode? := some 0 } }
+
 /-- A fixed `uname`, so prompts do not depend on the machine the tests run on. -/
 def testUname : Uname :=
   { system := "Linux", machine := "x86_64" }
@@ -27,6 +35,10 @@ def call (id name command : String) : Chat.ToolCall :=
 
 def submitCall (id : String) (message : String := "") : Chat.ToolCall :=
   { id, name := "submit", arguments := .mkObj [("message", (message : Json))] }
+
+/-- Mini's way to end a run: a `bash` call that prints its sentinel. -/
+def sentinelCall (id : String) : Chat.ToolCall :=
+  call id "bash" s!"echo {Agents.MiniSwe.sentinel}"
 
 def askCall (id question : String) (form := "yes_no") (options : Array String := #[]) : Chat.ToolCall :=
   { id, name := "ask_user", arguments := .mkObj [("question_type", (form : Json)),
@@ -125,9 +137,13 @@ def runOfConfig (name : String) (config : Json) (model : Models.Spec := testMode
         | none => config
 
 /-- A run of MiniSwe with `config`, as the program `agent`, for the test model, in the scope the
-catalog gives MiniSwe: its tools, and itself, which `subagent` calls. -/
+catalog gives MiniSwe: its `bash` tool. -/
 def miniRun (config : Agents.MiniSwe.Config := {}) : Except String (Scope Agent) :=
   runOfConfig "mini-swe" config.toJson
+
+/-- A run of MiniVero with `config`, as the program `agent`, for the test model. -/
+def veroRun (config : Agents.MiniVero.Config := {}) : Except String (Scope Agent) :=
+  runOfConfig "mini-vero" config.toJson
 
 /-- A runtime over a store and directory workspaces of the test's own, with `executor` and
 `model`. Each call has a store of its own; the work directory is the test's. -/
@@ -142,8 +158,8 @@ def runtime (executor : Executor) (model? : Option Model) : TestM Driver.Runtime
            | none => throw <| .input "a call samples its model: name a --provider" }
 
 /-- An executor that keeps files and runs nothing: `write PATH TEXT` writes a file of the work
-directory, `rm PATH` removes one, `cat PATH` prints one, `leak` drops a file among the outputs, and
-anything else lists the work directory and the outputs. -/
+directory, `rm PATH` removes one, `cat PATH` prints one, `leak` drops a file among the outputs,
+`echo TEXT` prints the text, and anything else lists the work directory and the outputs. -/
 def filing (outputs : System.FilePath) : Executor :=
   let done : Output := { output := "", exitCode? := some 0 }
   let names (dir : System.FilePath) : IO String := do
@@ -163,6 +179,7 @@ def filing (outputs : System.FilePath) : Executor :=
         let file := workDir / (path : System.FilePath)
         if ← file.pathExists then pure { done with output := ← IO.FS.readFile file }
         else pure { output := s!"cat: {path}: No such file or directory", exitCode? := some 1 }
+      | "echo" :: words => pure { done with output := " ".intercalate words ++ "\n" }
       | ["leak"] =>
         IO.FS.createDirAll outputs
         IO.FS.writeFile (outputs / "leak.txt") "x"
@@ -177,6 +194,12 @@ def filingRuntime (model : Model) : TestM Driver.Runtime := do
 /-- Runs `k` with MiniSwe's run, configured by `config`. -/
 def withMini (config : Agents.MiniSwe.Config := {}) (k : Scope Agent → TestM Unit) : TestM Unit :=
   match miniRun config with
+  | .ok run => k run
+  | .error problem => fail problem
+
+/-- Runs `k` with MiniVero's run, configured by `config`. -/
+def withVero (config : Agents.MiniVero.Config := {}) (k : Scope Agent → TestM Unit) : TestM Unit :=
+  match veroRun config with
   | .ok run => k run
   | .error problem => fail problem
 
@@ -265,14 +288,14 @@ def samplesOf (run : Scope Agent) (log : Log Agent) : Array (Chat.Request × Cha
     (replayer.feed event, found)
   (log.foldl step (Replayer.start run, #[])).2
 
-/-- What MiniSwe's model saw last, and the response it gave: the last request's messages, then
-that response as the view shows it. -/
-def lastDialogue (config : Agents.MiniSwe.Config) (run : Scope Agent) (log : Log Agent) :
+/-- What an agent's model saw last, and the response it gave: the last request's messages, then
+that response as the agent's view shows it, as `parse` reads it. -/
+def lastDialogue (parse : Chat.Response → Agents.MiniSwe.Parsed) (run : Scope Agent) (log : Log Agent) :
     Array Chat.Message :=
   match (samplesOf run log).back? with
   | none => #[]
   | some (request, response) =>
-    request.messages.push <| match Agents.MiniSwe.parseActions response config with
+    request.messages.push <| match parse response with
       | .calls _ => response.message
       | .formatError message => .user message
 

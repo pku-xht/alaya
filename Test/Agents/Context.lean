@@ -2,14 +2,16 @@ import Test.Support.Framework
 import Test.Support.Scripted
 import Alaya
 
-/-! Context management in MiniSwe: a run stops cleanly before its context is full, and the same
-way when the provider refuses a request as too long, which is the answer the log keeps; and the
-view may omit old outputs in blocks, naming the files that hold them. -/
+/-! Context management in the agents' loop: MiniVero stops cleanly before its context is full, and
+either agent the same way when the provider refuses a request as too long, which is the answer
+the log keeps; and MiniVero's view omits old outputs in blocks, naming the files that hold them.
+MiniSwe, as mini does, keeps every turn and sends every request. -/
 
 namespace ContextTests
 
 open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
-open Alaya.Agents.MiniSwe
+open Alaya.Agents.MiniVero
+open Alaya.Agents.MiniSwe (Dialogue Item outcome)
 open Lean (Json)
 
 private def bashCall (id : String) : Chat.ToolCall :=
@@ -38,7 +40,11 @@ private def shownOutput (dialogue : Dialogue) (id : String) : String :=
 private def stored (dialogue : Dialogue) : List String :=
   dialogue.toList.map (·.toStored.compress)
 
-private def masking : Config := { masking? := some { keepTurns := 2, block := 3 } }
+/-- MiniVero's view, its masking made small enough to see. -/
+private def masked (history : History) : Dialogue := view history { keepTurns := 2, block := 3 }
+
+/-- The same view, keeping every turn. -/
+private def unmasked (history : History) : Dialogue := view history { keepTurns := 1000, block := 1 }
 
 /-- How apiyi refused a request too long for the model, through each API. -/
 private def deepseekRefusal : String :=
@@ -60,8 +66,8 @@ private def refusing (answers : Array Chat.Response) : IO Model := do
 
 /-- What MiniSwe does after its task, `task`, for a model of `context` tokens: sample, or end
 before it. -/
-private def afterTask (context? : Option Nat) (task : String) (config : Config := {}) : String :=
-  match runOfConfig "mini-swe" config.toJson { testModelSpec with contextTokens? := context? } with
+private def afterTask (context? : Option Nat) (task : String) (program := "mini-vero") : String :=
+  match runOfConfig program (.mkObj []) { testModelSpec with contextTokens? := context? } with
   | .error problem => problem
   | .ok run =>
     let log := settle run (opening task)
@@ -70,17 +76,13 @@ private def afterTask (context? : Option Nat) (task : String) (config : Config :
     | _ => agentStatus log
 
 def suite : Suite := Testing.suite "agents/context" #[
-  iotest "the configuration records the reserve and masking, and rejects a bad block" do
-    let json := masking.toJson
-    if (json.getObjVal? "context_reserve").toOption != some (8000 : Nat) then throw <| IO.userError "no reserve"
-    if (({} : Config).toJson.getObjVal? "mask_observations").toOption != some .null then
-      throw <| IO.userError "masking should be off by default"
-    match Config.fromJson json with
-    | .ok again => if again.masking? != masking.masking? then throw <| IO.userError "no round trip"
-    | .error e => throw <| IO.userError e
-    for bad in [Json.mkObj [("keep_turns", 2), ("block", 0)], .mkObj [("block", 3)], .mkObj [("keep_turns", 2), ("block", 3), ("x", 1)]] do
-      if (Config.fromJson (.mkObj [("name", "mini-swe"), ("mask_observations", bad)])).toOption.isSome then
-        throw <| IO.userError s!"accepted {bad.compress}",
+  iotest "MiniVero masks old outputs and keeps room for a response; MiniSwe keeps every turn" do
+    if Agents.MiniVero.masking != { keepTurns := 20, block := 10 } then throw <| IO.userError "MiniVero masks"
+    if (({} : Agents.MiniVero.Config).toJson.getObjVal? "context_reserve").toOption != some (8000 : Nat) then
+      throw <| IO.userError "no reserve"
+    for bad in [Json.mkObj [("mask_observations", .mkObj [("keep_turns", 2), ("block", 3)])], .mkObj [("recover_output", true)]] do
+      if (Agents.MiniVero.Config.fromJson bad).toOption.isSome then
+        throw <| IO.userError s!"an extension is no option: accepted {bad.compress}",
 
   iotest "the boundary moves in blocks, and between its moves the view only grows" do
     let m : Masking := { keepTurns := 2, block := 3 }
@@ -88,8 +90,8 @@ def suite : Suite := Testing.suite "agents/context" #[
     if boundaries != [0, 0, 0, 0, 0, 3, 3, 3, 6, 6, 6, 9] then
       throw <| IO.userError s!"wrong boundaries: {boundaries}"
     for t in List.range 11 do
-      let before := view masking (turns t)
-      let after := view masking (turns (t + 1))
+      let before := masked (turns t)
+      let after := masked (turns (t + 1))
       let grows := (stored after).take before.size == stored before
       if grows != (m.omittedTurns (t + 1) == m.omittedTurns t) then
         throw <| IO.userError s!"turn {t + 1}: grows {grows}",
@@ -97,50 +99,47 @@ def suite : Suite := Testing.suite "agents/context" #[
   iotest "an omitted output names its file, which holds it; short ones and recent ones stay" do
     let history := { turns 6 with items := (turns 6).items.push (turn "s" "ok") }
     -- Seven turns: the first three are omitted; `s` is in the last.
-    let dialogue := view masking history
+    let dialogue := masked history
     let notice := shownOutput dialogue "c0"
     if notice != "[output omitted; full output: /alaya/outputs/c0.txt]" then
       throw <| IO.userError s!"wrong notice: {notice}"
     if shownOutput dialogue "c3" != String.ofList (List.replicate 500 'x') then
       throw <| IO.userError "a kept turn was omitted"
     let early : History := { items := #[.told (.user "task"), turn "s" "ok"] ++ (turns 6).items.extract 1 }
-    if shownOutput (view masking early) "s" != "ok" then throw <| IO.userError "a short output was omitted"
-    if stored (view {} history) != stored (view { masking? := none } history) then
-      throw <| IO.userError "off changed the view",
+    if shownOutput (masked early) "s" != "ok" then throw <| IO.userError "a short output was omitted"
+    if shownOutput (unmasked history) "c0" != String.ofList (List.replicate 500 'x') then
+      throw <| IO.userError "a loop with no masking omitted an output",
 
   iotest "the context is the last measured request, its response, and what came since" do
     let task : Dialogue := #[.user "task"]
     let history : History := {
       items := #[.told (.user "task"), turn "c" (String.ofList (List.replicate 4000 'x'))]
       measured? := some (task, 1000, some 50) }
-    let tokens := contextTokens history (view {} history)
+    let tokens := contextTokens history (unmasked history)
     -- 4,000 characters of output, plus its JSON, at four characters a token.
     if tokens < 2050 || tokens > 2100 then throw <| IO.userError s!"wrong size: {tokens}"
     let unmeasured := contextTokens {} #[.user (String.ofList (List.replicate 400 'y'))]
     if unmeasured < 100 || unmeasured > 115 then throw <| IO.userError s!"wrong estimate: {unmeasured}"
     -- Once masking rewrites what was measured, the measure no longer holds: the whole is estimated.
     let measured (t : Nat) : History :=
-      let before := view masking (turns (t - 1))
+      let before := masked (turns (t - 1))
       { turns t with measured? := some (before, 1, some 1) }
-    let small := contextTokens (measured 4) (view masking (measured 4))
+    let small := contextTokens (measured 4) (masked (measured 4))
     if small > 200 then throw <| IO.userError s!"not measured before the boundary moves: {small}"
-    let moved := contextTokens (measured 5) (view masking (measured 5))
-    if moved != Chat.estimateTokens (view masking (measured 5)) then
+    let moved := contextTokens (measured 5) (masked (measured 5))
+    if moved != Chat.estimateTokens (masked (measured 5)) then
       throw <| IO.userError s!"measured across a move of the boundary: {moved}"
     -- The limit is the model's context less the reserve, or less its output size when smaller.
     let model : Models.Spec := { name := "m", contextTokens? := some 3000, outputTokens? := some 500 }
-    if contextLimit? {} model != some 2500 then throw <| IO.userError "wrong limit"
-    if contextLimit? {} { name := "m" } != none then throw <| IO.userError "a limit with no context size",
+    if Agents.MiniVero.contextLimit? {} model != some 2500 then throw <| IO.userError "wrong limit"
+    if Agents.MiniVero.contextLimit? {} { name := "m" } != none then throw <| IO.userError "a limit with no context size",
 
-  test "the agent stops before a request its model's context cannot hold, and only then" do
+  test "MiniVero stops before a request its model's context cannot hold, and only then; MiniSwe sends it" do
     let long := String.ofList (List.replicate 40000 'y')
     assertEqual "bounded" (afterTask (some 9000) long) "ContextExceeded"
     assertEqual "roomy" (afterTask (some 100000) long) "sample"
     assertEqual "unknown context" (afterTask none long) "sample"
-    assertEqual "MiniVero too" (match runOfConfig "mini-vero" (.mkObj [])
-        { testModelSpec with contextTokens? := some 9000 } with
-      | .ok run => agentStatus (settle run (opening long))
-      | .error problem => problem) "ContextExceeded",
+    assertEqual "MiniSwe sends it, as mini does" (afterTask (some 9000) long "mini-swe") "sample",
 
   iotest "a provider's refusal of a too-long request is recognised, in either API's words" do
     for (label, status, body) in [("deepseek", 400, deepseekRefusal), ("luna", 400, lunaRefusal),

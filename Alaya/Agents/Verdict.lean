@@ -2,7 +2,7 @@ import Lean.Data.Json
 import Alaya.Base.Tap
 
 /-!
-A grader's verdict, from the TAP it printed on stdout (`Alaya.Base.Tap`, `docs/agents.md` §6). The
+A grader's verdict, from the TAP it printed on stdout (`Alaya.Base.Tap`, `docs/agents.md` §3). The
 grader's exit status is recorded but decides nothing: "the checks ran and some failed" and "the
 grader crashed" can share a status, and only an incomplete TAP stream tells them apart.
 

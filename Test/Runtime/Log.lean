@@ -104,7 +104,7 @@ def suite : Suite := Testing.suite "runtime/log" #[
       if (eventFromJson json).toOption.isSome then throw <| IO.userError s!"read as an event: {json.compress}",
 
   test "an answer to another operation, or a mark that differs, is no trace of the program" do
-    match miniRun with
+    match veroRun with
     | .error problem => fail problem
     | .ok run =>
       let broken (label : String) (log : Log Agent) (event : Event Agent) : TestM Unit :=

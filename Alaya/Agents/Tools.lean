@@ -37,6 +37,34 @@ def Tool.name (tool : Tool) : String := tool.definition.name
 
 namespace Tools
 
+/-- The first problem a response's tool calls have against the tools offered: no call at all, a
+call that must be alone beside another, arguments that are not JSON, a tool not offered, or a
+call its tool refuses; `none` when every call can be made. -/
+def problem? (tools : Array Tool) (response : Chat.Response) : Option String := Id.run do
+  if response.toolCalls.isEmpty then
+    return some "No tool calls found in the response. Every response MUST include at least one tool call."
+  if response.toolCalls.size != 1 then
+    if let some tool := tools.find? fun tool =>
+        tool.alone && response.toolCalls.any (·.name == tool.name) then
+      return some s!"{tool.name} must be called alone."
+  for call in response.toolCalls do
+    if let some raw := call.invalidArguments? then
+      return some ("Error parsing tool call arguments: " ++
+        (match Lean.Json.parse raw with | .error e => e | .ok _ => "invalid JSON") ++ ".")
+    match tools.find? (·.name == call.name) with
+    | none => return some s!"Unknown tool '{call.name}'."
+    | some tool => if let .error problem := tool.check call.arguments then return some problem
+  return none
+
+/-- Makes the call a model's tool call asks for: the routine call its tool makes of the model's
+arguments. A call that fails gives its error as its result. -/
+def make (tools : Array Tool) (asked : Chat.ToolCall) : Computation Agent Json := do
+  let made : RoutineCall := match tools.find? (·.name == asked.name) with
+    | some tool => tool.call asked.arguments
+    | none => { name := asked.name, arguments := asked.arguments }
+  try call made.name made.arguments
+  catch error => pure (.mkObj [("error", .str error)])
+
 /-! ## bash: a command in the workspace -/
 
 namespace Bash
@@ -368,28 +396,9 @@ def tool (name : String) (config : Json) : Tool := {
 
 end Subagent
 
-/-- What an agent's configuration says of the tools it offers. -/
-structure Options where
-  /-- How `bash` runs a command. -/
-  commands : Executor.Config := {}
-  /-- The kinds of question `ask_user` lets a model ask. -/
-  questions : Array Question.Kind := #[]
-  /-- The agent that offers the tools, which `subagent` calls: its name, and its configuration. -/
-  agent : String × Json := ("", .null)
-
-/-- The tools an agent's configuration can name, as `options` say. -/
-def all (options : Options := {}) : Array Tool :=
-  #[Bash.tool options.commands, Submit.tool, AskUser.tool options.questions, TimeBudget.tool,
-    Subagent.tool options.agent.1 options.agent.2]
-
 /-- The routines the tools call, but an agent's own: each fixed, what an agent's configuration
 says of a call coming in its arguments. -/
 def routines : Array (Routine Agent) := #[Bash.routine, AskUser.routine, TimeBudget.routine]
-
-def names : Array String := (all).map (·.name)
-
-def named? (name : String) (options : Options := {}) : Option Tool :=
-  (all options).find? (·.name == name)
 
 end Tools
 

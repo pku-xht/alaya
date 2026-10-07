@@ -77,10 +77,10 @@ call, a failure, a loop, a comment, a break, a question), replay, and routines a
 [`docs/runtime.md`](docs/runtime.md) — how a run is carried out: a run as a call made from
 outside, the session, the driver, and the data directory with every command as a function.
 
-[`docs/agents.md`](docs/agents.md) — the tools agents offer, `ask_user`, how an agent is made and
-offered as a program, the two agents included (MiniSwe, the port of mini-SWE-agent, and
-MiniVero, MiniSwe with Vero's instructions for Lean implementation and proof tasks), and the
-grader: its protocol, its verdict, and how to write one.
+[`docs/agents.md`](docs/agents.md) — the tools agents offer, `ask_user`, the grader (its
+protocol, its verdict, and how to write one), and the two agents included: MiniSwe, a faithful
+port of mini-SWE-agent, and MiniVero, its extension for Vero's Lean implementation and proof
+tasks.
 
 [`docs/llm-api.md`](docs/llm-api.md) — the LLM API: requests and responses as typed values,
 structured output, a model as the draws of a request, the layers a model is built from (retry,

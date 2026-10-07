@@ -16,6 +16,7 @@ def suites : Array Suite := #[
   MiniSweTests.goldenSuite, MiniSweTests.parseSuite, MiniSweTests.dialogueSuite,
   { MiniSweTests.runSuite with needs := #[docker] },
   MiniVeroTests.suite, { MiniVeroTests.timeSuite with needs := #[docker] },
+  { MiniVeroTests.containerSuite with needs := #[docker] },
   AskUserTests.suite, ContextTests.suite, GraderTests.suite, AgentRoutinesTests.suite]
 
 end AgentsTests

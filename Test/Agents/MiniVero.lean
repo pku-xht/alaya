@@ -4,8 +4,10 @@ import Test.Support.Container
 import Test.Support.Scripted
 import Alaya
 
-/-! Tests of the MiniVero port: the opening message it sends, and how it behaves on compiler
-feedback, submission, and its limits. -/
+/-! Tests of MiniVero: the opening message it sends, the extensions it always has — the `submit`,
+`time_budget` and `subagent` tools, `ask_user` when its configuration names kinds of question,
+and outputs kept as files — and how it behaves on compiler feedback, submission, and its time
+budget. Masking and the context limit are `Test/Agents/Context.lean`'s. -/
 
 namespace MiniVeroTests
 open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
@@ -148,14 +150,51 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       let log := after run #[.response { toolCalls := #[call] },
         .execution { output := { output := raw, exitCode? := some 0 }, workspace := default }]
       check (log.any fun | .answered _ _ (.ok (.execution e)) => e.output.output == raw | _ => false) "raw output kept"
-      let history : MiniSwe.History := { items := #[.turn { toolCalls := #[call] } #[(call, Tools.Bash.result
+      let history : MiniVero.History := { items := #[.turn { toolCalls := #[call] } #[(call, Tools.Bash.result
         { output := { output := raw, exitCode? := some 0 }, workspace := default })]] }
-      match (MiniSwe.view config.base history)[1]? with
+      match (MiniVero.view history)[1]? with
       | some (Chat.Message.tool _ (Json.str text)) =>
         check ((text.splitOn "elided_chars").length > 1) "view should truncate"
         check (text.length < raw.length) "view should be smaller"
       | _ => fail "missing view observation",
 
+  test "its tools are bash, submit, time_budget and subagent, with ask_user only for the kinds its configuration names" do
+    assertEqual "by default" (config.tools.map (·.name)) #["bash", "submit", "time_budget", "subagent"]
+    let asking : MiniVero.Config := { questionTypes := #[.yesNo, .singleChoice] }
+    assertEqual "asking" (asking.tools.map (·.name)) #["bash", "submit", "ask_user", "time_budget", "subagent"]
+    let opening (config : MiniVero.Config) : String :=
+      match (MiniVero.openingMessages config "t" machine)[1]? with
+      | some (Chat.Message.user text) => text
+      | _ => ""
+    assertContains "ask_user's instruction" (opening asking) (Tools.AskUser.instruction #[.yesNo, .singleChoice])
+    check (!contains (opening config) "ask_user") "no ask_user without kinds of question"
+    assertContains "subagent's instruction" (opening config) Tools.Subagent.instruction
+    let parse (config : MiniVero.Config) (response : Chat.Response) : String :=
+      match MiniVero.parseActions config response with
+      | .formatError message => message
+      | .calls _ => ""
+    assertContains "not offered" (parse config (Scripted.responseWith #[Scripted.askCall "q" "Keep it?"])) "Unknown tool 'ask_user'"
+    assertContains "its own refusal" (parse asking (Scripted.responseWith #[Scripted.askCall "q" "Which?" "single_choice" #["only"]]))
+      "at least two candidates"
+    assertContains "alone" (parse asking (Scripted.responseWith #[Scripted.askCall "q" "Keep it?", Scripted.call "c" "bash" "ls"]))
+      "ask_user must be called alone"
+    assertError "an unknown kind" (Catalog.complete "mini-vero" (.mkObj [("question_types", .arr #["multiple_choice"])])) fun
+      | .input m => contains m "unknown kind of question"
+      | _ => false,
+
+  test "a long output's warning names the file that holds it, and a format error names the submit tool" do
+    let long := String.ofList (List.replicate 20000 'x')
+    let shown (file? : Option String) : String := MiniVero.observe { output := long, exitCode? := some 0 } file? false
+    assertContains "with its file" (shown (some "/alaya/outputs/7.txt")) "[output truncated; full output: /alaya/outputs/7.txt]"
+    assertContains "with none" (shown none) "Output too long."
+    check (config.tools.any fun tool => tool.name == "bash" &&
+      ((tool.call (.mkObj [("command", "ls")])).arguments.getObjVal? "executor" |>.toOption
+        |>.any fun executor => (executor.getObjVal? "outputs").toOption == some (.bool true))) "every command keeps its output as a file"
+    let message := MiniVero.formatErrorMessage config "Unknown tool 'python'." true (some "stop")
+    assertContains "the submit tool" message "If you want to end the task, call the `submit` tool"
+    check (!contains message "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT") "no sentinel"
+    assertContains "a tool call" message "Every response needs at least one tool call."
+    assertContains "the tools' instructions" message Tools.Subagent.instruction
 ]
 private def call (id name : String) (arguments : Lean.Json := .mkObj []) : Chat.ToolCall :=
   { id, name, arguments }
@@ -172,12 +211,7 @@ def timeSuite : Suite := Testing.suite "agents/mini-vero.time" #[
     check (contains text "Do not use ``date``") "it says not to use date"
     check (offset "## Done condition" < offset "## Checkpointing" && offset "## Checkpointing" < offset "## Anti-cheating")
       "after the Done condition, before Anti-cheating, as in Vero"
-    let off := MiniVero.openingMessages { config with base := { config.base with tools := #["bash", "submit"] } } "t" machine
-    match off[1]? with
-    | some (Chat.Message.user plain) =>
-      check (!contains plain "## Checkpointing") "off, there is no such section"
-    | _ => fail "missing task"
-    assertEqual "tools" ((MiniSwe.tools config.base).map (·.name)) #["bash", "submit", "time_budget"],
+    assertEqual "tools" (config.tools.map (·.name)) #["bash", "submit", "time_budget", "subagent"],
 
   test "time_budget reads the clock and gives the seconds left, or that there is none" do
     withVero config fun run => do
@@ -193,8 +227,8 @@ def timeSuite : Suite := Testing.suite "agents/mini-vero.time" #[
       check ((gives { spentMs := 60500 }).bind (·.getObjVal? "seconds_left" |>.toOption) == some .null) "no budget, no number",
 
   test "mini-swe neither offers time_budget nor accepts it in its configuration" do
-    assertEqual "tools" ((MiniSwe.tools {}).map (·.name)) #["bash", "submit"]
-    match MiniSwe.parseActions (turn #[call "t" "time_budget"]) with
+    assertEqual "tools" ((MiniSwe.tools {}).map (·.name)) #["bash"]
+    match MiniSwe.parseActions {} (turn #[call "t" "time_budget"]) with
     | .formatError message => check (contains message "Unknown tool 'time_budget'") "unknown"
     | .calls _ => fail "mini-swe must not accept time_budget"
     assertError "config" (Catalog.complete "mini-swe" (.mkObj [("time_budget", true)])) fun
@@ -245,4 +279,46 @@ def timeSuite : Suite := Testing.suite "agents/mini-vero.time" #[
       finally executor.close
 ]
 
+
+/-- Runs whose commands do matter, in the test container. -/
+def containerSuite : Suite := Testing.suite "agents/mini-vero.container" #[
+  test "subagent calls the agent itself on the model's task, in its own scope, in a frame of its own" do
+    let delegated : Chat.ToolCall := { id := "d", name := "subagent", arguments := .mkObj [("task", "write b.txt")] }
+    let .ok run := Scripted.veroRun config | fail "mini-vero is a run"
+    let rt ← Scripted.containerRuntime (some (← Scripted.scriptedModel #[
+      Scripted.responseWith #[delegated],
+      Scripted.responseWith #[Scripted.call "c1" "bash" "echo b > b.txt"],
+      Scripted.responseWith #[Scripted.submitCall "s1" "wrote it"],
+      Scripted.responseWith #[Scripted.submitCall "s2" "delegated"]]))
+    let (last, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run)
+    let log ← Scripted.logAt rt last
+    assertEqual "the agent's outcome" (Scripted.agentStatus log) "Submitted"
+    assertEqual "the calls: the session, the agent, MiniVero itself in its frame, its bash in the sub-agent's"
+      (log.filterMap fun | .opened frame opened => some (frame, opened.name) | _ => none)
+      #[(⟪"session"⟫, "session"), (⟪"session", "agent"⟫, "agent"), (⟪"session", "agent", "mini-vero"⟫, "mini-vero"),
+        (⟪"session", "agent", "mini-vero", "bash"⟫, "bash")]
+    check (log.any fun
+        | .opened ⟪"session", "agent", "mini-vero"⟫ { name := "mini-vero", arguments := delegated, environment? := none } =>
+          Scripted.taskOf delegated == some "write b.txt"
+        | _ => false)
+      "the sub-agent's call is the agent's configuration, with the model's task, and no environment"
+    let requests := Scripted.samplesOf run log
+    check (requests[1]!.1.messages.any fun | .user text => contains text "write b.txt" | _ => false)
+      "the sub-agent was told the model's task"
+    check (requests[3]!.1.messages.any fun | .tool "d" content => contains content.compress "wrote it" | _ => false)
+      "the agent was shown how the sub-agent ended"
+    assertEqual "the sub-agent's edit" (← IO.FS.readFile ((← scratch) / "work" / "b.txt")) "b\n",
+
+  test "a command finds the whole output of an earlier one, in the file its warning names" do
+    let long := String.ofList (List.replicate 12000 'q')
+    let .ok run := Scripted.veroRun config | fail "mini-vero is a run"
+    let rt ← Scripted.containerRuntime (some (← Scripted.scriptedModel #[
+      Scripted.responseWith #[Scripted.call "c1" "bash" s!"printf '%s' {long}"],
+      Scripted.responseWith #[Scripted.call "c2" "bash" "wc -c < $(ls /alaya/outputs/*.txt | head -n 1)"],
+      Scripted.responseWith #[Scripted.submitCall "c3"]]))
+    let (last, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run)
+    let log ← Scripted.logAt rt last
+    check (log.any fun | .answered _ (.exec cmd _) (.ok (.execution e)) => contains cmd "wc -c" && contains e.output.output "12000" | _ => false)
+      "the file holds it all"
+]
 end MiniVeroTests

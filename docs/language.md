@@ -154,7 +154,7 @@ that name its caller made before it. A run is itself a call, made from outside
 it is written `-`.
 
 A frame keeps its identity when a program changes around it: a call of one routine does not
-move the calls of another. An agent that comes to call `subagent` first still has its first
+move the calls of another. An agent that comes to call `ask_user` first still has its first
 `bash` in `mini-swe/bash`.
 
 *The log of the agent below.*
@@ -498,7 +498,8 @@ its scope as a closure carries its environment. In Alaya's own agents:
 
 | Routine | Its scope: the routines it can call |
 | --- | --- |
-| `mini-swe` | `bash`, `ask_user`, `time_budget`, and `mini-swe` itself |
+| `mini-swe` | `bash` |
+| `mini-vero` | `bash`, `ask_user`, `time_budget`, and `mini-vero` itself |
 | `bash`, `ask_user`, `time_budget` | none |
 | `grader` | none |
 
@@ -515,7 +516,7 @@ scopes; the catalog is built this way. Routines that call each other need more. 
 as its own scope, the scope that contains all of them, and that scope exists only once they do.
 `Scope.fix make` resolves the circle, as `letrec` does. `make` receives the scope being built and
 returns the routines, each given that scope; the result contains them all. This is how
-`mini-swe`'s scope contains `mini-swe` itself, so that `subagent` can call it, and how the steps
+`mini-vero`'s scope contains `mini-vero` itself, so that `subagent` can call it, and how the steps
 of a workflow call one another.
 
 The argument and the result cross the call as JSON, because that is how the log holds them: the

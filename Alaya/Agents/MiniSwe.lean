@@ -1,11 +1,10 @@
 import Alaya.Agents.Tools
-import Alaya.Base.ConfigJson
 import Alaya.LLM.Models
+import Alaya.Base.ConfigJson
 
-/-! A port of mini-SWE-agent's default tool-calling agent as a program. It waits for its task,
-then goes round a loop whose state is the conversation: it samples the model on mini's view of
-the conversation, reads the response's tool calls as mini does, calls each tool by its name, and
-reads its inbox, so that what a person says or changes reaches the model in the next request.
+/-! A port of mini-SWE-agent's default tool-calling agent: mini's prompts, its one `bash` tool,
+its sentinel that ends a run, its observations, and its loop, whose context keeps every turn.
+The pieces of the loop that do not depend on mini's terms are public, for an agent built on it.
 See `docs/agents.md` §4. -/
 
 namespace Alaya.Agents.MiniSwe
@@ -13,9 +12,6 @@ namespace Alaya.Agents.MiniSwe
 open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
 
 open Lean (Json)
-
-/-- The context a sample is conditioned on: the output of a view. -/
-abbrev Dialogue := Array Chat.Message
 
 /-! ## Configuration -/
 
@@ -25,17 +21,9 @@ def defaultExecutor : Executor.Config := {
   env := #[("PAGER", "cat"), ("MANPAGER", "cat"), ("LESS", "-R"),
            ("PIP_PROGRESS_BAR", "off"), ("TQDM_DISABLE", "1")] }
 
-/-- Which old outputs the view omits: those of the turns before a boundary that keeps the last
-`keepTurns` turns whole and moves `block` turns at a time, so between its moves the context only
-grows at its end and the provider's prompt cache holds. -/
-structure Masking where
-  keepTurns : Nat
-  block : Nat
-  deriving Inhabited, BEq, Repr
-
 structure Config where
-  /-- The model it samples: its complete spec, a name alone reading as that model's defaults.
-  There is no default: whoever calls the agent names one. -/
+  /-- The model it samples: its complete spec. There is no default: whoever calls the agent
+  names one. -/
   model? : Option Models.Spec := none
   /-- The task, verbatim. There is no default: whoever calls the agent gives one. -/
   task? : Option String := none
@@ -43,143 +31,63 @@ structure Config where
   maxConsecutiveFormatErrors : Nat := 3
   /-- How commands are run. -/
   executor : Executor.Config := defaultExecutor
-  /-- Name, in a long output's warning, the file under `outputsDir` that holds the whole of it
-  (`Driver.outputFile`, named by the output's content). Off, the agent is mini to the byte; on,
-  only that warning differs. -/
-  recoverOutput : Bool := false
-  /-- The tools offered, by name, in order: `bash` and `submit`, and any others of `Tools.all`. -/
-  tools : Array String := #["bash", "submit"]
-  /-- The kinds of question `ask_user` lets the model ask: at least one when the tool is
-  offered, and none when it is not. There is no default: whoever offers the tool says. -/
-  questionTypes : Array Question.Kind := #[]
-  /-- Tokens kept free for the next response when deciding whether the context is full, or the
-  model's `output_tokens` when that is less. -/
-  contextReserve : Nat := 8000
-  /-- Omit old outputs from the view (`Masking`); `none` shows them all. -/
-  masking? : Option Masking := none
-  /-- The tokens a request may hold: the model's context less the reserve, set from the model
-  when the agent is built (`agent`), and not part of the JSON; `none` is no check. -/
-  contextLimit? : Option Nat := none
-  /-- The agent itself, which `subagent` calls: its name and its complete configuration, set when
-  the agent is built, and not part of the JSON. -/
-  itself : String × Json := ("", .null)
   deriving Inhabited
 
 /-- The configuration as JSON: what a run records, and what `alaya config` shows. -/
-def Config.toJson (config : Config) : Lean.Json :=
+def Config.toJson (config : Config) : Json :=
   .mkObj [
     ("model", config.model?.map (·.toJson) |>.getD .null),
-    ("task", config.task?.map Lean.Json.str |>.getD .null),
-    ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Lean.Json)),
+    ("task", config.task?.map Json.str |>.getD .null),
+    ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Json)),
     ("executor", .mkObj [
-      ("timeout_seconds", (config.executor.timeoutSeconds : Lean.Json)),
-      ("env", .arr (config.executor.env.map fun (name, value) => .arr #[.str name, .str value]))]),
-    ("recover_output", (config.recoverOutput : Lean.Json)),
-    ("tools", .arr (config.tools.map .str)),
-    ("question_types", .arr (config.questionTypes.map fun kind => .str kind.name)),
-    ("context_reserve", (config.contextReserve : Lean.Json)),
-    ("mask_observations", match config.masking? with
-      | none => .null
-      | some m => .mkObj [("keep_turns", (m.keepTurns : Lean.Json)), ("block", (m.block : Lean.Json))])]
+      ("timeout_seconds", (config.executor.timeoutSeconds : Json)),
+      ("env", .arr (config.executor.env.map fun (name, value) => .arr #[.str name, .str value]))])]
 
-/-- Reads a configuration; a field left out is `defaults`', and an unknown one is an error.
-`own` names the fields of an agent built on this one, which it reads itself. -/
-def Config.fromJson (json : Lean.Json) (defaults : Config := {}) (own : Array String := #[]) :
-    Except String Config := do
-  let object ← ConfigJson.object json
-    (#["model", "task", "max_consecutive_format_errors", "executor", "recover_output", "tools", "question_types",
-      "context_reserve", "mask_observations"] ++ own)
-  let executor ← match ← object.field? "executor" with
-    | none => pure defaults.executor
-    | some json => do
-      let object ← ConfigJson.object json #["timeout_seconds", "env"]
-      let env ← match ← object.field? "env" with
-        | none => pure defaults.executor.env
-        | some json => ConfigJson.pairs json
-      pure { timeoutSeconds := ← object.nat "timeout_seconds" defaults.executor.timeoutSeconds, env }
-  let masking? ← match ← object.field? "mask_observations" with
-    | none => pure defaults.masking?
-    | some .null => pure none
-    | some json => do
-      let object ← ConfigJson.object json #["keep_turns", "block"]
-      let some keepTurns ← object.field? "keep_turns" |>.map (·.bind (·.getNat?.toOption))
-        | throw "'mask_observations' needs 'keep_turns', a non-negative integer"
-      let some block ← object.field? "block" |>.map (·.bind (·.getNat?.toOption))
-        | throw "'mask_observations' needs 'block', a positive integer"
-      if block == 0 then throw "'mask_observations.block' must be positive"
-      pure (some { keepTurns, block })
-  let tools ← match ← object.field? "tools" with
-    | none => pure defaults.tools
-    | some (.arr names) => names.mapM fun
-      | .str name =>
-        if Tools.names.contains name then pure name
-        else throw s!"unknown tool '{name}' (the tools are {", ".intercalate Tools.names.toList})"
-      | other => throw s!"'tools' must be an array of tool names, not {other.compress}"
-    | some other => throw s!"'tools' must be an array of tool names, not {other.compress}"
-  let names := tools
-  for required in #["bash", "submit"] do
-    if !names.contains required then throw s!"'tools' must include {required}: mini's prompts are about it"
-  for name in names do
-    if (names.filter (· == name)).size > 1 then throw s!"'tools' names {name} twice"
-  let wrongTypes := s!"'question_types' must be an array of {Question.Kind.names}"
-  let questionTypes ← match ← object.field? "question_types" with
-    | none => pure defaults.questionTypes
-    | some (.arr names) => names.mapM fun
-      | .str name => match Question.Kind.ofName? name with
-        | some kind => pure kind
-        | none => throw s!"unknown kind of question '{name}': {wrongTypes}"
-      | other => throw s!"{wrongTypes}, not {other.compress}"
-    | some other => throw s!"{wrongTypes}, not {other.compress}"
-  for kind in questionTypes do
-    if (questionTypes.filter (· == kind)).size > 1 then throw s!"'question_types' names {kind.name} twice"
-  -- The kinds a model may ask are chosen with the tool, never assumed.
-  if names.contains "ask_user" && questionTypes.isEmpty then
-    throw s!"'tools' offers ask_user: 'question_types' must say which kinds of question the model may ask ({Question.Kind.names})"
-  if !names.contains "ask_user" && !questionTypes.isEmpty then
-    throw "'question_types' is for ask_user, which 'tools' does not offer"
+/-- The executor settings a configuration's `executor` field gives, over `defaults`. -/
+def executorFromJson (json : Json) (defaults : Executor.Config) : Except String Executor.Config := do
+  let object ← ConfigJson.object json #["timeout_seconds", "env"]
+  let env ← match ← object.field? "env" with
+    | none => pure defaults.env
+    | some json => ConfigJson.pairs json
+  pure { timeoutSeconds := ← object.nat "timeout_seconds" defaults.timeoutSeconds, env }
+
+/-- A model a configuration names: its complete spec, or none. -/
+def modelFromJson : Json → Except String (Option Models.Spec)
+  | .null => pure none
+  | json => match Models.Spec.read json with
+    | .ok spec => pure (some spec)
+    | .error problem => throw s!"'model': {problem}"
+
+/-- A task a configuration gives, or none. -/
+def taskFromJson : Json → Except String (Option String)
+  | .null => pure none
+  | .str task => pure (some task)
+  | other => throw s!"'task' must be a string, not {other.compress}"
+
+/-- Reads a configuration; a field left out is its default, and an unknown one is an error. -/
+def Config.fromJson (json : Json) : Except String Config := do
+  let object ← ConfigJson.object json #["model", "task", "max_consecutive_format_errors", "executor"]
+  let defaults : Config := {}
   let model? ← match ← object.field? "model" with
     | none => pure defaults.model?
-    | some .null => pure none
-    | some json => match Models.Spec.read json with
-      | .ok spec => pure (some spec)
-      | .error problem => throw s!"'model': {problem}"
+    | some json => modelFromJson json
   let task? ← match ← object.field? "task" with
     | none => pure defaults.task?
-    | some .null => pure none
-    | some (.str task) => pure (some task)
-    | some other => throw s!"'task' must be a string, not {other.compress}"
-  pure {
-    model?
-    task?
-    maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors
-    executor
-    recoverOutput := ← object.bool "recover_output" defaults.recoverOutput
-    tools
-    questionTypes
-    contextReserve := ← object.nat "context_reserve" defaults.contextReserve
-    masking? }
-
-/-- How the configuration runs a command: mini's executor settings, and, when the view may
-name a file an output is in, with the outputs kept as files. -/
-def Config.commands (config : Config) : Executor.Config :=
-  { config.executor with outputs := config.recoverOutput || config.masking?.isSome }
-
-/-- The tools the configuration offers, its commands run as it says, and `subagent` calling the
-agent itself. -/
-def Config.offered (config : Config) : Array Tool :=
-  config.tools.filterMap (Tools.named? · { commands := config.commands, questions := config.questionTypes
-                                           agent := config.itself })
+    | some json => taskFromJson json
+  let executor ← match ← object.field? "executor" with
+    | none => pure defaults.executor
+    | some json => executorFromJson json defaults.executor
+  pure { model?, task?, executor
+         maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors }
 
 /-! ## Prompts
 
 The files in `MiniSwe/` are mini's templates from `mini.yaml` (vendored beside them, from
 SWE-agent/mini-swe-agent `04d809c`), cut where jinja substitutes or branches, byte for byte;
-`Test/MiniSwe.lean` checks each against the vendored copy. Assembly does what jinja does: puts
-the task and the `uname` in, keeps the MacOS note when `system == "Darwin"` with the
-whitespace its `{%-`/`-%}` tags strip, and drops one trailing newline from a rendering. The
-changes of text are the port's: the sentences that name mini's submission sentinel say the
-`submit` tool (`sentinelToSubmit`), those that require a `bash` call require a tool call
-(`toolNeutral`), and the machine line has no kernel release or version (`instanceMessage`). -/
+`Test/Agents/MiniSwe.lean` checks each against the vendored copy. Assembly does what jinja does:
+puts the task and the `uname` in, keeps the MacOS note when `system == "Darwin"` with the
+whitespace its `{%-`/`-%}` tags strip, and drops one trailing newline from a rendering. The one
+change of text is the machine line, which has no kernel release or version (`instanceMessage`). -/
 
 def systemTemplate : String := include_str "MiniSwe/system.md"
 def opening : String := include_str "MiniSwe/instance-opening.md"
@@ -198,43 +106,14 @@ def pieces : Array (String × String) := #[
   ("format-error-cut.md", formatErrorCut), ("format-error.md", formatErrorTemplate)]
 
 /-- What jinja does to a rendering: one trailing newline goes. -/
-private def rendered (text : String) : String :=
+def rendered (text : String) : String :=
   if text.endsWith "\n" then (text.dropEnd 1).toString else text
 
-/-- Mini's instruction for ending a run, as it appears twice in the instance prompt with two
-different continuation indents, and the port's. -/
-def sentinelInstruction (indent : String) : String :=
-  "Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n" ++
-  indent ++ "Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>"
-
-def submitInstruction (indent : String) : String :=
-  "Submit your changes and finish your work by calling the `submit` tool.\n" ++
-  indent ++ "Do not combine it with any other tool call. <important>After this call, you cannot continue working on this task.</important>"
-
-/-- The last line of mini's format-error message, and the port's. -/
-def sentinelHint : String :=
-  "If you want to end the task, please issue the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`\nwithout any other command."
-
-def endHint : String :=
-  "If you want to end the task, call the `submit` tool\nwithout any other tool call."
-
-/-- The port's one change to mini's texts. -/
-def sentinelToSubmit (text : String) : String :=
-  let text := text.replace (sentinelInstruction "   ") (submitInstruction "   ")
-  let text := text.replace (sentinelInstruction "  ") (submitInstruction "  ")
-  text.replace sentinelHint endHint
+/-- The line a command prints first to end the run, the rest of its output being the
+submission: mini's sentinel. -/
+def sentinel : String := "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 
 def systemMessage : String := rendered systemTemplate
-
-/-- The port's one change of mini's texts besides `sentinelToSubmit`: the sentences that say a
-response must call `bash` say it must call a tool, so that tools added after them — some of
-which must be called alone — never contradict them. -/
-def toolNeutral (text : String) : String :=
-  let text := text.replace "Your response MUST include AT LEAST ONE bash tool call"
-    "Your response MUST include AT LEAST ONE tool call"
-  let text := text.replace "Every response needs to use the 'bash' tool at least once to execute commands."
-    "Every response needs at least one tool call."
-  text.replace "exactly one bash tool call" "exactly one tool call"
 
 /-- The rendered instance (task) message. Where mini's template has the whole `uname`, it has
 the `system` and the `machine` alone: under docker the kernel's release and version are the
@@ -242,44 +121,68 @@ host's, and a prompt should not say which machine a run was created on. The MacO
 included exactly when `system == "Darwin"`. -/
 def instanceMessage (task system machine : String) : String :=
   let note := if system == "Darwin" then darwinNote.trimAscii.toString else ""
-  rendered <| toolNeutral <| sentinelToSubmit <|
+  rendered <|
     opening ++ task ++ rules ++ system ++ " " ++ machine ++
     examples.trimAsciiEnd.toString ++ note ++ sedExamples.trimAsciiStart.toString
 
-/-- `text` with the instructions of the offered tools after it, a blank line before each: what
-a tool adds to the prompt, which is only ever added. -/
-def withInstructions (config : Config) (text : String) : String :=
-  (config.offered).foldl (init := text) fun text tool =>
-    match tool.instruction? with
-    | some instruction => text ++ "\n\n" ++ instruction
-    | none => text
-
 /-- The opening of a conversation: the system prompt and the task. -/
-def openingMessages (config : Config) (task : String) (uname : Uname) : Array Chat.Message :=
-  #[.system systemMessage,
-    .user (withInstructions config
-      (instanceMessage task uname.system uname.machine))]
+def openingMessages (task : String) (uname : Uname) : Array Chat.Message :=
+  #[.system systemMessage, .user (instanceMessage task uname.system uname.machine)]
+
+/-- Whether the provider cut the response off before a tool call: mini's test in its
+`format_error_template`. -/
+def truncated (hasToolCalls : Bool) (finishReason? : Option String) : Bool :=
+  match finishReason? with
+  | some "length" => true
+  | some "tool_calls" => !hasToolCalls
+  | _ => false
 
 /-- The user turn a malformed response is answered with: mini's `format_error_template`. -/
-def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : Option String)
-    (config : Config := {}) : String :=
-  withInstructions config <| toolNeutral <|
-  let truncated := match finishReason? with
-    | some "length" => true
-    | some "tool_calls" => !hasToolCalls
-    | _ => false
-  if truncated then formatErrorCut.replace "{{ finish_reason }}" (finishReason?.getD "")
-  else sentinelToSubmit (formatErrorTemplate.replace "{{error}}" error)
+def formatErrorMessage (error : String) (hasToolCalls : Bool) (finishReason? : Option String) : String :=
+  if truncated hasToolCalls finishReason? then
+    formatErrorCut.replace "{{ finish_reason }}" (finishReason?.getD "")
+  else rendered (formatErrorTemplate.replace "{{error}}" error)
 
-/-! ## Tools -/
+/-! ## Observations -/
 
 /-- How much of a command's output the model is shown; longer outputs show their head and tail. -/
 def outputLimit : Nat := 10000
 
-/-- The tools offered on every sample. -/
-def tools (config : Config) : Array Chat.ToolDefinition := config.offered.map (·.definition)
+/-- A text as jinja's `tojson` writes it. -/
+private def quoted (text : String) : String := (Json.str text).compress
 
-/-! ## Reading a response -/
+/-- How the model sees a command: mini's `observation_template`, its output whole under
+`outputLimit` characters, and its first and last half of that beyond, with what went wrong
+when the command did not end on its own. A command with no exit status has `returncode` -1. -/
+def observation (o : Output) : String :=
+  let returncode := match o.exitCode? with
+    | some code => toString code
+    | none => "-1"
+  let exception := match o.error? with
+    | some error => s!", \"exception_info\": {quoted error}"
+    | none => ""
+  let length := o.output.length
+  if length < outputLimit then
+    "{\n  \"returncode\": " ++ returncode ++ ",\n  \"output\": " ++ quoted o.output ++ exception ++ "\n}"
+  else
+    let half := outputLimit / 2
+    "{\n  \"returncode\": " ++ returncode ++
+      ",\n  \"output_head\": " ++ quoted (String.ofList (o.output.toList.take half)) ++
+      ",\n  \"output_tail\": " ++ quoted (String.ofList (o.output.toList.drop (length - half))) ++
+      ",\n  \"elided_chars\": " ++ toString (length - outputLimit) ++
+      ",\n  \"warning\": \"Output too long.\"" ++ exception ++ "\n}"
+
+/-! ## The loop
+
+Mini's `DefaultAgent`: each round reads what a person said, samples a response, answers a
+malformed one with the format error, and otherwise makes each of its tool calls in order, until a
+command prints the sentinel first. -/
+
+/-- The context a sample is conditioned on. -/
+abbrev Dialogue := Array Chat.Message
+
+/-- The tools it offers: mini's `bash`, alone. -/
+def tools (config : Config) : Array Tool := #[Tools.Bash.tool config.executor]
 
 /-- A parsed model turn: the calls to make, in order, or a format-error message to send back as
 a user turn. -/
@@ -287,34 +190,17 @@ inductive Parsed where
   | calls (calls : Array Chat.ToolCall)
   | formatError (message : String)
 
-/-- Reads a response's tool calls, each by the offered tool of its name; the first call with a
-problem makes the turn a format error, and so does a tool that must be alone and is not. -/
-def parseActions (response : Chat.Response) (config : Config := {}) : Parsed := Id.run do
-  if response.toolCalls.isEmpty then
-    return .formatError <| formatErrorMessage
-      "No tool calls found in the response. Every response MUST include at least one tool call."
-      false response.finishReason? config
-  let offered := config.offered
-  if response.toolCalls.size != 1 then
-    if let some tool := offered.find? fun tool =>
-        tool.alone && response.toolCalls.any (·.name == tool.name) then
-      return .formatError <| formatErrorMessage s!"{tool.name} must be called alone."
-        true response.finishReason? config
-  for call in response.toolCalls do
-    let problem? : Option String :=
-      if let some raw := call.invalidArguments? then
-        some ("Error parsing tool call arguments: " ++
-          (match Lean.Json.parse raw with | .error e => e | .ok _ => "invalid JSON") ++ ".")
-      else match offered.find? (·.name == call.name) with
-        | some tool => match tool.check call.arguments with
-          | .ok () => none
-          | .error problem => some problem
-        | none => some s!"Unknown tool '{call.name}'."
-    if let some problem := problem? then
-      return .formatError (formatErrorMessage problem true response.finishReason? config)
-  return .calls response.toolCalls
+/-- Reads a response's tool calls against `tools`: the first problem makes the turn a format
+error, as `formatError` words it. -/
+def parse (tools : Array Tool) (formatError : String → Bool → Option String → String)
+    (response : Chat.Response) : Parsed :=
+  match Tools.problem? tools response with
+  | some problem => .formatError (formatError problem (!response.toolCalls.isEmpty) response.finishReason?)
+  | none => .calls response.toolCalls
 
-/-! ## The conversation -/
+/-- Mini's `parse_actions`, on its tools and in its format error. -/
+def parseActions (config : Config) (response : Chat.Response) : Parsed :=
+  parse (tools config) formatErrorMessage response
 
 /-- One thing a conversation holds: a message told, the model's turn with each of its calls and
 what the call gave, or a malformed response, which the model is shown as the format error. -/
@@ -323,55 +209,23 @@ inductive Item where
   | turn (response : Chat.Response) (results : Array (Chat.ToolCall × Json))
   | malformed (message : String)
 
-/-- The state of the loop: the conversation, and what mini's limits count. -/
+/-- The state of the loop: the conversation, and the malformed responses since the last
+well-formed one. A person's message in between does not reset the count. -/
 structure History where
   items : Array Item := #[]
-  /-- The latest request whose response reported its size: its messages, the tokens it held,
-  and the tokens of the response. -/
-  measured? : Option (Dialogue × Nat × Option Nat) := none
-  /-- Malformed responses since the last well-formed one. A person's message in between does
-  not reset the count. -/
   formatErrors : Nat := 0
 
-/-- How many turns from the first are omitted when the conversation holds `turns`: none until
-the boundary first moves, then a multiple of `block`. -/
-def Masking.omittedTurns (m : Masking) (turns : Nat) : Nat :=
-  if turns < m.keepTurns + m.block then 0 else ((turns - m.keepTurns) / m.block) * m.block
+/-- The conversation with a malformed response, counted. -/
+def History.malformed (history : History) (message : String) : History :=
+  { history with items := history.items.push (.malformed message), formatErrors := history.formatErrors + 1 }
 
-/-- How the view shows a command's output: whole, cut to its head and tail, or omitted. -/
-private inductive Shown where
-  | whole | cut | omitted
-
-private def shown (omittedTurn : Bool) (file? : Option String) (o : Output) : Shown :=
-  match file? with
-  -- An output no longer than the notice is cheaper to keep, and one with no file cannot go.
-  | some file =>
-    if omittedTurn && o.output.length > (Tools.Bash.omittedNotice file).length then .omitted
-    else if o.output.length < outputLimit then .whole else .cut
-  | none => if o.output.length < outputLimit then .whole else .cut
-
-/-- What the model is shown of a call's result: a command's output as
-`Tools.Bash.observation`, which with `recoverOutput` names the file a cut output is in, or, in a
-turn masking omits, as `Tools.Bash.omitted`; any other result as JSON. -/
-private def resultMessage (config : Config) (omittedTurn : Bool) (call : Chat.ToolCall)
-    (result : Json) : Chat.Message :=
-  let content : Json := match call.name, Tools.Bash.ofResult? result with
-    | "bash", some (output, file?) =>
-      match shown omittedTurn file? output, file? with
-      | .omitted, some file => Tools.Bash.omitted output file
-      | _, _ => Tools.Bash.observation output outputLimit (if config.recoverOutput then file? else none)
-    | _, _ => result
-  .tool call.id (.str content.pretty)
-
-/-- The view: what is told as it is, a turn as the response and its calls' results, a malformed
-response as the format error, as a user turn. -/
-def view (config : Config) (history : History) : Dialogue := Id.run do
-  let turns := history.items.foldl (init := 0) fun n item =>
-    match item with | .told _ => n | _ => n + 1
-  let omitted := config.masking?.map (·.omittedTurns turns) |>.getD 0
+/-- The messages of a conversation: what is told as it is, a turn as the response and a tool
+message for each call, its result as `shown` gives it with the turn's number, from 1, and a
+malformed response as the format error, as a user turn. -/
+def viewWith (shown : Nat → Chat.ToolCall → Json → String) (items : Array Item) : Dialogue := Id.run do
   let mut messages : Dialogue := #[]
   let mut turn := 0
-  for item in history.items do
+  for item in items do
     match item with
     | .told message => messages := messages.push message
     | .malformed message =>
@@ -381,33 +235,26 @@ def view (config : Config) (history : History) : Dialogue := Id.run do
       turn := turn + 1
       messages := messages.push response.message
       for (call, result) in results do
-        messages := messages.push (resultMessage config (omitted > 0 && turn ≤ omitted) call result)
+        messages := messages.push (.tool call.id (.str (shown turn call result)))
   return messages
 
-/-- The request of a model turn: the view, with the tools. -/
-def request (config : Config) (history : History) : Chat.Request :=
-  { messages := view config history, tools := tools config }
-
-/-- The tokens `full`, the messages of the next request, holds, known without a tokenizer. The
-latest response that reported its size says how many the request it answered held, and how many
-it returned; what `full` holds after that request and the message that shows the response is
-estimated. When `full` no longer begins with that request, as when old outputs have since been
-masked, or nothing reported a size, the whole is estimated. -/
-def contextTokens (history : History) (full : Dialogue) : Nat :=
-  let wire (dialogue : Dialogue) := dialogue.map (·.toJson.compress)
-  match history.measured? with
-  | none => Chat.estimateTokens full
-  | some (before, input, output?) =>
-    if before.size < full.size && wire (full.extract 0 before.size) == wire before then
-      let response := output?.getD (Chat.estimateTokens (full.extract before.size (before.size + 1)))
-      input + response + Chat.estimateTokens (full.extract (before.size + 1) full.size)
-    else Chat.estimateTokens full
+/-- Mini's linear context: every turn, a command as its observation, and a tool that failed as
+its error. -/
+def view (history : History) : Dialogue :=
+  viewWith (items := history.items) fun _ _ result => match Tools.Bash.ofResult? result with
+    | some (output, _) => observation output
+    | none => result.pretty
 
 /-- How the agent ends: a status, what it submitted, and, where the status alone does not say,
 why. -/
 def outcome (status : String) (submission : String := "") (reason? : Option String := none) : Json :=
   .mkObj ([("status", (status : Json)), ("submission", (submission : Json))] ++
     (reason?.map fun reason => ("reason", (reason : Json))).toList)
+
+/-- How the agent ends when the provider refuses a request as too long: the one failure of a
+sample the driver answers with. -/
+def refused (refusal : String) : Json :=
+  outcome "ContextExceeded" (reason? := some s!"the provider refused the request: {refusal}")
 
 /-- What a notice tells the model: a person's message, in an envelope that says it came from a
 person while the agent was paused. No other notice reaches a read of the agent's. -/
@@ -417,82 +264,61 @@ def noticeMessage : Notice → Option Chat.Message
   | _ => none
 
 /-- The conversation with what has arrived since the last read of the inbox. -/
-def listen (history : History) : Computation Agent History := do
+def listen (items : Array Item) : Computation Agent (Array Item) := do
   let heard ← inbox
-  return { history with items := history.items ++ (heard.toArray.filterMap noticeMessage).map .told }
+  return items ++ (heard.toArray.filterMap noticeMessage).map .told
 
-/-- One round of mini's loop (`DefaultAgent.run`): read the inbox, so that what a person said
-or changed while the run was paused reaches the model in this round's request; stop before a
-request too large for the model's context; sample, and stop the same way
-when the provider refuses the request as too long, which is the one failure of a sample the
-driver answers with; answer a malformed response with the format error, and stop after too many in a row; otherwise call each tool in
-order, a `submit` ending the agent with its message. A tool that fails gives its error as its
-result. -/
-def round (config : Config) (history : History) : Computation Agent (History ⊕ Json) := do
-  let history ← listen history
-  let request := request config history
-  if let some limit := config.contextLimit? then
-    if contextTokens history request.messages >= limit then return .inr (outcome "ContextExceeded")
-  let some model := config.model? | throw "the agent has no model to sample"
-  let response ← try sample model request
-    catch refusal =>
-      return .inr (outcome "ContextExceeded" (reason? := some s!"the provider refused the request: {refusal}"))
-  let measured? := match response.usage?.bind (·.input?) with
-    | some input => some (request.messages, input, response.usage?.bind (·.output?))
-    | none => history.measured?
-  let history := { history with measured? }
-  match parseActions response config with
+/-- What a command printed after the sentinel `line`, when it printed the line first: mini's
+`has_finished`. -/
+def submitted? (line : String) (result : Json) : Option String := do
+  let (output, _) ← Tools.Bash.ofResult? result
+  match (output.output.trimAsciiStart.toString.splitOn "\n") with
+  | first :: rest => if first.trimAscii.toString == line then some ("\n".intercalate rest) else none
+  | [] => none
+
+/-- One round of mini's `DefaultAgent.run`: read the inbox, so that what a person said while the
+run was paused reaches the model in this round's request; sample, and end when the provider
+refuses the request as too long; answer a malformed response with the format error, and end
+after too many in a row; otherwise make each call in order, until a command prints the
+sentinel first. -/
+def round (config : Config) (model : Models.Spec) (history : History) : Computation Agent (History ⊕ Json) := do
+  let history := { history with items := ← listen history.items }
+  let request : Chat.Request := { messages := view history, tools := (tools config).map (·.definition) }
+  let response ← try sample model request catch refusal => return .inr (refused refusal)
+  match parseActions config response with
   | .formatError message =>
-    let history := { history with items := history.items.push (.malformed message)
-                                  formatErrors := history.formatErrors + 1 }
-    if config.maxConsecutiveFormatErrors > 0 && history.formatErrors >= config.maxConsecutiveFormatErrors then
-      return .inr (outcome "RepeatedFormatError")
+    let history := history.malformed message
+    let limit := config.maxConsecutiveFormatErrors
+    if limit > 0 && history.formatErrors >= limit then return .inr (outcome "RepeatedFormatError")
     return .inl history
   | .calls calls =>
     let mut results : Array (Chat.ToolCall × Json) := #[]
     for asked in calls do
-      if asked.name == Tools.Submit.definition.name then
-        return .inr (outcome "Submitted" (Tools.Submit.message asked.arguments))
-      -- The call is the one the tool makes of the model's arguments.
-      let made : RoutineCall := match config.offered.find? (·.name == asked.name) with
-        | some tool => tool.call asked.arguments
-        | none => { name := asked.name, arguments := asked.arguments }
-      let result ← try call made.name made.arguments
-        catch error => pure (.mkObj [("error", .str error)])
+      let result ← Tools.make (tools config) asked
+      if let some submission := submitted? sentinel result then
+        return .inr (outcome "Submitted" submission)
       results := results.push (asked, result)
     return .inl { history with items := history.items.push (.turn response results), formatErrors := 0 }
 
-/-- An agent with mini's loop: it opens the conversation with `opening`, and goes round until it
-ends. -/
-def converse (config : Config) (opening : Array Chat.Message) : Computation Agent Json :=
-  iter (round config) { items := opening.map .told }
+/-! ## The agent -/
 
-/-- The tokens a request to `model` may hold under `config`: its context less the room kept for
-a response; `none` when its context is not known. -/
-def contextLimit? (config : Config) (model : Models.Spec) : Option Nat :=
-  model.contextTokens?.map fun tokens =>
-    tokens - min config.contextReserve (model.outputTokens?.getD config.contextReserve)
-
-/-- The mini agent, for a call on `task`, on the machine the call names, of `model`, which
-`subagent` calls as `itself`: its name and configuration. -/
-def computation (config : Config) (model : Models.Spec) (task : String)
-    (itself : String × Json := ("", .null)) : Computation Agent Json := do
+/-- The mini agent, for a call of `model` on `task`, on the machine the call names. -/
+def computation (config : Config) (model : Models.Spec) (task : String) : Computation Agent Json := do
   -- The opening names the machine the commands run on, as the container says.
   let uname ← Tools.Uname.read
-  converse { config with model? := some model, contextLimit? := contextLimit? config model, itself }
-    (openingMessages config task uname)
+  iter (round config model) { items := (openingMessages task uname).map .told }
 
 /-- MiniSwe as a routine. A call's arguments are its configuration, its model and its task
-among it; one it cannot run on fails in the call's frame. Its scope is its tools, and itself,
-which `subagent` calls with its configuration and another task. -/
-def routine : Routine Agent :=
-  let body (arguments : Json) : Computation Agent Json :=
+among it; one it cannot run on fails in the call's frame. Its scope is its tool. -/
+def routine : Routine Agent where
+  name := "mini-swe"
+  body arguments :=
     match Config.fromJson arguments with
     | .error problem => .fail s!"mini-swe: {problem}"
     | .ok config => match config.model?, config.task? with
-      | some model, some task => computation config model task ("mini-swe", config.toJson)
+      | some model, some task => computation config model task
       | none, _ => .fail "mini-swe: it samples a model, and its configuration names none"
       | _, none => .fail "mini-swe: it works on a task, and its configuration names none"
-  { name := "mini-swe", body, scope := Scope.fix fun scope => Tools.routines.push { name := "mini-swe", body, scope } }
+  scope := Scope.of #[Tools.Bash.routine]
 
 end Alaya.Agents.MiniSwe

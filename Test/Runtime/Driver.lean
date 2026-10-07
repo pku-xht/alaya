@@ -66,7 +66,7 @@ private def script : Array Chat.Response := #[
 
 def suite : Suite := Testing.suite "runtime/driver" #[
   test "new writes the root, and a call of the agent is a notice with its configuration and its task" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let rt ← runtime (echoing) none
       let tip ← start rt run "the task"
       let log ← logAt rt tip
@@ -84,7 +84,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
       check (settled[6]? matches some (Event.opened ⟪"session", "agent"⟫ _)) "in a frame of its own",
 
   test "the driver appends an entry an event, and replay agrees with the log at every prefix" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let (rt, last, stop) ← drive run (echoing) (← scriptedModel script)
       check (isIdle stop) "the agent is over"
       let log ← logAt rt last
@@ -113,7 +113,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
       assertEqual "frames" frames #[⟪"session", "agent", "bash"⟫, ⟪"session", "agent", "bash#1"⟫, ⟪"session", "agent", "bash#2"⟫],
 
   test "the driver reports each entry as it appends it, in order, with its time" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let rt ← runtime (echoing) (some (← scriptedModel script))
       let tip ← start rt run
       let seen ← IO.mkRef (#[] : Array (Hash × Nat))
@@ -127,7 +127,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
         ((entries.extract 5 entries.size).map (·.elapsedMs)),
 
   test "a run paused at a limit goes on where it stopped, to the log an uninterrupted run makes" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let (whole, wholeEnd, _) ← drive run (echoing) (← scriptedModel script)
       let rt ← runtime (echoing) (some (← scriptedModel script))
       let tip ← start rt run
@@ -141,7 +141,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
       assertEqual "the same events" (describe (← logAt rt finished)) (describe (← logAt whole wholeEnd)),
 
   test "a crash is resumed: the operation is asked for again, and nothing was logged for it" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let rt ← runtime (echoing) (some (← unreachable 1 script))
       let tip ← start rt run
       assertError "the provider cannot be reached" (Driver.drive rt run tip) fun
@@ -157,7 +157,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
       assertEqual "the run is whole" (agentStatus (← logAt rt finished)) "Submitted",
 
   test "a failure of the provider that is no refusal for length stops the driver, with nothing logged" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       for (label, error) in #[("a key it rejects", Error.http 401 "invalid api key"),
           ("a request it rejects", Error.http 400 "temperature must be finite"),
           ("a response it garbles", Error.protocol "no choices"),
@@ -176,7 +176,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
         | _ => false,
 
   test "a command that could not be run stops the driver, and the next run asks for it again" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let attempts ← IO.mkRef 0
       let flaky : Executor := { exec := fun _ _ _ _ => do
         if (← attempts.modifyGet fun n => (n, n + 1)) == 0 then throw <| IO.userError "the daemon is gone"
@@ -196,7 +196,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
         | _ => false).size 1,
 
   test "a log lost after its responses were sampled is made again from the cache, the model not asked" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       -- The scripted model has one response for each request: a second ask would exhaust it.
       let model ← cached (← scriptedModel script)
       let (first, firstEnd, _) ← drive run (echoing) model
@@ -205,7 +205,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
       assertEqual "the same events" (describe (← logAt second secondEnd)) (describe (← logAt first firstEnd)),
 
   test "a response costs the time its draw took, in every log that holds it" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       -- A model that takes a while over each response, behind a cache on disk.
       let inner ← scriptedModel script
       let slow : Model := { inner with sample := fun request => do
@@ -241,7 +241,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
       assertEqual "a time a draw" (kept.qsort (· < ·)) (times.qsort (· < ·)),
 
   test "running a point again is a fork: a new draw, the first one kept" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let responses := script ++ #[responseWith #[submitCall "s2" "the other"]]
       let rt ← runtime (echoing) (some (← cached (← scriptedModel responses)))
       let tip ← start rt run
@@ -262,7 +262,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
         "the fork ended its own way",
 
   test "a message appended where a run paused reaches the model in its next request" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let (model, requests) ← do
         let requests ← IO.mkRef (#[] : Array Chat.Request)
         let index ← IO.mkRef 0
@@ -281,7 +281,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
       check (contains text "keep the old API" && contains text "<intervention>") text,
 
   test "a stop ends the agent, and one is refused once the agent is over" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let rt ← runtime (echoing) (some (← scriptedModel script))
       let tip ← start rt run
       let (paused, _) ← assertOk <| Driver.drive rt run tip { samples? := some 2 }
@@ -330,7 +330,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
         | _ => false,
 
   test "a log that is no trace of the run is refused, not driven" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let rt ← runtime (echoing) (some (← scriptedModel script))
       let tip ← start rt run
       let forest ← assertOk rt.store.forest
@@ -382,7 +382,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
     pure (),
 
   test "a change appends the files and what changed, no read takes it, and the next command runs on them" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       do
         let rt ← filingRuntime (← scriptedModel #[
           responseWith #[call "c1" "bash" "write a.txt one"],
@@ -410,7 +410,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
           "no read took the change",
 
   test "an output's file is named by its content, so a comment before the command changes no request" do
-    withMini { recoverOutput := true } fun run => do
+    withVero {} fun run => do
       let long := String.ofList (List.replicate 12000 'z')
       let script := #[responseWith #[call "c1" "bash" "print"], responseWith #[submitCall "s"]]
       let named (log : Log Agent) : Option String := log.findSome? fun
@@ -434,7 +434,7 @@ def suite : Suite := Testing.suite "runtime/driver" #[
   test "a command run without its outputs kept finds none, whatever was left there" do
     withMini {} fun run => do
       let rt ← filingRuntime (← scriptedModel #[responseWith #[call "c1" "bash" "leak"],
-        responseWith #[call "c2" "bash" "ls"], responseWith #[submitCall "s"]])
+        responseWith #[call "c2" "bash" "ls"], responseWith #[sentinelCall "s"]])
       let (final, _) ← assertOk <| Driver.drive rt run (← start rt run)
       assertEqual "the listing" (printed (← logAt rt final) "ls") (some "work: ; outputs: "),
 
@@ -442,9 +442,9 @@ def suite : Suite := Testing.suite "runtime/driver" #[
     withMini {} fun run => do
       let rt ← filingRuntime (← cached (← scriptedModel #[
         responseWith #[call "c1" "bash" "write a.txt one"], responseWith #[call "c2" "bash" "write b.txt two"],
-        responseWith #[call "c3" "bash" "ls"], responseWith #[submitCall "s"],
+        responseWith #[call "c3" "bash" "ls"], responseWith #[sentinelCall "s"],
         -- The fork's draws: the second response again, and what follows it there.
-        responseWith #[call "c4" "bash" "ls"], responseWith #[submitCall "t"]]))
+        responseWith #[call "c4" "bash" "ls"], responseWith #[sentinelCall "t"]]))
       let (first, _) ← assertOk <| Driver.drive rt run (← start rt run)
       let log ← logAt rt first
       assertEqual "the first log's files" (printed log "ls") (some "work: a.txt b.txt; outputs: ")

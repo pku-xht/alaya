@@ -232,8 +232,10 @@ def suite : Suite := Testing.suite "runtime/docker" #[
 
   test "a cut output is readable, read-only, in a recreated container, and stays out of the workspace" <| withDocker
     fun settings => do
-      let recover := { miniConfig with recoverOutput := true }
-      withRun recover fun run => do
+      let vero : Agents.MiniVero.Config := { executor := { miniConfig.executor with env := #[] } }
+      match Scripted.runOfConfig "mini-vero" vero.toJson with
+      | .error problem => fail problem
+      | .ok run => do
         let model ← Scripted.scriptedModel #[
           toolResponse "awk 'BEGIN {for(i=0;i<6000;i++) printf \"a\"; printf \"MIDDLE\"; for(i=0;i<6000;i++) printf \"z\"}'",
           toolResponse "grep -c MIDDLE /alaya/outputs/*.txt; touch /alaya/outputs/x 2>/dev/null || echo read-only; ls -A"]

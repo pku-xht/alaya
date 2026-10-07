@@ -884,12 +884,13 @@ def entries():
 
 
 def grader():
-    """The grading of a run: what goes into the grader's container, and what comes out of it."""
+    """The grading of a run: one input, the workspace; one image, the grader's, with its trusted
+    files built in; two outputs, the TAP and a new version of the workspace."""
     heads = ["what goes in", "the grader runs", "what comes out"]
-    inputs = [("the workspace at the graded entry", "the workspace", "the version the log has reached"),
-              ("the grader’s image, pinned by its call", "trusted files: hidden tests", "built into the image")]
-    container = "a container of the grader’s own image · no network"
-    mounts = [("the workdir", "the workspace, read-write"), ("/grader", "in the image")]
+    inputs = [("the workspace at the graded entry", "the workspace", "the version the log has reached")]
+    container = "the grader’s image, pinned by its call · no network"
+    mounts = [("the workdir", "the workspace, read-write"),
+              ("/grader", "hidden tests, a reference: built into the image")]
     command = ("sh /grader/grade.sh", "the grader’s command, with a time limit")
     tap = ("stdout: TAP", ["1..3", "ok 1 - parses", "ok 2 - runs", "not ok 3 - errors"])
     read, verdict, says = "read as", "fail 2/3", ["the verdict:", "the value of the call"]
@@ -905,10 +906,11 @@ def grader():
     # what goes in, and where it is mounted
     mount_w = max(width(name, 12, mono=True) for name, _ in mounts) + 22
     inside = []
-    for y, (above, text, fact), (name, note) in zip(rows, inputs, mounts):
+    for y, (above, text, fact) in zip(rows, inputs):
         out += node(x1, y, w1, text, above, [fact])[0]
-        inside += node(x2 + inset, y, mount_w, name, below=[note])[0]
         inside.append(arrow(x1 + w1 + 6, x2 + inset - 6, y + half))
+    for y, (name, note) in zip(rows, mounts):
+        inside += node(x2 + inset, y, mount_w, name, below=[note])[0]
     part, end2 = node(x2 + inset, rows[2], width(command[0], 12, mono=True) + 22, command[0], below=[command[1]], stroke=TEAL)
     inside += part + [label(x2 + inset, top + 18, container, "s")]
 
