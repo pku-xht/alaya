@@ -41,60 +41,34 @@ its own scope, so an agent that offers it gives it a scope with itself in it: Mi
 
 ### 1.1 Who checks what
 
-**Only the routine checks a call's arguments.** Routines and agents talk in JSON. The agent makes
-each call with `Tools.make`, which merges the tool's settings over the model's arguments and calls
-the routine of the tool's name; it checks nothing of the arguments. The routine reads the JSON it is given,
-whoever made the call: an agent for its model, the log, or another program. It refuses what it
-cannot read, failing its frame, and otherwise returns its result as JSON. The agent answers the
-call with that: the result, shown its own way, or why the routine failed. The schema is what the
-model is told.
+| Who | Checks | On a problem |
+| --- | --- | --- |
+| the agent | that a call can be made: its arguments are JSON, its tool is offered, it is alone if its tool must be, and its response was not cut off | the call is answered with the problem, and not made |
+| the routine | its arguments | its frame fails, and the call is answered with why |
+
+The agent makes a call with `Tools.make`, the tool's settings over the model's arguments, and
+shows the result its own way. `submit` calls no routine: the agent reads its message and ends.
+MiniSwe also checks each `bash` call's arguments before it makes any, as mini does (§6.3).
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
 flowchart LR
   classDef sample stroke:#3567a0
   classDef exec stroke:#2b6f6f
+  classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
   classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
 
-  asks("the model's<br/>tool call"):::sample
-  subgraph agentIn["the agent"]
-    make("1 · make the call,<br/>its settings added")
-  end
-  subgraph routine["the routine, in a frame of its own"]
-    reads("2 · read its arguments")
-    writes("3 · return its result<br/>as JSON")
-  end
-  failed("its frame fails,<br/>saying why"):::bad
-  subgraph agentOut["the agent"]
-    show("4 · answer the call,<br/>shown its own way")
-  end
-  sees("the next<br/>request"):::sample
-
-  asks --> make
-  make --> reads
-  reads -- "read" --> writes
-  reads -- "wrong" --> failed
-  writes --> show
-  failed --> show
-  show --> sees
+  asks("tool call"):::sample --> can("agent:<br/>can it be made?")
+  can -- "no" --> problem("the problem"):::bad
+  can -- "submit" --> ends("the agent ends"):::ok
+  can -- "yes" --> reads("routine:<br/>reads its arguments"):::exec
+  reads -- "cannot" --> failed("its failure"):::bad
+  reads -- "reads" --> result("its result"):::exec
+  problem --> answer("the agent<br/>answers the call"):::sample
+  failed --> answer
+  result --> answer
   linkStyle default stroke-width:1px
 ```
-
-1. **The agent makes the call** with `Tools.make`: the tool's settings over the model's
-   arguments, so the model cannot override them. It checks nothing of the arguments.
-2. **The routine reads its arguments.** What it cannot read fails its frame, saying why, and
-   nothing is run or asked.
-3. **The routine returns its result** as JSON.
-4. **The agent answers the call:** with the result, as it shows it (Basic's command output, §4.4;
-   mini's observation, §6.3; old outputs left out, §5.6; any other text as it is, anything else
-   as JSON), or with why the routine failed. To show a command, it reads `output`, `exit_code`,
-   `error` and `file` from the result.
-
-What the agent does check is the turn, not a tool's arguments: a call whose arguments are not
-JSON, or that names no tool offered, is answered with that and not made, and so is every call of
-a response that calls `submit` or `ask_user` beside others (§4.2). `submit` calls no routine: the
-agent reads its message itself. MiniSwe also reads each `bash` call before it makes any, as mini
-rejects a malformed response as a whole (§6.3).
 
 ![A response that asks for two tools, and the two calls it becomes](figures/agent-api/tool-call.svg)
 
