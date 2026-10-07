@@ -3,7 +3,7 @@ import Alaya.Runtime.Store
 import Alaya.Runtime.Workspaces.Restic
 
 /-! The data directory: the forest of a set of runs, the workspaces their logs name, and the model
-cache they sample through. Its layout is in `docs/log-schema.md` §5. A command opens it with
+cache they sample through. Its layout is in `docs/log-schema.md` §4. A command opens it with
 `Data.with`, which gives the command a scratch directory of its own. -/
 
 namespace Alaya.Runtime

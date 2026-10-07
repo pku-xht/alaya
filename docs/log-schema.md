@@ -1,8 +1,8 @@
 # Log schema
 
 A run of Alaya is a log of events (`docs/language.md` §2). This page is how logs are kept: the
-**entry**, the stored form of each event, how logs share entries and **fork**, how a run is
-**graded**, and what the data directory holds.
+**entry**, the stored form of each event, how logs share entries and **fork**, and what the data
+directory holds. How a run is graded is `docs/agents.md` §6.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
@@ -30,10 +30,9 @@ flowchart LR
 | 1 | an **entry**: one event and the entry before it, named by a hash |
 | 2 | **events** as JSON |
 | 3 | the **forest**: logs that share entries, and forks |
-| 4 | **grading**: the grader, its protocol, its verdict |
-| 5 | the **data directory**, and workspace snapshots |
-| 6 | the **model cache** entry |
-| 7 | invariants |
+| 4 | the **data directory**, and workspace snapshots |
+| 5 | the **model cache** entry |
+| 6 | invariants |
 
 ## 1. Entries
 
@@ -189,126 +188,7 @@ the next sample. A mark the earlier continuation made too is the same event afte
 entry, so it is the same entry: the fork departs only where its events differ. Which draw the
 new sample takes is `docs/runtime.md` §2.
 
-## 4. Grading
-
-A **grader** is a program a person calls on a log like an agent: `grader`, of the catalog. It
-runs one command, in a container of its own image, and returns the **verdict** read off what
-the command prints. Any point of any run is graded, by any grader, at any time.
-
-What a call of the grader holds as its configuration:
-
-```json
-{"command": "sh /grader/grade.sh", "timeout_seconds": 900}
-```
-
-| Field | Holds |
-| --- | --- |
-| `command` | a shell command, run with `/bin/sh -c` |
-| `timeout_seconds` | how long it may take: 900 unless given, 0 for no limit |
-
-### The protocol
-
-1. **A point is chosen.** Where a call still runs there, `alaya stop` ends it first, on a fork if
-   the log goes on.
-2. **The grader is called.** `alaya call ENTRY grader --image IMAGE --set command=CMD`
-   appends the call, its image pinned to a digest. So a log says exactly what graded it.
-3. **The command runs** in a new container of the grader's image, on the workspace the log has
-   reached, at the call's workdir, with no network unless `resume --network` gives one, and its
-   time limit. Its trusted files — hidden tests, a reference — are in its image.
-4. **It reports in TAP** on stdout, kept apart from its stderr: a plan `1..N`, then an `ok` or
-   `not ok` line for each check.
-5. **Alaya reads the verdict** off the TAP, and the call returns it as its value.
-6. **The workspace is kept** as the grader left it, reports included: `alaya ls` and `alaya cat`
-   read it at the entry of the command's answer. The agent is over, so nothing reads it but a
-   person.
-
-![What goes into a grader's container, and what comes out](figures/log-schema/grader.svg)
-
-### The verdict
-
-Only the TAP decides. The exit status and stderr are recorded, and decide nothing: "the checks
-ran and some failed" and "the grader crashed" can exit alike, and only an incomplete TAP tells
-them apart.
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
-flowchart TD
-  classDef exec stroke:#2b6f6f
-  classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
-  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
-  classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
-
-  subgraph checks[" "]
-    start("the grader ran<br/>its stdout is read as TAP"):::exec
-    ran("did it start, and end<br/>within its time limit?")
-    complete("is the TAP complete?<br/>a plan 1..N, exactly N checks,<br/>no Bail out!")
-    failed("did a check fail?<br/>a failing TODO or SKIP check<br/>does not count")
-  end
-  kept("the exit status and stderr<br/>are kept, and decide nothing")
-  error("error<br/>the grader did not do its job"):::wait
-  fail("fail"):::bad
-  pass("pass"):::ok
-
-  start --> ran
-  start -.- kept
-  ran -- "yes" --> complete
-  ran -- "no" --> error
-  complete -- "yes" --> failed
-  complete -- "no" --> error
-  failed -- "yes" --> fail
-  failed -- "no" --> pass
-  style checks fill:none,stroke:none
-  linkStyle 1 stroke-width:1px,stroke-dasharray:3
-  linkStyle default stroke-width:1px
-```
-
-| Status | When |
-| --- | --- |
-| `pass` | the plan is there, as many checks arrived as it announced, and none failed |
-| `fail` | the TAP is complete, and a check failed; a failing `TODO` or `SKIP` check does not count, a failing subtest does |
-| `error` | anything else: no plan, fewer or more checks than planned, a `Bail out!`, a grader that ran out of time or could not start |
-
-The value the grader's call returns:
-
-```json
-{"status": "fail", "passed": 2, "total": 3, "reason": "failed: errors",
- "checks": [{"ok": true, "name": "parses", "directive": ""}, …], "exit_code": 1}
-```
-
-`checks` has one item for each top-level check. What the command printed, stdout and stderr,
-is in the answer of its `exec` before it.
-
-### Writing a grader
-
-- **Print [TAP](https://testanything.org/tap-version-14-specification.html) on stdout, and
-  nothing else there.** Logs go to stderr, or into `#` comment lines.
-- **Say what an exit code means.** A plain test command needs a few lines of wrapper, in which
-  the grader's author, who knows the tool, turns its exit codes into TAP:
-
-  ```sh
-  echo 1..1
-  pytest -q; code=$?
-  case $code in
-    0) echo "ok 1 - tests" ;;
-    1) echo "not ok 1 - tests" ;;
-    *) echo "Bail out! pytest exited $code" ;;
-  esac
-  ```
-
-- **Keep what the agent must not see out of the workspace.** Hidden tests, reference outputs and
-  tools the agent should not have go in the grader's image, best built on the agent's image.
-  The call pins the image by digest, so the log names the very files that graded it.
-- **Change the workspace freely.** The agent is over: build in it, write reports in it.
-
-### Grading again
-
-Grading a point again, with the same grader or a corrected one, is a fork from the entry before
-the first grader was called, and `alaya tree` shows both verdicts; or a second call after the
-first's end, in the same log. A grader that reads only the workspace gives one verdict for each
-version of it, so the points worth grading are the entries that leave a new version: the
-answers of commands, and changes from outside.
-
-## 5. The data directory
+## 4. The data directory
 
 Every command names the data directory, `D`, with `--data D`, or reads `ALAYA_DATA`. There is no
 default, so a command run from the wrong place cannot quietly begin a new one. `new` creates it.
@@ -356,7 +236,7 @@ two runs of it are two entries.
 
 A snapshot or a checkout of a directory that overlaps `D` is refused before anything is touched.
 
-## 6. The model cache entry
+## 5. The model cache entry
 
 `D/cache/<hash>.json`, where `<hash>` is the SHA-256 of the cache key (`docs/llm-api.md` §4):
 
@@ -379,7 +259,7 @@ A snapshot or a checkout of a directory that overlaps `D` is refused before anyt
 
 How the cache is used is `docs/llm-api.md` §5.4.
 
-## 7. Invariants
+## 6. Invariants
 
 - **Names.** An entry's name is the hash of its parent's name and its event. Nothing under a
   name changes, and a log only grows.

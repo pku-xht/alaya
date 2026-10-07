@@ -192,7 +192,7 @@ alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grad
 ![call: a call of a program is appended, and the next resume opens it in a frame of its own](figures/cli/call.svg)
 
 - **`PROGRAM`** is one of the catalog: `mini-swe` and `mini-vero`, the agents
-  (`docs/agents.md` §4, `docs/agents.md` §5), or `grader` (`docs/log-schema.md` §4). Their defaults
+  (`docs/agents.md` §4 and §5), or `grader` (§6 there). Their defaults
   are in code, and there are no configuration files.
 - **`--set PATH=VALUE`** overrides one field of the program's configuration, and repeats
   (`executor.timeout_seconds=60`, `command='make check'`). `VALUE` is read as JSON when it
@@ -334,7 +334,7 @@ alaya resume CALLED                                       # exits 0 pass, 1 fail
 - **Grading a point again** with another grader is a fork from the entry before the first was
   called, or a second call after the first's end.
 
-What a grader runs on, and how its output becomes a verdict, is `docs/log-schema.md` §4.
+What a grader runs on, and how its output becomes a verdict, is `docs/agents.md` §6.
 
 ### `comment`
 
@@ -387,7 +387,7 @@ written by one agent, and `resume` refuses a log its agent did not write (`docs/
 - **`--set PATH=VALUE`** and **`--set-file PATH=FILE`** change the configuration of every call
   they fit, as on `call`; one that fits no call is refused. With another model, a call's copy ends at its first sample.
 - **`DIR`** has a restic repository of its own, with copies of the snapshots, and the model cache
-  as hard links (`docs/log-schema.md` §6). Its last entry is a comment that names the source.
+  as hard links (`docs/log-schema.md` §5). Its last entry is a comment that names the source.
 - **`DIR` must not exist**, and is made whole or not at all. The source is only read.
 
 On stderr, `rebase` says where the copy ends: `141 of 260 events hold; at 141 the log has "exec

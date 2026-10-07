@@ -124,7 +124,7 @@ each is a log.
 ### 2.1 The data directory
 
 A data directory holds a forest of runs, their workspaces, and the model cache
-(`docs/log-schema.md` §5). `Alaya.Runtime.Data` and `Alaya.Runtime.Commands` give every command
+(`docs/log-schema.md` §4). `Alaya.Runtime.Data` and `Alaya.Runtime.Commands` give every command
 of `alaya` as a function over it. Each returns a typed value, and a front end only parses and
 prints. Each takes the scope the run's call is made in, so the runtime knows no catalog of
 programs, and a front end says with `admit` what a person may append beyond what the log takes.

@@ -262,7 +262,7 @@ the subject of Dai et al. (2026), which this design follows.
 
 - With `readOnly`, a missing draw is an error: a way to prove a replay called no provider.
 - One process writes a cache directory at a time; within it, streams take turns at an entry.
-- The entry's file is specified in `docs/log-schema.md` §6.
+- The entry's file is specified in `docs/log-schema.md` §5.
 
 ## 6. Models and providers
 

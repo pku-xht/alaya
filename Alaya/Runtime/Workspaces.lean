@@ -7,7 +7,7 @@ Where the versions of a run's workspace are kept.
 A log names a version of the workspace by an identifier and never looks inside it: the driver
 and the commands of a person ask to snapshot a directory, to write a snapshot back out, to say
 what changed between two snapshots, to read one file of one, and to copy some into a new store. `Workspaces` is that contract,
-and `Workspaces.Restic` keeps it with a restic repository. See `docs/log-schema.md` §5.
+and `Workspaces.Restic` keeps it with a restic repository. See `docs/log-schema.md` §4.
 -/
 
 namespace Alaya.Runtime

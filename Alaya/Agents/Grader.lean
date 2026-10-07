@@ -6,7 +6,7 @@ import Alaya.Base.ConfigJson
 read off the TAP the command prints on stdout (`Alaya.Agents.Verdict`, under `Alaya.Agents.Grader`). Its trusted input — the tests, a
 reference — is in its image, so a call needs nothing besides the image and the command. What
 the command writes lands in the workspace, after the agent's last version: the agent is over by
-then, and nothing reads it but a person. See `docs/log-schema.md` §4. -/
+then, and nothing reads it but a person. See `docs/agents.md` §6. -/
 
 namespace Alaya.Agents.Grader
 
