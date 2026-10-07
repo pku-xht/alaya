@@ -281,38 +281,38 @@ Each round reads what a person said, samples a response, and answers every tool 
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
-flowchart TD
+flowchart LR
   classDef sample stroke:#3567a0
   classDef exec stroke:#2b6f6f
   classDef notice stroke:#7556a3
   classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
+  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
   classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
-  listen("listen: read the inbox"):::notice --> sample("sample request"):::sample
-  sample -- "refused as too long" --> context("return ContextExceeded"):::wait
-  sample -- "no tool call" --> remind("tell the model to call a tool")
-  sample -- "tool calls" --> each("each call, in order")
-  each -- "submit" --> submitted("return Submitted"):::ok
-  each -- "a problem" --> problem("answer the call with its problem")
-  each -- "otherwise" --> tool("call name arguments<br/>its result, or its failure, is the answer"):::exec
-  remind --> again("next round")
-  problem --> again
-  tool --> again
+  listen("read the inbox"):::notice --> sample("sample"):::sample
+  sample -- "refused as too long" --> context("ContextExceeded"):::wait
+  sample -- "no tool call" --> remind("a reminder")
+  sample -- "tool calls" --> can("each call, in order:<br/>can it be made?")
+  can -- "no" --> problem("the problem"):::bad
+  can -- "submit" --> submitted("Submitted"):::ok
+  can -- "yes" --> routine("routine:<br/>its result, or its failure"):::exec
+  remind --> next("next round")
+  problem --> next
+  routine --> next
   linkStyle default stroke-width:1px
 ```
 
-**Every tool call is answered.** A call is not made, and its answer is the problem, when:
+**Every tool call is answered.** A call cannot be made, and its answer is the problem, when:
 
 | The call | Its answer |
 | --- | --- |
 | has arguments that are not JSON | "Error parsing tool call arguments: …" |
 | names a tool that is not offered | "Unknown tool '…'." |
-| has arguments its tool refuses, such as a `bash` call with no `command` | what is wrong with them |
 | comes with others in a response that calls `submit` | "submit must be called alone: no call of this response was made." |
 | is in a response cut off at the output token limit | that its arguments may be cut off, and to call again |
 
-A call that is made is answered with its result. A routine that fails is answered with its
-error. Whatever the model sends, the run goes on.
+A call that is made is answered with its routine's result, or with why it failed, as when it
+cannot read its arguments (§1.1). Whatever the model sends, the run goes on.
 
 **A response with no tool call** is kept when it says something, and answered with a reminder to
 call a tool. A response cut off before any call is told so, and asked to be brief.
@@ -527,11 +527,12 @@ def round (config : Config) (model : Models.Spec) :          -- the messages, th
 iter (round config model) (opening, 0)                       -- go round until it ends
 ```
 
-*One round (`MiniSwe.round`).*
+*One round (`MiniSwe.round`). Mini checks every call before it makes any, so a malformed
+response runs nothing.*
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
-flowchart TD
+flowchart LR
   classDef sample stroke:#3567a0
   classDef exec stroke:#2b6f6f
   classDef notice stroke:#7556a3
@@ -539,22 +540,21 @@ flowchart TD
   classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
   classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
 
-  listen("listen: read the inbox"):::notice --> sample("sample request"):::sample
-  sample -- "refused as too long" --> context("return ContextExceeded"):::wait
-  sample -- "a response" --> parsed("read its tool calls")
-  parsed -- "malformed" --> format("tell the model the format error")
-  format -- "too many in a row" --> repeated("return RepeatedFormatError"):::bad
-  format -- "otherwise" --> again("next round, with the new state")
-  parsed -- "calls" --> each("each call, in order")
-  each --> tool("call name arguments<br/>its failure is given to the model as its result"):::exec
-  tool -- "printed the sentinel first" --> submitted("return Submitted"):::ok
-  tool --> again
+  listen("read the inbox"):::notice --> sample("sample"):::sample
+  sample -- "refused as too long" --> context("ContextExceeded"):::wait
+  sample -- "a response" --> can("every call:<br/>can it be made,<br/>bash's arguments too?")
+  can -- "no" --> format("the format error"):::bad
+  format -- "too many in a row" --> repeated("RepeatedFormatError"):::bad
+  format -- "otherwise" --> next("next round")
+  can -- "yes" --> routine("each call, in order:<br/>bash's result, or its failure"):::exec
+  routine -- "printed the sentinel first" --> submitted("Submitted"):::ok
+  routine --> next
   linkStyle default stroke-width:1px
 ```
 
 The state of the loop is mini's linear context: the messages so far, each appended once and
-kept, with a format error in place of each malformed response. Each request is all of them. The agent ends by returning its outcome, a status and a submission, as the value of its
-frame (§6.4).
+kept, with a format error in place of each malformed response. Each request is all of them. The
+agent ends by returning its outcome, a status and a submission, as the value of its frame (§6.4).
 
 ### 6.3 What the model is sent
 
