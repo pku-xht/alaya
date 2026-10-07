@@ -115,20 +115,14 @@ with `model` as its model and the call's task as its task, in the scope the cata
 program. -/
 def runOfConfig (name : String) (config : Json) (model : Models.Spec := testModelSpec) :
     Except String (Scope Agent) :=
-  let config := config.setObjVal! "model" model.toJson
-  match Catalog.build name config with
-  | .error problem => .error problem
-  | .ok _ =>
-    let scope := ((Catalog.named? name).map (·.routine.scope)).getD .empty
-    .ok (runWith (scope := scope) fun called =>
-      let config := match taskOf called with
+  match Catalog.named? name with
+  | none => .error s!"unknown program: {name}"
+  | some definition => match definition.complete (config.setObjVal! "model" model.toJson) with
+    | .error problem => .error problem
+    | .ok (config : Json) => .ok <| runWith (scope := definition.routine.scope) fun called =>
+      definition.routine.body <| match taskOf called with
         | some task => config.setObjVal! "task" task
         | none => config
-      match Catalog.build name config with
-      | .error problem => .fail problem
-      | .ok built => match built.computation with
-        | .ok computation => computation
-        | .error problem => .fail problem)
 
 /-- A run of MiniSwe with `config`, as the program `agent`, for the test model, in the scope the
 catalog gives MiniSwe: its tools, and itself, which `subagent` calls. -/

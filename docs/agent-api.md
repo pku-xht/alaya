@@ -772,24 +772,26 @@ results of its calls, and each malformed response. Each round builds its request
 state. The agent ends by returning its outcome, a status and a submission, as the value of its
 frame.
 
-A **program** is a routine of the catalog (`Alaya.App.Catalog`), which a person calls by name, with
-how its configuration is read: the agents, and the grader (`docs/log-schema.md` §4). The command
-line reads a configuration before any call is made: to print its defaults, apply `--set`, and
-check a call. The program reads only its configuration, from which `make` builds its
-computation; an agent reads where it runs with `uname -sm`. Its scope is fixed: its tools, and
-itself, which `subagent` calls with its configuration and another task.
+An **agent** is a routine its module defines: `MiniSwe.routine`, `MiniVero.routine`, and
+`Grader.routine` for the grader. A call's arguments are its configuration, its model and task
+among it, as a tool's are its arguments and the agent's settings. One it cannot run on fails in
+the call's frame, saying why in the configuration's terms. An agent reads where it runs with
+`uname -sm`. Its scope is fixed where it is defined: its tools, and itself, which `subagent`
+calls with its configuration and another task.
+
+A **program** is an agent as the catalog (`Alaya.App.Catalog`) lists it, which a person calls by
+name (`docs/log-schema.md` §4). The command line reads a configuration before any call is made:
+to print its defaults, apply `--set`, and check a call. A call fits its program when the
+program's routine does not fail at once on its configuration, and the command line adds how to
+give a field the configuration leaves empty.
 
 ```lean
-structure Built where
-  config      : Json                                         -- the complete configuration
-  computation : Except String (Computation Agent Json)       -- or why the configuration makes none
+MiniSwe.routine : Routine Agent                              -- likewise MiniVero, Grader
 
 structure Definition where                                   -- a program
-  routine : Routine Agent                                    -- what a call of it runs
-  make    : Json → Except String Built                       -- how its configuration is read
+  routine  : Routine Agent                                   -- what a call of it runs
+  complete : Json → Except String Json                       -- its configuration, every field filled
 
-Definition.of : (name : String) → (Json → Except String Built) →
-                (routines : Array (Routine Agent)) → Definition   -- scope: routines and itself
 Catalog.check : RoutineCall → Except String Unit             -- whether a call fits its program
 ```
 

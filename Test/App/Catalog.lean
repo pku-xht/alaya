@@ -99,18 +99,6 @@ def suite : Suite := Testing.suite "app/catalog" #[
       | some (opened, some (.returned verdict)) =>
         assertEqual "the grader's verdict" (opened.name, Agents.Grader.verdictStatus verdict) ("grader", "pass")
       | _ => fail "the grader returned its verdict",
-  test "a program brings its scope: an agent's tools and itself, fixed where it is defined" do
-    match Catalog.scope.find "mini-swe" with
-    | none => fail "mini-swe is a program"
-    | some swe =>
-      assertEqual "what a call inside MiniSwe can name"
-        (#["bash", "submit", "ask_user", "time_budget", "mini-swe", "mini-vero", "grader"].filter
-          fun name => (swe.scope.find name).isSome) #["bash", "ask_user", "time_budget", "mini-swe"]
-      -- The scope holds MiniSwe itself, with the same scope: what lets it call itself.
-      check ((swe.scope.find "mini-swe").any fun inner => (inner.scope.find "bash").isSome)
-        "MiniSwe in its own scope has the same scope"
-    check (Catalog.scope.find "nothing").isNone "no program of that name",
-
   test "a call fits its program only with every field its program takes, and none it does not" do
     check (match Catalog.check { testCall with name := "nothing" } with
       | .error message => contains message "unknown program: nothing"
@@ -172,7 +160,18 @@ def suite : Suite := Testing.suite "app/catalog" #[
       assertEqual "a stop ends the agent" frame ⟪"session", "agent"⟫
       let stopped := settle run (running.push (.broke frame "enough"))
       check (Catalog.idle (next run stopped)) "and the session waits for the next"
-      assertEqual "the agent's call ended, stopped" ((lastCall? stopped).bind (·.2) |>.map Render.endingSummary) (some "stopped: enough")
+      assertEqual "the agent's call ended, stopped" ((lastCall? stopped).bind (·.2) |>.map Render.endingSummary) (some "stopped: enough"),
+
+  test "the command line says how to give a field the configuration leaves empty" do
+    for (program, arguments, flag) in [("mini-swe", Json.mkObj [("task", "t")], "--set model=NAME"),
+        ("mini-swe", Json.mkObj [("model", "gpt-oss-120b")], "--set task=TEXT or --set-file task=FILE"),
+        ("grader", Json.mkObj [], "--set command=CMD")] do
+      match Catalog.check { name := program, arguments } with
+      | .ok () => fail s!"{program}: fits"
+      | .error message => assertContains program message flag
+    match Catalog.check { name := "mini-swe", arguments := Json.mkObj [("tsak", "t")] } with
+    | .ok () => fail "an unknown field fits"
+    | .error message => check (!contains message "--set") "a field no program takes has no flag to give"
 ]
 
 end CatalogTests

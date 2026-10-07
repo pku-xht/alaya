@@ -20,77 +20,24 @@ open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.Agents
 
 open Lean (Json)
 
-/-- A program built from its configuration: the complete configuration, and its computation, or
-why the configuration does not make one. -/
-structure Built where
-  config : Json
-  computation : Except String (Computation Agent Json)
-
-/-- A program a call can name: the routine a call of it runs, and how its configuration is read,
-which the command line needs before any call is made. -/
+/-- A program a call can name: the routine a call of it runs, as its agent defines it, and how
+its configuration is completed, which the command line needs before any call is made. -/
 structure Definition where
   routine : Routine Agent
-  /-- The program a configuration describes, with any of its fields left out for their
-  defaults. -/
-  make : Json → Except String Built
+  /-- The complete configuration a configuration describes, every field it leaves out at its
+  default, or what is wrong with it. -/
+  complete : Json → Except String Json
 
 def Definition.name (definition : Definition) : String := definition.routine.name
 
-/-- The computation of a call of the program `name`, whose configuration `make` reads: its
-arguments, the configuration; or why there is none. -/
-private def computationOf (name : String) (make : Json → Except String Built) (arguments : Json) :
-    Except String (Computation Agent Json) :=
-  match make arguments with
-  | .error problem => .error s!"{name}: {problem}"
-  | .ok built => match built.computation with
-    | .error problem => .error s!"{name}: {problem}"
-    | .ok computation => .ok computation
+def miniSwe : Definition :=
+  { routine := MiniSwe.routine, complete := fun json => (MiniSwe.Config.fromJson json).map (·.toJson) }
 
-/-- The program `name`, whose configuration `make` reads. Its routine's computation is the one
-`make` builds from the call's configuration, failing in its frame when it does not fit; its scope
-is `routines`, its tools, and itself, which a sub-agent calls. -/
-def Definition.of (name : String) (make : Json → Except String Built)
-    (routines : Array (Routine Agent) := #[]) : Definition :=
-  let body (arguments : Json) : Computation Agent Json :=
-    match computationOf name make arguments with
-    | .ok computation => computation
-    | .error problem => .fail problem
-  { routine := { name, body, scope := Scope.fix fun scope => routines.push { name, body, scope } }
-    make }
+def miniVero : Definition :=
+  { routine := MiniVero.routine, complete := fun json => (MiniVero.Config.fromJson json).map (·.toJson) }
 
-/-- What an agent needs of its configuration: a model, and a task. -/
-private def agentCall (model? : Option Models.Spec) (task? : Option String)
-    (k : Models.Spec → String → Computation Agent Json) : Except String (Computation Agent Json) :=
-  match model?, task? with
-  | some model, some task => .ok (k model task)
-  | none, _ => .error s!"it samples a model: name it with --set model=NAME"
-  | _, none => .error s!"it works on a task: give it with --set task=TEXT or --set-file task=FILE"
-
-def miniSwe : Definition := .of "mini-swe" (routines := Tools.routines) fun json =>
-  match MiniSwe.Config.fromJson json with
-  | .ok config =>
-    .ok { config := config.toJson
-          computation := agentCall config.model? config.task? fun model task =>
-            MiniSwe.computation config model task ("mini-swe", config.toJson) }
-  | .error problem => .error problem
-
-def miniVero : Definition := .of "mini-vero" (routines := Tools.routines) fun json =>
-  match MiniVero.Config.fromJson json with
-  | .ok config =>
-    .ok { config := config.toJson
-          computation := agentCall config.base.model? config.base.task? fun model task =>
-            MiniVero.computation config model task ("mini-vero", config.toJson) }
-  | .error problem => .error problem
-
-def grader : Definition := .of "grader" fun json =>
-  match Grader.Config.fromJson json with
-  | .ok config =>
-    .ok { config := config.toJson
-          computation :=
-            if config.command.trimAscii.isEmpty then
-              .error "it needs its command, which prints TAP: --set command=CMD"
-            else .ok (Grader.computation config) }
-  | .error problem => .error problem
+def grader : Definition :=
+  { routine := Grader.routine, complete := fun json => (Grader.Config.fromJson json).map (·.toJson) }
 
 def all : Array Definition := #[miniSwe, miniVero, grader]
 
@@ -98,20 +45,14 @@ def names : String := ", ".intercalate (all.map (·.name)).toList
 
 def named? (name : String) : Option Definition := all.find? (·.name == name)
 
-/-- The program `name` as the configuration `json` describes it, or what is wrong with it. -/
-def build (name : String) (json : Json) : Except String Built :=
-  match named? name with
-  | some definition => match definition.make json with
-    | .ok built => .ok built
-    | .error message => .error s!"{name}: {message}"
-  | none => .error s!"unknown program: {name} (use {names})"
-
 /-- The complete configuration of the program `name` that `json` describes, or what is wrong
 with it: every field, those left out at their defaults. -/
 def complete (name : String) (json : Json) : Result Json :=
-  match build name json with
-  | .ok built => pure built.config
-  | .error message => throw <| .input message
+  match named? name with
+  | none => throw <| .input s!"unknown program: {name} (use {names})"
+  | some definition => match definition.complete json with
+    | .ok config => pure config
+    | .error message => throw <| .input s!"{name}: {message}"
 
 /-- The complete configuration of the program `name`, `config` with `settings` applied over it,
 one after another, each result completed before the next when it is complete on its own: so
@@ -130,13 +71,27 @@ def applying (name : String) (config : Json) (settings : Array Settings.Setting)
 def resolve (name : String) (settings : Array Settings.Setting) : Result Json := do
   applying name (← complete name (.mkObj [])) settings
 
-/-- Whether a call fits the program it names: what `alaya call` checks before it appends one. -/
+/-- How a person gives a field of a configuration on the command line. -/
+private def givenAs : List (String × String) :=
+  [("model", "--set model=NAME"), ("task", "--set task=TEXT or --set-file task=FILE"), ("command", "--set command=CMD")]
+
+/-- Whether a call fits the program it names: what `alaya call` checks before it appends one. The
+program says so itself: a call it cannot run on fails at once, with why. For a field its
+configuration leaves empty, the command line adds how to give it. -/
 def check (call : RoutineCall) : Except String Unit :=
   match named? call.name with
   | none => .error s!"unknown program: {call.name} (use {names})"
-  | some definition => match computationOf definition.name definition.make call.arguments with
-    | .ok _ => .ok ()
-    | .error problem => .error problem
+  | some definition => match definition.complete call.arguments with
+    | .error message => .error s!"{call.name}: {message}"
+    | .ok config => match definition.routine.body config with
+      | .fail problem =>
+        let empty (field : String) := match config.getObjVal? field with
+          | .ok .null | .ok (.str "") => true
+          | _ => false
+        match givenAs.find? fun (field, _) => empty field with
+        | some (_, flag) => .error s!"{problem}: give it with {flag}"
+        | none => .error problem
+      | _ => .ok ()
 
 /-! ## The session
 
