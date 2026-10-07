@@ -6,7 +6,7 @@ Following your suggestion, I first screened tasks that the model struggled to co
 
 ## Setup
 
-I adapted the experiment to the redesigned Alaya agent interface and checked the ask/reply/continue/grading workflow. I used DeepSeek Flash through XMCP route `ds/deepseek-v4-flash`, with a nominal 30-minute budget per run and a 65,536-token output limit. Seven independent screening runs were followed by two fresh help-enabled runs, each starting from the original task.
+I adapted the experiment to the redesigned Alaya agent interface and checked the ask/reply/continue/grading workflow. I used DeepSeek Flash through XMCP route `ds/deepseek-flash`, with a nominal 30-minute budget per run and a 65,536-token output limit. Seven independent screening runs were followed by two fresh help-enabled runs, each starting from the original task.
 
 The initial system prompt emphasized that help could be valuable, questions could be repeated, and the model did not need to exhaust independent attempts before asking. It also required checking time before winding down. An AI assistant proxy was available to answer; this identity was disclosed. No human participants were involved.
 

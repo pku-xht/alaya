@@ -45,7 +45,7 @@ def providers : Array Provider.Provider := #[
     keyVar := "YUNWU_API_KEY" },
   { name := "closeai", baseUrl := "https://api.openai-proxy.org/v1", keyVar := "CLOSEAI_API_KEY" },
   { name := "xmcp", baseUrl := "https://llm.xmcp.ltd", keyVar := "XMCP_API_KEY"
-    routes := [("deepseek-v4.1-flash", { name := "ds/deepseek-v4-flash" }),
+    routes := [("deepseek-v4.1-flash", { name := "ds/deepseek-flash" }),
       ("gpt-5.6-luna", { name := "closeai/gpt-5.6-luna" })] },
   { name := "apiyi", baseUrl := "https://api.apiyi.com/v1", baseUrlVar? := some "APIYI_BASE_URL",
     keyVar := "APIYI_API_KEY"

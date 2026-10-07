@@ -112,7 +112,7 @@ def suite : Suite := Testing.suite "app/catalog" #[
     let nameOf (provider model : String) : TestM (Option String) := do
       pure ((← route provider model).toOption.map (·.name))
     assertEqual "apiyi, its own name" (← nameOf "apiyi" "deepseek-v4.1-flash") (some "deepseek-v4.1-flash")
-    assertEqual "xmcp's name" (← nameOf "xmcp" "deepseek-v4.1-flash") (some "ds/deepseek-v4-flash")
+    assertEqual "xmcp's name" (← nameOf "xmcp" "deepseek-v4.1-flash") (some "ds/deepseek-flash")
     assertEqual "fireworks' name" (← nameOf "fireworks" "deepseek-v4.1-flash")
       (some "accounts/fireworks/models/deepseek-v4p1-flash")
     match ← route "fireworks" "gpt-oss-120b" with

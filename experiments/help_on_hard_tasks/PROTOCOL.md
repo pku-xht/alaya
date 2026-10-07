@@ -6,7 +6,7 @@
 
 - 上游 Alaya：`c2aefbea19de06b53357c5b8ee505c859043cc03`；实验 agent 为 `help-study`。复用 MiniVero 的任务文本、输出恢复、上下文计量，增加初始 system guidance；工具为 bash、submit、time_budget，help 组另有 open-ended ask_user。禁用模型子代理。旧实验与 PR #50 不改。
 - Vero：`0a7325df9e9e6dbc275c0ad483b3d1cbe38d9b09`，Lean 4.29.1、codeproof、无外部包。候选：Munkres（19）、Pythonconstraint（20）、Greenery（26）；Primepy（9）是预期较易的参照，其难度也须由本轮结果确认。
-- XMCP `ds/deepseek-v4-flash`，Alaya 名称 `deepseek-v4.1-flash`；temperature=0；max_tokens=65536；累计 1024 响应、1800 秒模型／工具时间；最多两个轨迹并行。时间在步骤边界检查，单步可以超额。回答等待和制作时间另报。
+- XMCP `ds/deepseek-flash`，Alaya 名称 `deepseek-v4.1-flash`；temperature=0；max_tokens=65536；累计 1024 响应、1800 秒模型／工具时间；最多两个轨迹并行。时间在步骤边界检查，单步可以超额。回答等待和制作时间另报。
 - 先对四题各跑一次 solo；不完整的候选最多再独立跑一次。每个候选最多两次，不完整参照不自动加样。根据两次均有效且不完整的运行，最多选两题开展新的 help 运行，并为 Primepy 开展一次新的 help 运行。因此至多 7 次筛选、3 次 help，共 10 条全新轨迹。不足两道合格题则少跑，不扩充题库。
 - 首轮按 Primepy、Munkres、Pythonconstraint、Greenery 顺序，两条一批。复测沿候选顺序。若三题均合格，优先平均规格通过比例较低者，同分按上述顺序。选择前人工审阅可见动作和剩余证明目标；仅低分或尚有预算不构成障碍证据。
 

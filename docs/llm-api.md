@@ -338,7 +338,7 @@ The providers the catalog offers:
 | --- | --- | --- | --- |
 | `yunwu` | `https://yunwu.ai/v1` | `YUNWU_API_KEY` | any model, under its own name |
 | `closeai` | `https://api.openai-proxy.org/v1` | `CLOSEAI_API_KEY` | any model, under its own name |
-| `xmcp` | `https://llm.xmcp.ltd` | `XMCP_API_KEY` | any model; `deepseek-v4.1-flash` as `ds/deepseek-v4-flash`, `gpt-5.6-luna` as `closeai/gpt-5.6-luna` |
+| `xmcp` | `https://llm.xmcp.ltd` | `XMCP_API_KEY` | any model; `deepseek-v4.1-flash` as `ds/deepseek-flash`, `gpt-5.6-luna` as `closeai/gpt-5.6-luna` |
 | `apiyi` | `https://api.apiyi.com/v1` | `APIYI_API_KEY` | any model; `gpt-6-luna` through the Responses API |
 | `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | only `deepseek-v4.1-flash`, as `accounts/fireworks/models/deepseek-v4p1-flash` |
 | `dgx` | `http://10.42.0.1:8000/v1` | `DGX_API_KEY`, default `EMPTY` | any model, under its own name |

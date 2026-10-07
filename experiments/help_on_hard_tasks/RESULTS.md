@@ -22,7 +22,7 @@
 
 ## 时间和终止口径
 
-固定参数为 XMCP `ds/deepseek-v4-flash`、temperature=0、max_tokens=65536、output_tokens=65536、累计 1800 秒模型／工具时间及 1024 响应上限。框架在步骤边界检查预算，正在执行的单步可能超额，因此记录时间可超过 1800 秒。日志状态 paused 的运行均在终点评分前 stop，不再恢复。
+固定参数为 XMCP `ds/deepseek-flash`、temperature=0、max_tokens=65536、output_tokens=65536、累计 1800 秒模型／工具时间及 1024 响应上限。框架在步骤边界检查预算，正在执行的单步可能超额，因此记录时间可超过 1800 秒。日志状态 paused 的运行均在终点评分前 stop，不再恢复。
 
 表中时间来自日志记录的 effect elapsed，并非纯模型思考时间。成功请求中的服务重试等待也计入；不能把 HTTP Retry-After 头相加当作精确损失时间。*Munkres 复测最后抛出的 provider transient 错误没有 answered 事件，最后失败请求的等待未进入累计时间，1519.540 秒低于实际墙钟运行时间；没有借此续跑补时间。HTTP 观察是 best-effort，捕获数是已知记录，未捕获不等于未发生。
 

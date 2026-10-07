@@ -142,7 +142,7 @@ class Run:
             raise RuntimeError('initialization unexpectedly sampled')
         write(self.root / 'manifest.json', {
             'study': 'help-hard-20261007', 'task': preflight['task'], 'arm': self.a.arm,
-            'created': utc(), 'model': MODEL, 'provider': PROVIDER, 'route': 'ds/deepseek-v4-flash',
+            'created': utc(), 'model': MODEL, 'provider': PROVIDER, 'route': 'ds/deepseek-flash',
             'max_output_tokens': OUTPUT, 'max_samples': SAMPLES, 'cumulative_seconds': SECONDS,
             'temperature': 0, 'helper': 'assistant_proxy' if self.a.arm == 'help' else 'unavailable_tool',
             'root': root, 'initial_call': call, 'first_request_entry': None,
