@@ -4,11 +4,11 @@ import Alaya.Base.Question
 
 /-! Computations, routines and the log: an agent, and every routine it calls, is a computation,
 a tree of the operations it asks the world for, under a name; a run is the flat, append-only log
-of what happened. See `docs/agent-api.md`.
+of what happened. See `docs/language.md`.
 
 A computation is the free monad on a signature of operations (Hancock and Setzer 2000; Kiselyov
 and Ishii 2015), with a way to fail, a read of the inbox, a call of a routine by its name, and a
-loop. The papers the design draws on are listed in `docs/agent-api.md`. -/
+loop. The papers the design draws on are listed in `docs/language.md`. -/
 
 namespace Alaya.Core
 

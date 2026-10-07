@@ -1,26 +1,34 @@
 # Alaya: LLM Agents as Effectful Programs with Durable Execution
 
-Alaya is an agentic framework built on three principles:
+Alaya is a framework for studying LLM agents on realistic benchmarks. It represents an agent as an
+effectful program and runs it by durable execution: replay against an append-only log of events.
+This gives Alaya the following features:
 
-**Agents as durable effectful programs.** Agent runs are hard to study and reproduce. Alaya
-represents an agent as an effectful program in free-monad form and runs it by durable execution:
-replay against an append-only log of events. A run is therefore complete data, which can be
-analysed without re-execution. The logs form a forest, so the impact of an
-intervention, such as changing a message, a file or the agent's workflow, is studied by forking a
-run at the point of the change.
-
-**Agent-native operation.** Experiments with agents produce more data than a person can process
-by hand, and research itself is increasingly automated by AI. Alaya is designed to be operated
-entirely by an external agent, such as Claude Code or Codex, through a strict, self-describing
-command line. An external agent can therefore carry out research on its own, from proposing
-ideas to evaluating them in experiments.
-
-**Reliable runs on realistic benchmarks.** Runs on realistic benchmarks are long and expensive,
-need non-trivial environments, and are graded in ways that differ from benchmark to benchmark.
-Alaya continues an interrupted run from its log, runs every command in an isolated container of
-the benchmark's image, and grades any point of any run through one interface, with an adapter for
-each benchmark. Alaya includes MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for
-the Vero benchmark of verified Lean code.
+- **Durable runs.** A run is complete data, which can be analysed without running it again. A run
+  that crashed or was interrupted resumes from its log, and every model draw is cached, so
+  resuming sends no request twice.
+- **A complete view of runs.** All runs and their forks are written as one HTML page: every
+  branch, every step of the agent's workflow, each request as it was sent, each response with its
+  reasoning, and how each command changed the files.
+- **Forks.** Any point of any run can be continued differently, and the original stays as it was,
+  so the impact of an intervention is studied by forking a run at the point of the change.
+- **Interventions at any point.** A person can send the agent a message, change its files, answer
+  its question, or stop it, or any step of its workflow.
+- **Grading at any point.** Any intermediate state of a run can be graded, through one interface
+  that supports any benchmark.
+- **Rebase.** After an agent changes, a run is copied as the new version makes it: the prefix of
+  the old run that the new version still makes is kept, and only the rest is run again.
+- **Isolated execution.** Every command runs in a container of the benchmark's image, pinned by
+  digest, with no network by default. The workspace is versioned after every command, so any
+  point of a run can be listed, read, compared or checked out.
+- **Provider-independent runs.** A run records the model it used, not who served it. Another
+  provider may resume it only if it sends the model the same requests, and is refused otherwise.
+- **Agents.** An agent is a Lean program, built from routines with lexical scopes. Alaya includes
+  MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for the Vero benchmark of
+  verified Lean code.
+- **Operated by agents.** An external agent, such as Claude Code or Codex, can operate Alaya
+  entirely on its own, so research can be automated, from proposing ideas to evaluating them in
+  experiments.
 
 ## Getting started
 
@@ -65,14 +73,20 @@ fork of it:
 
 ## Documentation
 
+[`docs/language.md`](docs/language.md) — the language agents are written in: a computation, the
+log of events it writes, what each construct writes there (an operation, a read of the inbox, a
+call, a failure, a loop, a comment, a break, a question), replay, and routines and scopes.
+
+[`docs/runtime.md`](docs/runtime.md) — how a run is carried out: a run as a call made from
+outside, the session, the driver, and the data directory with every command as a function.
+
+[`docs/agents.md`](docs/agents.md) — the tools agents offer, `ask_user`, how an agent is made and
+offered as a program, and the two agents included: MiniSwe, the port of mini-SWE-agent, and
+MiniVero, MiniSwe with Vero's instructions for Lean implementation and proof tasks.
+
 [`docs/llm-api.md`](docs/llm-api.md) — the LLM API: requests and responses as typed values,
 structured output, a model as the draws of a request, the layers a model is built from (retry,
 batching, sharing of draws, a persistent cache), and the providers that serve models.
-
-[`docs/agent-api.md`](docs/agent-api.md) — the agent API: a computation, the log of events it
-writes, and what each construct writes there (an operation, a read of the inbox, a call, a
-failure, a loop, a comment); then replay, routines and scopes, tools, `ask_user`, an agent, a
-run, and the driver.
 
 [`docs/cli.md`](docs/cli.md) — the `alaya` command line: its commands for creating, running,
 grading, inspecting and rebasing runs, their text and JSON output, and their exit statuses.
@@ -80,13 +94,6 @@ grading, inspecting and rebasing runs, their text and JSON output, and their exi
 [`docs/log-schema.md`](docs/log-schema.md) — the log schema: an entry, the events as JSON, the
 forest of logs and its forks, the grader's protocol and its verdict, the data directory with its
 workspace snapshots, and the model cache entry.
-
-[`docs/miniswe.md`](docs/miniswe.md) — MiniSwe, the port of mini-SWE-agent: its options, what
-the model is sent, how it ends, commands and their output, and how it differs from the original.
-
-[`docs/minivero.md`](docs/minivero.md) — MiniVero, MiniSwe with Vero's instructions for Lean
-implementation and proof tasks: its options, what the model is sent, how that differs from
-Vero's own instructions, and the `time_budget` tool a run is paced by.
 
 [`docs/style_guide.md`](docs/style_guide.md) — how Alaya looks: the colours, type, parts, icons
 and wording of the HTML report, and how the website and the diagrams take them up. It is a

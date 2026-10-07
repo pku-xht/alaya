@@ -6,7 +6,7 @@ import Alaya.LLM.Models
 then goes round a loop whose state is the conversation: it samples the model on mini's view of
 the conversation, reads the response's tool calls as mini does, calls each tool by its name, and
 reads its inbox, so that what a person says or changes reaches the model in the next request.
-See `docs/miniswe.md`. -/
+See `docs/agents.md` §4. -/
 
 namespace Alaya.Agents.MiniSwe
 

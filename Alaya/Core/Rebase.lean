@@ -2,7 +2,7 @@ import Alaya.Core.Replay
 
 /-! Rebase: a run's log, made again by another version of its agent. A log is a trace of the
 run's routine that wrote it, and a routine changed after it was written reads it only up to its
-first changed operation (`docs/agent-api.md` §4). Rebase keeps that prefix, as the new routine makes
+first changed operation (`docs/language.md` §4). Rebase keeps that prefix, as the new routine makes
 it, in a data directory of its own, where the run goes on: every log of a data directory stays a
 trace of the agent that directory runs.
 

@@ -3,7 +3,7 @@
 `alaya` drives runs from a shell, a script, a UI, or an agent such as Claude Code. A run is a
 log, a point of a run is an **entry**, and every command takes the entry it acts at: it appends
 after it, or reads at it. Appending after an entry that already has a next entry creates a fork.
-`docs/agent-api.md` defines the log, and `docs/log-schema.md` how it is stored.
+`docs/language.md` defines the log, and `docs/log-schema.md` how it is stored.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
@@ -192,7 +192,7 @@ alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grad
 ![call: a call of a program is appended, and the next resume opens it in a frame of its own](figures/cli/call.svg)
 
 - **`PROGRAM`** is one of the catalog: `mini-swe` and `mini-vero`, the agents
-  (`docs/miniswe.md`, `docs/minivero.md`), or `grader` (`docs/log-schema.md` §4). Their defaults
+  (`docs/agents.md` §4, `docs/agents.md` §5), or `grader` (`docs/log-schema.md` §4). Their defaults
   are in code, and there are no configuration files.
 - **`--set PATH=VALUE`** overrides one field of the program's configuration, and repeats
   (`executor.timeout_seconds=60`, `command='make check'`). `VALUE` is read as JSON when it
@@ -274,7 +274,7 @@ refused.
 
 ### `reply`
 
-Answers the question the log waits on (`docs/agent-api.md` §3.8).
+Answers the question the log waits on (`docs/language.md` §3.8).
 
 ```sh
 alaya waiting                              # every question that waits, with its entry
@@ -310,7 +310,7 @@ alaya stop 4f2c8b --frame session/mini-swe/mini-swe --reason 'the sub-agent is s
 ![stop: a stop is appended, and the call is over](figures/cli/stop.svg)
 
 A stop appends `broke FRAME REASON`: the call open in `FRAME` ends there, with every call inside
-it (`docs/agent-api.md` §3.7). Its caller is told it failed with the reason: the session waits
+it (`docs/language.md` §3.7). Its caller is told it failed with the reason: the session waits
 for the next call, and an agent whose sub-agent was stopped goes on. A stop is refused where no
 call is open in its frame.
 
@@ -377,7 +377,7 @@ alaya resume "$tip" --data ../v2 --provider apiyi
 ![rebase: the log, up to where the two agents differ, is copied into a new data directory, where the revised agent goes on](figures/cli/rebase.svg)
 
 The revised agent cannot go on in the original data directory: every log of a data directory is
-written by one agent, and `resume` refuses a log its agent did not write (`docs/agent-api.md` §4).
+written by one agent, and `resume` refuses a log its agent did not write (`docs/language.md` §4).
 
 - **The copy** is the revised agent replayed against the log: an answer it asks for again is
   taken from the log, and a mark it makes is checked against the log's.

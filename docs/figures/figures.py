@@ -4,13 +4,14 @@
 # dependencies = []
 # ///
 """The figures of the documents: run `./figures.py` to write every SVG into the directory of its
-document beside this file, `agent-api/` for docs/agent-api.md, `llm-api/` for docs/llm-api.md,
-`log-schema/` for docs/log-schema.md and `cli/` for docs/cli.md.
+document beside this file: `agent-api/` for docs/language.md, docs/runtime.md and
+docs/agents.md, `llm-api/` for docs/llm-api.md, `log-schema/` for docs/log-schema.md and `cli/`
+for docs/cli.md.
 
 The look is docs/style_guide.md; the icons are read from Alaya/App/Html/page.js. The file has five
 parts: what every figure is drawn with (the style's values, text, shapes), then the figures of
-agent-api.md, those of llm-api.md, those of log-schema.md, and those of cli.md. SVG cannot
-measure text, so a width here is an estimate: after changing a label, run the script and look at
+language.md, runtime.md and agents.md, those of llm-api.md, those of log-schema.md, and those of
+cli.md. SVG cannot measure text, so a width here is an estimate: after changing a label, run the script and look at
 the figure.
 """
 
@@ -137,7 +138,7 @@ def write(folder, name, title, height, parts, style=STYLE):
     print(f"{folder}/{name}.svg  {WIDTH}×{height}")
 
 
-# === docs/agent-api.md ====================================================================
+# === docs/language.md, docs/runtime.md, docs/agents.md ====================================================================
 #
 # A figure is a piece of a run in three columns with aligned rows: what the program does, who
 # carries it out, and the log. Its spec (below, after the kit) is a list of rows; the kind of a
@@ -433,7 +434,7 @@ def figure(name, title, rows, inside=(), takes=False, heads=False, legend=False,
     write("agent-api", name, title, height, head + [panel] + frames + out)
 
 
-# --- the figures of agent-api.md ----------------------------------------------------------
+# --- the figures of language.md, runtime.md and agents.md ----------------------------------------------------------
 
 
 def SESSION(by=None):
