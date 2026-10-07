@@ -314,7 +314,7 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       "choose question_type: yes_no for a yes/no answer, single_choice to select exactly one of at least two distinct candidates, or open_ended for a nonblank free-text answer.")
       "the instruction for every kind"
     -- The kinds are named, each once.
-    for (kinds, problem) in (#[(Json.arr #["yes_no", "maybe"], "unknown kind"),
+    for (kinds, problem) in (#[(Json.arr #["yes_no", "maybe"], "not maybe"),
         (.arr #["yes_no", "yes_no"], "twice"), (.str "yes_no", "must be an array")] : Array (Json × String)) do
       assertError s!"with {kinds.compress}" (Catalog.complete "mini-vero" (.mkObj [("question_types", kinds)])) fun
         | .input message => contains message problem

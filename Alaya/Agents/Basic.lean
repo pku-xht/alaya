@@ -1,6 +1,6 @@
 import Alaya.Agents.Tools
 import Alaya.LLM.Models
-import Alaya.Base.ConfigJson
+import Alaya.Base.Fields
 
 /-! The basic agent: a model with `bash` and `submit`, as simple as an agent can be and still
 robust. Every tool call is answered: with its result, or with why it was not made. A response
@@ -30,52 +30,37 @@ structure Config where
   executor : Executor.Config := defaultExecutor
   deriving Inhabited
 
-/-- An executor's settings as a configuration holds them. -/
-def executorToJson (executor : Executor.Config) : Json :=
-  .mkObj [("timeout_seconds", (executor.timeoutSeconds : Json)),
-    ("env", .arr (executor.env.map fun (name, value) => .arr #[.str name, .str value]))]
+/-- How commands run, as a configuration holds it: their time limit, and their environment. -/
+def executorFields : Fields Executor.Config := #[
+  .of "timeout_seconds" .nat (·.timeoutSeconds) fun v e => { e with timeoutSeconds := v },
+  .of "env" .pairs (·.env) fun v e => { e with env := v }]
+
+/-- The fields of its configuration, which an agent built on it has too. -/
+def fields : Fields Config := #[
+  .of "model" (.option Models.Spec.codec) (·.model?) fun v c => { c with model? := v },
+  .of "task" (.option .string) (·.task?) fun v c => { c with task? := v },
+  .record "executor" executorFields (·.executor) fun v c => { c with executor := v }]
 
 /-- The configuration as JSON: what a run records, and what `alaya config` shows. -/
-def Config.toJson (config : Config) : Json :=
-  .mkObj [
-    ("model", config.model?.map (·.toJson) |>.getD .null),
-    ("task", config.task?.map Json.str |>.getD .null),
-    ("executor", executorToJson config.executor)]
-
-/-- The executor settings a configuration's `executor` field gives, over `defaults`. -/
-def executorFromJson (json : Json) (defaults : Executor.Config) : Except String Executor.Config := do
-  let object ← ConfigJson.object json #["timeout_seconds", "env"]
-  let env ← match ← object.field? "env" with
-    | none => pure defaults.env
-    | some json => ConfigJson.pairs json
-  pure { timeoutSeconds := ← object.nat "timeout_seconds" defaults.timeoutSeconds, env }
-
-/-- A model a configuration names: its complete spec, or none. -/
-def modelFromJson : Json → Except String (Option Models.Spec)
-  | .null => pure none
-  | json => match Models.Spec.read json with
-    | .ok spec => pure (some spec)
-    | .error problem => throw s!"'model': {problem}"
-
-/-- A task a configuration gives, or none. -/
-def taskFromJson : Json → Except String (Option String)
-  | .null => pure none
-  | .str task => pure (some task)
-  | other => throw s!"'task' must be a string, not {other.compress}"
+def Config.toJson (config : Config) : Json := fields.toJson config
 
 /-- Reads a configuration; a field left out is its default, and an unknown one is an error. -/
-def Config.fromJson (json : Json) : Except String Config := do
-  let object ← ConfigJson.object json #["model", "task", "executor"]
-  let model? ← match ← object.field? "model" with
-    | none => pure none
-    | some json => modelFromJson json
-  let task? ← match ← object.field? "task" with
-    | none => pure none
-    | some json => taskFromJson json
-  let executor ← match ← object.field? "executor" with
-    | none => pure defaultExecutor
-    | some json => executorFromJson json defaultExecutor
-  pure { model?, task?, executor }
+def Config.fromJson (json : Json) : Except String Config := fields.read json {}
+
+/-- An agent's routine: its configuration read from a call's arguments, `fields` over
+`defaults`, and its computation run on the model and the task the configuration names. A call
+it cannot run on fails in the call's frame, saying why in the configuration's terms. -/
+def agent (name : String) (fields : Fields σ) (defaults : σ) (base : σ → Config)
+    (computation : σ → Models.Spec → String → Computation Agent Json) (scope : Scope Agent) : Routine Agent where
+  name
+  body arguments :=
+    match fields.read arguments defaults with
+    | .error problem => .fail s!"{name}: {problem}"
+    | .ok config => match (base config).model?, (base config).task? with
+      | some model, some task => computation config model task
+      | none, _ => .fail s!"{name}: it samples a model, and its configuration names none"
+      | _, none => .fail s!"{name}: it works on a task, and its configuration names none"
+  scope
 
 /-! ## Commands and their output -/
 
@@ -309,17 +294,8 @@ def computation (config : Config) (model : Models.Spec) (task : String) : Comput
   let uname ← Tools.Uname.read
   iter (round config model) ((openingMessages task uname).map .told)
 
-/-- The basic agent as a routine. A call's arguments are its configuration, its model and its
-task among it; one it cannot run on fails in the call's frame. Its scope is its tool. -/
-def routine : Routine Agent where
-  name := "basic"
-  body arguments :=
-    match Config.fromJson arguments with
-    | .error problem => .fail s!"basic: {problem}"
-    | .ok config => match config.model?, config.task? with
-      | some model, some task => computation config model task
-      | none, _ => .fail "basic: it samples a model, and its configuration names none"
-      | _, none => .fail "basic: it works on a task, and its configuration names none"
-  scope := Scope.of #[Tools.Bash.routine]
+/-- The basic agent as a routine. Its scope is its tool. -/
+def routine : Routine Agent :=
+  agent "basic" fields {} id computation (Scope.of #[Tools.Bash.routine])
 
 end Alaya.Agents.Basic

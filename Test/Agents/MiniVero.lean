@@ -89,10 +89,11 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       check (onDisk.trimAsciiEnd.toString == compiled)
         s!"{file} changed after Alaya.Agents.MiniVero was built: touch the module and rebuild",
   test "a mode is named as Vero names it" do
-    assertEqual "proof" (MiniVero.Mode.ofString? "proof") (some .proof)
-    assertEqual "codeproof" (MiniVero.Mode.ofString? "codeproof") (some .codeproof)
-    assertEqual "unknown" (MiniVero.Mode.ofString? "Proof") none
-    assertEqual "round trip" (MiniVero.Mode.all.map (MiniVero.Mode.ofString? ·.toString))
+    let mode : Codec MiniVero.Mode := .enum toString MiniVero.Mode.all
+    assertEqual "proof" (mode.read "proof").toOption (some MiniVero.Mode.proof)
+    assertEqual "codeproof" (mode.read "codeproof").toOption (some MiniVero.Mode.codeproof)
+    assertEqual "unknown" (mode.read "Proof").toOption none
+    assertEqual "round trip" (MiniVero.Mode.all.map fun m => (mode.read (mode.write m)).toOption)
       (MiniVero.Mode.all.map some),
   test "the instance and run facts are left to the task text" do
     let text ← openingText "TASK_CODEPROOF"
@@ -177,7 +178,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
     assertContains "alone" (parse asking (Scripted.responseWith #[Scripted.askCall "q" "Keep it?", Scripted.call "c" "bash" "ls"]))
       "ask_user must be called alone"
     assertError "an unknown kind" (Catalog.complete "mini-vero" (.mkObj [("question_types", .arr #["multiple_choice"])])) fun
-      | .input m => contains m "unknown kind of question"
+      | .input m => contains m "must be yes_no or single_choice or open_ended, not multiple_choice"
       | _ => false,
 
   test "a long output's note names the file that holds it, and an old one is that file alone" do
@@ -236,7 +237,7 @@ def timeSuite : Suite := Testing.suite "agents/mini-vero.time" #[
       let executor ← containerExecutor
       try
         let model ← Scripted.scriptedModel #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
-          turn #[call "t" "time_budget"], turn #[call "s" "submit"]]
+          turn #[call "t" "time_budget"], turn #[call "s" "submit" (.mkObj [("message", "")])]]
         let rt ← Scripted.runtime executor (some model)
         let (final, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run) { budgetMs? := some 3600000 }
         let forest ← assertOk rt.store.forest

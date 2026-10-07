@@ -79,6 +79,9 @@ def suite : Suite := Testing.suite "agents/basic" #[
       (contains · "Missing 'command'")) "no command"
     let mixed := problem (responseWith #[call "a" "bash" "ls", submitCall "s"])
     check (mixed.all (·.any (contains · "submit must be called alone"))) s!"submit beside another: {mixed}"
+    let bare : Chat.ToolCall := { id := "s", name := "submit", arguments := .mkObj [] }
+    check ((problem (responseWith #[bare])).head!.any (contains · "Invalid arguments for the submit tool"))
+      "arguments that do not fit the tool's schema"
     let cut := problem (responseWith #[call "a" "bash" "ls"] (finish := "length"))
     check (cut.all (·.any (contains · "hit the output token limit"))) "a response cut off",
 

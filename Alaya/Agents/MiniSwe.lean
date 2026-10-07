@@ -19,41 +19,23 @@ def defaultExecutor : Executor.Config := {
   env := #[("PAGER", "cat"), ("MANPAGER", "cat"), ("LESS", "-R"),
            ("PIP_PROGRESS_BAR", "off"), ("TQDM_DISABLE", "1")] }
 
-structure Config where
-  /-- The model it samples: its complete spec. There is no default: whoever calls the agent
-  names one. -/
-  model? : Option Models.Spec := none
-  /-- The task, verbatim. There is no default: whoever calls the agent gives one. -/
-  task? : Option String := none
-  /-- Consecutive format errors tolerated before exiting; 0 disables. -/
+/-- The basic agent's configuration, with mini's command settings, and how many malformed
+responses in a row end it: mini's limit, 0 for none. -/
+structure Config extends Basic.Config where
+  executor := defaultExecutor
   maxConsecutiveFormatErrors : Nat := 3
-  /-- How commands are run. -/
-  executor : Executor.Config := defaultExecutor
   deriving Inhabited
 
+def fields : Fields Config :=
+  Basic.fields.lift (·.toConfig) (fun b c => { c with toConfig := b }) ++ #[
+  .of "max_consecutive_format_errors" .nat (·.maxConsecutiveFormatErrors)
+    fun v c => { c with maxConsecutiveFormatErrors := v }]
+
 /-- The configuration as JSON: what a run records, and what `alaya config` shows. -/
-def Config.toJson (config : Config) : Json :=
-  .mkObj [
-    ("model", config.model?.map (·.toJson) |>.getD .null),
-    ("task", config.task?.map Json.str |>.getD .null),
-    ("max_consecutive_format_errors", (config.maxConsecutiveFormatErrors : Json)),
-    ("executor", Basic.executorToJson config.executor)]
+def Config.toJson (config : Config) : Json := fields.toJson config
 
 /-- Reads a configuration; a field left out is its default, and an unknown one is an error. -/
-def Config.fromJson (json : Json) : Except String Config := do
-  let object ← ConfigJson.object json #["model", "task", "max_consecutive_format_errors", "executor"]
-  let defaults : Config := {}
-  let model? ← match ← object.field? "model" with
-    | none => pure defaults.model?
-    | some json => Basic.modelFromJson json
-  let task? ← match ← object.field? "task" with
-    | none => pure defaults.task?
-    | some json => Basic.taskFromJson json
-  let executor ← match ← object.field? "executor" with
-    | none => pure defaults.executor
-    | some json => Basic.executorFromJson json defaults.executor
-  pure { model?, task?, executor
-         maxConsecutiveFormatErrors := ← object.nat "max_consecutive_format_errors" defaults.maxConsecutiveFormatErrors }
+def Config.fromJson (json : Json) : Except String Config := fields.read json {}
 
 /-! ## Prompts
 
@@ -203,17 +185,8 @@ def computation (config : Config) (model : Models.Spec) (task : String) : Comput
   let uname ← Tools.Uname.read
   iter (round config model) (openingMessages task uname, 0)
 
-/-- MiniSwe as a routine. A call's arguments are its configuration, its model and its task
-among it; one it cannot run on fails in the call's frame. Its scope is its tool. -/
-def routine : Routine Agent where
-  name := "mini-swe"
-  body arguments :=
-    match Config.fromJson arguments with
-    | .error problem => .fail s!"mini-swe: {problem}"
-    | .ok config => match config.model?, config.task? with
-      | some model, some task => computation config model task
-      | none, _ => .fail "mini-swe: it samples a model, and its configuration names none"
-      | _, none => .fail "mini-swe: it works on a task, and its configuration names none"
-  scope := Scope.of #[Tools.Bash.routine]
+/-- MiniSwe as a routine. Its scope is its tool. -/
+def routine : Routine Agent :=
+  Basic.agent "mini-swe" fields {} (·.toConfig) computation (Scope.of #[Tools.Bash.routine])
 
 end Alaya.Agents.MiniSwe

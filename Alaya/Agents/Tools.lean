@@ -27,8 +27,11 @@ structure Tool where
   alone : Bool := false
   /-- What the model is told of the tool beyond its definition, appended to the prompt. -/
   instruction? : Option String := none
-  /-- What is wrong with a call's arguments, if anything: checked before the call is made. -/
-  check : Json → Except String Unit := fun _ => pure ()
+  /-- What is wrong with a call's arguments, if anything: checked before the call is made. By
+  default, whether they fit the tool's schema. -/
+  check : Json → Except String Unit := fun arguments =>
+    (definition.parameters.validate arguments).mapError fun problem =>
+      s!"Invalid arguments for the {definition.name} tool: {problem}."
   /-- The routine call the model's arguments make: by default, of the routine of the tool's name,
   with those arguments. -/
   call : Json → RoutineCall := fun arguments => { name := definition.name, arguments }
@@ -73,7 +76,8 @@ def definition : Chat.ToolDefinition := {
   parameters := .object #[("command", .string (description? := some "The bash command to execute"))]
 }
 
-/-- The command of a call, or what is wrong with its arguments. -/
+/-- The command of a call, or what is wrong with its arguments, in mini's words: the check of
+the tool, in place of its schema's. -/
 def command (arguments : Lean.Json) : Except String String :=
   match arguments.getObjVal? "command" with
   | .ok (.str command) => .ok command
@@ -130,7 +134,7 @@ def definition : Chat.ToolDefinition := {
   parameters := .object #[("message", .string (description? := some "A short summary of what you did"))]
 }
 
-/-- The submission; a call without a string message submits nothing. -/
+/-- The submission of a call, whose arguments fit the schema. -/
 def message (arguments : Lean.Json) : String :=
   match arguments.getObjVal? "message" with
   | .ok (.str message) => message
@@ -337,12 +341,12 @@ def definition : Chat.ToolDefinition := {
   parameters := .object #[("task", .string (description? := some "The task, complete: the sub-agent sees nothing else"))]
 }
 
-/-- The task of a call, or what is wrong with its arguments. -/
-def task (arguments : Lean.Json) : Except String String :=
-  match arguments.getObjVal? "task" with
-  | .ok (.str task) => if task.trimAscii.isEmpty then .error "The 'task' argument of the subagent tool is empty." else .ok task
-  | .ok _ => .error "The 'task' argument of the subagent tool must be a string."
-  | .error _ => .error "Missing 'task' argument in subagent tool call."
+/-- The task of a call whose arguments fit the schema, or that it is blank. -/
+def task (arguments : Lean.Json) : Except String String := do
+  let task ← (arguments.getObjVal? "task" >>= Lean.Json.getStr?).mapError fun _ =>
+    "The subagent tool takes its task as a string."
+  if task.trimAscii.isEmpty then throw "The 'task' argument of the subagent tool is empty."
+  pure task
 
 def instruction : String :=
   "You may call subagent to hand a self-contained part of the work to a sub-agent like you; " ++
@@ -354,7 +358,9 @@ offers the same tools, this one among them. It runs where its caller's commands 
 def tool (name : String) (config : Json) : Tool := {
   definition
   instruction? := some instruction
-  check := fun arguments => (task arguments).map fun _ => ()
+  check := fun arguments => do
+    ({ definition } : Tool).check arguments
+    discard <| task arguments
   call := fun arguments => match task arguments with
     | .ok task => { name, arguments := config.setObjVal! "task" task }
     | .error _ => { name, arguments } }

@@ -25,7 +25,7 @@ structure Tool where
   definition   : Chat.ToolDefinition              -- its name, description and schema, for a model
   alone        : Bool := false                    -- must be the only call of its turn
   instruction? : Option String := none            -- appended to the prompt
-  check        : Json → Except String Unit        -- what is wrong with a call's arguments
+  check        : Json → Except String Unit        -- what is wrong with a call's arguments; by default, its schema's
   call         : Json → RoutineCall               -- the call the model's arguments make
 
 Tools.routines : Array (Routine Agent)            -- bash, ask_user, time_budget
@@ -40,7 +40,8 @@ A model's tool call becomes a call of a routine in four steps:
 
 1. The agent samples a request that offers the tools' `definition`s.
 2. The response names tools and gives arguments. The agent checks each call with the tool's
-   `check`; a call that is wrong is answered with a format error and is not made.
+   `check`, by default whether the arguments fit the tool's schema; a call that is wrong is
+   answered with its problem and is not made.
 3. The agent makes each tool's call of the model's arguments, `tool.call asked.arguments`. The
    routine runs in a frame of its own.
 4. The agent puts each result in the next request, as a tool message. A tool that failed gives

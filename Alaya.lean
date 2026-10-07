@@ -1,4 +1,4 @@
-import Alaya.Base.ConfigJson
+import Alaya.Base.Fields
 import Alaya.Base.Error
 import Alaya.Base.Hash
 import Alaya.Base.Lock
@@ -37,7 +37,6 @@ import Alaya.Agents.Grader
 import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
 import Alaya.Agents.Tools
-import Alaya.Agents.Verdict
 import Alaya.App.Catalog
 import Alaya.App.Cli
 import Alaya.App.Html

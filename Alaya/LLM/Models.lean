@@ -1,4 +1,4 @@
-import Alaya.Base.ConfigJson
+import Alaya.Base.Fields
 import Alaya.Base.Error
 
 /-!
@@ -49,43 +49,25 @@ structure Spec where
 def protectedParams : Array String :=
   #["model", "messages", "tools", "tool_choice", "response_format", "n", "stream"]
 
-private def orNull (value? : Option Nat) : Lean.Json := value?.map (fun n => (n : Lean.Json)) |>.getD .null
+/-- A spec's fields, each written whole: its name, its request fields, what of its reasoning it
+is sent back, and its sizes, `null` where not known. -/
+def Spec.fields : Fields Spec := #[
+  .of "name" .string (·.name) fun v s => { s with name := v },
+  .of "params" .object (·.params) fun v s => { s with params := v },
+  .of "echo_reasoning" (.enum toString Echo.all) (·.echoReasoning) fun v s => { s with echoReasoning := v },
+  .of "context_tokens" (.option .nat) (·.contextTokens?) fun v s => { s with contextTokens? := v },
+  .of "output_tokens" (.option .nat) (·.outputTokens?) fun v s => { s with outputTokens? := v }]
 
 /-- The complete spec, every field written. -/
-def Spec.toJson (spec : Spec) : Lean.Json :=
-  .mkObj [("name", spec.name), ("params", spec.params),
-    ("echo_reasoning", toString spec.echoReasoning), ("context_tokens", orNull spec.contextTokens?),
-    ("output_tokens", orNull spec.outputTokens?)]
-
-private def natOrNull (object : ConfigJson.Object) (key : String) (default : Option Nat) :
-    Except String (Option Nat) := do
-  match ← object.field? key with
-  | none => pure default
-  | some .null => pure none
-  | some value => match value.getNat? with
-    | .ok n => pure (some n)
-    | .error _ => throw s!"'{key}' must be a non-negative integer or null, not {value.compress}"
+def Spec.toJson (spec : Spec) : Lean.Json := Spec.fields.toJson spec
 
 /-- Reads a spec over `defaults`: a field left out is the default's, an unknown one is an error,
-and `params` must be an object with none of `protectedParams`. -/
+and `params` may set none of `protectedParams`. -/
 def Spec.fromJson (json : Lean.Json) (defaults : Spec) : Except String Spec := do
-  let object ← ConfigJson.object json #["name", "params", "echo_reasoning", "context_tokens", "output_tokens"]
-  let params ← match ← object.field? "params" with
-    | none => pure defaults.params
-    | some params@(.obj _) => pure params
-    | some other => throw s!"'params' must be an object of request fields, not {other.compress}"
+  let spec ← Spec.fields.read json defaults
   for key in protectedParams do
-    if (params.getObjVal? key).isOk then throw s!"params cannot set '{key}': alaya sets it itself"
-  pure {
-    name := defaults.name, params
-    echoReasoning := ← match ← object.field? "echo_reasoning" with
-      | none => pure defaults.echoReasoning
-      | some (.str name) => match Echo.all.find? (toString · == name) with
-        | some echo => pure echo
-        | none => throw s!"'echo_reasoning' must be none, text or items, not {name}"
-      | some other => throw s!"'echo_reasoning' must be none, text or items, not {other.compress}"
-    contextTokens? := ← natOrNull object "context_tokens" defaults.contextTokens?
-    outputTokens? := ← natOrNull object "output_tokens" defaults.outputTokens? }
+    if (spec.params.getObjVal? key).isOk then throw s!"params cannot set '{key}': alaya sets it itself"
+  pure spec
 
 /-- A spec as a configuration or a log holds it: its name, and the fields it sets, each one left
 out at the spec's own default. No list of models is consulted: the spec is what is written,
@@ -95,5 +77,10 @@ def Spec.read (json : Lean.Json) : Except String Spec := do
     | .ok (.str name) => pure name
     | _ => throw "a model needs a \"name\""
   Spec.fromJson json { name }
+
+/-- A spec as a configuration holds it: whole, with its name. -/
+def Spec.codec : Codec Spec where
+  write := Spec.toJson
+  read json := (Spec.read json).mapError (s!"must be a model's spec: {·}")
 
 end Alaya.LLM.Models

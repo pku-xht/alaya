@@ -25,9 +25,6 @@ instance : ToString Mode := ⟨Mode.toString⟩
 
 def Mode.all : List Mode := [.proof, .codeproof]
 
-def Mode.ofString? (name : String) : Option Mode :=
-  Mode.all.find? (·.toString == name)
-
 /-! ## Configuration -/
 
 
@@ -48,15 +45,10 @@ def Masking.omittedTurns (m : Masking) (turns : Nat) : Nat :=
 time. -/
 def masking : Masking := { keepTurns := 20, block := 10 }
 
-structure Config where
-  /-- The model it samples: its complete spec. There is no default: whoever calls the agent
-  names one. -/
-  model? : Option Models.Spec := none
-  /-- The task, verbatim. There is no default: whoever calls the agent gives one. -/
-  task? : Option String := none
+/-- The basic agent's configuration, with Vero's mode, the room kept for a response, and the
+kinds of question it may ask. -/
+structure Config extends Basic.Config where
   mode : Mode := .proof
-  /-- How commands are run. -/
-  executor : Executor.Config := Basic.defaultExecutor
   /-- Tokens kept free for the next response when deciding whether the context is full, or the
   model's `output_tokens` when that is less. -/
   contextReserve : Nat := 8000
@@ -65,49 +57,26 @@ structure Config where
   questionTypes : Array Question.Kind := #[]
   deriving Inhabited
 
+/-- Kinds of question, each named once. -/
+def questionTypesCodec : Codec (Array Question.Kind) :=
+  let kinds := Codec.array (.enum Question.Kind.name Question.Kind.all.toList)
+  { kinds with read := fun json => do
+      let read ← kinds.read json
+      for kind in read do
+        if (read.filter (· == kind)).size > 1 then throw s!"names {kind.name} twice"
+      pure read }
+
+def fields : Fields Config :=
+  Basic.fields.lift (·.toConfig) (fun b c => { c with toConfig := b }) ++ #[
+  .of "mode" (.enum toString Mode.all) (·.mode) fun v c => { c with mode := v },
+  .of "context_reserve" .nat (·.contextReserve) fun v c => { c with contextReserve := v },
+  .of "question_types" questionTypesCodec (·.questionTypes) fun v c => { c with questionTypes := v }]
+
 /-- The configuration as JSON: what a run records, and what `alaya config` shows. -/
-def Config.toJson (config : Config) : Lean.Json :=
-  .mkObj [
-    ("model", config.model?.map (·.toJson) |>.getD .null),
-    ("task", config.task?.map Lean.Json.str |>.getD .null),
-    ("mode", toString config.mode),
-    ("executor", Basic.executorToJson config.executor),
-    ("context_reserve", (config.contextReserve : Lean.Json)),
-    ("question_types", .arr (config.questionTypes.map fun kind => .str kind.name))]
+def Config.toJson (config : Config) : Lean.Json := fields.toJson config
 
 /-- Reads a configuration; a field left out is its default, and an unknown one is an error. -/
-def Config.fromJson (json : Lean.Json) : Except String Config := do
-  let object ← ConfigJson.object json
-    #["model", "task", "mode", "executor", "context_reserve", "question_types"]
-  let defaults : Config := {}
-  let model? ← match ← object.field? "model" with
-    | none => pure defaults.model?
-    | some json => Basic.modelFromJson json
-  let task? ← match ← object.field? "task" with
-    | none => pure defaults.task?
-    | some json => Basic.taskFromJson json
-  let mode ← match ← object.field? "mode" with
-    | none => pure defaults.mode
-    | some (.str name) => match Mode.ofString? name with
-      | some mode => pure mode
-      | none => throw s!"unknown mode: {name} (use {" or ".intercalate (Mode.all.map toString)})"
-    | some other => throw s!"'mode' must be a string, not {other.compress}"
-  let executor ← match ← object.field? "executor" with
-    | none => pure defaults.executor
-    | some json => Basic.executorFromJson json defaults.executor
-  let wrongTypes := s!"'question_types' must be an array of {Question.Kind.names}"
-  let questionTypes ← match ← object.field? "question_types" with
-    | none => pure defaults.questionTypes
-    | some (.arr names) => names.mapM fun
-      | .str name => match Question.Kind.ofName? name with
-        | some kind => pure kind
-        | none => throw s!"unknown kind of question '{name}': {wrongTypes}"
-      | other => throw s!"{wrongTypes}, not {other.compress}"
-    | some other => throw s!"{wrongTypes}, not {other.compress}"
-  for kind in questionTypes do
-    if (questionTypes.filter (· == kind)).size > 1 then throw s!"'question_types' names {kind.name} twice"
-  pure { model?, task?, mode, executor, questionTypes
-         contextReserve := ← object.nat "context_reserve" defaults.contextReserve }
+def Config.fromJson (json : Lean.Json) : Except String Config := fields.read json {}
 
 /-- The tools it offers: the basic agent's, `bash` and `submit`; `ask_user`, for the kinds of
 question its configuration names; `time_budget`; and `subagent`, calling the agent itself with
@@ -265,17 +234,10 @@ def computation (config : Config) (model : Models.Spec) (task : String) : Comput
   let uname ← Tools.Uname.read
   iter (round config model) { items := (openingMessages config task uname).map .told }
 
-/-- MiniVero as a routine. A call's arguments are its configuration, its model and its task
-among it; one it cannot run on fails in the call's frame. Its scope is its tools, and itself,
-which `subagent` calls with its configuration and another task. -/
+/-- MiniVero as a routine. Its scope is its tools, and itself, which `subagent` calls with its
+configuration and another task. -/
 def routine : Routine Agent :=
-  let body (arguments : Lean.Json) : Computation Agent Lean.Json :=
-    match Config.fromJson arguments with
-    | .error problem => .fail s!"mini-vero: {problem}"
-    | .ok config => match config.model?, config.task? with
-      | some model, some task => computation config model task
-      | none, _ => .fail "mini-vero: it samples a model, and its configuration names none"
-      | _, none => .fail "mini-vero: it works on a task, and its configuration names none"
-  { name := "mini-vero", body, scope := Scope.fix fun scope => Tools.routines.push { name := "mini-vero", body, scope } }
+  let make := Basic.agent "mini-vero" fields {} (·.toConfig) computation
+  make (Scope.fix fun scope => Tools.routines.push (make scope))
 
 end Alaya.Agents.MiniVero

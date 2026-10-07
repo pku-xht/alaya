@@ -1,7 +1,7 @@
 import Test.Support.Framework
-import Alaya.Agents.Verdict
+import Alaya.Agents.Grader
 
-/-! The verdict on a grader's TAP: pass, fail, or error (`Alaya.Agents.Verdict`). -/
+/-! The verdict on a grader's TAP: pass, fail, or error (`Alaya.Agents.Grader`). -/
 
 namespace GraderTests
 
