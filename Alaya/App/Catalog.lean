@@ -1,6 +1,7 @@
 import Alaya.Agents.Basic
 import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
+import Alaya.Agents.HelpStudy
 import Alaya.Agents.Grader
 import Alaya.Base.Settings
 import Alaya.LLM.Provider
@@ -108,7 +109,14 @@ def miniVero : Definition :=
 def grader : Definition :=
   { routine := Grader.routine, complete := fun json => (Grader.Config.fromJson json).map (·.toJson) }
 
-def all : Array Definition := #[basic, miniSwe, miniVero, grader]
+def helpStudy : Definition :=
+  { routine := HelpStudy.routine, complete := fun json => (HelpStudy.Config.fromJson json).map (·.toJson) }
+
+def helpProbe : Definition :=
+  { routine := HelpStudy.probe, complete := fun json =>
+      if json == Lean.Json.mkObj [] then .ok json else .error "help-probe accepts no configuration" }
+
+def all : Array Definition := #[basic, miniSwe, miniVero, grader, helpStudy, helpProbe]
 
 def names : String := ", ".intercalate (all.map (·.name)).toList
 
