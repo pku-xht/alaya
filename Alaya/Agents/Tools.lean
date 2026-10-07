@@ -30,8 +30,6 @@ structure Tool where
   alone : Bool := false
   /-- What the model is told of the tool beyond its definition, appended to the prompt. -/
   instruction? : Option String := none
-  /-- The routine a call of it calls: by default, the routine of its name. -/
-  routine : String := definition.name
   /-- What the agent says of every call, merged over the model's arguments: how a command runs,
   which kinds of question may be asked. They win over the model's. -/
   settings : Json := .mkObj []
@@ -66,12 +64,12 @@ def lone? (tools : Array Tool) (response : Chat.Response) : Option Tool :=
   if response.toolCalls.size ≤ 1 then none
   else tools.find? fun tool => tool.alone && response.toolCalls.any (·.name == tool.name)
 
-/-- Makes the call a model's tool call asks for: of its tool's routine, with the model's
-arguments and the tool's settings over them. Gives its result, or its error when it fails, as
+/-- Makes the call a model's tool call asks for: of the routine of its tool's name, with the
+model's arguments and the tool's settings over them. Gives its result, or its error when it fails, as
 when it cannot read its arguments. -/
 def make (tools : Array Tool) (asked : Chat.ToolCall) : Computation Agent (Except String Json) := do
   let some tool := tools.find? (·.name == asked.name) | return .error s!"Unknown tool '{asked.name}'."
-  try .ok <$> call tool.routine (tool.arguments asked.arguments)
+  try .ok <$> call tool.name (tool.arguments asked.arguments)
   catch error => pure (.error error)
 
 /-! ## bash: a command in the workspace -/
@@ -335,13 +333,26 @@ def instruction : String :=
   "You may call subagent to hand a self-contained part of the work to a sub-agent like you; " ++
   "it has its own conversation, so say everything it needs in the task."
 
-/-- A call of the agent `name` with the configuration `config`, the agent that offers the tool,
-on the model's task: the agent itself, with another task, in its own scope, so the sub-agent
-offers the same tools, this one among them. It runs where its caller's commands do, and gives
-how it ended. The settings are the configuration but its task, which the model's fills; the agent
-reads it with the rest of its configuration, and refuses what it cannot run on. -/
+/-- Calls the agent its settings name, with their configuration and the model's task: the agent
+that offers the tool, on another task, so the sub-agent offers the same tools, this one among
+them. It runs where its caller's commands do, and gives how the sub-agent ended. The agent reads
+the task with the rest of its configuration, and refuses what it cannot run on. The routine finds
+the agent by name in its scope, so an agent that offers the tool gives it a scope with itself in
+it (`MiniVero.routine`). -/
+def routine : Routine Agent := {
+  name := definition.name
+  body := fun arguments => do
+    let agent ← match arguments.getObjVal? "agent" >>= Json.getStr? with
+      | .ok agent => pure agent
+      | .error _ => throw "The subagent tool's settings name no agent."
+    let config := (arguments.getObjVal? "configuration").toOption.getD (.mkObj [])
+    call agent (config.setObjVal! "task" ((arguments.getObjVal? "task").toOption.getD .null))
+  scope := .empty }
+
+/-- A sub-agent that is the agent `name`, with the configuration `config`. -/
 def tool (name : String) (config : Json) : Tool :=
-  { definition, instruction? := some instruction, routine := name, settings := without config "task" }
+  { definition, instruction? := some instruction
+    settings := .mkObj [("agent", name), ("configuration", without config "task")] }
 
 end Subagent
 

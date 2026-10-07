@@ -298,10 +298,11 @@ def containerSuite : Suite := Testing.suite "agents/mini-vero.container" #[
     assertEqual "the agent's outcome" (Scripted.agentStatus log) "Submitted"
     assertEqual "the calls: the session, the agent, MiniVero itself in its frame, its bash in the sub-agent's"
       (log.filterMap fun | .opened frame opened => some (frame, opened.name) | _ => none)
-      #[(⟪"session"⟫, "session"), (⟪"session", "agent"⟫, "agent"), (⟪"session", "agent", "mini-vero"⟫, "mini-vero"),
-        (⟪"session", "agent", "mini-vero", "bash"⟫, "bash")]
+      #[(⟪"session"⟫, "session"), (⟪"session", "agent"⟫, "agent"), (⟪"session", "agent", "subagent"⟫, "subagent"),
+        (⟪"session", "agent", "subagent", "mini-vero"⟫, "mini-vero"),
+        (⟪"session", "agent", "subagent", "mini-vero", "bash"⟫, "bash")]
     check (log.any fun
-        | .opened ⟪"session", "agent", "mini-vero"⟫ { name := "mini-vero", arguments := delegated, environment? := none } =>
+        | .opened ⟪"session", "agent", "subagent", "mini-vero"⟫ { name := "mini-vero", arguments := delegated, environment? := none } =>
           Scripted.taskOf delegated == some "write b.txt"
         | _ => false)
       "the sub-agent's call is the agent's configuration, with the model's task, and no environment"

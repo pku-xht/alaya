@@ -215,10 +215,11 @@ def computation (config : Config) (model : Models.Spec) (task : String) : Comput
   let uname ← Tools.Uname.read
   iter (round config model) { items := (openingMessages config task uname).map .told }
 
-/-- MiniVero as a routine. Its scope is its tools, and itself, which `subagent` calls with its
-configuration and another task. -/
+/-- MiniVero as a routine. Its scope is its tools' routines, and itself: the `subagent` routine,
+given this same scope, finds MiniVero there and calls it with its configuration and another
+task. -/
 def routine : Routine Agent :=
   let make := Basic.agent "mini-vero" fields {} (·.toCommon) computation
-  make (Scope.fix fun scope => Tools.routines.push (make scope))
+  make (Scope.fix fun scope => Tools.routines ++ #[make scope, { Tools.Subagent.routine with scope }])
 
 end Alaya.Agents.MiniVero

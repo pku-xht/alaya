@@ -500,7 +500,8 @@ its scope as a closure carries its environment. In Alaya's own agents:
 | --- | --- |
 | `basic` | `bash`, `ask_user` |
 | `mini-swe` | `bash` |
-| `mini-vero` | `bash`, `ask_user`, `time_budget`, and `mini-vero` itself |
+| `mini-vero` | `bash`, `ask_user`, `time_budget`, `subagent`, and `mini-vero` itself |
+| `subagent`, within `mini-vero` | the same as `mini-vero`'s |
 | `bash`, `ask_user`, `time_budget` | none |
 | `grader` | none |
 

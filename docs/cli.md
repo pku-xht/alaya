@@ -304,7 +304,7 @@ Ends the call running at an entry: the program the session runs, or the call ope
 
 ```sh
 alaya stop 4f2c8b --reason 'wrong approach'
-alaya stop 4f2c8b --frame session/mini-vero/mini-vero --reason 'the sub-agent is stuck'
+alaya stop 4f2c8b --frame session/mini-vero/subagent --reason 'the sub-agent is stuck'
 ```
 
 ![stop: a stop is appended, and the call is over](figures/cli/stop.svg)

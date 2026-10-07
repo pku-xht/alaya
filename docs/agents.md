@@ -18,32 +18,32 @@ port of mini-SWE-agent.
 
 ## 1. Tools
 
-A **tool** is data: what a model needs to call it, the routine a call of it calls, and the
-settings the agent adds to every call.
+A **tool** is data: what a model needs to call it, and the settings the agent adds to every call.
+A call of it calls the routine of its name.
 
 ```lean
 structure Tool where
   definition   : Chat.ToolDefinition              -- its name, description and schema, for a model
   alone        : Bool := false                    -- must be the only call of its turn
   instruction? : Option String := none            -- appended to the prompt
-  routine      : String := definition.name        -- the routine a call of it calls
   settings     : Json := .mkObj []                -- merged over the model's arguments; they win
 
 Tools.make     : Array Tool → Chat.ToolCall → Computation Agent (Except String Json)
 Tools.routines : Array (Routine Agent)            -- bash, ask_user, time_budget
+Tools.Subagent.routine : Routine Agent            -- given its agent's scope by the agent
 ```
 
 A tool is made from what the agent's configuration says of it, and that is its settings: `bash`
-holds how a command runs, and `ask_user` the kinds of question allowed. `subagent` calls the agent
-itself, its routine the agent's name and its settings the agent's configuration but its task,
-which the model's fills. The routines are fixed, so all of it is in the call's arguments, in the
-log.
+holds how a command runs, `ask_user` the kinds of question allowed, and `subagent` the agent to
+call and its configuration but its task, which the model's fills. The routines are fixed, so all
+of it is in the call's arguments, in the log. The `subagent` routine finds the agent by name in
+its own scope, so an agent that offers it gives it a scope with itself in it: MiniVero's.
 
 ### 1.1 Who checks what
 
 **Only the routine checks a call's arguments.** Routines and agents talk in JSON. The agent makes
 each call with `Tools.make`, which merges the tool's settings over the model's arguments and calls
-the tool's routine; it checks nothing of the arguments. The routine reads the JSON it is given,
+the routine of the tool's name; it checks nothing of the arguments. The routine reads the JSON it is given,
 whoever made the call: an agent for its model, the log, or another program. It refuses what it
 cannot read, failing its frame, and otherwise returns its result as JSON. The agent answers the
 call with that: the result, shown its own way, or why the routine failed. The schema is what the
@@ -104,7 +104,7 @@ rejects a malformed response as a whole (§6.3).
 | `time_budget` | none | `time_budget`: `time` | `seconds_left`, or that the run has no limit |
 | `ask_user` | `question_type`, `question`, `options`: a question that can be asked, of a kind the agent allows (§2) | `ask_user`: `ask` the question; settings: `question_types`, the kinds allowed | the reply |
 | `submit` | `message`, a string; any other submits nothing | none: the agent that offers it ends with the message; called alone | |
-| `subagent` | `task`, a string that is not blank, which the sub-agent checks | the agent itself, `mini-vero`; settings: its configuration but its task | the sub-agent's outcome: `status`, `submission`, `reason` |
+| `subagent` | `task`, a string that is not blank, which the sub-agent checks | `subagent`: calls the agent, `mini-vero`; settings: `agent` and its `configuration` but its task | the sub-agent's outcome: `status`, `submission`, `reason` |
 
 A tool is independent of the agent that offers it. The agent chooses which tools to offer, how
 to report a malformed call, and how to show a result to its model. Basic offers `bash`,

@@ -16,11 +16,14 @@ def suite : Suite := Testing.suite "agents/routines" #[
     let reach (routine : Routine Agent) := names.filter fun name => (routine.scope.find name).isSome
     assertEqual "inside the basic agent" (reach Basic.routine) #["bash", "ask_user"]
     assertEqual "inside MiniSwe" (reach MiniSwe.routine) #["bash"]
-    assertEqual "inside MiniVero" (reach MiniVero.routine) #["bash", "ask_user", "time_budget", "mini-vero"]
+    assertEqual "inside MiniVero" (reach MiniVero.routine) #["bash", "ask_user", "time_budget", "subagent", "mini-vero"]
     assertEqual "inside the grader" (reach Grader.routine) #[]
-    -- MiniVero in its own scope has that same scope: what lets a sub-agent call it in turn.
+    -- MiniVero in its own scope has that same scope, and so has the subagent routine there:
+    -- what lets a sub-agent find MiniVero, and call it in turn.
     check ((MiniVero.routine.scope.find "mini-vero").any fun inner => (inner.scope.find "bash").isSome)
-      "MiniVero in its own scope has the same scope",
+      "MiniVero in its own scope has the same scope"
+    check ((MiniVero.routine.scope.find "subagent").any fun sub => (sub.scope.find "mini-vero").isSome)
+      "the subagent routine finds MiniVero in its scope",
 
   test "a call an agent cannot run on fails in its frame, in the configuration's terms" do
     let failure (routine : Routine Agent) (arguments : Json) : Option String :=
@@ -62,9 +65,9 @@ def suite : Suite := Testing.suite "agents/routines" #[
     assertEqual "the agent's executor, not the model's"
       ((made.getObjVal? "executor" >>= (·.getObjVal? "timeout_seconds") >>= Json.getNat?).toOption) (some 7)
     let sub := Tools.Subagent.tool "mini-vero" (.mkObj [("task", "the parent's"), ("mode", "proof")])
-    assertEqual "a sub-agent: the agent's configuration, the model's task"
-      (sub.routine, (sub.arguments (.mkObj [("task", "write b.txt")])).compress)
-      ("mini-vero", "{\"mode\":\"proof\",\"task\":\"write b.txt\"}")
+    assertEqual "a sub-agent: the agent, its configuration but its task, and the model's task"
+      (sub.arguments (.mkObj [("task", "write b.txt")])).compress
+      "{\"agent\":\"mini-vero\",\"configuration\":{\"mode\":\"proof\"},\"task\":\"write b.txt\"}"
 ]
 
 end AgentRoutinesTests
