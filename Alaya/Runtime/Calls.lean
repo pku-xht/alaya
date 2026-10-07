@@ -3,7 +3,7 @@ import Alaya.Runtime.Agent
 /-! What a log says of its calls: their arguments, where their commands run, and how they ended.
 A call's configuration is the arguments of its opening, so every later command builds the same
 program from the log alone; its commands run in the container of the environment the nearest
-call on its path names. See `docs/agent-api.md` §9. -/
+call on its path names. See `docs/runtime.md` §1. -/
 
 namespace Alaya.Runtime
 

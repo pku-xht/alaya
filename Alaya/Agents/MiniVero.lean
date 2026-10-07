@@ -80,7 +80,7 @@ def antiCheating : String := quoted (include_str "MiniVero/anti-cheating.md")
 
 /-- Vero's `Checkpointing` section, adapted: its chunk of a known number of minutes is a time
 budget the `time_budget` tool reports, and it names that tool where Vero says `date`. Unlike
-the files above, not Vero's to the byte (`docs/minivero.md` lists the changes). -/
+the files above, not Vero's to the byte (`docs/agents.md` §5 lists the changes). -/
 def checkpointing : String := quoted (include_str "MiniVero/checkpointing.md")
 
 def grading : Mode -> String

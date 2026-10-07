@@ -1,6 +1,6 @@
 # Log schema
 
-A run of Alaya is a log of events (`docs/agent-api.md` §2). This page is how logs are kept: the
+A run of Alaya is a log of events (`docs/language.md` §2). This page is how logs are kept: the
 **entry**, the stored form of each event, how logs share entries and **fork**, how a run is
 **graded**, and what the data directory holds.
 
@@ -60,7 +60,7 @@ The format carries no version: a data directory is read by the Alaya that wrote 
 
 ## 2. Events
 
-What each event means is `docs/agent-api.md` §2 and §3. This is how each is stored: an object
+What each event means is `docs/language.md` §2 and §3. This is how each is stored: an object
 with its kind under `type`, and its frame, where it has one, as an array of steps, outermost
 first: each the name of the routine called, with `#N` after it for the call of that name its
 caller made after N others (`["session", "mini-swe", "bash#1"]`).
@@ -182,12 +182,12 @@ that already goes on is a fork; appending at the end of a log lets the next `res
 | `comment` | a `commented` event |
 
 `rm ENTRY` deletes an entry and everything after it. What each command takes and refuses is
-`docs/cli.md`; the rules themselves are `docs/agent-api.md` §10.
+`docs/cli.md`; the rules themselves are `docs/runtime.md` §2.
 
 **A fork shares all it can.** Driving again from an entry repeats the marks and commands up to
 the next sample. A mark the earlier continuation made too is the same event after the same
 entry, so it is the same entry: the fork departs only where its events differ. Which draw the
-new sample takes is `docs/agent-api.md` §10.
+new sample takes is `docs/runtime.md` §2.
 
 ## 4. Grading
 

@@ -7,7 +7,7 @@ import Alaya.LLM.Chat.Stored
 /-! What a computation of Alaya may ask the world for: its signature, `Agent`. A model samples, a
 command runs in the workspace, in the container of the call it is made in, and the clock tells
 the run's time. Each has its type of answer, and the log keeps every operation by a key and every
-answer as JSON (`docs/log-schema.md`). See `docs/agent-api.md`. -/
+answer as JSON (`docs/log-schema.md`). See `docs/language.md`. -/
 
 namespace Alaya.Runtime
 

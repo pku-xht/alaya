@@ -1,4 +1,4 @@
-# Agent API
+# The language
 
 Agent runs must survive crashes and remain available for analysis, so Alaya separates deciding
 from acting, in three parts. The **computation** is a value that says what to ask the world for
@@ -35,13 +35,10 @@ flowchart LR
 | 3 | what each construct of a computation writes in the log | `Alaya.Core.Replay`, `Alaya.Runtime.Agent` |
 | 4 | **replay**: from the log back to the computation | `Alaya.Core.Replay` |
 | 5 | **routines** and **scopes**: how a computation is structured | `Alaya.Core.Computation` |
-| 6 | **tools**: routines a model can call | `Alaya.Agents.Tools` |
-| 7 | `ask_user`: a model asks a person | `Alaya.Agents.Tools` |
-| 8 | an **agent**: a program and its routines | `Alaya.Agents.*` |
-| 9 | a **run**: a workspace, and the programs called on it | `Alaya.Runtime.Calls` |
-| 10 | **driving** a run: the driver's own API, and the data directory | `Alaya.Runtime.Driver`, `Alaya.Runtime.Commands` |
 
-`docs/log-schema.md` specifies how a log is stored; `docs/cli.md` is the command line.
+How a run is driven, and the data directory, are `docs/runtime.md`; the tools and the agents built in
+this language, `docs/agents.md`. `docs/log-schema.md` specifies how a log is stored; `docs/cli.md`
+is the command line.
 
 ## 1. A computation
 
@@ -151,7 +148,7 @@ inductive Notice where
 
 A **frame** says which call of a routine (`call name arguments`, §3.3) an event happened in. It
 lists, from the outermost call inward, each call by the routine's name and by how many calls of
-that name its caller made before it. The run is itself a call, made from outside (§9): `session`
+that name its caller made before it. The run is itself a call, made from outside (`docs/runtime.md` §1): `session`
 is the run, `session/mini-swe` the agent it calls, and `session/mini-swe/bash#2` the agent's
 third call of `bash`. `#[]` is the outside, where nothing of the run runs; it is written `-`.
 
@@ -175,7 +172,7 @@ Every log begins the same way. Position 0 is the **root**, `arrived (changed …
 **workspace**, the filesystem directory the agent works in, as the run starts. Position 1 is the
 call of the run, a notice; position 2 the outside's read of it, and position 3 the opening of the
 run's call, `session`. A person's call of the agent follows, with the session's read of it and the
-opening of the agent's call (§9).
+opening of the agent's call (`docs/runtime.md` §1).
 
 ## 3. What each construct writes
 
@@ -336,7 +333,7 @@ appended where a call is open in `frame`; `alaya stop` appends one.
    marks.
 2. Nothing inside the call can catch it.
 3. Its caller goes on with `reason` as the call's failure, and may catch it. The session goes on
-   to wait for its next call (§9); a break of the run's own call ends the run.
+   to wait for its next call (`docs/runtime.md` §1); a break of the run's own call ends the run.
 
 ![A break ends the call open in its frame, and the session waits for the next](figures/agent-api/stop.svg)
 
@@ -380,7 +377,7 @@ There are three kinds of question and six kinds of reply:
 | `open_ended` | `text`, not blank, kept verbatim |
 | any | `unavailable`: the person cannot answer |
 
-Any computation may ask: a tool a model calls (§7), or a step of a workflow that wants a person's
+Any computation may ask: a tool a model calls (`docs/agents.md` §2), or a step of a workflow that wants a person's
 word before it goes on.
 
 ```lean
@@ -460,7 +457,7 @@ A **routine** is a computation from its arguments to its result, both JSON, unde
 a scope: the routines it can call. It is the one way to structure an agent: a tool, a step
 of a workflow, a sub-agent and the agent itself are routines, and each runs in a frame of its
 own (§3.3). A **scope** is a set of routines, by name. The run itself is a call of a routine,
-made from outside (§9).
+made from outside (`docs/runtime.md` §1).
 
 ```lean
 structure Routine σ where
@@ -487,7 +484,7 @@ Routine.Typed.within : Routine.Typed σ α β → Scope σ → Routine σ
    result.
 2. **Give it its scope** with `within`. Routines defined together take theirs from `Scope.fix`.
 3. **Call it** with `r.call argument`, from a routine of that scope. A routine a model names is
-   called by that name: `call name arguments` (§6).
+   called by that name: `call name arguments` (`docs/agents.md` §1).
 
 **How a call finds its routine.** Every frame runs the body of one routine: the run's own frame
 runs the run's routine, and every other frame runs the routine whose call opened it. When a body
@@ -635,294 +632,6 @@ its opening to its return.*
 
 Every sample names its model; an agent takes it from its configuration. A helper that is not a
 routine, such as `planRound`, runs in its caller's frame and leaves no call in the log.
-
-## 6. Tools
-
-A **tool** is what a model needs to call it, and the routine call its arguments make:
-
-```lean
-structure Tool where
-  definition   : Chat.ToolDefinition              -- its name, description and schema, for a model
-  alone        : Bool := false                    -- must be the only call of its turn
-  instruction? : Option String := none            -- appended to the prompt
-  check        : Json → Except String Unit        -- what is wrong with a call's arguments
-  call         : Json → RoutineCall               -- the call the model's arguments make
-
-Tools.routines : Array (Routine Agent)            -- bash, ask_user, time_budget
-```
-
-A tool is parameterized by what the agent's configuration says of it, as `ask_user` is by the
-kinds of question: `bash` by how a command runs, which its call adds to the model's arguments;
-`subagent` by the agent itself, its name and its configuration, which its call names with the
-model's task. The routines are fixed, so all of it is in the call's arguments, in the log.
-
-A model's tool call becomes a call of a routine in four steps:
-
-1. The agent samples a request that offers the tools' `definition`s.
-2. The response names tools and gives arguments. The agent checks each call with the tool's
-   `check`; a call that is wrong is answered with a format error and is not made.
-3. The agent makes each tool's call of the model's arguments, `tool.call asked.arguments`. The
-   routine runs in a frame of its own.
-4. The agent puts each result in the next request, as a tool message. A tool that failed gives
-   its error as its result.
-
-![A response that asks for two tools, and the two calls it becomes](figures/agent-api/tool-call.svg)
-
-| Tool | Arguments | Its call | Result |
-| --- | --- | --- | --- |
-| `bash` | `command` | `bash`: `exec command`, with the executor settings the agent adds | `output`, `exit_code`, `error`, `file` |
-| `time_budget` | none | `time_budget`: `time` | `seconds_left`, or that the run has no limit |
-| `ask_user` | `question_type`, `question`, `options` | `ask_user`: `ask` the question (§7) | the reply |
-| `submit` | `message` | none: the agent that offers it ends with the message | |
-| `subagent` | `task` | the agent itself, `mini-swe` or `mini-vero`, with its configuration and the model's task | the sub-agent's outcome |
-
-`Agents.Tools.all` lists the tools an agent's configuration can name. A tool is independent of
-the agent that offers it: the agent chooses which tools to offer, how to report a malformed
-call, and how to show a result to its model.
-
-## 7. `ask_user`: a model asks a person
-
-`ask_user` lets a model ask a person a question, through `ask` (§3.8). Questions and replies are
-defined by the core; the tool only adapts them to a model:
-
-| | The core: a question | The tool: `ask_user` |
-| --- | --- | --- |
-| owns | the three kinds, the replies that fit each, the wait, the checks on a reply | its name, its schema, its instruction, the rule that it is called alone |
-| decides | whether a reply answers a question | which kinds of question the model may ask |
-| translates | nothing | a call's arguments into a question, and a reply into what the model is shown |
-
-1. **The kinds are chosen in advance.** The agent's `question_types` names the kinds of
-   question the model may ask. There is no default: offering `ask_user` without it is an error.
-
-   ```sh
-   --set 'tools=["bash","submit","ask_user"]' --set 'question_types=["yes_no","single_choice"]'
-   ```
-
-2. **The model is offered exactly those.** The tool's schema, description and instruction name
-   only the kinds allowed, and `options` is there only when a choice is among them.
-3. **The model asks.** It calls `ask_user`, alone in its turn:
-
-   ```json
-   {"question_type": "single_choice",
-    "question": "Should the function keep duplicate elements? The prose does not say.",
-    "options": ["Keep them, in order.", "Drop them."]}
-   ```
-
-4. **The call is checked.** A kind that is not allowed, a blank question, options on a question
-   that is not a choice, or a candidate that says "none of the above" is a format error, and
-   nothing is asked.
-5. **The tool asks.** Its routine reads the question from the arguments and performs `ask`: the
-   question is marked in the log, and the run waits (§3.8).
-6. **A person replies**, with `alaya reply` (`docs/cli.md`).
-7. **The model is told.** The call returns the reply as the tool encodes it:
-
-   | Reply | The call returns |
-   | --- | --- |
-   | `yes`, `no` | `"yes"`, `"no"` |
-   | `choice n` | the number `n` |
-   | `noneOfAbove` | `"none_of_above"` |
-   | `text` | the text |
-   | `unavailable` | `{"status": "unavailable"}` |
-
-![A question: the tool asks, the run waits, a person replies, the call returns](figures/agent-api/ask-user.svg)
-
-The reply is taken by the frame that asked and by no other read: the agent's own `inbox` leaves
-it.
-
-## 8. An agent
-
-An agent is a program a run calls: a routine of the catalog, whose scope is its tools and
-itself. It is given its task with its configuration, and its usual shape is a loop over a
-conversation that opens with it:
-
-```lean
-def converse (config : Config) (opening : Array Chat.Message) : Computation Agent Json :=
-  iter (round config) { items := opening.map .told }             -- go round until it ends
-```
-
-*One round of MiniSwe's loop (`Agents.MiniSwe.round`, `docs/miniswe.md`).*
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
-flowchart TD
-  classDef sample stroke:#3567a0
-  classDef exec stroke:#2b6f6f
-  classDef notice stroke:#7556a3
-  classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
-  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
-  classDef wait fill:#fbe9cf,stroke:#a8690f,color:#7a4a08
-
-  listen("listen: read the inbox"):::notice --> fits("request fits the context?")
-  fits -- "no" --> context("return ContextExceeded"):::wait
-  fits -- "yes" --> sample("sample request"):::sample
-  sample -- "refused as too long" --> context
-  sample -- "a response" --> parsed("read its tool calls")
-  parsed -- "malformed" --> format("tell the model the format error")
-  format -- "too many in a row" --> repeated("return RepeatedFormatError"):::bad
-  format -- "otherwise" --> again("next round, with the new state")
-  parsed -- "calls" --> each("each call, in order")
-  each -- "submit" --> submitted("return Submitted"):::ok
-  each -- "any other" --> tool("call name arguments<br/>its failure is given to the model as its result"):::exec
-  tool --> again
-  linkStyle default stroke-width:1px
-```
-
-The state of the loop is the conversation so far: what the model was told, each turn with the
-results of its calls, and each malformed response. Each round builds its request from this
-state. The agent ends by returning its outcome, a status and a submission, as the value of its
-frame.
-
-An **agent** is a routine its module defines: `MiniSwe.routine`, `MiniVero.routine`, and
-`Grader.routine` for the grader. A call's arguments are its configuration, its model and task
-among it, as a tool's are its arguments and the agent's settings. One it cannot run on fails in
-the call's frame, saying why in the configuration's terms. An agent reads where it runs with
-`uname -sm`. Its scope is fixed where it is defined: its tools, and itself, which `subagent`
-calls with its configuration and another task.
-
-A **program** is an agent as the catalog (`Alaya.App.Catalog`) lists it, which a person calls by
-name (`docs/log-schema.md` §4). The command line reads a configuration before any call is made:
-to print its defaults, apply `--set`, and check a call. A call fits its program when the
-program's routine does not fail at once on its configuration, and the command line adds how to
-give a field the configuration leaves empty.
-
-```lean
-MiniSwe.routine : Routine Agent                              -- likewise MiniVero, Grader
-
-structure Definition where                                   -- a program
-  routine  : Routine Agent                                   -- what a call of it runs
-  complete : Json → Except String Json                       -- its configuration, every field filled
-
-Catalog.check : RoutineCall → Except String Unit             -- whether a call fits its program
-```
-
-## 9. A run
-
-A run is a workspace and a call made from outside, of a routine of the scope the run is
-replayed in. Outside, in `#[]`, the run waits for its call, takes it, and makes it in a frame of
-its own; the run is over when that call is. The core knows nothing more of it.
-
-The command line starts every run as a call of `session`, a routine of the app
-(`Alaya.App.Session`). It is a loop: it waits for a call, calls the program the call names in a
-frame of its own, and waits again. Its scope is the catalog. What a person may do at a point of
-a run — call a program, say something, stop a call — is the session's to say: the runtime takes
-anything the log can take.
-
-```lean
-Session.of    : Scope Agent → Routine Agent        -- wait for a call, make it, wait again
-Session.scope : Scope Agent                        -- what a run's call may name: the session, a program
-
-structure Environment where                         -- where a call's commands run, as the driver
-  image   : String                                  --   reads a call's environment?, which the
-  workdir : String                                  --   core holds as data
-
-RoutineCall.event : RoutineCall → Event Agent      -- a person's call: arrived (called call)
-environmentOf : Log Agent → Frame → Result (Frame × Environment)  -- where a frame's commands run
-lastCall?      : Log Agent → Option (RoutineCall × Option CallEnd)   -- the run's last call, and how it ended
-```
-
-1. **The root.** A person provides the workspace: `arrived (changed …)`, at position 0.
-2. **The run's call.** `alaya new` appends the call of `session`; the outside reads it, `heard -
-   [1]`, and opens it, `opened session`. The session waits for a call.
-3. **A person calls a program**: `alaya call` appends `arrived (called call)`, a call like any
-   other: the program's name, its configuration as its arguments, and the environment its
-   commands run in, which a person's call always names.
-4. **The session reads it, and opens the call** as it is: `heard session [4]`, then `opened
-   session/mini-swe call`, so every later command builds the same program from the log alone.
-5. **The call runs**, in frame `session/mini-swe`, until it returns, fails, or is broken. It calls
-   the routines of the program's scope, and its commands run in a container of the image its call
-   named. A call inside it that names no environment, a sub-agent's or a tool's, runs in the
-   same container; one that names its own runs in a container of that image.
-6. **The session waits for the next call.** A grader is called the same way, in frame
-   `session/grader`, and its value is its verdict.
-
-![A whole run: the agent, then a grader, each in a frame of its own](figures/agent-api/run.svg)
-
-## 10. Driving a run
-
-The driver is the one part that touches the world. Lean code that uses Alaya as a library drives
-a run with two functions:
-
-```lean
-drive  : Runtime → Scope Agent → (tip : Hash) → Limits → OnEntry → Result (Hash × Stop)
-append : Store → Scope Agent → (tip : Hash) → Event Agent → Result (Hash × Entry)
-settle : Store → Scope Agent → (tip : Hash) → Result (Array (Hash × Entry))   -- the marks, with no world
-
-structure Runtime where          -- what a run is driven with
-  store ; workspaces ; workDir ; outputsDir
-  executor : Environment → Result Executor   -- a container of a call's image, for its commands
-  model : Models.Spec → Result Model         -- a call's model; fails when no provider was named
-
-structure Limits where           -- what one invocation allows; nothing of it is recorded
-  samples? : Option Nat          -- responses this invocation may sample
-  budgetMs? : Option Nat         -- the run's time, summed along its log, after which nothing starts
-
-inductive Stop where             -- why the driver stopped
-  | ended (result : Except String Json)                  -- the run's call is over
-  | waits (frame : Frame) (question? : Option Question)  -- a read waits for a notice
-  | paused (reason : String)                             -- a limit was reached
-```
-
-A point of a run is an **entry**: one event and the entry before it, named by a hash
-(`docs/log-schema.md`). The log of an entry is the path to it from its root.
-
-`drive` goes on from the entry `tip`:
-
-1. It reads the log that ends at `tip`, and replays it.
-2. It asks what the run does next, and does it (the diagram of §4): it carries out an
-   operation and appends the answer, or appends a mark, after the comments the computation made
-   since its last event. Each event is a new entry after the last, and `OnEntry` is called with
-   it.
-3. It stops when the run is over, when a read waits for a notice, or at a limit. It gives the
-   last entry, and why it stopped. The session waiting for a call is a wait like any other.
-
-`settle` appends the marks alone, with no world: a run whose call was just appended is at its
-first wait, so a person's next call finds it waiting.
-
-`append` is how something from outside enters a log: a notice, or a break, after `tip`. It
-replays the log first, and refuses what the log cannot take:
-
-| Event | Taken only |
-| --- | --- |
-| a break | where a call is open in its frame |
-| a notice | while the run is not over |
-
-What a person may append beyond that is the front end's to say. The command line takes a message,
-a change or a reply only while a call of the session runs, and a call only where the session
-waits for one (`Session.admitsNotice`, `Session.admitsCall`).
-
-Appending at an entry that already goes on is a fork: the entry has two continuations, and
-each is a log.
-
-- **Draws.** A sample from an entry that has `n` sampled continuations takes draw `n` of its
-  request. So the first sample from an entry takes draw 0, which is the response the cache
-  kept if the run crashed after its model answered; and driving a point again takes a new draw.
-- **Time.** Each entry records how long its event took, and a run's time is the sum along its
-  log. A response counts for the time its draw took, also when the cache gives it.
-- **Limits** are checked before an operation and before a read of the inbox, so a paused run
-  stops where a message a person appends is heard at once. A read that takes calls alone is not
-  held: it starts no work of its own. A limit writes nothing, and holds every call, a grader's
-  too.
-- **Failures.** A failure that is not an answer (§3.4) stops `drive` with an error, and nothing is
-  logged for the operation; the next `drive` asks for it again. So a command happens at least
-  once: what it does beyond the workspace may happen twice.
-
-### 10.1 The data directory
-
-A data directory holds a forest of runs, their workspaces, and the model cache
-(`docs/log-schema.md` §5). `Alaya.Runtime.Data` and `Alaya.Runtime.Commands` give every command
-of `alaya` as a function over it. Each returns a typed value, and a front end only parses and
-prints. Each takes the scope the run's call is made in, so the runtime knows no catalog of
-programs, and a front end says with `admit` what a person may append beyond what the log takes.
-
-```lean
-Data.with   : FilePath → (Data → Result α) → (write create : Bool) → Result α   -- holds the lock to write
-Data.create : FilePath → Source → Scope Agent → RoutineCall → Result (Array Appended)  -- a new run
-Data.call / tell / stop / commit / reply / comment : … → Result Appended         -- what a person appends
-Data.withRuntime : Data → RunOptions → Option Provider → … → (Runtime → Result α) → Result α
-Data.resume : Data → Routine Agent → String → Runtime → Limits → … → Result (Hash × Stop × Log Agent)
-Data.rebase : Data → Array Entry → Rebased Agent → (target : FilePath) → String → Result (Array Appended)
-Data.visitsAt / visitAt / waiting / changes                                     -- what a run did
-```
 
 ## References
 

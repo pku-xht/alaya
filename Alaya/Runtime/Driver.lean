@@ -10,7 +10,7 @@ appends the answer, or appends the mark it makes, an entry at a time, until the 
 waits for a notice, or this invocation reaches a limit. Each call's commands run in a
 container of the call's own image, and each sample is drawn from the model it names.
 "Execution is an external operation rather than a constant within type theory" (Hancock and
-Setzer 2000): this is the one loop that need not end. See `docs/agent-api.md` §10.
+Setzer 2000): this is the one loop that need not end. See `docs/runtime.md` §2.
 
 Resuming after a crash is no different from going on: the operation that was being carried out
 when the driver stopped is asked for again. A command runs on the version of the workspace the
