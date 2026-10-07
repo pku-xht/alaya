@@ -11,6 +11,8 @@ Before sampling, verify the CLI's real ask/reply/resume lifecycle with a determi
 
 Audit each new event-log root and first request: pristine workspace, no prior model samples or injected messages, intended first system message, correct tools/model, fresh data/cache directory. Keep model-output capacity, response limit and cumulative time budget fixed. Preserve invalid or interrupted attempts as such; cached responses are not fresh replicates.
 
+In the current CLI, `--samples 0` means unlimited, not zero sampling. Prepare with `new` and `call` only. Audit the actual first request from its recorded sample. Questions independently initiated under explicit initial help guidance are prompted model-generated questions; do not call them unprompted spontaneous behavior.
+
 Answer natural questions within their original trajectory using the runner. Record who authored the answer, what public context it used, validation limits, and separate answer-production time. Do not replace proxy advice with trusted solutions. No recruitment or messaging is authorized.
 
 Grade only after ending the agent. Inspect visible actions, exact questions, advice adoption, remaining proof goals, and stopping decisions. Report framework stops and length truncation separately from voluntary submission. Prepare future participant materials only from reviewed public question context; pilot answers remain proxies.
