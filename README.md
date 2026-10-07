@@ -2,8 +2,7 @@
 
 Alaya is a framework for studying LLM agents on realistic benchmarks. It represents an agent as an
 effectful program and runs it by durable execution: replay against an append-only log of events.
-
-## Features
+This gives Alaya the following features:
 
 - **Durable runs.** A run is complete data, which can be analysed without running it again. A run
   that crashed or was interrupted resumes from its log, and every model draw is cached, so
