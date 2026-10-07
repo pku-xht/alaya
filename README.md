@@ -1,36 +1,18 @@
 # Alaya: LLM Agents as Effectful Programs with Durable Execution
 
-Alaya is an agentic framework built on three principles:
-
-**Agents as durable effectful programs.** Agent runs are hard to study and reproduce. Alaya
-represents an agent as an effectful program in free-monad form and runs it by durable execution:
-replay against an append-only log of events. A run is therefore complete data, which can be
-analysed without re-execution. The logs form a forest, so the impact of an
-intervention, such as changing a message, a file or the agent's workflow, is studied by forking a
-run at the point of the change.
-
-**Agent-native operation.** Experiments with agents produce more data than a person can process
-by hand, and research itself is increasingly automated by AI. Alaya is designed to be operated
-entirely by an external agent, such as Claude Code or Codex, through a strict, self-describing
-command line. An external agent can therefore carry out research on its own, from proposing
-ideas to evaluating them in experiments.
-
-**Reliable runs on realistic benchmarks.** Runs on realistic benchmarks are long and expensive,
-need non-trivial environments, and are graded in ways that differ from benchmark to benchmark.
-Alaya continues an interrupted run from its log, runs every command in an isolated container of
-the benchmark's image, and grades any point of any run through one interface, with an adapter for
-each benchmark. Alaya includes MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for
-the Vero benchmark of verified Lean code.
+Alaya is a framework for studying LLM agents on realistic benchmarks. It represents an agent as an
+effectful program and runs it by durable execution: replay against an append-only log of events.
 
 ## Features
 
-- **Durable runs.** A run that crashed or was interrupted resumes from its log. Every model draw
-  is cached, so resuming sends no request twice.
-- **A complete view of runs.** The whole forest is written as one HTML page: every branch, every
-  step of the agent's workflow, each request as it was sent, each response with its reasoning, and
-  how each command changed the files.
-- **Forks.** Any entry of any run can be continued differently, and the original stays as it was.
-  The logs of a data directory form a forest that shares their common entries.
+- **Durable runs.** A run is complete data, which can be analysed without running it again. A run
+  that crashed or was interrupted resumes from its log, and every model draw is cached, so
+  resuming sends no request twice.
+- **A complete view of runs.** All runs and their forks are written as one HTML page: every
+  branch, every step of the agent's workflow, each request as it was sent, each response with its
+  reasoning, and how each command changed the files.
+- **Forks.** Any point of any run can be continued differently, and the original stays as it was,
+  so the impact of an intervention is studied by forking a run at the point of the change.
 - **Interventions at any point.** A person can send the agent a message, change its files, answer
   its question, or stop it, or any step of its workflow.
 - **Grading at any point.** Any intermediate state of a run can be graded, through one interface
@@ -42,11 +24,12 @@ the Vero benchmark of verified Lean code.
   point of a run can be listed, read, compared or checked out.
 - **Provider-independent runs.** A run records the model it used, not who served it. Another
   provider may resume it only if it sends the model the same requests, and is refused otherwise.
-- **Agents.** MiniSwe and MiniVero are included, with the tools `bash`, `submit`, `ask_user`,
-  `time_budget` and `subagent`. An agent is a Lean program, built from routines with lexical
-  scopes, and its log shows every call it made.
-- **Operated by agents.** An external agent, such as Claude Code, can operate Alaya entirely on
-  its own: create and drive runs, intervene, grade, and read the results.
+- **Agents.** An agent is a Lean program, built from routines with lexical scopes. Alaya includes
+  MiniSwe, a port of mini-SWE-agent for SWE-bench, and MiniVero, for the Vero benchmark of
+  verified Lean code.
+- **Operated by agents.** An external agent, such as Claude Code or Codex, can operate Alaya
+  entirely on its own, so research can be automated, from proposing ideas to evaluating them in
+  experiments.
 
 ## Getting started
 
