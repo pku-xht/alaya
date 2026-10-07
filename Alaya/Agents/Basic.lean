@@ -78,7 +78,9 @@ def agent (name : String) (fields : Fields σ) (defaults : σ) (base : σ → Co
     match fields.read arguments defaults with
     | .error problem => .fail s!"{name}: {problem}"
     | .ok config => match (base config).model?, (base config).task? with
-      | some model, some task => computation config model task
+      | some model, some task =>
+        if task.trimAscii.isEmpty then .fail s!"{name}: its task is blank"
+        else computation config model task
       | none, _ => .fail s!"{name}: it samples a model, and its configuration names none"
       | _, none => .fail s!"{name}: it works on a task, and its configuration names none"
   scope

@@ -104,9 +104,9 @@ def parseSuite : Suite := suite "agents/mini-swe.parse" #[
     assertContains "no call" (formatErrorOf { content? := some "just prose", finishReason? := some "stop" }) "No tool calls found"
     assertContains "a tool mini does not have" (formatErrorOf (responseWith #[submitCall "s" "done"])) "Unknown tool 'submit'."
     assertContains "no command" (formatErrorOf (responseWith #[{ id := "c", name := "bash", arguments := .mkObj [] }]))
-      "missing required property `command`"
+      "The bash tool takes its command as a string."
     assertContains "a command that is no string"
-      (formatErrorOf (responseWith #[{ id := "c", name := "bash", arguments := .mkObj [("command", (42 : Json))] }])) "command: expected a string"
+      (formatErrorOf (responseWith #[{ id := "c", name := "bash", arguments := .mkObj [("command", (42 : Json))] }])) "The bash tool takes its command as a string."
     let bad : Chat.ToolCall := { id := "c", name := "bash", arguments := .null, invalidArguments? := some "{\"command\": \"ls" }
     assertContains "arguments that are no JSON" (formatErrorOf (responseWith #[bad])) "Error parsing tool call arguments: "
     assertContains "cut off by the provider" (formatErrorOf { toolCalls := #[bad], finishReason? := some "length" })

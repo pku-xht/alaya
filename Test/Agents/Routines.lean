@@ -61,13 +61,18 @@ def suite : Suite := Testing.suite "agents/routines" #[
       roundTrip s!"the reply {reply.line}" Tools.AskUser.result reply
     roundTrip "an outcome" Outcome.codec { status := "Submitted", submission := "done" }
     roundTrip "an outcome with a reason" Outcome.codec { status := "ContextExceeded", reason? := some "refused" }
-    -- What a tool's call makes, its routine reads with the tool's own `read`.
-    let made := (Tools.AskUser.tool #[.yesNo]).call (.mkObj [("question_type", "yes_no"), ("question", "Keep it?")])
-    let some made := made.toOption | fail "a yes/no question with no options is a call"
-    assertEqual "the routine reads it" ((Tools.AskUser.spec Question.Kind.all).read made.arguments |>.toOption |>.map (·.form))
-      (some .yesNo)
+    -- What a tool's call makes, its routine reads with the tool's own `read`: the model's
+    -- arguments, with the agent's settings, which the routine enforces.
+    let ask (kinds : Array Question.Kind) (arguments : Json) : Except String Question :=
+      (Tools.AskUser.spec kinds).read ((Tools.AskUser.tool kinds).call arguments).arguments
+    let yesNo := Json.mkObj [("question_type", "yes_no"), ("question", "Keep it?")]
+    assertEqual "a yes/no question with no options" ((ask #[.yesNo] yesNo).toOption.map (·.form))
+      (some Question.Form.yesNo)
+    check (match ask #[.openEnded] yesNo with
+      | .error problem => contains problem "question_type: open_ended"
+      | .ok _ => false) "a kind the agent did not allow, refused by the routine"
     let ran := (Tools.Bash.tool {}).call (.mkObj [("command", "ls")])
-    assertEqual "a command, as its routine reads it" (ran.toOption.bind fun made => ((Tools.Bash.spec).read made.arguments).toOption) (some "ls")
+    assertEqual "a command, as its routine reads it" ((Tools.Bash.spec).read ran.arguments).toOption (some "ls")
 ]
 
 end AgentRoutinesTests

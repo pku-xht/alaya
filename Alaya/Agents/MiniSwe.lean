@@ -134,12 +134,22 @@ and otherwise makes each tool call in order, until a command prints the sentinel
 /-- The tools it offers: mini's `bash`, alone. -/
 def tools (config : Config) : Array Tool := #[Tools.Bash.tool config.executor]
 
+/-- What is wrong with a call, as mini checks it before it makes any: it can be made, and its
+`bash` routine can read its arguments. -/
+def callProblem? (config : Config) (call : Chat.ToolCall) : Option String :=
+  match Tools.callProblem? (tools config) call with
+  | some problem => some problem
+  | none => match (Tools.Bash.spec).read call.arguments with
+    | .ok _ => none
+    | .error problem => some problem
+
 /-- The format error a response is answered with, mini's `parse_actions`: of its first problem,
-no call at all or the first call with a problem; `none` when every call can be made. -/
+no call at all or the first call with a problem; `none` when every call can be made. Mini checks
+every call before it makes any, so a malformed response runs nothing. -/
 def formatError? (config : Config) (response : Chat.Response) : Option String :=
   let problem? := if response.toolCalls.isEmpty
     then some "No tool calls found in the response. Every response MUST include at least one tool call."
-    else response.toolCalls.findSome? (Tools.callProblem? (tools config))
+    else response.toolCalls.findSome? (callProblem? config)
   problem?.map (formatErrorMessage · (!response.toolCalls.isEmpty) response.finishReason?)
 
 /-- What a command printed after the sentinel `line`, when it printed the line first: mini's

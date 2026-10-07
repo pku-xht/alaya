@@ -75,19 +75,17 @@ def suite : Suite := Testing.suite "agents/basic" #[
     check ((problem (responseWith #[call "a" "python" "ls"])).head!.any (contains · "Unknown tool 'python'")) "unknown"
     check ((problem (responseWith #[{ (Scripted.call "a" "bash" "ls") with invalidArguments? := some "{\"command\":" }])).head!.any
       (contains · "Error parsing tool call arguments")) "not JSON"
-    check ((problem (responseWith #[{ id := "a", name := "bash", arguments := .mkObj [] }])).head!.any
-      (contains · "missing required property `command`")) "no command"
+    assertEqual "no command is the routine's to refuse" (problem (responseWith #[{ id := "a", name := "bash", arguments := .mkObj [] }]))
+      [none]
     let mixed := problem (responseWith #[call "a" "bash" "ls", submitCall "s"])
     check (mixed.all (·.any (contains · "submit must be called alone"))) s!"submit beside another: {mixed}"
-    let bare : Chat.ToolCall := { id := "s", name := "submit", arguments := .mkObj [] }
-    check ((problem (responseWith #[bare])).head!.any (contains · "Invalid arguments for the submit tool"))
-      "arguments that do not fit the tool's schema"
     let cut := problem (responseWith #[call "a" "bash" "ls"] (finish := "length"))
     check (cut.all (·.any (contains · "hit the output token limit"))) "a response cut off",
 
   test "a run goes on past every problem, and ends where the model submits" do
     let prose : Chat.Response := { content? := some "Let me look.", finishReason? := some "stop" }
-    let (log, requests) ← driven #[prose, responseWith #[call "a" "python" "ls", call "b" "bash" "echo hi"],
+    let (log, requests) ← driven #[prose, responseWith #[call "a" "python" "ls", call "b" "bash" "echo hi",
+        { id := "d", name := "bash", arguments := .mkObj [] }],
       responseWith #[call "c" "bash" "ls", submitCall "s"], responseWith #[submitCall "s" "done"]]
     assertEqual "submitted" (agentResult log |>.bind (·.toOption) |>.map (·.compress))
       (some (Agents.Basic.outcome "Submitted" "done").compress)
@@ -99,6 +97,8 @@ def suite : Suite := Testing.suite "agents/basic" #[
     check (requests[1]!.messages.any fun | .assistant (some "Let me look.") .. => true | _ => false) "what it said is kept"
     assertEqual "the unknown tool" ((answerTo requests[2]! "a").map (contains · "Unknown tool")) (some true)
     assertEqual "the call beside it is made" (answerTo requests[2]! "b") (some "hi\n")
+    assertEqual "a command its routine cannot read fails its frame, and is answered with that"
+      (answerTo requests[2]! "d") (some "The bash tool takes its command as a string.")
     assertEqual "nothing of a mixed response is made" ((answerTo requests[3]! "c").map (contains · "alone")) (some true),
 
   test "only basic's own fields configure it" do
@@ -110,7 +110,7 @@ def suite : Suite := Testing.suite "agents/basic" #[
         | .input m => contains m s!"unknown field '{field}'"
         | _ => false
     check (Basic.tools config |>.any fun tool => tool.name == "bash" &&
-      ((tool.call (.mkObj [("command", "ls")])).toOption.bind (·.arguments.getObjVal? "executor" |>.toOption)
+      ((tool.call (.mkObj [("command", "ls")])).arguments.getObjVal? "executor" |>.toOption
         |>.any fun executor => (executor.getObjVal? "outputs").toOption == some (.bool true)))
       "every command keeps its output as a file"
     -- ask_user is offered, with its instruction, only when the configuration names kinds of question.
