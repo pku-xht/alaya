@@ -47,7 +47,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       "## Grading (``codeproof`` mode)",
       "## Done condition — non-negotiable",
       "## Anti-cheating — what the grader rejects",
-      "## Scoring",
+      "## Persistence — keep working until done",
       "An unfilled slot scores the same as a wrong proof: zero.",
       "Every additional spec you close strictly increases the score.",
       "-- !benchmark @start",
@@ -57,7 +57,8 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       "submit tool"] do
       check (contains text needle) s!"missing {needle}",
   test "a run is sent the grading rules of its own mode only" do
-    let proofOnly := ["## Grading (``proof`` mode)", "disprove_<S>", "Classical.choice"]
+    -- Vero's `Persistence`, sent in both modes, names `disprove_<S>` too.
+    let proofOnly := ["## Grading (``proof`` mode)", "Classical.choice"]
     let codeproofOnly := ["## Grading (``codeproof`` mode)", "unsat_<S>", "unpaired_sat", "Part A"]
     let proof ← openingText "TASK_PROOF" .proof
     let codeproof ← openingText "TASK_CODEPROOF" .codeproof
@@ -83,7 +84,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       ("framing.md", MiniVero.framing), ("rules.md", MiniVero.rules),
       ("grading-proof.md", MiniVero.gradingProof),
       ("grading-codeproof.md", MiniVero.gradingCodeproof),
-      ("done.md", MiniVero.doneCondition), ("anti-cheating.md", MiniVero.antiCheating),
+      ("done.md", MiniVero.doneCondition), ("persistence.md", MiniVero.persistence), ("anti-cheating.md", MiniVero.antiCheating),
       ("checkpointing.md", MiniVero.checkpointing)] do
       let onDisk ← IO.FS.readFile (dir / file)
       check (onDisk.trimAsciiEnd.toString == compiled)
@@ -108,20 +109,12 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       "## Reference — original upstream source",
       "upstream_source"] do
       check (!contains text absent) s!"the prompt should not carry {absent}",
-  test "the scoring facts are kept and the advice is not" do
+  test "Vero's Persistence is sent, and its Workflow and Proof strategy are not" do
     let text ← openingText "TASK_CODEPROOF"
-    for absent in [
-      "## Persistence",
-      "## Workflow",
-      "## Proof strategy",
-      "Never regress",
-      "locked-in",
-      "keep working",
-      "keep iterating",
-      "two genuinely distinct tactics",
-      "Treat every spec as independently valuable",
-      "The turn/budget cap is the only signal to stop before the Done condition is met.",
-      "do not assume Mathlib"] do
+    assertContains "Vero's Persistence, to the byte" text MiniVero.persistence
+    for present in ["keep iterating", "Never regress", "The turn/budget cap is the only valid stop signal."] do
+      assertContains "its advice" text present
+    for absent in ["## Workflow", "## Proof strategy", "## Scoring"] do
       check (!contains text absent) s!"the prompt should not carry {absent}",
   test "a failed compile remains observable and the agent continues" do
     withVero config fun run => do
@@ -159,10 +152,10 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
         check (text.length < raw.length) "view should be smaller"
       | _ => fail "missing view observation",
 
-  test "its tools are bash, submit, time_budget and subagent, with ask_user only for the kinds its configuration names" do
-    assertEqual "by default" (config.tools.map (·.name)) #["bash", "submit", "time_budget", "subagent"]
+  test "its tools are bash, submit and subagent, with ask_user only for the kinds its configuration names" do
+    assertEqual "by default" (config.tools.map (·.name)) #["bash", "submit", "subagent"]
     let asking : MiniVero.Config := { questionTypes := #[.yesNo, .singleChoice] }
-    assertEqual "asking" (asking.tools.map (·.name)) #["bash", "submit", "ask_user", "time_budget", "subagent"]
+    assertEqual "asking" (asking.tools.map (·.name)) #["bash", "submit", "ask_user", "subagent"]
     let opening (config : MiniVero.Config) : String :=
       match (MiniVero.openingMessages config "t" machine)[1]? with
       | some (Chat.Message.user text) => text
@@ -206,28 +199,55 @@ private def turn (calls : Array Chat.ToolCall) : Chat.Response :=
   { toolCalls := calls, finishReason? := some "tool_calls" }
 
 def timeSuite : Suite := Testing.suite "agents/mini-vero.time" #[
-  test "the opening asks the agent to pace itself by time_budget, not date, in Vero's place" do
+  test "the opening tells the agent it is told the time left, and not to use date" do
     let text ← openingText "TASK_CODEPROOF"
     let offset (needle : String) : Nat := (text.splitOn needle)[0]!.length
     check (contains text "## Checkpointing — work within your time budget") "the section is there"
-    check (contains text "Call the ``time_budget`` tool") "it names the tool"
+    check (contains text "you are told how much is left") "it says the time comes to it"
     check (contains text "Do not use ``date``") "it says not to use date"
-    check (offset "## Done condition" < offset "## Checkpointing" && offset "## Checkpointing" < offset "## Anti-cheating")
-      "after the Done condition, before Anti-cheating, as in Vero"
-    assertEqual "tools" (config.tools.map (·.name)) #["bash", "submit", "time_budget", "subagent"],
+    check (!contains text "time_budget") "it names no tool"
+    check (offset "## Done condition" < offset "## Persistence" && offset "## Persistence" < offset "## Checkpointing"
+        && offset "## Checkpointing" < offset "## Anti-cheating")
+      "Done condition, Persistence, Checkpointing, Anti-cheating, as in Vero",
 
-  test "time_budget reads the clock and gives the seconds left, or that there is none" do
+  test "the model is told the time left once each tenth of the budget is spent" do
+    let budget := 90 * 60000
+    let after (minutes : Nat) : Timing := { spentMs := minutes * 60000, budgetMs? := some budget }
+    assertEqual "none at the start" (MiniVero.notice? (0, 0) (after 0)) none
+    assertEqual "none within the first tenth" (MiniVero.notice? (0, 0) (after 8)) none
+    assertEqual "one past it" (MiniVero.notice? (0, 0) (after 9)) (some ("[time] 81 of 90 minutes remain.", (budget, 1)))
+    assertEqual "none again in that tenth" (MiniVero.notice? (budget, 1) (after 17)) none
+    assertEqual "one past the next" ((MiniVero.notice? (budget, 1) (after 18)).map (·.1)) (some "[time] 72 of 90 minutes remain.")
+    assertEqual "none without a budget" (MiniVero.notice? (0, 0) { spentMs := 600000 }) none
+    -- A later run with another budget is told afresh.
+    let longer := 180 * 60000
+    assertEqual "another budget" ((MiniVero.notice? (budget, 9) { spentMs := 81 * 60000, budgetMs? := some longer }).map (·.1))
+      (some "[time] 99 of 180 minutes remain."),
+
+  test "a submit before the last tenth runs the Done check: refused while it fails, taken once it passes" do
+    let checks ← IO.mkRef 0
+    let executor : Executor := { exec := fun _ _ argv _ => do
+      if argv[0]? != some MiniVero.doneCheck then
+        return { output := "ok", exitCode? := some 0 }
+      checks.modify (· + 1)
+      if (← checks.get) == 1 then
+        return { output := "warning: Base58/Proof/Spec.lean:12:8: declaration uses 'sorry'", exitCode? := some 1 }
+      return { output := "Build completed successfully.", exitCode? := some 0 } }
+    let submitCall : Chat.ToolCall := { id := "s", name := "submit", arguments := .mkObj [("message", "done")] }
+    let again : Chat.ToolCall := { submitCall with id := "t" }
+    let model ← Scripted.scriptedModel #[turn #[submitCall], turn #[again]]
     withVero config fun run => do
-      let asked := after run #[.response (turn #[call "t" "time_budget"])]
-      match next run asked with
-      | .ask { op := .time, frame } => assertEqual "in the tool's frame" frame ⟪"session", "agent", "time_budget"⟫
-      | _ => fail "expected the clock read"
-      let gives (timing : Timing) : Option Json :=
-        (Scripted.answer run asked (.timing timing)).findSome? fun
-          | .returned ⟪"session", "agent", "time_budget"⟫ value => some value
-          | _ => none
-      assertEqual "left" ((gives { spentMs := 60500, budgetMs? := some 3600000 }).bind (·.getObjVal? "seconds_left" |>.toOption) |>.map (·.compress)) (some "3539")
-      check ((gives { spentMs := 60500 }).bind (·.getObjVal? "seconds_left" |>.toOption) == some .null) "no budget, no number",
+      let rt ← Scripted.runtime executor (some model)
+      let (final, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run) { budgetMs? := some 3600000 }
+      let log ← Scripted.logAt rt final
+      assertEqual "the second is taken" (Scripted.agentStatus log) "Submitted"
+      assertEqual "each ran the check" (← checks.get) 2
+      let some (request, _) := (Scripted.samplesOf run log)[1]? | fail "a second request"
+      let told := request.messages.findSome? fun
+        | .tool "s" (.str text) => some text
+        | _ => none
+      check (told.any fun text => contains text "Not done" && contains text "uses 'sorry'" && contains text "minutes remain")
+        s!"the first was answered with why, and the time left: {told}",
 
   test "mini-swe neither offers time_budget nor accepts it in its configuration" do
     assertEqual "tools" ((MiniSwe.tools {}).map (·.name)) #["bash"]
@@ -238,28 +258,31 @@ def timeSuite : Suite := Testing.suite "agents/mini-vero.time" #[
       | .input m => contains m "unknown field 'time_budget'"
       | _ => false,
 
-  test "each entry records its time, and the tool counts the run's against the budget" do
+  test "each entry records its time, and each round times the run against the budget" do
     withVero config fun run => do
       let executor ← containerExecutor
       try
         let model ← Scripted.scriptedModel #[turn #[call "c" "bash" (.mkObj [("command", "sleep 0.2")])],
-          turn #[call "t" "time_budget"], turn #[call "s" "submit" (.mkObj [("message", "")])]]
+          turn #[call "s" "submit" (.mkObj [("message", "")])]]
         let rt ← Scripted.runtime executor (some model)
-        let (final, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run) { budgetMs? := some 3600000 }
+        let limits : Driver.Limits := { budgetMs? := some 3600000, samples? := some 2 }
+        let (final, _) ← assertOk <| Driver.drive rt run (← Scripted.start rt run) limits
         let forest ← assertOk rt.store.forest
         let entries ← assertOk <| rt.store.entries forest final
         let slept := entries.foldl (fun ms e => match e.event with
           | .answered _ (.exec "sleep 0.2" _) _ => ms + e.elapsedMs | _ => ms) 0
         check (slept >= 200) s!"the command's entry took the sleep, recorded {slept} ms"
-        let some (timing, left) := entries.zipIdx.findSome? fun (e, i) => match e.event with
-            | .answered _ .time (.ok (.timing t)) => (entries[i + 1]?).bind fun next => match next.event with
-              | .returned _ value => some (t, (value.getObjVal? "seconds_left" >>= Json.getNat?).toOption.getD 0)
-              | _ => none
-            | _ => none
-          | fail "expected the clock read and the answer"
-        check (timing.spentMs >= slept) "the reading counts the run so far"
-        assertEqual "the budget" timing.budgetMs? (some 3600000)
-        check (left < 3600 && left + 5 >= 3600) s!"left {left} s of 3600 after {slept} ms"
+        let timings := entries.filterMap fun e => match e.event with
+          | .answered ⟪"session", "agent"⟫ .time (.ok (.timing t)) => some t
+          | _ => none
+        check (timings.size ≥ 2) s!"each round times the run: {timings.size}"
+        check (timings.all (·.budgetMs? == some 3600000)) "against the budget"
+        check ((timings.back?.map (·.spentMs)).any (· ≥ slept)) "the reading counts the run so far"
+        -- The test image has no Lean: its Done check fails, and the early submit is refused.
+        let log := entries.map (·.event)
+        check (log.any fun | .answered _ (.exec command _) _ => command == MiniVero.doneCheck | _ => false)
+          "the submit ran the Done check"
+        assertEqual "and the run went on" (Scripted.agentStatus log) "running"
       finally executor.close,
 
   test "a spent budget pauses the run before anything, and a later run goes on" do

@@ -84,7 +84,7 @@ flowchart LR
 
 A tool is independent of the agent that offers it. The agent chooses which tools to offer, how
 to report a malformed call, and how to show a result to its model. Basic offers `bash`,
-`submit` and, when asked to, `ask_user`; MiniVero offers them all (§5); and MiniSwe offers `bash`
+`submit` and, when asked to, `ask_user`; MiniVero offers them and `subagent` (§5); and MiniSwe offers `bash`
 alone.
 
 ## 2. `ask_user`: a model asks a person
@@ -373,7 +373,9 @@ benchmark. It is Basic (§4): its tools, `ask_user` among them when `question_ty
 of question; its answers to every call; and its command output. It goes round a loop of its own,
 with Vero's instructions, and with every extension on:
 
-- **`time_budget`** tells the model how much of the run's time is left (§5.5).
+- **The time left** is told to the model each time another tenth of the budget is spent (§5.5).
+- **`submit` is checked:** before the last tenth of the budget, it ends the run only once the task
+  is done (§5.5).
 - **`subagent`** hands a task to another MiniVero, with the same configuration.
 - **Masking**: the outputs of turns older than the last 20 are left out of the view (§5.6).
 - **A context limit**: a request that would not fit the model's context ends the agent first.
@@ -405,7 +407,7 @@ message, in this order:
    the agent stops.
 2. The instance, its `task`, given to `call` as `--set-file task=MINIVERO_TASK.md`: the file of §5.3.
 3. Vero's rule sections: `Marker grammar`, `Oracle commands`, `Grading` for the run's mode,
-   `Done condition`, `Checkpointing`, `Anti-cheating`, and the two facts under `Scoring`.
+   `Done condition`, `Persistence`, `Checkpointing` and `Anti-cheating`.
 4. This agent's mechanics: repository-relative paths, no shell state between calls, one
    `submit` call; and the image's system and architecture.
 5. Each offered tool's instruction.
@@ -432,12 +434,11 @@ the next `resume`.
 
 ### 5.4 Differences from Vero's own instructions
 
-- **No prescribed way of working.** Vero's `Persistence`, `Workflow` and `Proof strategy`
-  sections tell the agent how to work: keep iterating until the budget is spent, follow a fixed
-  order of steps, and decompose proofs over lists into helper lemmas. MiniVero leaves them out
-  and sends only the rules the grader enforces, so the strategy is the model's own. Vero's
-  `Previous iteration feedback` is left out too: feedback is a message appended with
-  `alaya tell` (§5.3).
+- **No prescribed workflow.** Vero's `Workflow` and `Proof strategy` sections tell the agent to
+  follow a fixed order of steps and to decompose proofs over lists into helper lemmas. MiniVero
+  leaves them out, so the strategy is the model's own. It keeps `Persistence`, which says to
+  keep working until the budget is spent. Vero's `Previous iteration feedback` is left out too:
+  feedback is a message appended with `alaya tell` (§5.3).
 - **File lists are the sandbox's own.** Vero's base template, shared by both modes, lists
   `Impl/*.lean` as editable even in `proof`, where its mode template says it is frozen. The
   instance lists the files as they are in the run's mode: `Impl/*.lean` is frozen in `proof` and
@@ -445,23 +446,31 @@ the next `resume`.
 - **`Checkpointing` is adapted**, the one section not Vero's to the byte. Vero's is for a chunk
   of a known number of minutes, and says to check the time with `date`. Here the budget is
   given per invocation, after the prompt is sent, and the run may be paused and driven on
-  later. So the section says the run has a time budget that the `time_budget` tool reports,
-  names that tool where Vero says `date`, and says "run" where Vero says "chunk". The advice is
+  later. So the section says the run has a time budget, the rest of which the model is told as
+  it goes (§5.5), says to pace itself by that where Vero says `date`, and says "run" where Vero
+  says "chunk". The advice is
   Vero's: keep the build green, one slot at a time, never leave a slot half-written, wind down
   before the end.
 - **The mode comes from the call's configuration**, never from the task file.
+- **The time notes and the `submit` check are MiniVero's own** (§5.5). Vero's instructions and
+  grader are unchanged, so scores stay comparable with Vero's.
 
-### 5.5 Pacing: `time_budget`
+### 5.5 Pacing
 
 `alaya resume ENTRY --time-budget SECONDS` pauses the run once it has taken that long, and a
-later `resume` goes on from its last entry. With `time_budget` among its tools, the agent is told
-to pace itself by it.
+later `resume` goes on from its last entry. The budget is checked before each thing the agent
+does and never cuts one short, so a run can overrun it by one command or one response.
 
-- The tool takes no arguments and gives `{"seconds_left": N}`: the budget less the run's time
-  along its log. So it is right after a pause, when the clock since the start is not.
-- Without a budget it gives `{"seconds_left": null, "note": "this run has no time limit"}`.
-- The budget is checked before each thing the agent does and never cuts one short, so a run
-  can overrun it by one command or one response.
+**The time left.** Each round, MiniVero times the run: its time along the log, against this
+invocation's budget. Each time another tenth of the budget is spent, it tells the model the
+time left, in a user message such as `[time] 47 of 90 minutes remain.` A later run with another
+budget is told afresh; a run without a budget is told nothing.
+
+**A checked `submit`.** A `submit` before the last tenth of the budget first runs a check of
+Vero's Done condition in the sandbox: `lake build` succeeds, and its output warns of no slot
+that still uses `sorry`. When the check passes, the run ends as Basic's does. Otherwise the
+call is answered with why, the end of the build's output, and the time left, and the run goes
+on. In the last tenth of the budget, or without a budget, `submit` ends the run unchecked.
 
 ### 5.6 Old outputs
 
