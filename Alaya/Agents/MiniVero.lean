@@ -1,10 +1,10 @@
 import Alaya.Agents.Basic
 
 /-! Alaya's agent for Vero's Lean implementation and proof tasks: the basic agent with Vero's
-instructions, and every extension of its loop on. It ends with the `submit` tool, paces
-itself by `time_budget`, can hand work to a sub-agent like it, names the file a long output is
-kept in, and leaves old outputs out of its view; `ask_user` is offered when its configuration
-names the kinds of question it may ask. Rendering and grading are external. See
+instructions, and every extension of its loop on. It ends with the `submit` tool, once the task
+is done or the budget nearly spent; is told the time left as it goes; can hand work to a
+sub-agent like it; names the file a long output is kept in; and leaves old outputs out of its
+view. `ask_user` is offered when its configuration names the kinds of question it may ask. Rendering and grading are external. See
 `docs/agents.md` §5. -/
 namespace Alaya.Agents.MiniVero
 
@@ -66,10 +66,10 @@ def Config.toJson (config : Config) : Lean.Json := fields.toJson config
 def Config.fromJson (json : Lean.Json) : Except String Config := fields.read json {}
 
 /-- The tools it offers: the basic agent's, `bash`, `submit` and `ask_user` when its
-configuration names kinds of question; `time_budget`; and `subagent`, calling the agent itself
+configuration names kinds of question; and `subagent`, calling the agent itself
 with its configuration. -/
 def Config.tools (config : Config) : Array Tool :=
-  Basic.tools config.toConfig ++ #[Tools.TimeBudget.tool, Tools.Subagent.tool "mini-vero" config.toJson]
+  Basic.tools config.toConfig ++ #[Tools.Subagent.tool "mini-vero" config.toJson]
 
 /-- `text` with the instructions of the offered tools after it, as the basic agent adds them. -/
 def withInstructions (config : Config) (text : String) : String :=
@@ -94,22 +94,19 @@ def rules : String := quoted (include_str "MiniVero/rules.md")
 def gradingProof : String := quoted (include_str "MiniVero/grading-proof.md")
 def gradingCodeproof : String := quoted (include_str "MiniVero/grading-codeproof.md")
 def doneCondition : String := quoted (include_str "MiniVero/done.md")
+/-- Vero's `Persistence` section up to its advice: its heading and first three paragraphs, to the
+byte. What follows them in Vero is said in `Checkpointing`, or is advice on how to work. -/
+def persistence : String := quoted (include_str "MiniVero/persistence.md")
 def antiCheating : String := quoted (include_str "MiniVero/anti-cheating.md")
 
 /-- Vero's `Checkpointing` section, adapted: its chunk of a known number of minutes is a time
-budget the `time_budget` tool reports, and it names that tool where Vero says `date`. Unlike
+budget the model is told the rest of as it goes, which it paces itself by where Vero says `date`. Unlike
 the files above, not Vero's to the byte (`docs/agents.md` §5 lists the changes). -/
 def checkpointing : String := quoted (include_str "MiniVero/checkpointing.md")
 
 def grading : Mode -> String
   | .proof => gradingProof
   | .codeproof => gradingCodeproof
-
-/-- The two scoring facts of Vero's `Persistence` section, without its advice. -/
-def scoring : String :=
-  "## Scoring\n\n" ++
-  "An unfilled slot scores the same as a wrong proof: zero. Every additional spec you " ++
-  "close strictly increases the score."
 
 /-- What this agent adds to Vero's rules: how its tools behave, and how a run ends. -/
 def mechanics : String :=
@@ -126,9 +123,9 @@ def taskMessage (task : String) (mode : Mode) (uname : Uname) : String :=
     rules,
     grading mode,
     doneCondition,
+    persistence,
     checkpointing,
     antiCheating,
-    scoring,
     mechanics,
     "Environment: " ++
       uname.system ++ " " ++ uname.machine]
@@ -149,6 +146,9 @@ size: its messages, the tokens it held, and the tokens of the response. -/
 structure History where
   items : Array Item := #[]
   measured? : Option (Dialogue × Nat × Option Nat) := none
+  /-- The budget the model was last told the time left of, and how many tenths of it were
+  spent then. -/
+  reported : Nat × Nat := (0, 0)
 
 /-- What an omitted output says in its place. -/
 def omittedNotice (file : String) : String := s!"[output omitted; full output: {file}]"
@@ -193,10 +193,54 @@ def contextLimit? (config : Config) (model : Models.Spec) : Option Nat :=
   model.contextTokens?.map fun tokens =>
     tokens - min config.contextReserve (model.outputTokens?.getD config.contextReserve)
 
-/-- One round: the basic agent's, except that it ends before a request too large for the
-context, and keeps the size of the last request a response reported. -/
+/-- The note that tells the model how much of the run's time is left. -/
+def timeNote (timing : Timing) (budget : Nat) : String :=
+  s!"[time] {(budget - timing.spentMs) / 60000} of {budget / 60000} minutes remain."
+
+/-- How many tenths of `budget` the run has spent, from none to all ten. -/
+def tenths (timing : Timing) (budget : Nat) : Nat :=
+  if budget == 0 then 10 else min 10 (timing.spentMs * 10 / budget)
+
+/-- The note due at `timing`, if one is, and what the model has then been told: one each time
+another tenth of the budget is spent, counted afresh when the budget is another. -/
+def notice? (reported : Nat × Nat) (timing : Timing) : Option (String × (Nat × Nat)) := do
+  let budget ← timing.budgetMs?
+  let told := if reported.1 == budget then reported.2 else 0
+  if tenths timing budget ≤ told then none
+  else some (timeNote timing budget, (budget, tenths timing budget))
+
+/-- What tells the agent the task is done, as Vero's Done condition has it: `lake build`
+succeeds, and no slot still holds `sorry`, which Lean warns of, on every build. -/
+def doneCheck : String :=
+  "out=$(lake build 2>&1); s=$?; printf '%s\n' \"$out\" | tail -n 30; " ++
+  "[ $s -eq 0 ] && ! printf '%s\n' \"$out\" | grep -q \"uses 'sorry'\""
+
+/-- The conversation after `response`, a `submit` alone in it, when the task is not done: the
+call answered with what the check found and the time left. `none` when the submission stands:
+the check passes, or no more than a tenth of the budget is left. -/
+def checkSubmit (config : Config) (timing : Timing) (items : Array Item) (response : Chat.Response) :
+    Computation Agent (Option (Array Item)) := do
+  let some budget := timing.budgetMs? | return none
+  let #[asked] := response.toolCalls | return none
+  if asked.name != Tools.Submit.definition.name || tenths timing budget ≥ 9 then return none
+  let ran ← exec doneCheck config.executor
+  if ran.output.exitCode? == some 0 then return none
+  let told := "Not done: by the Done condition, `lake build` must succeed and no slot may hold " ++
+    s!"`sorry`. {timeNote timing budget} Keep working, and submit once the Done condition holds." ++
+    "\n\n" ++ ran.output.output
+  return some (items.push (.turn response #[(asked, .error told)]))
+
+/-- One round: the basic agent's, except that it tells the model the time left each time
+another tenth of the budget is spent; ends before a request too large for the context, keeping
+the size of the last request a response reported; and answers a `submit` that comes before the
+last tenth of the budget, when the task is not done, instead of ending. -/
 def round (config : Config) (model : Models.Spec) (history : History) : Computation Agent (History ⊕ Lean.Json) := do
   let history := { history with items := history.items ++ (← Basic.heard).map .told }
+  -- The time left, told once each tenth of the budget is spent.
+  let timing ← time
+  let history := match notice? history.reported timing with
+    | some (note, reported) => { history with items := history.items.push (.told (.user note)), reported }
+    | none => history
   let request : Chat.Request := { messages := view history, tools := config.tools.map (·.definition) }
   if let some limit := contextLimit? config model then
     if contextTokens history request.messages >= limit then return .inr (outcome "ContextExceeded")
@@ -206,8 +250,10 @@ def round (config : Config) (model : Models.Spec) (history : History) : Computat
   let measured? := match response.usage?.bind (·.input?) with
     | some input => some (request.messages, input, response.usage?.bind (·.output?))
     | none => history.measured?
+  if let some items ← checkSubmit config timing history.items response then
+    return .inl { history with items, measured? }
   return match ← Basic.respond config.tools history.items response with
-    | .inl items => .inl { items, measured? }
+    | .inl items => .inl { history with items, measured? }
     | .inr ended => .inr ended
 
 /-! ## The agent -/

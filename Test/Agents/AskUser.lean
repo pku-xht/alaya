@@ -123,14 +123,14 @@ private def replyAt (rt : Driver.Runtime) (run : Scope Agent) (tip : Hash) (text
 
 def suite : Suite := Testing.suite "agents/ask-user" #[
   test "MiniVero offers ask_user only for the kinds of question its configuration names, and MiniSwe never" do
-    let plain ← assertOk <| Catalog.complete "mini-vero" (.mkObj [])
+    let plain ← assertOk <| Builtin.catalog.complete "mini-vero" (.mkObj [])
     assertEqual "no kinds by default" ((plain.getObjVal? "question_types").toOption.map (·.compress)) (some "[]")
     check (!(({} : Config).tools.any (·.name == "ask_user"))) "so no ask_user"
     check (enabled.tools.any (·.name == "ask_user")) "with kinds, ask_user"
-    let resolved ← assertOk <| Catalog.resolve "mini-vero" #[{ path := ["question_types"], value := everyKind }]
-    assertEqual "round-trips" (← assertOk <| Catalog.complete "mini-vero" resolved).compress resolved.compress
+    let resolved ← assertOk <| Builtin.catalog.resolve "mini-vero" #[{ path := ["question_types"], value := everyKind }]
+    assertEqual "round-trips" (← assertOk <| Builtin.catalog.complete "mini-vero" resolved).compress resolved.compress
     for field in ["question_types", "tools"] do
-      assertError s!"mini-swe takes no {field}" (Catalog.complete "mini-swe" (.mkObj [(field, everyKind)])) fun
+      assertError s!"mini-swe takes no {field}" (Builtin.catalog.complete "mini-swe" (.mkObj [(field, everyKind)])) fun
         | .input message => contains message s!"unknown field '{field}'"
         | _ => false
     let opening (config : Config) : String :=
@@ -139,8 +139,8 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       | _ => ""
     -- Asking adds its instruction where the tool stands among the others, and changes nothing else.
     assertStringEq "asking only adds its instruction" (opening enabled)
-      ((opening {}).replace ("\n\n" ++ Tools.TimeBudget.instruction)
-        ("\n\n" ++ Tools.AskUser.instruction Question.Kind.all ++ "\n\n" ++ Tools.TimeBudget.instruction)),
+      ((opening {}).replace ("\n\n" ++ Tools.Subagent.instruction)
+        ("\n\n" ++ Tools.AskUser.instruction Question.Kind.all ++ "\n\n" ++ Tools.Subagent.instruction)),
 
   test "single choice offers None of the above beside the model's options, kept verbatim" do
     let question := "  Which rule applies?\nContext: α < β.  "
@@ -340,10 +340,10 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
     -- The kinds are named, each once.
     for (kinds, problem) in (#[(Json.arr #["yes_no", "maybe"], "not maybe"),
         (.arr #["yes_no", "yes_no"], "twice"), (.str "yes_no", "must be an array")] : Array (Json × String)) do
-      assertError s!"with {kinds.compress}" (Catalog.complete "mini-vero" (.mkObj [("question_types", kinds)])) fun
+      assertError s!"with {kinds.compress}" (Builtin.catalog.complete "mini-vero" (.mkObj [("question_types", kinds)])) fun
         | .input message => contains message problem
         | _ => false
-    let one ← assertOk <| Catalog.complete "mini-vero" (.mkObj [("question_types", .arr #["open_ended"])])
+    let one ← assertOk <| Builtin.catalog.complete "mini-vero" (.mkObj [("question_types", .arr #["open_ended"])])
     assertEqual "it records the kinds" ((one.getObjVal? "question_types").toOption.map (·.compress))
       (some "[\"open_ended\"]"),
 

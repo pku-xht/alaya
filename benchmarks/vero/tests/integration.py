@@ -129,9 +129,9 @@ def test_mode(args, mode):
 
     def grade_at(at, expected, passed, total=1, command=vero, image=grader_image, **options):
         """Grade a point of a run, with Vero's grader unless another command is given: a stop
-        there if a call runs, a call of the grader, and `resume`, which exits with the verdict."""
-        code = {"pass": 0, "fail": 1, "error": 2}[expected]
-        final = grade(args.alaya, data, at, image, command, codes=(code,), **options)
+        there if a call runs, a call of the grader, and `resume`, which exits 0: the verdict is the
+        grader's value, in the final status object."""
+        final = grade(args.alaya, data, at, image, command, codes=(0,), **options)
         record = final["value"]
         assert record["status"] == expected, record
         assert len(record["checks"]) == total, record

@@ -1,7 +1,8 @@
 import Alaya.Agents.MiniVero
 
 /-! Study-only MiniVero variant: initial-system guidance and no model subagent.
-The stock MiniVero, task rules, output recovery, and context accounting are unchanged. -/
+The stock MiniVero is unchanged. This study retains its c2aefbe task wording and loop:
+no automatic time notices or submit gate introduced after the recorded runs. -/
 namespace Alaya.Agents.HelpStudy
 
 open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
@@ -21,9 +22,32 @@ def Config.fromJson (json : Lean.Json) : Except String Config := fields.read jso
 def Config.tools (config : Config) : Array Tool :=
   Basic.tools config.base.toConfig ++ #[Tools.TimeBudget.tool]
 
+/-- Frozen task wording from c2aefbe, before upstream pacing and persistence changes.
+Keep this separate from stock MiniVero so archived results retain their condition. -/
+def checkpointing : String := (include_str "HelpStudy/checkpointing.md").trimAsciiEnd.toString
+
+def scoring : String :=
+  "## Scoring\n\n" ++
+  "An unfilled slot scores the same as a wrong proof: zero. Every additional spec you " ++
+  "close strictly increases the score."
+
+def taskMessage (task : String) (mode : MiniVero.Mode) (uname : Uname) : String :=
+  "\n\n".intercalate <| [
+    MiniVero.framing,
+    "Solve this Vero task:\n\n" ++ task,
+    MiniVero.rules,
+    MiniVero.grading mode,
+    MiniVero.doneCondition,
+    checkpointing,
+    MiniVero.antiCheating,
+    scoring,
+    MiniVero.mechanics,
+    "Environment: " ++
+      uname.system ++ " " ++ uname.machine]
+
 def openingMessages (config : Config) (task : String) (uname : Uname) : Array Chat.Message :=
   #[.system (MiniVero.systemMessage ++ "\n\n" ++ config.guidance),
-    .user (Basic.withInstructions config.tools (MiniVero.taskMessage task config.base.mode uname))]
+    .user (Basic.withInstructions config.tools (taskMessage task config.base.mode uname))]
 
 def round (config : Config) (model : Models.Spec) (history : MiniVero.History) :
     Computation Agent (MiniVero.History ⊕ Lean.Json) := do
@@ -39,7 +63,7 @@ def round (config : Config) (model : Models.Spec) (history : MiniVero.History) :
     | some input => some (request.messages, input, response.usage?.bind (·.output?))
     | none => history.measured?
   return match ← Basic.respond config.tools history.items response with
-    | .inl items => .inl { items, measured? }
+    | .inl items => .inl { history with items, measured? }
     | .inr ended => .inr ended
 
 def computation (config : Config) (model : Models.Spec) (task : String) : Computation Agent Lean.Json := do

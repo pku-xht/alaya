@@ -26,4 +26,10 @@ Primepy solo 首轮误用 samples=0 启动：新版该值表示无限响应数�
 
 上游基线 c2aefbea19de06b53357c5b8ee505c859043cc03，分支 codex/help-on-hard-tasks。全部模型／评分进程已结束，只读 HTTP 观察器已停止；Docker 无需重启。XMCP 凭据已从本机 DSH store 找回并实际认证成功，按用户要求记住了位置，项目不保存密钥值。
 
-原始证据在 WSL /home/xht/.cache/alaya-demo/help-hard-20261007/：src/ 是冻结构建与采样 runner，runs/ 是独立轨迹，preflight-v2/ 是候选审核，probe-002/ 与 tiny-acceptance.json 是工程验收，http-observations-*.jsonl 是只读观察。Git 仅保存实验源文件、协议和审阅证据；原始模型流量、内部推理、完整工作区及 trusted 解答不纳入。旧研究与 PR #50 保持原样，本任务不 push。
+原始证据在 WSL /home/xht/.cache/alaya-demo/help-hard-20261007/：src/ 是冻结构建与采样 runner，runs/ 是独立轨迹，preflight-v2/ 是候选审核，probe-002/ 与 tiny-acceptance.json 是工程验收，http-observations-*.jsonl 是只读观察。Git 仅保存实验源文件、协议和审阅证据；原始模型流量、内部推理、完整工作区及 trusted 解答不纳入。旧研究与 PR #50 保持原样；2026-10-08 用户追加授权推送本分支并创建新 PR。
+
+## PR 兼容性说明（2026-10-08）
+
+发布前合入主分支 f152241，按新的 Builtin catalog 注册实验 agent。本轮采样仍来自 c2aefbe 基线的冻结构建，报告与证据未改写；完整实验源码归档提交为 68cefa9。HelpStudy 单独保留当时的 task wording、显式 time_budget 和原提交行为，没有引入后来 stock MiniVero 的自动报时、提交检查或新增 Persistence 文案。因此本报告不能评价这些新机制的效果。兼容更新仅做离线验证，没有新增模型采样。
+
+兼容验证通过：lake build、43 项相关 Lean 测试、11 项 Python 离线测试；固定公开示例的初始消息与冻结实验构建逐字一致（7819 字节）。没有重新采样。

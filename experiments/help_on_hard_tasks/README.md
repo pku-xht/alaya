@@ -51,3 +51,7 @@ python3 experiments/help_on_hard_tasks/run.py advance --binary "$BINARY" --root 
 `observe_http.py --study-root "$SCRATCH" --output "$SCRATCH/http-observations.jsonl"` 可只读观察本研究 curl 子进程的 HTTP 状态和有单位的 Retry-After 头；不读取凭据、请求、响应正文或进程环境。该旁路可能漏过短进程，未观察到 429 不能证明没有限流。`summarize_http.py INPUT... --output OUTPUT` 合并观察、去重并报告覆盖范围。原始 provider 错误可能带账号标识，不能直接复制进报告或 Git。
 
 服务错误抛出且没有 answered 事件时，其耗时不一定计入日志累计时间。保留中断证据，不能靠重新启动获得隐性额外预算。基础设施若主导结果，则不纳入有效困难判定；不补跑凑数。脚本离线检查：`python3 -m unittest discover -s experiments/help_on_hard_tasks -p 'test_*.py'`。
+
+## PR 兼容性说明（2026-10-08）
+
+发布前合入主分支 f152241，按新的 Builtin catalog 注册实验 agent。本轮采样仍来自 c2aefbe 基线的冻结构建，报告与证据未改写；完整实验源码归档提交为 68cefa9。HelpStudy 单独保留当时的 task wording、显式 time_budget 和原提交行为，没有引入后来 stock MiniVero 的自动报时、提交检查或新增 Persistence 文案。因此本报告不能评价这些新机制的效果。兼容更新仅做离线验证，没有新增模型采样。

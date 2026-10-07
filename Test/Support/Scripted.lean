@@ -115,7 +115,7 @@ def runWith (body : Json → Computation Agent Json) (scope : Scope Agent := .em
   Scope.of #[Session.of ⟨fun name =>
       if name == "agent" then
         some { name, scope, body }
-      else Catalog.scope.find name⟩]
+      else Builtin.catalog.scope.find name⟩]
 
 /-- A run of Alaya whose program `agent` is `make`'s computation for the call's task, its calls
 naming routines in `scope`. -/
@@ -127,7 +127,7 @@ with `model` as its model and the call's task as its task, in the scope the cata
 program. -/
 def runOfConfig (name : String) (config : Json) (model : Models.Spec := testModelSpec) :
     Except String (Scope Agent) :=
-  match Catalog.named? name with
+  match Builtin.catalog.program? name with
   | none => .error s!"unknown program: {name}"
   | some definition => match definition.complete (config.setObjVal! "model" model.toJson) with
     | .error problem => .error problem
@@ -304,7 +304,7 @@ comments the program made since its last one. -/
 def appended (run : Scope Agent) (log : Log Agent) (event : Event Agent) : Log Agent :=
   (log ++ (Replayer.ofLog run log).comments.map Event.commented).push event
 
-/-- The log with every mark `run` makes after it appended, and the answer to an agent's `uname`,
+/-- The log with every mark `run` makes after it appended, the answer to an agent's `uname`, and to a `time` with no budget,
 the test's machine, up to what it asks of the world next, or how it ends: what the driver would
 log before its next operation, without one. -/
 partial def settle (run : Scope Agent) (log : Log Agent) : Log Agent :=
@@ -314,6 +314,9 @@ partial def settle (run : Scope Agent) (log : Log Agent) : Log Agent :=
     let execution : Execution :=
       { output := { output := testUnameOutput, exitCode? := some 0 }, workspace := (workspace? log).getD default }
     settle run (appended run log (.answered frame (.exec command config) (.ok (.execution execution))))
+  -- MiniVero times each round, to tell its model the time left: a run with no budget.
+  | .ask { frame, op := .time } =>
+    settle run (appended run log (.answered frame .time (.ok (.timing { spentMs := 0 }))))
   | .mark event => settle run (appended run log event)
   | _ => log
 
