@@ -36,7 +36,7 @@ flowchart TD
 | 3 | **structured output**: an answer of a fixed JSON shape | `Alaya.LLM.Chat` |
 | 4 | a **model**: a request has a sequence of draws | `Alaya.LLM.Model` |
 | 5 | **layers**: retry, batch, sharing of draws, the persistent cache | `Alaya.LLM.Model`, `Alaya.LLM.Cache` |
-| 6 | **models and providers**: what is asked, and who serves it | `Alaya.LLM.Models`, `Alaya.LLM.Provider`; the lists, `Alaya.App.Catalog` |
+| 6 | **models and providers**: what is asked, and who serves it | `Alaya.LLM.Models`, `Alaya.LLM.Provider`; Alaya's lists, `Alaya.App.Builtin` |
 | 7 | **errors** | `Alaya.Base.Error` |
 
 ## 1. A request
@@ -292,7 +292,7 @@ Models.Spec.read : Json → Except String Spec   -- a spec as written: fields le
 ```
 
 The library knows no particular model or provider. Which a person can name, with their defaults,
-is the app's catalog (`Alaya.App.Catalog`): a model named alone becomes its whole spec there,
+is the app's catalog (`Alaya.App.Catalog`; Alaya's own is `Builtin.catalog`): a model named alone becomes its whole spec there,
 before a call records it, so a log holds complete specs and reads back without the list.
 
 `Provider.serve provider spec` gives the innermost `Model`, the transport, after checking that
