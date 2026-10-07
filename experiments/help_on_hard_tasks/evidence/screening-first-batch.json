@@ -10,11 +10,16 @@
       "bash": 53,
       "time_budget": 2
     },
+    "failed_sample_effects": 0,
+    "termination_result": {
+      "status": null,
+      "stop_reason": null
+    },
     "executed_bash_commands": 52,
     "actual_time_checks": 2,
-    "external_notices_before_first_sample": [
-      "changed"
-    ],
+    "bash_effect_errors": 0,
+    "external_notices_before_first_sample": [],
+    "initial_workspace_event": "b4fb5e49b325728c982a2a1c9e38874c8562d9239b1c627a1487edead3aae359",
     "questions": [],
     "proxy_answers": [],
     "human_answers": 0,
@@ -317,11 +322,16 @@
       "bash": 51,
       "time_budget": 3
     },
+    "failed_sample_effects": 0,
+    "termination_result": {
+      "status": null,
+      "stop_reason": null
+    },
     "executed_bash_commands": 50,
     "actual_time_checks": 3,
-    "external_notices_before_first_sample": [
-      "changed"
-    ],
+    "bash_effect_errors": 0,
+    "external_notices_before_first_sample": [],
+    "initial_workspace_event": "4a1e13f7c4865b5478e71f28f944314caec937c4d7455988856f86bdf12a604b",
     "questions": [],
     "proxy_answers": [],
     "human_answers": 0,

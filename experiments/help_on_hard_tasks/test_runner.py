@@ -54,5 +54,67 @@ class RunnerGuards(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'terminal'):
                 runner.grade()
 
+class InitialEventAudit(unittest.TestCase):
+    def make_log(self, notice=None):
+        log = [
+            {'entry': 'workspace-root', 'event': {'type': 'arrived', 'notice': {'type': 'changed'}}},
+            {'entry': 'session-tip', 'event': {'type': 'opened'}},
+            {'entry': 'agent-call', 'event': {'type': 'arrived', 'notice': {'type': 'called'}}},
+        ]
+        if notice:
+            log.append({'entry': 'intervention', 'event': {'type': 'arrived', 'notice': {'type': notice}}})
+        log.append({'entry': 'first-sample', 'event': {'type': 'answered', 'op': {
+            'type': 'sample', 'model': {'name': run.MODEL, 'params': {
+                'max_tokens': run.OUTPUT, 'temperature': 0}}}, 'answer': {}}})
+        return [dict(row, position=i) for i, row in enumerate(log)]
+
+    def audit_request(self, root, log):
+        guidance = 'Fixture guidance.'
+        (root / 'guidance.md').write_text(guidance)
+        run.write(root / 'manifest.json', {'root': 'session-tip', 'arm': 'solo'})
+        (root / 'first-request.jsonl').write_text(json.dumps({'request': {
+            'messages': [{'role': 'system', 'content': 'System.\n' + guidance},
+                         {'role': 'user', 'content': 'Task.'}],
+            'tools': [{'name': name} for name in ('bash', 'submit', 'time_budget')]}}) + '\n')
+        runner = run.Run(argparse.Namespace(root=root, binary=Path('/unused')))
+        with patch.object(runner, 'last', side_effect=AssertionError('audit must remain offline')):
+            runner.audit_request(log)
+
+    def test_initial_workspace_is_allowed_and_session_tip_is_ancestor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.audit_request(root, self.make_log())
+            result = run.read(root / 'request-audit.json')
+            self.assertTrue(result['passed'])
+            self.assertEqual(result['initial_workspace_event'], {
+                'entry': 'workspace-root', 'position': 0, 'type': 'changed'})
+            self.assertTrue(result['manifest_root_is_ancestor'])
+            self.assertEqual(result['external_notices_before_first_sample'], [])
+
+    def test_reply_tell_and_later_workspace_change_are_rejected(self):
+        for notice in ('replied', 'said', 'changed'):
+            with self.subTest(notice=notice), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with self.assertRaisesRegex(RuntimeError, 'external notices: ' + notice):
+                    self.audit_request(root, self.make_log(notice))
+                self.assertFalse((root / 'request-audit.json').exists())
+
+    def test_initial_event_must_be_position_zero_workspace_change(self):
+        for bad_root in (
+            {'position': 1, 'event': {'type': 'arrived', 'notice': {'type': 'changed'}}},
+            {'position': 0, 'event': {'type': 'arrived', 'notice': {'type': 'said'}}},
+        ):
+            with self.subTest(root=bad_root):
+                log = self.make_log()
+                log[0] = dict(bad_root, entry='workspace-root')
+                with self.assertRaisesRegex(RuntimeError, 'position-zero workspace'):
+                    run.audit_initial_events(log, 'session-tip', 'first-sample')
+
+    def test_manifest_root_must_precede_first_sample(self):
+        log = self.make_log()
+        for root in ('missing-tip', 'first-sample'):
+            with self.subTest(root=root), self.assertRaisesRegex(RuntimeError, 'not an ancestor'):
+                run.audit_initial_events(log, root, 'first-sample')
+
 if __name__ == '__main__':
     unittest.main()

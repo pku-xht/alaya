@@ -1,6 +1,6 @@
 # 困难任务中的求助实验
 
-阅读入口：[协议](PROTOCOL.md)、[当前状态](STATUS.md)。本目录是新版 Alaya 上的新实验；旧报告和 PR #50 保持原样。
+阅读入口：[协议](PROTOCOL.md)、[当前状态](STATUS.md)、[筛选依据与服务局限](SELECTION.md)。本目录是新版 Alaya 上的新实验；旧报告和 PR #50 保持原样。
 
 问题是：**当模型遇到经过筛选的真实解题障碍时，它会不会主动提问，答复是否被采用？** 当前回答者是 AI 助手代理，不能据此比较不同背景真人的帮助效果。
 
@@ -39,3 +39,11 @@ python3 experiments/help_on_hard_tasks/run.py advance --binary "$BINARY" --root 
 真实模型问题产生后才制作问题包，注明提问时的预算、公开代码和错误、希望提供的帮助。试验用代理答案单独存放，不能给正式被试预先看。若本轮没有自然问题，明确报告“自然问题包为空”，不拿研究者补写的问题冒充。
 
 未来背景记录可包括 Lean 使用经验、相关算法／数学知识、编程经验；不能仅按学历或年级断言谁更能帮助模型。答复表记录理解题意、答复原文、自信程度、用时、参考资料及验证方法。真实招募、分组和研究协议是后续工作，本轮不执行。
+
+## 审阅与服务观察
+
+`audit_completed.py --binary "$BINARY" --runs "$RUNS"` 对已评分运行重验实际初始请求与日志根，不采样。`summarize.py` 导出正式得分、实际问题、工具请求与执行数、停止类型、截断及注入审计。manifest 的 root 是 new 命令最后返回的 session tip；真正初始工作区是 position=0 的 changed 事件，两者分开核验。当前维护版只修正审计；本轮正在使用的采样 runner 与 Lean binary 保持冻结。
+
+`observe_http.py --study-root "$SCRATCH" --output "$SCRATCH/http-observations.jsonl"` 可只读观察本研究 curl 子进程的 HTTP 状态和有单位的 Retry-After 头；不读取凭据、请求、响应正文或进程环境。该旁路可能漏过短进程，未观察到 429 不能证明没有限流。`summarize_http.py INPUT... --output OUTPUT` 合并观察、去重并报告覆盖范围。原始 provider 错误可能带账号标识，不能直接复制进报告或 Git。
+
+服务错误抛出且没有 answered 事件时，其耗时不一定计入日志累计时间。保留中断证据，不能靠重新启动获得隐性额外预算。基础设施若主导结果，则不纳入有效困难判定；不补跑凑数。脚本离线检查：`python3 -m unittest discover -s experiments/help_on_hard_tasks -p 'test_*.py'`。

@@ -21,24 +21,35 @@ def summarize(binary, root):
     clock = 0
     lengths = 0
     responses = 0
+    failed_samples = 0
     questions = []
     executed_commands = 0
+    execution_errors = 0
     time_checks = 0
     external_before_first = []
-    for row in rows:
+    initial_workspace_event = None
+    for row_index, row in enumerate(rows):
         clock += row.get('elapsed_ms', 0)
         event = row.get('event', {})
         if responses == 0 and event.get('type') == 'arrived':
             kind = event.get('notice', {}).get('type')
             if kind in ('said', 'changed', 'replied'):
-                external_before_first.append(kind)
-        if event.get('op', {}).get('type') == 'exec' and event.get('frame', [''])[-1].split('#')[0] == 'bash':
-            executed_commands += 1
+                if kind == 'changed' and row_index == 0 and row.get('position') == 0:
+                    initial_workspace_event = row['entry']
+                else:
+                    external_before_first.append(kind)
+        if event.get('type') == 'answered' and event.get('op', {}).get('type') == 'exec' and event.get('frame', [''])[-1].split('#')[0] == 'bash':
+            if event.get('answer') is not None:
+                executed_commands += 1
+            else:
+                execution_errors += 1
         if event.get('op', {}).get('type') == 'time':
             time_checks += 1
         if event.get('type') == 'asked':
             questions.append({'entry': row['entry'], 'seconds': round(clock / 1000, 3),
                               'question_type': event['question']['form']['type']})
+        if event.get('type') == 'answered' and event.get('op', {}).get('type') == 'sample' and event.get('answer') is None:
+            failed_samples += 1
         if event.get('op', {}).get('type') == 'sample' and event.get('answer') is not None:
             responses += 1
             response = event['answer']
@@ -54,8 +65,13 @@ def summarize(binary, root):
     audit_path = root / 'request-audit.json'
     return {'run': root.name, 'task': manifest['task'], 'arm': manifest['arm'], 'status': state['status'],
         'samples': responses, 'run_time_seconds': round(clock / 1000, 3), 'tool_requests': dict(count),
+        'failed_sample_effects': failed_samples,
+        'termination_result': {'status': state.get('result', {}).get('value', {}).get('status'),
+                               'stop_reason': state.get('stop_reason')},
         'executed_bash_commands': executed_commands, 'actual_time_checks': time_checks,
+        'bash_effect_errors': execution_errors,
         'external_notices_before_first_sample': external_before_first,
+        'initial_workspace_event': initial_workspace_event,
         'questions': questions, 'proxy_answers': provenance, 'human_answers': 0,
         'length_truncated_responses': lengths, 'grader_status': grade.get('status'),
         'passed': grade.get('passed'), 'total': grade.get('total'),
@@ -73,6 +89,7 @@ def main():
     records = [summarize(a.binary, r) for r in sorted(a.runs.iterdir())
                if (r / 'state.json').exists() and (r / 'manifest.json').exists()
                and load(r / 'state.json').get('grade')]
+    a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_text(json.dumps(records, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps([{k: r[k] for k in ['run', 'status', 'passed', 'total', 'samples', 'run_time_seconds',
                                       'tool_requests', 'questions', 'length_truncated_responses']} for r in records], ensure_ascii=False))

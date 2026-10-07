@@ -44,6 +44,32 @@ def samples(log):
     return [r for r in log if r.get('event', {}).get('type') == 'answered'
             and r['event'].get('op', {}).get('type') == 'sample']
 
+def audit_initial_events(log, manifest_root, first_sample_entry):
+    """Separate the initial workspace from later external intervention.
+
+    `new` returns the opened session tip, so manifest.root is an ancestor of the
+    first sample, not necessarily the position-zero workspace event itself.
+    """
+    first_index = next((i for i, row in enumerate(log)
+                        if row.get('entry') == first_sample_entry), None)
+    if first_index is None or first_index == 0:
+        raise RuntimeError('first sample has no initial event prefix')
+    prefix = log[:first_index]
+    initial = prefix[0]
+    event = initial.get('event', {})
+    if (initial.get('position') != 0 or event.get('type') != 'arrived'
+            or event.get('notice', {}).get('type') != 'changed'):
+        raise RuntimeError('log must start with the position-zero workspace changed event')
+    if not manifest_root or not any(row.get('entry') == manifest_root for row in prefix):
+        raise RuntimeError('manifest root is not an ancestor before the first sample')
+    unexpected = [row['event']['notice']['type'] for row in prefix[1:]
+                  if row.get('event', {}).get('type') == 'arrived'
+                  and row['event'].get('notice', {}).get('type') in ('said', 'changed', 'replied')]
+    if unexpected:
+        raise RuntimeError('unexpected pre-sample external notices: ' + ', '.join(unexpected))
+    return {'initial_workspace_event': {'entry': initial['entry'], 'position': 0, 'type': 'changed'},
+            'manifest_root_is_ancestor': True, 'external_notices_before_first_sample': []}
+
 class Run:
     def __init__(self, args):
         self.a = args
@@ -145,10 +171,10 @@ class Run:
         spec = sampled[0]['event']['op']['model']
         assert spec['name'] == MODEL and spec['params']['max_tokens'] == OUTPUT
         assert spec['params']['temperature'] == 0
-        first_index = next(i for i, r in enumerate(log) if r.get('entry') == sampled[0]['entry'])
-        assert not any(r.get('event', {}).get('type') == 'replied' for r in log[:first_index])
+        initial_audit = audit_initial_events(log, manifest['root'], sampled[0]['entry'])
         write(self.root / 'request-audit.json', {'passed': True, 'first_sample_entry': sampled[0]['entry'],
                                                'roles': ['system', 'user'], 'tools': tools,
+                                               **initial_audit,
                                                'guidance_sha256': digest(self.root / 'guidance.md')})
 
     def advance(self):

@@ -1,0 +1,283 @@
+{
+  "best_effort": true,
+  "limitation": "Partial observation; retry headers are requested delays, not an exact accounting of time lost.",
+  "coverage": [
+    {
+      "file": "http-observations-001.jsonl",
+      "observed_at": "2026-10-07T14:14:08.654889+00:00",
+      "type": "coverage_start",
+      "best_effort": true,
+      "scope": "/home/xht/.cache/alaya-demo/help-hard-20261007/runs"
+    },
+    {
+      "file": "http-observations-001.jsonl",
+      "observed_at": "2026-10-07T14:26:20.012005+00:00",
+      "type": "coverage_end"
+    },
+    {
+      "file": "http-observations-002.jsonl",
+      "observed_at": "2026-10-07T14:25:33.916020+00:00",
+      "type": "coverage_start",
+      "best_effort": true,
+      "scope": "/home/xht/.cache/alaya-demo/help-hard-20261007/runs"
+    }
+  ],
+  "runs": [
+    {
+      "run": "greenery-solo-02",
+      "observed_requests": 6,
+      "status_counts": {
+        "200": 6
+      },
+      "first_observed": "2026-10-07T14:34:27.336075+00:00",
+      "last_observed": "2026-10-07T14:34:42.045214+00:00",
+      "observed_429": 0,
+      "retry_headers": []
+    },
+    {
+      "run": "munkres-solo-02",
+      "observed_requests": 28,
+      "status_counts": {
+        "200": 16,
+        "429": 12
+      },
+      "first_observed": "2026-10-07T14:15:05.935896+00:00",
+      "last_observed": "2026-10-07T14:30:05.362774+00:00",
+      "observed_429": 12,
+      "retry_headers": [
+        {
+          "observed_at": "2026-10-07T14:16:40.439192+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:17:41.023998+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:18:41.725435+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:19:42.373028+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:23:01.049821+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:24:01.688620+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:25:02.293427+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:26:02.860378+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T14:27:03.525098+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T14:28:04.093112+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T14:29:04.608226+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T14:30:05.362774+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        }
+      ]
+    },
+    {
+      "run": "pythonconstraint-solo-02",
+      "observed_requests": 30,
+      "status_counts": {
+        "200": 15,
+        "429": 15
+      },
+      "first_observed": "2026-10-07T14:14:08.659242+00:00",
+      "last_observed": "2026-10-07T14:31:48.759281+00:00",
+      "observed_429": 15,
+      "retry_headers": [
+        {
+          "observed_at": "2026-10-07T14:15:12.408776+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:16:12.900487+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:17:13.401773+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:18:13.961879+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:19:14.499388+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:20:14.962740+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:21:39.379533+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:23:23.489559+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:24:23.827719+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:25:28.896397+00:00",
+          "retry_after": null,
+          "legacy_untyped_values": [
+            60
+          ]
+        },
+        {
+          "observed_at": "2026-10-07T14:26:36.680306+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T14:27:37.089760+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T14:28:37.561850+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T14:29:38.111331+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T14:30:38.718425+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        }
+      ]
+    }
+  ]
+}
