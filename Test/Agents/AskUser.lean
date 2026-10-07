@@ -139,8 +139,8 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       | _ => ""
     -- Asking adds its instruction where the tool stands among the others, and changes nothing else.
     assertStringEq "asking only adds its instruction" (opening enabled)
-      ((opening {}).replace ("\n\n" ++ Tools.TimeBudget.instruction)
-        ("\n\n" ++ Tools.AskUser.instruction Question.Kind.all ++ "\n\n" ++ Tools.TimeBudget.instruction)),
+      ((opening {}).replace ("\n\n" ++ Tools.Subagent.instruction)
+        ("\n\n" ++ Tools.AskUser.instruction Question.Kind.all ++ "\n\n" ++ Tools.Subagent.instruction)),
 
   test "single choice offers None of the above beside the model's options, kept verbatim" do
     let question := "  Which rule applies?\nContext: α < β.  "

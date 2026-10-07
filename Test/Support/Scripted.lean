@@ -304,7 +304,7 @@ comments the program made since its last one. -/
 def appended (run : Scope Agent) (log : Log Agent) (event : Event Agent) : Log Agent :=
   (log ++ (Replayer.ofLog run log).comments.map Event.commented).push event
 
-/-- The log with every mark `run` makes after it appended, and the answer to an agent's `uname`,
+/-- The log with every mark `run` makes after it appended, the answer to an agent's `uname`, and to a `time` with no budget,
 the test's machine, up to what it asks of the world next, or how it ends: what the driver would
 log before its next operation, without one. -/
 partial def settle (run : Scope Agent) (log : Log Agent) : Log Agent :=
@@ -314,6 +314,9 @@ partial def settle (run : Scope Agent) (log : Log Agent) : Log Agent :=
     let execution : Execution :=
       { output := { output := testUnameOutput, exitCode? := some 0 }, workspace := (workspace? log).getD default }
     settle run (appended run log (.answered frame (.exec command config) (.ok (.execution execution))))
+  -- MiniVero times each round, to tell its model the time left: a run with no budget.
+  | .ask { frame, op := .time } =>
+    settle run (appended run log (.answered frame .time (.ok (.timing { spentMs := 0 }))))
   | .mark event => settle run (appended run log event)
   | _ => log
 
