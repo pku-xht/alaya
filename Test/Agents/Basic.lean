@@ -102,11 +102,11 @@ def suite : Suite := Testing.suite "agents/basic" #[
     assertEqual "nothing of a mixed response is made" ((answerTo requests[3]! "c").map (contains · "alone")) (some true),
 
   test "only basic's own fields configure it" do
-    let complete ← assertOk <| Catalog.complete "basic" (.mkObj [])
+    let complete ← assertOk <| Builtin.catalog.complete "basic" (.mkObj [])
     assertEqual "its fields" (match complete with | .obj kvs => kvs.toList.map (·.1) | _ => [])
       ["executor", "model", "question_types", "task"]
     for field in ["max_consecutive_format_errors", "mode", "context_reserve"] do
-      assertError s!"no {field}" (Catalog.complete "basic" (.mkObj [(field, 1)])) fun
+      assertError s!"no {field}" (Builtin.catalog.complete "basic" (.mkObj [(field, 1)])) fun
         | .input m => contains m s!"unknown field '{field}'"
         | _ => false
     check (Basic.tools config |>.any fun tool => tool.name == "bash" &&

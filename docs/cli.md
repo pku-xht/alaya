@@ -14,7 +14,7 @@ flowchart TD
   new("<b>new</b><br/>create a run")
   calling("<b>call</b><br/>an agent, a grader")
   resume("<b>resume</b><br/>drive it on")
-  idle("the session waits for a call<br/>exit 0, or 1 if it failed;<br/>a grader: by its verdict"):::ok
+  idle("the session waits for a call<br/>exit 0, or 1 if it failed"):::ok
   paused("paused at a limit<br/>exit 4"):::wait
   waits("waits for a person<br/>exit 3"):::wait
   stop("<b>stop</b><br/>end the call")
@@ -134,9 +134,8 @@ command.
 
 | Status | Means | What to do |
 | --- | --- | --- |
-| 0 | success; `resume`: the session waits for a call, and the last one returned or was stopped; a grader's: a pass | |
-| 1 | `resume`: the last call failed; a grader's: a fail | look at the log |
-| 2 | `resume`: the last call was a grader, and its verdict is an error: it did not finish, or printed no complete TAP | look at the grader's command |
+| 0 | success; `resume`: the session waits for a call, and the last one returned or was stopped | |
+| 1 | `resume`: the last call failed | look at the log |
 | 3 | `resume`: a call waits for a person | `reply` or `tell`, then `resume` from the new entry |
 | 4 | `resume`: a limit paused it | `resume` from the entry it printed last |
 | 64 | `usage`: the command line does not parse | fix the command line |
@@ -236,7 +235,7 @@ alaya resume 4f2c8b --provider apiyi --samples 50 --time-budget 3600
 - **A log that is no trace of its run's program** is refused (65): one edited by hand, or
   written by another version of an agent; `rebase` copies the part that is.
 - **The exit status** is how the last call ended: 0 when it returned or was stopped, 1 when it
-  failed, and, for a grader, by its verdict: 0 a pass, 1 a fail, 2 an error.
+  failed. What it returned, a grader's verdict among them, is its `value` with `--json`.
 
 ### `tell`
 

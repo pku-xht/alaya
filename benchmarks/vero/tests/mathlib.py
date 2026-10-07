@@ -74,11 +74,11 @@ spec_total = sum(
     for package in json.loads((benchmark / "manifest.json").read_text())["packages"]
     for module in package.get("modules", [])
 )
-# Grade the untouched source at the root, with the benchmark's grader image: `resume` exits 1 for
-# the fail this is.
+# Grade the untouched source at the root, with the benchmark's grader image: `resume` exits 0, and
+# the verdict, a fail, is the grader's value.
 grader_image = task_grader(args.grader_image, benchmark, "alaya-vero-grader-mathlib")
 final = grade(alaya, data, root["entry"], grader_image,
-              "python /opt/alaya-vero/grade.py --mode proof --benchmark /grader", codes=(1,), timeout=5400)
+              "python /opt/alaya-vero/grade.py --mode proof --benchmark /grader", codes=(0,), timeout=5400)
 record = final["value"]
 answer = grader_answer(json_lines(run(alaya, "log", final["entry"], "--json",
                                       "--data", data).stdout))["entry"]

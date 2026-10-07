@@ -1076,7 +1076,7 @@ def cli_resume():
     y = TOP
     out, at = strip(12, y, ["…", ("call mini-swe", "old", True), ("inbox", "new"), ("open mini-swe", "new"),
                             ("sample", "new"), "…"])
-    ends = [(OK, "no call runs", "exit 0 or 1; a grader: by verdict"), (WAIT, "waits for a person", "exit 3"),
+    ends = [(OK, "no call runs", "exit 0, or 1 if the last call failed"), (WAIT, "waits for a person", "exit 3"),
             (NEUTRAL, "paused at a limit", "exit 4")]
     bx, pitch = at[-1][1] + 10.5, 24
     out.append(f'<path class="a" d="M{bx + 4},{y - pitch + 3.5}H{bx}V{y + pitch + 21.5}H{bx + 4}"/>')

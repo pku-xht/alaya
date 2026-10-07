@@ -23,13 +23,13 @@ private def reading (name : String) (action : Result α) : Result α :=
 
 /-- A call's configuration as the current version of its program reads it, with the settings
 of `settings` its program takes over it, every field complete; and which of `settings` it takes. -/
-private def reconfigureCall (call : RoutineCall) (settings : Array Settings.Setting) :
+private def reconfigureCall (catalog : Catalog) (call : RoutineCall) (settings : Array Settings.Setting) :
     Result (RoutineCall × Array Bool) := do
-  let mut config ← reading call.name (Catalog.complete call.name call.arguments)
+  let mut config ← reading call.name (catalog.complete call.name call.arguments)
   let mut taken := #[]
   -- A setting fits a call when its program takes it.
   for setting in settings do
-    match ← tryCatch (some <$> Catalog.applying call.name config #[setting]) (fun _ => pure none) with
+    match ← tryCatch (some <$> catalog.applying call.name config #[setting]) (fun _ => pure none) with
     | some applied => config := applied; taken := taken.push true
     | none => taken := taken.push false
   pure ({ call with arguments := config }, taken)
@@ -37,19 +37,20 @@ private def reconfigureCall (call : RoutineCall) (settings : Array Settings.Sett
 /-- The log with every call configured as the current version of its program reads it, with
 `settings` over each call they fit, both where the call is asked for and where it opens. A
 setting that fits no call is an error. -/
-def reconfigure (log : Log Agent) (settings : Array Settings.Setting) : Result (Log Agent) := do
+def reconfigure (catalog : Catalog) (log : Log Agent) (settings : Array Settings.Setting) :
+    Result (Log Agent) := do
   let mut events := #[]
   let mut accepted := settings.map fun _ => false
   for event in log do
     match event with
     -- The calls of the catalog's programs: the run's own, the session's, is none of them.
     | .arrived (.called call) =>
-      if (Catalog.named? call.name).isNone then events := events.push event else
-      let (call, _) ← reconfigureCall call settings
+      if (catalog.program? call.name).isNone then events := events.push event else
+      let (call, _) ← reconfigureCall catalog call settings
       events := events.push (.arrived (.called call))
     | .opened frame call =>
-      if frame.size != 2 || (Catalog.named? call.name).isNone then events := events.push event else
-      let (call, fits) ← reconfigureCall call settings
+      if frame.size != 2 || (catalog.program? call.name).isNone then events := events.push event else
+      let (call, fits) ← reconfigureCall catalog call settings
       accepted := (accepted.zip fits).map fun (a, b) => a || b
       events := events.push (.opened frame call)
     | event => events := events.push event

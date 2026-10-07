@@ -190,9 +190,10 @@ def suite : Suite := Testing.suite "app/commands" #[
       (field status ["value", "passed"]).compress, (field status ["value", "total"]).compress)
     assertEqual "with the grader's verdict" (verdictOf status) ("grader", "pass", "2", "2")
     let graded := text status ["entry"]
-    -- The same grader at the first version, where the file is as it was: a fail, and resume exits 1.
+    -- The same grader at the first version, where the file is as it was: a fail. The grader
+    -- returned, so resume exits 0; the verdict is its value.
     let (_, _, early) ← gradeAt data tip check2
-    assertEqual "a fail exits 1" early.exit 1
+    assertEqual "a fail is a value, and resume exits 0" early.exit 0
     assertEqual "its verdict" ((← records early.stdout).back?.map verdictOf) (some ("grader", "fail", "1", "2"))
     -- Another grader, at the point already graded: called after the first's end, it is a second call.
     let (none, _, again) ← gradeAt data graded "printf '1..1\\nok 1 - other\\n'" | fail "no call runs there"
@@ -204,9 +205,9 @@ def suite : Suite := Testing.suite "app/commands" #[
     let tree := lines (← ok data "tree")
     check (tree.any (contains · "[done: pass 1/1]") && !tree.any (contains · "[done: pass 2/2]")) s!"the last verdict: {tree}"
     check ((lines (← ok data "log" #[twice])).any (contains · "return pass 2/2")) "the first is in the log, before it"
-    -- A grader that prints no TAP is an error, and resume exits 2.
+    -- A grader that prints no TAP returns the verdict error, which is its value too.
     let (_, _, broken) ← gradeAt data graded "exit 3"
-    check (broken.exit == 2 && contains broken.stdout "\"status\":\"error\"") s!"an error exits 2: {broken.exit} {broken.stdout}"
+    check (broken.exit == 0 && contains broken.stdout "\"status\":\"error\"") s!"an error is a value: {broken.exit} {broken.stdout}"
     -- Where no call runs, there is nothing to stop and no one to read a message.
     check (contains (← refused 65 data "stop" #[twice]) "no call is running") "a stop where no call runs is refused"
     check (contains (← refused 65 data "tell" #[twice, "late"]) "no call is running") "and so is a message"

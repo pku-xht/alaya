@@ -22,7 +22,7 @@ private def created : TestM (System.FilePath × Array Appended) := do
   let data := (← scratch) / "data"
   let project := (← scratch) / "project"
   writeSpec project #[("a.txt", "one\n")]
-  let made ← assertOk <| Data.create data (.directory project) Session.scope Session.call (workspaces := copies)
+  let made ← assertOk <| Data.create data (.directory project) (Session.scope Builtin.catalog) Session.call (workspaces := copies)
   pure (data, made)
 
 /-- A runtime over the data directory: the test's model, and commands that keep files. -/
@@ -74,26 +74,26 @@ def suite : Suite := Testing.suite "runtime/data" #[
     assertEqual "each after the one before" (made.map (·.entry.parent?)) (#[none] ++ (made.pop.map (some ·.hash)))
     check (made[3]!.entry.event matches .opened ⟪"session"⟫ _) "the session is open"
     withData data fun data => do
-      let visit ← data.visitAt Session.scope made.back!.hash.hex
+      let visit ← data.visitAt (Session.scope Builtin.catalog) made.back!.hash.hex
       if !(visit.next?.any Session.idle) then throw (.input "the session does not wait")
     -- A project that holds the data directory would snapshot it.
     let project := (← scratch) / "outer"
     IO.FS.createDirAll project
     assertInput "a data directory inside the project"
-      (Data.create (project / "data") (.directory project) Session.scope Session.call (workspaces := copies)) "",
+      (Data.create (project / "data") (.directory project) (Session.scope Builtin.catalog) Session.call (workspaces := copies)) "",
 
   test "what a person appends is checked by the session, and what the log can take by the runtime" do
     let (data, made) ← created
     let tip := made.back!.hash.hex
     withData data fun data => do
       -- The session admits a call where it waits; then a message, but no second call.
-      let called ← data.call Session.scope tip (agentCall) (admit := Session.admitsCall)
-      let _ ← data.tell Session.scope tip "too early" |>.toBaseIO   -- the runtime takes it: a notice
+      let called ← data.call (Session.scope Builtin.catalog) tip (agentCall) (admit := Session.admitsCall)
+      let _ ← data.tell (Session.scope Builtin.catalog) tip "too early" |>.toBaseIO   -- the runtime takes it: a notice
       let refusals : Array (String × Result Appended × String) := #[
-        ("a message where no call runs", data.tell Session.scope tip "hi" (admit := Session.admitsNotice), "no call is running"),
-        ("a second call before the first is made", data.call Session.scope called.hash.hex (agentCall) (admit := Session.admitsCall), "a call to make here already"),
-        ("a reply where no question waits", data.reply Session.scope called.hash.hex (some "yes"), "no question waits"),
-        ("a stop where no call is open in its frame", data.stop Session.scope tip ⟪"session", "mini-swe"⟫ "x", "no call is open")]
+        ("a message where no call runs", data.tell (Session.scope Builtin.catalog) tip "hi" (admit := Session.admitsNotice), "no call is running"),
+        ("a second call before the first is made", data.call (Session.scope Builtin.catalog) called.hash.hex (agentCall) (admit := Session.admitsCall), "a call to make here already"),
+        ("a reply where no question waits", data.reply (Session.scope Builtin.catalog) called.hash.hex (some "yes"), "no question waits"),
+        ("a stop where no call is open in its frame", data.stop (Session.scope Builtin.catalog) tip ⟪"session", "mini-swe"⟫ "x", "no call is open")]
       for (label, appended, needle) in refusals do
         match ← appended.toBaseIO with
         | .ok _ => throw (.input s!"{label}: taken")
@@ -104,12 +104,12 @@ def suite : Suite := Testing.suite "runtime/data" #[
   test "resume drives the run on, telling of each entry at its position, to where the session waits" do
     let (data, made) ← created
     withData data fun data => do
-      let called ← data.call Session.scope made.back!.hash.hex (agentCall) (admit := Session.admitsCall)
+      let called ← data.call (Session.scope Builtin.catalog) made.back!.hash.hex (agentCall) (admit := Session.admitsCall)
       let model ← Result.fromIO Error.storage (scriptedModel #[responseWith #[call "c" "bash" "write b.txt two"],
         responseWith #[sentinelCall "s"]])
       let rt ← runtimeOf data model
       let told ← Result.fromIO Error.storage (IO.mkRef (#[] : Array Nat))
-      let (last, stop, log) ← data.resume Session.scope called.hash.hex rt {} fun appended =>
+      let (last, stop, log) ← data.resume (Session.scope Builtin.catalog) called.hash.hex rt {} fun appended =>
         Result.fromIO Error.storage (told.modify (·.push appended.position))
       let positions ← Result.fromIO Error.storage told.get
       if positions != (Array.range positions.size).map (· + called.position + 1) then
@@ -119,8 +119,8 @@ def suite : Suite := Testing.suite "runtime/data" #[
       -- The queries read the same: the workspace changed, and nothing waits for a reply.
       let changes ← data.changes made.back!.hash.hex last.hex
       if changes.map (·.line) != #["+ b.txt"] then throw (.input s!"changes: {changes.map (·.line)}")
-      if !(← data.waiting Session.scope).isEmpty then throw (.input "nothing waits for a reply")
-      let visits ← data.visitsAt Session.scope last.hex
+      if !(← data.waiting (Session.scope Builtin.catalog)).isEmpty then throw (.input "nothing waits for a reply")
+      let visits ← data.visitsAt (Session.scope Builtin.catalog) last.hex
       if visits.map (·.position) != Array.range log.size then throw (.input "a visit for each entry, in order")
     pure (),
 
@@ -129,7 +129,7 @@ def suite : Suite := Testing.suite "runtime/data" #[
     let target := (← scratch) / "rebased"
     withData data (write := false) fun data => do
       let (_, _, entries) ← data.entriesAt made.back!.hash.hex
-      let rebased := rebase Session.scope (entries.map (·.event))
+      let rebased := rebase (Session.scope Builtin.catalog) (entries.map (·.event))
       for (label, to, needle) in [("a directory that exists", data.path, "exists"),
           ("one inside the data directory", data.path / "inner", "overlaps")] do
         match ← (data.rebase entries rebased to "note").toBaseIO with
@@ -151,23 +151,23 @@ def suite : Suite := Testing.suite "runtime/data" #[
   test "the marks a run makes with no world are appended where it would make them, and nowhere else" do
     let (data, made) ← created
     withData data fun data => do
-      if !(← Driver.settle data.store Session.scope made.back!.hash).isEmpty then
+      if !(← Driver.settle data.store (Session.scope Builtin.catalog) made.back!.hash).isEmpty then
         throw (.input "the session already waits: nothing to settle")
-      let called ← data.call Session.scope made.back!.hash.hex (agentCall)
-      let settled ← Driver.settle data.store Session.scope called.hash
+      let called ← data.call (Session.scope Builtin.catalog) made.back!.hash.hex (agentCall)
+      let settled ← Driver.settle data.store (Session.scope Builtin.catalog) called.hash
       if !(settled.map (·.2.event) |>.all fun | .heard .. | .opened .. => true | _ => false) || settled.size != 2 then
         throw (.input "the session's read of the call and the agent's opening")
-      if !(← Driver.settle data.store Session.scope settled.back!.1).isEmpty then
+      if !(← Driver.settle data.store (Session.scope Builtin.catalog) settled.back!.1).isEmpty then
         throw (.input "the agent asks the world next: nothing more")
     pure (),
 
   test "a limit lets the session take a call, and holds a read that may take a message" do
     let (data, made) ← created
     withData data fun data => do
-      let called ← data.call Session.scope made.back!.hash.hex (agentCall)
+      let called ← data.call (Session.scope Builtin.catalog) made.back!.hash.hex (agentCall)
       let model ← Result.fromIO Error.storage (scriptedModel #[responseWith #[sentinelCall "s"]])
       let rt ← runtimeOf data model
-      let (_, stop, log) ← data.resume Session.scope called.hash.hex rt { samples? := some 0 }
+      let (_, stop, log) ← data.resume (Session.scope Builtin.catalog) called.hash.hex rt { samples? := some 0 }
       if !(stop matches .paused _) then throw (.input "paused")
       -- The session read the call and opened the agent; the agent ran uname, and stopped before its read.
       if !(log.any (· matches .opened ⟪"session", "mini-swe"⟫ _)) then throw (.input "the call was opened")

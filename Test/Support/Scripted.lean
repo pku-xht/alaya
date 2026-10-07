@@ -115,7 +115,7 @@ def runWith (body : Json → Computation Agent Json) (scope : Scope Agent := .em
   Scope.of #[Session.of ⟨fun name =>
       if name == "agent" then
         some { name, scope, body }
-      else Catalog.scope.find name⟩]
+      else Builtin.catalog.scope.find name⟩]
 
 /-- A run of Alaya whose program `agent` is `make`'s computation for the call's task, its calls
 naming routines in `scope`. -/
@@ -127,7 +127,7 @@ with `model` as its model and the call's task as its task, in the scope the cata
 program. -/
 def runOfConfig (name : String) (config : Json) (model : Models.Spec := testModelSpec) :
     Except String (Scope Agent) :=
-  match Catalog.named? name with
+  match Builtin.catalog.program? name with
   | none => .error s!"unknown program: {name}"
   | some definition => match definition.complete (config.setObjVal! "model" model.toJson) with
     | .error problem => .error problem
