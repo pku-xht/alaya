@@ -1,0 +1,611 @@
+[
+  {
+    "run": "munkres-solo-01",
+    "task": "munkres",
+    "arm": "solo",
+    "status": "paused",
+    "samples": 52,
+    "run_time_seconds": 2084.331,
+    "tool_requests": {
+      "bash": 53,
+      "time_budget": 2
+    },
+    "executed_bash_commands": 52,
+    "actual_time_checks": 2,
+    "external_notices_before_first_sample": [
+      "changed"
+    ],
+    "questions": [],
+    "proxy_answers": [],
+    "human_answers": 0,
+    "length_truncated_responses": 0,
+    "grader_status": "fail",
+    "passed": 6,
+    "total": 19,
+    "initial_request_audited": true,
+    "guidance_sha256": "7d1b5496c732bc7d4db2aeb1907ddb388114ea47da04a122f759aa0d1f289fb5",
+    "binary_sha256": "b8c584f2c7b7ed60fc795baa6b44a2494578426ce75cda34fba1c26f7adb4335",
+    "agent_terminal": "8f8efcdd633f010a46f396060d65dd6f53b9a1499227b25ec6329bcf68cf53d9",
+    "grader_terminal": "45fb0cb9b9f3c72cb2f745f1292b14831e9cbc7f2912cbce62730d0f2233d39a",
+    "deviation": null,
+    "tool_timeline": [
+      {
+        "entry": "d2898937f10829ed8dc897aade6062daf515513e28872f8758a36921bf9a1c1c",
+        "seconds": 183.895,
+        "tool": "bash"
+      },
+      {
+        "entry": "d2898937f10829ed8dc897aade6062daf515513e28872f8758a36921bf9a1c1c",
+        "seconds": 183.895,
+        "tool": "time_budget"
+      },
+      {
+        "entry": "44881fe299fc8a65de012a05ae715833831fffa7ddc1c59944f1c381aba92995",
+        "seconds": 186.197,
+        "tool": "bash"
+      },
+      {
+        "entry": "acfdc80064ed56d7f4782959a4a1a17a464e13d0709947cf86d7af471ac37e44",
+        "seconds": 188.469,
+        "tool": "bash"
+      },
+      {
+        "entry": "098fd11bc85ebc39faad8147ed1feb0e11da223bd073da57bd7cd4b1a0b90b05",
+        "seconds": 192.369,
+        "tool": "bash"
+      },
+      {
+        "entry": "631621e2876b1400c3269b132488e1c3adb3b3e6e5b0a45b9f5ee04a18033b68",
+        "seconds": 350.837,
+        "tool": "bash"
+      },
+      {
+        "entry": "631621e2876b1400c3269b132488e1c3adb3b3e6e5b0a45b9f5ee04a18033b68",
+        "seconds": 350.837,
+        "tool": "bash"
+      },
+      {
+        "entry": "a58dd0bdb2b157204fa9cbec3373a371e291741969087fe84af3e643fa93c699",
+        "seconds": 536.894,
+        "tool": "bash"
+      },
+      {
+        "entry": "a58dd0bdb2b157204fa9cbec3373a371e291741969087fe84af3e643fa93c699",
+        "seconds": 536.894,
+        "tool": "bash"
+      },
+      {
+        "entry": "92cd4221d8aa92496de65459dd88d56a740b8af4eb0349c5e148f13aaa12d4ec",
+        "seconds": 545.871,
+        "tool": "bash"
+      },
+      {
+        "entry": "701efa8a1739f1ea3aa8f6174ed10b83c1a4df0274787cc42e7fcee1bf797fb7",
+        "seconds": 550.455,
+        "tool": "bash"
+      },
+      {
+        "entry": "04713127911b5386977a9ff0d66ad96fd5c93ad72a903d402c2084302d349a33",
+        "seconds": 601.791,
+        "tool": "bash"
+      },
+      {
+        "entry": "7231f2f05e36413cff73742dcde22d754e34827a8a534168911353cbc176ebd2",
+        "seconds": 608.251,
+        "tool": "bash"
+      },
+      {
+        "entry": "6c8b57498db84a2886ec5692b50db3250ee9a1e23f125199ba11a51dd3988ea1",
+        "seconds": 613.935,
+        "tool": "bash"
+      },
+      {
+        "entry": "8c35d8535c36c82cc82f4f9fceff6601d9f9a40d23c26640c9335e33c021e1ba",
+        "seconds": 651.919,
+        "tool": "bash"
+      },
+      {
+        "entry": "d505c1931cbf157226301abbdb26de8cbc6fb1092ec56f440a3d20fea01745db",
+        "seconds": 657.223,
+        "tool": "bash"
+      },
+      {
+        "entry": "9bae0988849b6ad0df5d1a143250332caf5deef22826e0e48ee6d5b68a409b3c",
+        "seconds": 660.28,
+        "tool": "bash"
+      },
+      {
+        "entry": "b381f445a9f47de4a5bdfe2b13dbfef8f5d94f7a2be93c71038a346d7e8dfc7c",
+        "seconds": 665.213,
+        "tool": "bash"
+      },
+      {
+        "entry": "225bd100ee129d47832188a5da8b5db8fc9d157eaf071901e38ee918dfa7a3a3",
+        "seconds": 671.424,
+        "tool": "bash"
+      },
+      {
+        "entry": "115abf41369554c4f5caadf2a0582784dbdac9842872cd08ff7d648a13706707",
+        "seconds": 675.316,
+        "tool": "bash"
+      },
+      {
+        "entry": "d81e94d648db021d44fb7369fed570e870750b35b7470db048d8f7ae68a63fee",
+        "seconds": 681.401,
+        "tool": "bash"
+      },
+      {
+        "entry": "e1237ce258aea11632a61e82aadfa51dda3c3962e70f5c3897e4bc1106f5199c",
+        "seconds": 687.335,
+        "tool": "bash"
+      },
+      {
+        "entry": "3bd594db8b79127f1c82622fb652407e19aa1f313098db80e6915a17a9b139f7",
+        "seconds": 694.755,
+        "tool": "bash"
+      },
+      {
+        "entry": "e6adb333d842030036c8a0d88d6286e51047163048a59508260482b913ee8abe",
+        "seconds": 704.307,
+        "tool": "bash"
+      },
+      {
+        "entry": "5d41cd352f206afa4f56c99f24cadd84e85fe473e7b4959c45d2cbeeb8d0cc4a",
+        "seconds": 710.798,
+        "tool": "bash"
+      },
+      {
+        "entry": "3753638e9427fecfaf5113f369faaa70d78d60833c5d37b5034235cd908adaec",
+        "seconds": 717.42,
+        "tool": "bash"
+      },
+      {
+        "entry": "42939cd2f2ad30161fbe483b52eed8a9b469bf2f176c952b2cea29925dba1a0f",
+        "seconds": 722.673,
+        "tool": "bash"
+      },
+      {
+        "entry": "3db086f19e57411e50ee1abf4401fee2443fda476b94494a3c5f9ef531d6a344",
+        "seconds": 728.836,
+        "tool": "bash"
+      },
+      {
+        "entry": "2a581469fc4de0ea39a189380aea43a5747ab3bc19760e75e6d9adddfe217481",
+        "seconds": 732.61,
+        "tool": "bash"
+      },
+      {
+        "entry": "4b4dc8651bb2ee4c6dc09cce6217e614e767b90ed80de3f243d2695644d36a13",
+        "seconds": 737.374,
+        "tool": "bash"
+      },
+      {
+        "entry": "ab99cb500a40c26ff3cdf5f1f3331f59f54245b5783784419dbeb0f453f42287",
+        "seconds": 743.341,
+        "tool": "bash"
+      },
+      {
+        "entry": "cc58a323eecb9d5ff3290f4bdbadd216ac369d4b69141881cb8a6aa84cea51ad",
+        "seconds": 767.627,
+        "tool": "bash"
+      },
+      {
+        "entry": "057f0cbb7ed26e22748b03cf16a4db7fb802cef0ffd9460e22c1f2dce22039bb",
+        "seconds": 782.182,
+        "tool": "bash"
+      },
+      {
+        "entry": "0cc5db98e24fea69d38a5b0d4fd98521bd082dac1f2dfdd0720980380adc5cfc",
+        "seconds": 789.669,
+        "tool": "bash"
+      },
+      {
+        "entry": "6b92e0aeb5090b97c9b26b7ade74ee3603c244ca9ee74ee129128ffb72ee9441",
+        "seconds": 793.984,
+        "tool": "bash"
+      },
+      {
+        "entry": "1ea238052898f465a622d5d8a50cf8bed115b5683004e003b5314e03635c26a7",
+        "seconds": 801.776,
+        "tool": "bash"
+      },
+      {
+        "entry": "a925c8d4d94189e1b0426c05bca7f5c0b92ef1c8b199213a1cc2e14595494999",
+        "seconds": 806.791,
+        "tool": "bash"
+      },
+      {
+        "entry": "ca526ad22b4fb0601082065d0e2c9cf9b134ff38b67ecf381dc3928e7e32396a",
+        "seconds": 822.689,
+        "tool": "bash"
+      },
+      {
+        "entry": "db6cc6461f6510c4f33cbf099eb9c9fab51816445b5bfa0cf17382a7a3111866",
+        "seconds": 830.25,
+        "tool": "bash"
+      },
+      {
+        "entry": "b2dc7dab580de417f2e541533d9b31ba9c4d02038282cac09840ecefc14949ff",
+        "seconds": 838.32,
+        "tool": "bash"
+      },
+      {
+        "entry": "5425c721d9000f607f0d2267da880762f3e59b7102aeb9afac3b93768ee26a3c",
+        "seconds": 1204.679,
+        "tool": "bash"
+      },
+      {
+        "entry": "1cbb717658206e4b881f1b46a7a72f0ae0385b0f14d3f7b31276fa67937cefe8",
+        "seconds": 1210.224,
+        "tool": "bash"
+      },
+      {
+        "entry": "96f9d7f231210a633bda1ddfe543753fa3e1bbdd0e005d8184dd7376509fad2a",
+        "seconds": 1217.087,
+        "tool": "bash"
+      },
+      {
+        "entry": "21dde20d9cba1785a35d9dafa3132847250977a97bba90d05b6fb20b3414966b",
+        "seconds": 1226.501,
+        "tool": "bash"
+      },
+      {
+        "entry": "348693950bcfa9aab9543edf42f623bfd1b3b15def8baccd809f23c114ba19e1",
+        "seconds": 1297.199,
+        "tool": "bash"
+      },
+      {
+        "entry": "6730a3b8aa5916d887bfee961b535d3d3be528a4e63e115ac59b701d8f03d7b7",
+        "seconds": 1304.871,
+        "tool": "bash"
+      },
+      {
+        "entry": "9c5e6994eb89ca07a946a2b43cb9fffaf4771bfe92f6066225836fb1313d3bef",
+        "seconds": 1429.144,
+        "tool": "bash"
+      },
+      {
+        "entry": "5ace0da7189b7c3477932c92f24e46816b6009e180ac630999166422e7174bc2",
+        "seconds": 1444.076,
+        "tool": "bash"
+      },
+      {
+        "entry": "67623e057963f30f55506928255c743aa01a856ab235d0c24ba5b47cab9a90e5",
+        "seconds": 1689.308,
+        "tool": "bash"
+      },
+      {
+        "entry": "96681124f3f8f1217a72046bb9cf42d4fa73679321f6e8a9f81f33537b54ec94",
+        "seconds": 1699.561,
+        "tool": "bash"
+      },
+      {
+        "entry": "4fe1dcf84f66745eaf98e22e4a605c8c8f1f38aa7e4942ddf6140498f5a4a5cc",
+        "seconds": 1703.914,
+        "tool": "bash"
+      },
+      {
+        "entry": "e88ff42be800dfc5fe1569021d46cbda5d58f2547f28a9e93a3b5683fa4def1d",
+        "seconds": 1708.842,
+        "tool": "bash"
+      },
+      {
+        "entry": "a46aa2a05a9fc99f08fc9f0292bea824d4280c2eabdd3641ee1d229481dfecd0",
+        "seconds": 1712.489,
+        "tool": "time_budget"
+      },
+      {
+        "entry": "acd2373e452fd42254da29a53ad10f3a9dff40544c34bc6c5a22d769ffdf9021",
+        "seconds": 1776.011,
+        "tool": "bash"
+      },
+      {
+        "entry": "5bfb9318cbda788ada9bc64a3fac24108d57adfba37a4fed220180471090cefd",
+        "seconds": 2084.315,
+        "tool": "bash"
+      }
+    ]
+  },
+  {
+    "run": "primepy-solo-01",
+    "task": "primepy",
+    "arm": "solo",
+    "status": "paused",
+    "samples": 44,
+    "run_time_seconds": 2184.082,
+    "tool_requests": {
+      "bash": 51,
+      "time_budget": 3
+    },
+    "executed_bash_commands": 50,
+    "actual_time_checks": 3,
+    "external_notices_before_first_sample": [
+      "changed"
+    ],
+    "questions": [],
+    "proxy_answers": [],
+    "human_answers": 0,
+    "length_truncated_responses": 0,
+    "grader_status": "fail",
+    "passed": 0,
+    "total": 9,
+    "initial_request_audited": true,
+    "guidance_sha256": "7d1b5496c732bc7d4db2aeb1907ddb388114ea47da04a122f759aa0d1f289fb5",
+    "binary_sha256": "b8c584f2c7b7ed60fc795baa6b44a2494578426ce75cda34fba1c26f7adb4335",
+    "agent_terminal": "9449bb5a3a344bfbe98a20964e8320b020efa106cf626f76447b65fa0a32051f",
+    "grader_terminal": "a8e5dba1164a1f9f1f9ec6a73225d48d0b50bf33c0fca334fe27792f4d14fcc6",
+    "deviation": "samples=0 meant unlimited; no response cap enforced; retained as first preassigned reference trajectory",
+    "tool_timeline": [
+      {
+        "entry": "54039d091120e0a71e0cf529e54e049bf2a3e4c02a6480f9104b698ebaeaac26",
+        "seconds": 3.385,
+        "tool": "bash"
+      },
+      {
+        "entry": "54039d091120e0a71e0cf529e54e049bf2a3e4c02a6480f9104b698ebaeaac26",
+        "seconds": 3.385,
+        "tool": "time_budget"
+      },
+      {
+        "entry": "12aeb7497cfffd31466ed03a2adb121ad0005b53dcdfff5af1a295cc60756c5b",
+        "seconds": 6.09,
+        "tool": "bash"
+      },
+      {
+        "entry": "12aeb7497cfffd31466ed03a2adb121ad0005b53dcdfff5af1a295cc60756c5b",
+        "seconds": 6.09,
+        "tool": "bash"
+      },
+      {
+        "entry": "c99a7c8c3a561bd154f61d36f85c674d905a600e903c6498697c79129b421eda",
+        "seconds": 9.011,
+        "tool": "bash"
+      },
+      {
+        "entry": "c99a7c8c3a561bd154f61d36f85c674d905a600e903c6498697c79129b421eda",
+        "seconds": 9.011,
+        "tool": "bash"
+      },
+      {
+        "entry": "d4624dbf2ea4dae640d8b063c9c1d912df12e452ae7a22ede7cc2cb3cae909c0",
+        "seconds": 66.035,
+        "tool": "bash"
+      },
+      {
+        "entry": "d4624dbf2ea4dae640d8b063c9c1d912df12e452ae7a22ede7cc2cb3cae909c0",
+        "seconds": 66.035,
+        "tool": "bash"
+      },
+      {
+        "entry": "244950ec02941984c59a429801f9b6163e1224452f8517e80e87b92b9c17e894",
+        "seconds": 70.506,
+        "tool": "bash"
+      },
+      {
+        "entry": "5a10832f470c3e9b01628b3552ddc8c05c567f3069bbdb65fd3fcaeaee221d16",
+        "seconds": 74.843,
+        "tool": "bash"
+      },
+      {
+        "entry": "5a10832f470c3e9b01628b3552ddc8c05c567f3069bbdb65fd3fcaeaee221d16",
+        "seconds": 74.843,
+        "tool": "bash"
+      },
+      {
+        "entry": "623671886527802f531f04be8c579273eeb74739db82c8ec4e1d25a89acbb833",
+        "seconds": 78.542,
+        "tool": "bash"
+      },
+      {
+        "entry": "623671886527802f531f04be8c579273eeb74739db82c8ec4e1d25a89acbb833",
+        "seconds": 78.542,
+        "tool": "bash"
+      },
+      {
+        "entry": "765308a1f9d0c3e292411e5120b9e616da90cbc6a2eebb24f1781743e5d07273",
+        "seconds": 83.738,
+        "tool": "bash"
+      },
+      {
+        "entry": "765308a1f9d0c3e292411e5120b9e616da90cbc6a2eebb24f1781743e5d07273",
+        "seconds": 83.738,
+        "tool": "bash"
+      },
+      {
+        "entry": "11104724ecf2d4bf0718fd05e283d7b9c92f9e599af45e410d1bf89fe924aceb",
+        "seconds": 89.616,
+        "tool": "bash"
+      },
+      {
+        "entry": "11104724ecf2d4bf0718fd05e283d7b9c92f9e599af45e410d1bf89fe924aceb",
+        "seconds": 89.616,
+        "tool": "bash"
+      },
+      {
+        "entry": "87b2ae77dbd3138191490b7bdfeb03b778e2eee67a94e33ec2d508602cc0e9a7",
+        "seconds": 106.122,
+        "tool": "bash"
+      },
+      {
+        "entry": "87b2ae77dbd3138191490b7bdfeb03b778e2eee67a94e33ec2d508602cc0e9a7",
+        "seconds": 106.122,
+        "tool": "bash"
+      },
+      {
+        "entry": "b45c39bf9e1f652cf3bd6fa7226639d07060801ee571ed2d6f0ec4b24f62c3d8",
+        "seconds": 132.929,
+        "tool": "bash"
+      },
+      {
+        "entry": "8f8a7d74c21a27517b93035d05c3f8b6b16bbfe1cfaa088538ed8b7d081df96f",
+        "seconds": 136.72,
+        "tool": "bash"
+      },
+      {
+        "entry": "b08d0eb8ae381aecac80095dcbcf7345a5cefa54888d14c8fa0d303815d2673c",
+        "seconds": 263.978,
+        "tool": "bash"
+      },
+      {
+        "entry": "40a0201c1cd5b21fc12b1229349f32d00c0a73d5aa4f7f90ac78056522090fde",
+        "seconds": 328.398,
+        "tool": "bash"
+      },
+      {
+        "entry": "c943c13b718f0b8a30c7784f82686c53683eb6bc61161a54827c30a8909f9110",
+        "seconds": 337.729,
+        "tool": "bash"
+      },
+      {
+        "entry": "899e9497a5a222c8c41d2ef7f93e7fd22c18b7928b964efae27f707ebe3975d7",
+        "seconds": 343.272,
+        "tool": "bash"
+      },
+      {
+        "entry": "cd18df14b031cca1b39e833e7cf4a634e997cebaa148ece0399c3507e8f61f1b",
+        "seconds": 382.11,
+        "tool": "bash"
+      },
+      {
+        "entry": "8221118a3b51b2159f8e1688f90c3249785f276604db4704e56c2b57e32c1fdf",
+        "seconds": 451.282,
+        "tool": "bash"
+      },
+      {
+        "entry": "7f85242487ebdc39862d42abbfe79089f7509344ad8859299563915c5c4f9698",
+        "seconds": 455.419,
+        "tool": "bash"
+      },
+      {
+        "entry": "bceae74d2134dbb6036106b04c49c8c085f356c678002224e773ac0a237ec393",
+        "seconds": 700.754,
+        "tool": "bash"
+      },
+      {
+        "entry": "21206b42490d7623edee2b747121faed61f683b0a7f83483cfc35e5c1b4c6397",
+        "seconds": 709.465,
+        "tool": "bash"
+      },
+      {
+        "entry": "d096fd00b1a6069636056a618ffb35833923c882ae1ca5daf366a438224b4db0",
+        "seconds": 716.389,
+        "tool": "bash"
+      },
+      {
+        "entry": "6c9447852cda8747d891f4c26ca5693d5ce691fae37959c6fe8135715f0a31b5",
+        "seconds": 719.752,
+        "tool": "time_budget"
+      },
+      {
+        "entry": "efe34afbc2bdbcfb55e718f41117aad2820d98cfce67e616a36c9f54e0f3285a",
+        "seconds": 734.948,
+        "tool": "bash"
+      },
+      {
+        "entry": "1d24d6b60e625fe225bff8f02a1c5d411b6a7898a34b75ace7b7becf68ac5848",
+        "seconds": 795.752,
+        "tool": "bash"
+      },
+      {
+        "entry": "3c8e1a2096ec42d337b410234cab06760c3818bea6ff4dc33184edb8161971cf",
+        "seconds": 862.756,
+        "tool": "bash"
+      },
+      {
+        "entry": "3cdfe4aeebca6846b9fe95ffeb31e7cf62dabce833436aec5d643b7a214a615b",
+        "seconds": 876.46,
+        "tool": "bash"
+      },
+      {
+        "entry": "cc5d9348d07953729ca8083ec164f6f7ac8bfe9c9104c082a1199d7ae81c6c67",
+        "seconds": 891.665,
+        "tool": "bash"
+      },
+      {
+        "entry": "e45e95b8a820b79417e0164813ea00ff991b2deac2c9d9c652c42feb7e93cb53",
+        "seconds": 1031.722,
+        "tool": "bash"
+      },
+      {
+        "entry": "d29d7bda4a23faf95e19b7e6432f2da5bbc7a49fbe42aee58556e6daf301fe8f",
+        "seconds": 1164.023,
+        "tool": "bash"
+      },
+      {
+        "entry": "9c16924fc1463ea964df4edb22e072ffa9ade4fa1f8c67ddb76b4771e09bfd2d",
+        "seconds": 1294.511,
+        "tool": "bash"
+      },
+      {
+        "entry": "8063340f0acf863ac28d2bb760f3911812e23e9f398d473dc7874dec74da7a91",
+        "seconds": 1605.491,
+        "tool": "bash"
+      },
+      {
+        "entry": "ea1a21e21e458ca596cbea985f2f52ecc998534c01de1f1ca4291529bdff236b",
+        "seconds": 1614.39,
+        "tool": "bash"
+      },
+      {
+        "entry": "8577d1c954a2717d2a6233fa04f6050e5438352a8cc70bbca522c131aab0f2e7",
+        "seconds": 1681.684,
+        "tool": "bash"
+      },
+      {
+        "entry": "4c11268fbacd6de6baa0c69a2b64229de09210383785a09ab5bba111a2707112",
+        "seconds": 1689.228,
+        "tool": "bash"
+      },
+      {
+        "entry": "e30677ea635cf4b5d9993ae66ea358c0a9c568958aaef333a1b124d1723a746b",
+        "seconds": 1692.924,
+        "tool": "bash"
+      },
+      {
+        "entry": "d11d6267a8063aa34e9c773bd04697c9a76143052e43aaaf9e1dae85e0bf2c3b",
+        "seconds": 1697.636,
+        "tool": "bash"
+      },
+      {
+        "entry": "1bbf6ef845f32e988a3e5a331b4b19cdb7116f9c0021bab7c73f5e73c6851dad",
+        "seconds": 1709.893,
+        "tool": "bash"
+      },
+      {
+        "entry": "f21f1e59bda8d6ff693b13ca7b1d05718165f1f424dec2ac94a1978799109358",
+        "seconds": 1720.783,
+        "tool": "bash"
+      },
+      {
+        "entry": "89b6604c955d26f3822e5a344e622a78abdf360e0822dcac4c3ce659eff9f263",
+        "seconds": 1727.584,
+        "tool": "bash"
+      },
+      {
+        "entry": "135a12cd387ae673d8f8b4d7c03531d328e918d34b65ef2a9904ee473ef547c6",
+        "seconds": 1738.921,
+        "tool": "bash"
+      },
+      {
+        "entry": "67f0065c4c64f4268ee76e9ec60156be9351c0ecac1c3e25b9a294a5a82d6f03",
+        "seconds": 1747.366,
+        "tool": "bash"
+      },
+      {
+        "entry": "878af3c5ba03695c64fed7564322410113ad72607f9347380eb8f755feedce87",
+        "seconds": 1752.683,
+        "tool": "bash"
+      },
+      {
+        "entry": "878af3c5ba03695c64fed7564322410113ad72607f9347380eb8f755feedce87",
+        "seconds": 1752.683,
+        "tool": "time_budget"
+      },
+      {
+        "entry": "caf829d65739c670f1669fe636148a222e3242138e9f6907c4cd2e01212b21ce",
+        "seconds": 2184.049,
+        "tool": "bash"
+      }
+    ]
+  }
+]
