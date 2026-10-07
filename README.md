@@ -26,18 +26,18 @@ the Vero benchmark of verified Lean code.
 
 - **Durable runs.** A run that crashed or was interrupted resumes from its log. Every model draw
   is cached, so resuming sends no request twice.
-- **A complete view of runs.** `alaya html` writes the whole forest as one page: every branch,
-  every call in its frame, each request as it was sent, each response with its reasoning, and how
-  each command changed the files.
+- **A complete view of runs.** The whole forest is written as one HTML page: every branch, every
+  step of the agent's workflow, each request as it was sent, each response with its reasoning, and
+  how each command changed the files.
 - **Forks.** Any entry of any run can be continued differently, and the original stays as it was.
   The logs of a data directory form a forest that shares their common entries.
-- **Interventions at any point.** A person can send a message (`tell`), change the workspace
-  (`commit`), answer an agent's question (`reply`), or stop any call by its frame (`stop`).
-- **Grading at any point.** A grader is a program called on the log, in an image of its own. It
-  reads TAP from the benchmark's tests and gives a verdict: pass, fail or error, with a score.
-- **Rebase.** After an agent changes, `rebase` copies a run into a new data directory as the new
-  version makes it, keeping every entry that still holds.
-- **Isolated execution.** Every command runs in a container of its call's image, pinned by
+- **Interventions at any point.** A person can send the agent a message, change its files, answer
+  its question, or stop it, or any step of its workflow.
+- **Grading at any point.** Any intermediate state of a run can be graded, through one interface
+  that supports any benchmark.
+- **Rebase.** After an agent changes, a run is copied as the new version makes it: the prefix of
+  the old run that the new version still makes is kept, and only the rest is run again.
+- **Isolated execution.** Every command runs in a container of the benchmark's image, pinned by
   digest, with no network by default. The workspace is versioned after every command, so any
   point of a run can be listed, read, compared or checked out.
 - **Provider-independent runs.** A run records the model it used, not who served it. Another
@@ -45,8 +45,8 @@ the Vero benchmark of verified Lean code.
 - **Agents.** MiniSwe and MiniVero are included, with the tools `bash`, `submit`, `ask_user`,
   `time_budget` and `subagent`. An agent is a Lean program, built from routines with lexical
   scopes, and its log shows every call it made.
-- **An agent-native command line.** Every command takes `--json`, every failure has a typed exit
-  status, and `alaya help --json` describes every command as data.
+- **Operated by agents.** An external agent, such as Claude Code, can operate Alaya entirely on
+  its own: create and drive runs, intervene, grade, and read the results.
 
 ## Getting started
 
