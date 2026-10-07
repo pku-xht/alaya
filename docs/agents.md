@@ -58,8 +58,9 @@ A model's tool call becomes a call of a routine in four steps:
 | `subagent` | `task` | the agent itself, `mini-vero`, with its configuration and the model's task | the sub-agent's outcome |
 
 A tool is independent of the agent that offers it. The agent chooses which tools to offer, how
-to report a malformed call, and how to show a result to its model. Basic offers `bash` and
-`submit`, MiniVero offers them all (§5), and MiniSwe offers `bash` alone.
+to report a malformed call, and how to show a result to its model. Basic offers `bash`,
+`submit` and, when asked to, `ask_user`; MiniVero offers them all (§5); and MiniSwe offers `bash`
+alone.
 
 ## 2. `ask_user`: a model asks a person
 
@@ -72,9 +73,9 @@ defined by the core; the tool only adapts them to a model:
 | decides | whether a reply answers a question | which kinds of question the model may ask |
 | translates | nothing | a call's arguments into a question, and a reply into what the model is shown |
 
-1. **The kinds are chosen in advance.** MiniVero's `question_types` names the kinds of
-   question the model may ask. It offers `ask_user` only when the list is not empty, and
-   MiniSwe never does.
+1. **The kinds are chosen in advance.** The `question_types` of Basic and MiniVero names the
+   kinds of question the model may ask. Either offers `ask_user` only when the list is not
+   empty, and MiniSwe never does.
 
    ```sh
    --set 'question_types=["yes_no","single_choice"]'
@@ -91,12 +92,13 @@ defined by the core; the tool only adapts them to a model:
    ```
 
 4. **The call is checked.** A kind that is not allowed, a blank question, options on a question
-   that is not a choice, or a candidate that says "none of the above" is a format error, and
-   nothing is asked.
+   that is not a choice, or an option that says "none of the above" is answered with the problem,
+   and nothing is asked.
 5. **The tool asks.** Its routine reads the question from the arguments and performs `ask`: the
    question is marked in the log, and the run waits (`docs/language.md` §3.8).
 6. **A person replies**, with `alaya reply` (`docs/cli.md`).
-7. **The model is told.** The call returns the reply as the tool encodes it:
+7. **The model is told.** The call returns the reply as the tool encodes it, and the model is
+   shown a text as it is, and anything else as JSON:
 
    | Reply | The call returns |
    | --- | --- |
@@ -232,8 +234,8 @@ answers of commands, and changes from outside.
 
 ## 4. Basic
 
-`Alaya.Agents.Basic` is the basic agent: a model with `bash` and `submit`, as simple as an agent
-can be and still robust. Its command output follows [pi](https://github.com/earendil-works/pi):
+`Alaya.Agents.Basic` is the basic agent: a model with `bash` and `submit`, and `ask_user` when its
+configuration names kinds of question, as simple as an agent can be and still robust. Its command output follows [pi](https://github.com/earendil-works/pi):
 the end of an output, a note that names a file with all of it, and how the command ended. It is
 the base of MiniVero (§5).
 
@@ -248,6 +250,7 @@ A field left out is its default, and a misspelt one is an error.
 | `task` | none | the task, verbatim; required. `--set-file task=FILE` reads it from a file |
 | `executor.timeout_seconds` | 300 | the time a command may take |
 | `executor.env` | none | environment overrides for every command |
+| `question_types` | `[]` | the kinds of question `ask_user` lets the model ask: any of `yes_no`, `single_choice`, `open_ended`; none offers no `ask_user` (§2) |
 
 ### 4.2 The loop
 
@@ -341,14 +344,14 @@ Nothing else ends it.
 ## 5. MiniVero
 
 `Alaya.Agents.MiniVero` is Alaya's agent for the Lean implementation and proof tasks of the Vero
-benchmark. It is Basic (§4): its `bash` and `submit`, its answers to every call, and its command
-output. It goes round a loop of its own, with Vero's instructions, and with every extension on:
+benchmark. It is Basic (§4): its tools, `ask_user` among them when `question_types` names kinds
+of question; its answers to every call; and its command output. It goes round a loop of its own,
+with Vero's instructions, and with every extension on:
 
 - **`time_budget`** tells the model how much of the run's time is left (§5.5).
 - **`subagent`** hands a task to another MiniVero, with the same configuration.
 - **Masking**: the outputs of turns older than the last 20 are left out of the view (§5.6).
 - **A context limit**: a request that would not fit the model's context ends the agent first.
-- **`ask_user`** is offered when `question_types` names kinds of question (§2).
 
 ### 5.1 Options
 
@@ -356,10 +359,9 @@ output. It goes round a loop of its own, with Vero's instructions, and with ever
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `model`, `task`, `executor` | | as Basic's (§4.1) |
+| `model`, `task`, `executor`, `question_types` | | as Basic's (§4.1) |
 | `mode` | `proof` | Vero's evaluation mode for the run: `proof` or `codeproof` |
 | `context_reserve` | 8000 | tokens kept free for the next response |
-| `question_types` | `[]` | the kinds of question `ask_user` lets the model ask: any of `yes_no`, `single_choice`, `open_ended`; none offers no `ask_user` |
 
 A codeproof run calls `mini-vero --set mode=codeproof`.
 

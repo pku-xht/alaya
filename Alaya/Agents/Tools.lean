@@ -157,89 +157,68 @@ namespace AskUser
 
 open Question (Kind)
 
-/-- `a`, `a or b`, `a, b, or c`. -/
-private def listed : List String → String
-  | [] => ""
-  | [a] => a
-  | [a, b] => s!"{a} or {b}"
-  | items => ", ".intercalate items.dropLast ++ ", or " ++ items.getLast!
-
 /-- The kinds, in the order questions are always named in. -/
 private def ordered (kinds : Array Kind) : List Kind :=
   Kind.all.toList.filter kinds.contains
 
-/-- What the model is told of the tool beyond its definition, for the kinds it may ask: how the
-tool works, and nothing of what to ask or how to treat the answer, which is the agent's, or the
-experiment's, to say. -/
+/-- What the model is told of the tool beyond its definition, for the kinds it may ask: only
+what the schema cannot say, and nothing of what to ask or how to treat the answer, which is the
+agent's, or the experiment's, to say. -/
 def instruction (kinds : Array Kind) : String :=
-  let kinds := ordered kinds
-  let choose := listed <| kinds.map fun
-    | .yesNo => "yes_no for a yes/no answer"
-    | .singleChoice => "single_choice to select exactly one of at least two distinct candidates"
-    | .openEnded => "open_ended for a nonblank free-text answer"
-  let options :=
-    if !kinds.contains .singleChoice then ""
-    else if kinds.length == 1 then ""
-    else "Only single_choice takes options; otherwise pass an empty array. "
-  let yesNo := if kinds.contains .yesNo then "A yes_no answer returns the string yes or no. " else ""
-  let choice := if !kinds.contains .singleChoice then "" else
-    "A selected candidate returns its one-based option number (starting at 1), as a number. " ++
-    "The platform appends None of the above; never include that reserved label or none_of_above " ++
-    "in options. It returns the plain string none_of_above when all listed candidates are incorrect, " ++
-    "distinct from being unable to answer. "
-  "You may ask a concrete question with ask_user instead of running a command. " ++
-  s!"Include the relevant context and choose question_type: {choose}. " ++
-  options ++ yesNo ++ choice ++
-  "Call ask_user alone, without any other tool. " ++
-  "For every question type, the person may be unable to answer; this returns the JSON " ++
-  "object {\"status\":\"unavailable\"} instead of an answer."
+  "You may ask the person a question with ask_user. Give enough context to answer it." ++
+  (if !kinds.contains .singleChoice then "" else
+    " A single_choice question needs at least two distinct options; the person may also answer " ++
+    "None of the above, so do not list it yourself.")
 
-/-- The tool as a model is offered it, for the kinds of question it may ask: `question_type`
-names one of them, and `options` is there only when a choice is among them. -/
+/-- The tool as a model is offered it, for the kinds of question it may ask: what each kind's
+answer is, `question_type` naming one of the kinds, and `options` there only when a choice is
+among them. -/
 def definition (kinds : Array Kind) : Chat.ToolDefinition :=
   let kinds := ordered kinds
-  let asks := listed <| kinds.map fun
-    | .yesNo => "yes/no"
-    | .singleChoice => "single-choice"
-    | .openEnded => "open-ended"
+  let answers := "; ".intercalate <| kinds.map fun
+    | .yesNo => "yes or no for yes_no"
+    | .singleChoice => "the chosen option's number (from 1) or none_of_above for single_choice"
+    | .openEnded => "the person's own words for open_ended"
   let others := (kinds.filter (· != .singleChoice)).map (·.name)
-  let choice := if !kinds.contains .singleChoice then "" else
-    "Single-choice answers return one candidate's one-based option number (starting at 1), " ++
-    "or the platform's None of the above " ++
-    "answer (plain text none_of_above). Never include that reserved option yourself. "
   { name := "ask_user"
-    description := s!"Ask a {asks} question and wait for an answer. " ++ choice ++
-      "If the person cannot answer, the result is {\"status\":\"unavailable\"}. Call this tool alone."
+    description := s!"Ask the person a question and wait for the answer. The answer is {answers}. " ++
+      "If the person cannot answer, the result is {\"status\": \"unavailable\"}. Call this tool alone."
     parameters := .object (#[
-      ("question_type", .string (description? := some "The form of the answer requested")
+      ("question_type", .string (description? := some "The kind of answer the question asks for")
         (enum := (kinds.map (·.name)).toArray)),
-      ("question", .string (description? := some "The question and enough context to answer it"))] ++
+      ("question", .string (description? := some "The question, with enough context to answer it"))] ++
       (if !kinds.contains .singleChoice then #[] else #[
       ("options", .array (.string) (description? := some (
-        "For single_choice, at least two distinct, nonempty actual candidates. " ++
-        "Do not include None of the above or none_of_above; the platform adds it." ++
-        (if others.isEmpty then "" else s!" For {" and ".intercalate others}, an empty array."))))])) }
+        "The answers to choose from" ++
+        (if others.isEmpty then "." else s!", for single_choice; an empty array for {" and ".intercalate others}."))))])) }
 
-/-- Reads the question a call asks, or says what is wrong with it: the arguments name a kind the
-tool allows, only a choice has options, and the question is one that can be asked
-(`Question.validate`). It does not judge whether a candidate is true. -/
-def question (kinds : Array Kind) (arguments : Lean.Json) : Except String Question := do
-  (definition kinds).parameters.validate arguments
-  let text ← arguments.getObjVal? "question" >>= Lean.Json.getStr?
+/-- Reads the question of a call's arguments, or says what is wrong with it: only a choice has
+options, and the question is one that can be asked (`Question.validate`). Options left out are
+none. It does not judge whether an option is true. -/
+def read (arguments : Lean.Json) : Except String Question := do
+  let text ← (arguments.getObjVal? "question" >>= Lean.Json.getStr?).mapError fun _ =>
+    "The ask_user tool takes its question as a string."
   let options ← match arguments.getObjVal? "options" with
-    | .ok options => options.getArr? >>= (·.mapM Lean.Json.getStr?)
+    | .ok options => (options.getArr? >>= (·.mapM Lean.Json.getStr?)).mapError fun _ =>
+      "The ask_user tool takes its options as an array of strings."
     | .error _ => pure #[]
   let noOptions : Except String Unit :=
     if options.isEmpty then pure ()
-    else throw "Question options must be empty for yes_no and open_ended questions."
-  let form ← match ← arguments.getObjVal? "question_type" >>= Lean.Json.getStr? with
-    | "single_choice" => pure (Question.Form.singleChoice options)
-    | "yes_no" => noOptions *> pure .yesNo
-    | "open_ended" => noOptions *> pure .openEnded
-    | other => throw s!"Unknown question_type: {other}."
+    else throw "Options must be empty for yes_no and open_ended."
+  let form ← match arguments.getObjVal? "question_type" >>= Lean.Json.getStr? with
+    | .ok "single_choice" => pure (Question.Form.singleChoice options)
+    | .ok "yes_no" => noOptions *> pure .yesNo
+    | .ok "open_ended" => noOptions *> pure .openEnded
+    | _ => throw s!"The ask_user tool takes a question_type: one of {Kind.names}."
   let question : Question := { text, form }
   question.validate
   pure question
+
+/-- Reads the question a call asks of a tool that allows `kinds`, or says what is wrong with it:
+the arguments fit the tool's schema, so they name a kind it allows, and the question reads. -/
+def question (kinds : Array Kind) (arguments : Lean.Json) : Except String Question := do
+  ({ definition := definition kinds } : Tool).check arguments
+  read arguments
 
 /-- What a call gives for a reply, and so what the model is shown as its result: `"yes"` or
 `"no"`, the candidate's number, `"none_of_above"`, the person's text, or the object
@@ -256,7 +235,9 @@ def result : Reply → Lean.Json
 def routine : Routine Agent := {
   name := "ask_user"
   body := fun arguments => do
-    let question ← match question Kind.all arguments with
+    -- The agent checked the call against the tool it offered; the question is read again here,
+    -- from the opening in the log, whichever kinds that tool allowed.
+    let question ← match read arguments with
       | .ok question => pure question
       | .error problem => throw problem
     return result (← ask question)

@@ -36,7 +36,7 @@ def suite : Suite := Testing.suite "app/catalog" #[
     refused "type" "mini-swe" (.mkObj [("max_consecutive_format_errors", "yes")]) "must be a non-negative integer"
     refused "mode" "mini-vero" (.mkObj [("mode", "both")]) "must be proof or codeproof, not both"
     refused "nested" "mini-swe" (.mkObj [("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
-    refused "own field, misnamed" "mini-vero" (.mkObj [("stepp", 1)]) "context_reserve, question_types"
+    refused "own field, misnamed" "mini-vero" (.mkObj [("stepp", 1)]) "question_types, mode, context_reserve"
     let built ← assertOk <| Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof"]
     assertEqual "a setting" ((built.getObjVal? "mode").toOption.map (·.compress)) (some "\"codeproof\"")
     -- How commands run is in each command the agent asks for.

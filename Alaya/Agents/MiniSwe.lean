@@ -21,13 +21,13 @@ def defaultExecutor : Executor.Config := {
 
 /-- The basic agent's configuration, with mini's command settings, and how many malformed
 responses in a row end it: mini's limit, 0 for none. -/
-structure Config extends Basic.Config where
+structure Config extends Basic.Common where
   executor := defaultExecutor
   maxConsecutiveFormatErrors : Nat := 3
   deriving Inhabited
 
 def fields : Fields Config :=
-  Basic.fields.lift (·.toConfig) (fun b c => { c with toConfig := b }) ++ #[
+  Basic.commonFields.lift (·.toCommon) (fun b c => { c with toCommon := b }) ++ #[
   .of "max_consecutive_format_errors" .nat (·.maxConsecutiveFormatErrors)
     fun v c => { c with maxConsecutiveFormatErrors := v }]
 
@@ -187,6 +187,6 @@ def computation (config : Config) (model : Models.Spec) (task : String) : Comput
 
 /-- MiniSwe as a routine. Its scope is its tool. -/
 def routine : Routine Agent :=
-  Basic.agent "mini-swe" fields {} (·.toConfig) computation (Scope.of #[Tools.Bash.routine])
+  Basic.agent "mini-swe" fields {} (·.toCommon) computation (Scope.of #[Tools.Bash.routine])
 
 end Alaya.Agents.MiniSwe

@@ -53,11 +53,11 @@ private def enumValues (values : Array EnumValue) : List (String × Lean.Json) :
 private def describePath (path : String) (message : String) : String :=
   if path.isEmpty then message else s!"{path}: {message}"
 
-private def validateEnum (path : String) (values : Array α) (value : α) [BEq α] : Except String Unit :=
+private def validateEnum (path : String) (values : Array α) (value : α) [BEq α] [ToString α] : Except String Unit :=
   if values.isEmpty || values.contains value then
     pure ()
   else
-    throw <| describePath path "value is not in the enum"
+    throw <| describePath path s!"must be one of {", ".intercalate (values.toList.map toString)}"
 
 /-- Validates a JSON value against this strict OpenAI-compatible schema.
 

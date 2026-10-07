@@ -110,14 +110,13 @@ call and again off its opening in the log, and nowhere after. -/
 def validate (question : Question) : Except String Unit := do
   if isBlank question.text then throw "A question must not be blank."
   if let .singleChoice options := question.form then
-    if options.size < 2 then throw "A choice question needs at least two candidates."
+    if options.size < 2 then throw "single_choice needs at least two options."
     let mut seen : Array String := #[]
     for option in options do
       let key := option.trimAscii.toString
-      if key.isEmpty then throw "Question choices must not be empty."
-      if seen.contains key then throw "Question choices must be distinct."
-      if reserved key then
-        throw "Question choices must not include None of the above: every choice has it already."
+      if key.isEmpty then throw "Options must not be blank."
+      if seen.contains key then throw "Options must be distinct."
+      if reserved key then throw "Do not list None of the above: it is always offered."
       seen := seen.push key
 
 /-- Whether a reply answers a question of this form. -/
@@ -176,9 +175,9 @@ def render (question : Question) : String :=
   | .singleChoice options =>
     let numbered := options.mapIdx fun i option => s!"{i + 1}. {option}"
     question.text ++ "\n\n" ++ "\n".intercalate numbered.toList ++
-      "\nnone_of_above. None of the above\n\nSelect exactly one answer. Reply with one " ++
+      "\nnone_of_above: None of the above\n\nSelect exactly one answer. Reply with one " ++
       "number from 1 to " ++ toString options.size ++
-      ", or the plain text none_of_above if every listed candidate is incorrect. " ++
+      ", or none_of_above if none of them fits. " ++
       "none_of_above is an answer, distinct from being unable to answer."
 
 instance : ToString Question := ⟨render⟩

@@ -174,7 +174,7 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       (response.toolCalls.findSome? (Basic.problem? config.tools response)).getD ""
     assertContains "not offered" (parse config (Scripted.responseWith #[Scripted.askCall "q" "Keep it?"])) "Unknown tool 'ask_user'"
     assertContains "its own refusal" (parse asking (Scripted.responseWith #[Scripted.askCall "q" "Which?" "single_choice" #["only"]]))
-      "at least two candidates"
+      "at least two options"
     assertContains "alone" (parse asking (Scripted.responseWith #[Scripted.askCall "q" "Keep it?", Scripted.call "c" "bash" "ls"]))
       "ask_user must be called alone"
     assertError "an unknown kind" (Catalog.complete "mini-vero" (.mkObj [("question_types", .arr #["multiple_choice"])])) fun

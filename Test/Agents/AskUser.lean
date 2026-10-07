@@ -81,13 +81,18 @@ private def withRun (agent : String × Json) (k : Scope Agent → TestM Unit) : 
   | .ok run => k run
   | .error problem => fail problem
 
-/-- What the model was shown as the result of the call `q`: the observation, read back. -/
-private def shownResult (request : Chat.Request) : TestM Json := do
+/-- What the model was shown as the result of the call `q`. -/
+private def shownResult (request : Chat.Request) : TestM String := do
   let some shown := request.messages.findSome? fun
       | .tool "q" (.str text) => some text
       | _ => none
     | fail "the answer must be the asking call's observation"
-  assertOk <| Result.fromExcept Error.protocol (Json.parse shown)
+  pure shown
+
+/-- A result as the model is shown it: a text as it is, anything else as JSON. -/
+private def asShown : Json → String
+  | .str text => text
+  | json => json.pretty
 
 /-- Appends a reply to the question the log at `tip` waits on, read from `text` against the
 question's form, or that the person cannot answer. -/
@@ -124,7 +129,7 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       ((opening {}).replace ("\n\n" ++ Tools.TimeBudget.instruction)
         ("\n\n" ++ Tools.AskUser.instruction Question.Kind.all ++ "\n\n" ++ Tools.TimeBudget.instruction)),
 
-  test "single choice adds a platform answer while retaining model candidates verbatim" do
+  test "single choice offers None of the above beside the model's options, kept verbatim" do
     let question := "  Which rule applies?\nContext: α < β.  "
     let candidates := #[" Keep α ", "Change β\nwith evidence"]
     let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question Question.Kind.all (args question candidates))
@@ -134,8 +139,8 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
     check (rendered.startsWith question) "the question and context must retain their original wording"
     check (contains rendered "\n1.  Keep α \n2. Change β\nwith evidence")
       "numbered candidates must retain their wording"
-    check (contains rendered "none_of_above. None of the above") "the platform adds its reserved answer"
-    assertEqual "one platform label" (rendered.splitOn "None of the above").length 2
+    check (contains rendered "none_of_above: None of the above") "None of the above is offered"
+    assertEqual "once" (rendered.splitOn "None of the above").length 2
     check (contains rendered "Select exactly one answer") "the answer is single choice"
     match parseActions (response #[askOne "q" (args question candidates)]) enabled with
     | .calls calls => assertEqual "the call" (calls.map (·.name)) #["ask_user"]
@@ -219,7 +224,7 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
           if isIdle stop then assertEqual "submitted after the reply" (agentStatus (← logAt rt final)) "Submitted"
           else fail "the run must go on after the reply"
           let some request := (← requests.get).back? | fail "no request after the reply"
-          assertEqual s!"{questionType} answer in the model's view" (← shownResult request).compress shown.compress
+          assertEqual s!"{questionType} answer in the model's view" (← shownResult request) (asShown shown)
         let forest ← assertOk rt.store.forest
         assertEqual "one branch per answer" (forest.childrenOf waiting).size answers.size
         assertEqual "one question and one continuation each" (← requests.get).size (1 + answers.size)
@@ -309,10 +314,11 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
       match parseActions (response #[askOne "q" refused]) yesNo with
       | .formatError _ => pure ()
       | .calls _ => fail s!"a kind that is not allowed was accepted: {refused.compress}"
-    -- With every kind, the words are the ones the tool always had.
-    check (contains (Tools.AskUser.instruction Question.Kind.all)
-      "choose question_type: yes_no for a yes/no answer, single_choice to select exactly one of at least two distinct candidates, or open_ended for a nonblank free-text answer.")
-      "the instruction for every kind"
+    -- With a choice among the kinds, the instruction says what the schema cannot.
+    assertStringEq "the instruction for every kind" (Tools.AskUser.instruction Question.Kind.all)
+      ("You may ask the person a question with ask_user. Give enough context to answer it. " ++
+       "A single_choice question needs at least two distinct options; the person may also answer " ++
+       "None of the above, so do not list it yourself.")
     -- The kinds are named, each once.
     for (kinds, problem) in (#[(Json.arr #["yes_no", "maybe"], "not maybe"),
         (.arr #["yes_no", "yes_no"], "twice"), (.str "yes_no", "must be an array")] : Array (Json × String)) do

@@ -68,7 +68,7 @@ def suite : Suite := Testing.suite "agents/basic" #[
       "partial\n\n\n'sleep 9' timed out after 5 seconds",
 
   test "a call with a problem is answered with it, and not made" do
-    let tools := Basic.tools config.executor
+    let tools := Basic.tools config
     let problem (response : Chat.Response) : List (Option String) :=
       response.toolCalls.toList.map (Basic.problem? tools response)
     assertEqual "fine" (problem (responseWith #[call "a" "bash" "ls", call "b" "bash" "pwd"])) [none, none]
@@ -104,15 +104,41 @@ def suite : Suite := Testing.suite "agents/basic" #[
   test "only basic's own fields configure it" do
     let complete ← assertOk <| Catalog.complete "basic" (.mkObj [])
     assertEqual "its fields" (match complete with | .obj kvs => kvs.toList.map (·.1) | _ => [])
-      ["executor", "model", "task"]
-    for field in ["max_consecutive_format_errors", "question_types", "mode"] do
+      ["executor", "model", "question_types", "task"]
+    for field in ["max_consecutive_format_errors", "mode", "context_reserve"] do
       assertError s!"no {field}" (Catalog.complete "basic" (.mkObj [(field, 1)])) fun
         | .input m => contains m s!"unknown field '{field}'"
         | _ => false
-    check (Basic.tools config.executor |>.any fun tool => tool.name == "bash" &&
+    check (Basic.tools config |>.any fun tool => tool.name == "bash" &&
       ((tool.call (.mkObj [("command", "ls")])).arguments.getObjVal? "executor" |>.toOption
         |>.any fun executor => (executor.getObjVal? "outputs").toOption == some (.bool true)))
       "every command keeps its output as a file"
+    -- ask_user is offered, with its instruction, only when the configuration names kinds of question.
+    assertEqual "by default" ((Basic.tools config).map (·.name)) #["bash", "submit"]
+    let asking : Basic.Config := { questionTypes := #[.yesNo] }
+    assertEqual "asking" ((Basic.tools asking).map (·.name)) #["bash", "submit", "ask_user"]
+    let system (config : Basic.Config) : String :=
+      match (Basic.openingMessages config "t" testUname)[0]? with
+      | some (Chat.Message.system text) => text
+      | _ => ""
+    assertStringEq "its instruction follows the system message" (system asking)
+      (system config ++ "\n\n" ++ Tools.AskUser.instruction #[.yesNo]),
+
+  test "a question asked through ask_user waits for the person, and the reply goes to the model" do
+    let .ok run := runOfConfig "basic" ({ questionTypes := #[.yesNo] } : Basic.Config).toJson | fail "basic is a run"
+    let ask : Chat.ToolCall :=
+      { id := "q", name := "ask_user", arguments := .mkObj [("question_type", "yes_no"), ("question", "Keep the API?")] }
+    let rt ← runtime echoingCommands (some (← scriptedModel #[responseWith #[ask], responseWith #[submitCall "s" "kept"]]))
+    let (waiting, stop) ← assertOk <| Driver.drive rt run (← start rt run)
+    let .waits frame (some question) := stop | fail "the run waits for the person"
+    assertEqual "in the tool's frame" frame ⟪"session", "agent", "ask_user"⟫
+    assertEqual "a yes/no question" question.form .yesNo
+    let event ← assertOk <| Result.fromExcept Error.input (replyTo (next run (← logAt rt waiting)) .yes)
+    let (replied, _) ← assertOk <| Driver.append rt.store run waiting event
+    let (last, _) ← assertOk <| Driver.drive rt run replied
+    let log ← logAt rt last
+    assertEqual "submitted" (agentStatus log) "Submitted"
+    assertEqual "the model is shown the answer" (answerTo ((samplesOf run log).back!.1) "q") (some "yes")
 ]
 
 /-- A run whose commands run in the test container. -/

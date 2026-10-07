@@ -52,25 +52,12 @@ structure Config extends Basic.Config where
   /-- Tokens kept free for the next response when deciding whether the context is full, or the
   model's `output_tokens` when that is less. -/
   contextReserve : Nat := 8000
-  /-- The kinds of question `ask_user` lets the model ask; none, the default, offers no
-  `ask_user`. -/
-  questionTypes : Array Question.Kind := #[]
   deriving Inhabited
-
-/-- Kinds of question, each named once. -/
-def questionTypesCodec : Codec (Array Question.Kind) :=
-  let kinds := Codec.array (.enum Question.Kind.name Question.Kind.all.toList)
-  { kinds with read := fun json => do
-      let read ← kinds.read json
-      for kind in read do
-        if (read.filter (· == kind)).size > 1 then throw s!"names {kind.name} twice"
-      pure read }
 
 def fields : Fields Config :=
   Basic.fields.lift (·.toConfig) (fun b c => { c with toConfig := b }) ++ #[
   .of "mode" (.enum toString Mode.all) (·.mode) fun v c => { c with mode := v },
-  .of "context_reserve" .nat (·.contextReserve) fun v c => { c with contextReserve := v },
-  .of "question_types" questionTypesCodec (·.questionTypes) fun v c => { c with questionTypes := v }]
+  .of "context_reserve" .nat (·.contextReserve) fun v c => { c with contextReserve := v }]
 
 /-- The configuration as JSON: what a run records, and what `alaya config` shows. -/
 def Config.toJson (config : Config) : Lean.Json := fields.toJson config
@@ -78,21 +65,15 @@ def Config.toJson (config : Config) : Lean.Json := fields.toJson config
 /-- Reads a configuration; a field left out is its default, and an unknown one is an error. -/
 def Config.fromJson (json : Lean.Json) : Except String Config := fields.read json {}
 
-/-- The tools it offers: the basic agent's, `bash` and `submit`; `ask_user`, for the kinds of
-question its configuration names; `time_budget`; and `subagent`, calling the agent itself with
-its configuration. -/
+/-- The tools it offers: the basic agent's, `bash`, `submit` and `ask_user` when its
+configuration names kinds of question; `time_budget`; and `subagent`, calling the agent itself
+with its configuration. -/
 def Config.tools (config : Config) : Array Tool :=
-  Basic.tools config.executor ++
-    (if config.questionTypes.isEmpty then #[] else #[Tools.AskUser.tool config.questionTypes]) ++
-    #[Tools.TimeBudget.tool, Tools.Subagent.tool "mini-vero" config.toJson]
+  Basic.tools config.toConfig ++ #[Tools.TimeBudget.tool, Tools.Subagent.tool "mini-vero" config.toJson]
 
-/-- `text` with the instructions of the offered tools after it, a blank line before each: what
-a tool adds to the prompt, which is only ever added. -/
+/-- `text` with the instructions of the offered tools after it, as the basic agent adds them. -/
 def withInstructions (config : Config) (text : String) : String :=
-  config.tools.foldl (init := text) fun text tool =>
-    match tool.instruction? with
-    | some instruction => text ++ "\n\n" ++ instruction
-    | none => text
+  Basic.withInstructions config.tools text
 
 def systemMessage : String :=
   "You are MiniVero, a Lean 4 implementation and proof agent working in a Vero sandbox. " ++
@@ -189,7 +170,7 @@ def view (history : History) (masking : Masking := masking) : Dialogue :=
   Basic.viewWith (items := history.items) fun turn call result =>
     match call.name, Tools.Bash.ofResult? result with
     | "bash", some (output, file?) => observe output file? (omitted > 0 && turn ≤ omitted)
-    | _, _ => result.pretty
+    | _, _ => Basic.shown call result
 
 /-- The tokens `full`, the messages of the next request, holds, known without a tokenizer. The
 latest response that reported its size says how many the request it answered held, and how many
@@ -237,7 +218,7 @@ def computation (config : Config) (model : Models.Spec) (task : String) : Comput
 /-- MiniVero as a routine. Its scope is its tools, and itself, which `subagent` calls with its
 configuration and another task. -/
 def routine : Routine Agent :=
-  let make := Basic.agent "mini-vero" fields {} (·.toConfig) computation
+  let make := Basic.agent "mini-vero" fields {} (·.toCommon) computation
   make (Scope.fix fun scope => Tools.routines.push (make scope))
 
 end Alaya.Agents.MiniVero
