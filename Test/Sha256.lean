@@ -1,5 +1,5 @@
 import Test.Framework
-import Alaya.Sha256
+import Alaya.Base.Hash
 
 /-! The pure SHA-256 against NIST vectors and, for block
 boundaries and bulk input, cross-checked against the system checksum tool. -/
@@ -7,7 +7,7 @@ boundaries and bulk input, cross-checked against the system checksum tool. -/
 namespace Sha256Tests
 
 open Testing
-open Alaya
+open Alaya Alaya.Base
 
 private def vectors : Array (String × String) := #[
   ("", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
@@ -35,17 +35,17 @@ private def systemDigest (bytes : ByteArray) : TestM String := do
 def suite : Suite := Testing.suite "sha256" #[
   test "nist vectors" do
     for (input, expected) in vectors do
-      assertEqual s!"sha256({input.take 12}...)" (Sha256.sumHex input.toUTF8) expected,
+      assertEqual s!"sha256({input.take 12}...)" ((Hash.ofBytes input.toUTF8).hex) expected,
 
   test "padding boundaries match the system tool" do
     -- Every interesting length around the 64-byte block and 56-byte padding thresholds.
     for length in [0, 1, 54, 55, 56, 57, 63, 64, 65, 127, 128, 129, 1000] do
       let bytes := deterministicBytes (seed := length + 1) length
-      assertEqual s!"length {length}" (Sha256.sumHex bytes) (← systemDigest bytes),
+      assertEqual s!"length {length}" ((Hash.ofBytes bytes).hex) (← systemDigest bytes),
 
   test "bulk input matches the system tool" do
     let bytes := deterministicBytes (seed := 42) 262144
-    assertEqual "256KiB digest" (Sha256.sumHex bytes) (← systemDigest bytes)
+    assertEqual "256KiB digest" ((Hash.ofBytes bytes).hex) (← systemDigest bytes)
 ]
 
 end Sha256Tests

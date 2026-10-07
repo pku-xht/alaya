@@ -10,7 +10,7 @@ builds both. -/
 
 namespace CommandsTests
 
-open Testing Alaya
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 open Lean (Json)
 
 private def binary : System.FilePath := ".lake" / "build" / "bin" / "alaya"
@@ -90,7 +90,7 @@ private def newRun : TestM (System.FilePath × System.FilePath × Array Json × 
   let project := (← scratch) / "project"
   writeSpec project #[("a.txt", "one\n"), ("src/b.txt", "two\n")]
   let root ← records (← ok data "new" #["--json", project.toString])
-  let called ← records (← ok data "call" #["--json", text root[0]! ["entry"], "mini-swe", "--set", "task=the task",
+  let called ← records (← ok data "call" #["--json", text root.back! ["entry"], "mini-swe", "--set", "task=the task",
     "--image", testImageReference, "--set", "model=gpt-oss-120b", "--set", "context_reserve=7"])
   let resumed ← alaya data "resume" #[text called[0]! ["entry"], "--json"]
   if resumed.exit != 65 || !has resumed.stderr "--provider" then
@@ -98,18 +98,21 @@ private def newRun : TestM (System.FilePath × System.FilePath × Array Json × 
   pure (data, project, root ++ called, ← records resumed.stdout)
 
 def suite : Suite := Testing.suite "commands" #[
-  test "new makes a root, call asks for an agent with its configuration, resume opens it, and the readers read it" do
+  test "new makes a root and the session that waits, call asks for an agent with its configuration, resume opens it, and the readers read it" do
     let (data, _, made, resumed) ← newRun
-    assertEqual "the root and the call" (made.map (text · ["event", "type"])) #["arrived", "arrived"]
-    assertEqual "each after the one before" (made.map (text · ["parent"])) #["null", text made[0]! ["entry"]]
-    let call := field made[1]! ["event", "notice", "call"]
+    assertEqual "the root, the session's call, read and opened, and the agent's call"
+      (made.map (text · ["event", "type"])) #["arrived", "arrived", "heard", "opened", "arrived"]
+    assertEqual "each after the one before" (made.map (text · ["parent"]))
+      (#["null"] ++ (made.pop.map (text · ["entry"])))
+    assertEqual "the session, in its frame" (text made[3]! ["frame"]) "[\"session\"]"
+    let call := field made[4]! ["event", "notice", "call"]
     let config := field call ["arguments"]
     assertEqual "the call names its program, and its arguments are its configuration, model and task"
       (text call ["name"], text config ["model", "name"], (field config ["context_reserve"]).compress,
         text config ["task"])
       ("mini-swe", "gpt-oss-120b", "7", "the task")
     check ((field config ["name"]) == Json.null) "the name is the call's alone"
-    check (has (text made[1]! ["event", "notice", "environment", "image"]) "@sha256:")
+    check (has (text call ["environment", "image"]) "@sha256:")
       "the person's call pins its image by its digest"
     check (has (← refused 64 data "new" #["--task", "t", ((← scratch) / "project").toString]) "unknown option --task")
       "new takes no task"
@@ -120,20 +123,20 @@ def suite : Suite := Testing.suite "commands" #[
     let log ← records (← ok data "log" #[(tip.take 10).toString, "--json"])
     assertEqual "the log, and what comes next" (log.map fun record =>
         if (field record ["next"]) != Json.null then text record ["next"] else text record ["event", "type"])
-      #["arrived", "arrived", "heard", "opened", "answered", "heard",
+      #["arrived", "arrived", "heard", "opened", "arrived", "heard", "opened", "answered", "heard",
         "next: sample gpt-oss-120b on a request of 2 messages"]
     let plain := lines (← ok data "log" #[tip])
-    check (plain[3]?.any (has · "mini-swe  open mini-swe, gpt-oss-120b")) s!"the log in lines: {plain}"
-    let shown ← records (← ok data "show" #[s!"{tip}:3", "--json"])
+    check (plain[6]?.any (has · "session/mini-swe  open mini-swe, gpt-oss-120b")) s!"the log in lines: {plain}"
+    let shown ← records (← ok data "show" #[s!"{tip}:6", "--json"])
     assertEqual "an entry by its position" (text shown[0]! ["entry"]) (text resumed[1]! ["entry"])
     assertEqual "the calls open at it" ((field shown[0]! ["calls"]).getArr?.toOption.map (·.map (text · ["routine", "name"])))
-      (some #["mini-swe"])
+      (some #["session", "mini-swe"])
     assertEqual "the workspace it stands on" (text shown[0]! ["workspace"]) (text made[0]! ["event", "notice", "workspace"])
     check (has (← ok data "show" #[tip, "--request"]) "request: none") "an entry that answers no sample has no request"
     let tree := lines (← ok data "tree")
     assertEqual "the tree" tree.size 2
     check (has tree[0]! "root  mini-swe, gpt-oss-120b" && has tree[1]! "[next: sample gpt-oss-120b on a request of 2 messages]") s!"{tree}"
-    assertEqual "the tree as records" (← records (← ok data "tree" #["--json"])).size 6
+    assertEqual "the tree as records" (← records (← ok data "tree" #["--json"])).size 9
     assertEqual "no question waits" (← ok data "waiting") ""
     -- The workspace at an entry: listed, read, written out.
     let listed := lines (← ok data "ls" #[tip])
@@ -154,13 +157,17 @@ def suite : Suite := Testing.suite "commands" #[
     let tip := text resumed.back! ["entry"]
     let told ← appended data "tell" #[tip, "keep the old API"]
     assertEqual "a message" (text told ["event", "notice", "message"], (field told ["position"]).compress)
-      ("keep the old API", "6")
+      ("keep the old API", "9")
     -- A change: the files of a directory, and what changed.
     let edited := (← scratch) / "edited"
     let _ ← ok data "checkout" #[tip, edited.toString]
     IO.FS.writeFile (edited / "a.txt") "edited\n"
-    let changed ← appended data "commit" #[text told ["entry"], edited.toString, "--message", "by hand"]
-    assertEqual "what changed, and what the person says" (text changed ["event", "notice", "summary"]) "  M a.txt\nby hand"
+    let made ← records (← ok data "commit" #[text told ["entry"], edited.toString, "--message", "by hand", "--json"])
+    let some changed := made[0]? | fail "commit printed no change"
+    assertEqual "what changed" (text changed ["event", "notice", "summary"]) "M a.txt"
+    -- The change reaches no read: a message after it says what changed, and what the person adds.
+    assertEqual "and a message after it" (made.map (text · ["event", "notice", "type"])) #["changed", "said"]
+    assertEqual "that says so" (text made[1]! ["event", "notice", "message"]) "I changed the workspace:\n  M a.txt\nby hand"
     check (has (← refused 65 data "commit" #[text changed ["entry"], edited.toString]) "no change")
       "a directory with no change is refused"
     assertEqual "the change, between two entries" (lines (← ok data "diff" #[tip, text changed ["entry"]])) #["M a.txt"]
@@ -171,14 +178,14 @@ def suite : Suite := Testing.suite "commands" #[
       "--set", "command=exit 0"]) "a call is running") "a call while the agent runs"
     -- Graded there: the agent is stopped, the grader called, and resume runs it, with no model.
     let (stopped, called, ran) ← gradeAt data (text changed ["entry"]) check2
-    check (stopped.any (text · ["event", "type"] == "stopped")) "the agent is stopped first"
+    check (stopped.any (text · ["event", "type"] == "broke")) "the agent is stopped first"
     assertEqual "the grader is a call" (text called ["event", "notice", "call", "name"]) "grader"
     assertEqual "a pass exits 0" ran.exit 0
     let ran ← records ran.stdout
     assertEqual "the run reads the call, opens it, runs its command, and it returns its verdict"
       ((ran.extract 0 4).map fun record => text record ["event", "type"]) #["heard", "opened", "answered", "returned"]
     assertEqual "the grader runs in a frame of its own" ((ran.extract 1 4).map fun record =>
-      (field record ["event", "frame"]).compress) #["[\"grader\"]", "[\"grader\"]", "[\"grader\"]"]
+      (field record ["event", "frame"]).compress) #["[\"session\",\"grader\"]", "[\"session\",\"grader\"]", "[\"session\",\"grader\"]"]
     let some status := ran.back? | fail "resume printed nothing"
     let verdictOf (status : Json) := (text status ["call"], text status ["value", "status"],
       (field status ["value", "passed"]).compress, (field status ["value", "total"]).compress)
@@ -233,7 +240,7 @@ def suite : Suite := Testing.suite "commands" #[
     let written ← records (← ok data "rebase" #[graded, target.toString, "--json"])
     let some summary := written.back? | fail "rebase printed nothing"
     assertEqual "the whole log holds" (text summary ["held"], text summary ["total"], text summary ["divergence"])
-      ("14", "14", "null")
+      ("17", "17", "null")
     let tip := text summary ["entry"]
     let note := written[written.size - 2]!
     check (text note ["entry"] == tip && has (text note ["event", "text"]) s!"rebased from {graded}")
@@ -242,8 +249,8 @@ def suite : Suite := Testing.suite "commands" #[
     -- The new directory reads as the old one: its tree, the file a person changed, the workspace
     -- the grader left, each by the new names of its snapshots.
     check ((lines (← ok target "tree")).any (has · "[done: pass 2/2]")) "the verdict"
-    assertEqual "the change" (← ok target "cat" #[s!"{tip}:7", "a.txt"]) "edited\n"
-    assertEqual "after the grader's command" (← ok target "cat" #[s!"{tip}:11", "a.txt"]) "edited\n"
+    assertEqual "the change" (← ok target "cat" #[s!"{tip}:10", "a.txt"]) "edited\n"
+    assertEqual "after the grader's command" (← ok target "cat" #[s!"{tip}:14", "a.txt"]) "edited\n"
     check ((text written[0]! ["event", "notice", "workspace"]) != (text made[0]! ["event", "notice", "workspace"]))
       "a snapshot under a name of the new repository"
     assertEqual "the model cache" (← IO.FS.readFile (target / "cache" / "0123.json")) "a draw"
@@ -252,7 +259,7 @@ def suite : Suite := Testing.suite "commands" #[
     check (has (← refused 65 data "rebase" #[graded, target.toString]) "exists") "a directory that exists is refused"
     -- Without --json: the entries, then what held on stderr.
     let plain ← alaya data "rebase" #[graded, ((← scratch) / "again").toString]
-    check (plain.exit == 0 && has plain.stderr "all 14 events hold") s!"what held: {plain.stderr}"
+    check (plain.exit == 0 && has plain.stderr "all 17 events hold") s!"what held: {plain.stderr}"
     check ((lines plain.stdout).back?.any (has · "# rebased from")) "the last line is the entry to go on from",
 
   test "a command says what it refuses, with its class's exit status" do

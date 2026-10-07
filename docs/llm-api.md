@@ -31,13 +31,13 @@ flowchart TD
 
 | § | What | Where |
 | --- | --- | --- |
-| 1 | a **request**: messages, tools, and what the answer must be | `Alaya.Chat` |
-| 2 | a **response**: text, tool calls, usage, reasoning | `Alaya.Chat` |
-| 3 | **structured output**: an answer of a fixed JSON shape | `Alaya.Chat` |
-| 4 | a **model**: a request has a sequence of draws | `Alaya.Model` |
-| 5 | **layers**: retry, batch, sharing of draws, the persistent cache | `Alaya.Model`, `Alaya.Cache` |
-| 6 | **models and providers**: what is asked, and who serves it | `Alaya.Models`, `Alaya.Provider` |
-| 7 | **errors** | `Alaya.Error` |
+| 1 | a **request**: messages, tools, and what the answer must be | `Alaya.LLM.Chat` |
+| 2 | a **response**: text, tool calls, usage, reasoning | `Alaya.LLM.Chat` |
+| 3 | **structured output**: an answer of a fixed JSON shape | `Alaya.LLM.Chat` |
+| 4 | a **model**: a request has a sequence of draws | `Alaya.LLM.Model` |
+| 5 | **layers**: retry, batch, sharing of draws, the persistent cache | `Alaya.LLM.Model`, `Alaya.LLM.Cache` |
+| 6 | **models and providers**: what is asked, and who serves it | `Alaya.LLM.Models`, `Alaya.LLM.Provider` |
+| 7 | **errors** | `Alaya.Base.Error` |
 
 ## 1. A request
 

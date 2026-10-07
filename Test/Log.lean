@@ -9,7 +9,7 @@ breaks the way the design says. The interpreter itself is checked against the sk
 
 namespace LogTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Lean (Json)
 
 private def snapshot (c : Char) : Snapshot := ⟨String.ofList (List.replicate 64 c)⟩
@@ -18,49 +18,46 @@ private def snapshot (c : Char) : Snapshot := ⟨String.ofList (List.replicate 6
 private def events : Array (Event Agent) := #[
   .arrived (.changed (snapshot 'a') "the project"),
   .arrived (.said "the task\nwith a second line"),
-  .arrived (.replied ⟪"agent", "ask_user"⟫ (.choice 2)),
-  .arrived (.replied ⟪"agent", "ask_user"⟫ .noneOfAbove),
-  .arrived (.replied ⟪"agent", "ask_user"⟫ (.text "words")),
-  .arrived (.replied ⟪"agent", "ask_user"⟫ .unavailable),
-  .arrived (.replied ⟪"agent", "ask_user"⟫ .yes),
-  .heard ⟪"agent"⟫ #[2, 5],
-  .heard ⟪"agent", "bash"⟫ #[],
-  .answered ⟪"agent"⟫ (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response
+  .arrived (.replied ⟪"session", "agent", "ask_user"⟫ (.choice 2)),
+  .arrived (.replied ⟪"session", "agent", "ask_user"⟫ .noneOfAbove),
+  .arrived (.replied ⟪"session", "agent", "ask_user"⟫ (.text "words")),
+  .arrived (.replied ⟪"session", "agent", "ask_user"⟫ .unavailable),
+  .arrived (.replied ⟪"session", "agent", "ask_user"⟫ .yes),
+  .heard ⟪"session", "agent"⟫ #[2, 5],
+  .heard ⟪"session", "agent", "bash"⟫ #[],
+  .answered ⟪"session", "agent"⟫ (.sample testModelSpec.toJson (snapshot 'b')) (.ok (.response
     { content? := some "hi", toolCalls := #[call "c" "bash" "ls"], reasoning? := some "think"
       usage? := some { input? := some 10, output? := some 2, cached? := some 4 }
       finishReason? := some "tool_calls" })),
-  .answered ⟪"agent"⟫ (.sample testModelSpec.toJson (snapshot 'b')) (.error "context exceeded: too long"),
-  .answered ⟪"agent", "bash"⟫ (.exec "ls -la" { timeoutSeconds := 30, env := #[("A", "1")], outputs := true })
+  .answered ⟪"session", "agent"⟫ (.sample testModelSpec.toJson (snapshot 'b')) (.error "context exceeded: too long"),
+  .answered ⟪"session", "agent", "bash"⟫ (.exec "ls -la" { timeoutSeconds := 30, env := #[("A", "1")], outputs := true })
     (.ok (.execution { output := { output := "x\n", exitCode? := some 0 }, workspace := snapshot 'c'
                        file? := some "/alaya/outputs/7.txt" })),
-  .answered ⟪"agent", "bash#1"⟫ (.exec "sleep 9" {}) (.ok (.execution
+  .answered ⟪"session", "agent", "bash#1"⟫ (.exec "sleep 9" {}) (.ok (.execution
     { output := { output := "", error? := some "timed out" }, workspace := snapshot 'c' })),
-  .answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })),
-  .answered ⟪"agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200 })),
-  .answered ⟪"grader"⟫ (.exec "sh g.sh" { timeoutSeconds := 900, merge := false })
+  .answered ⟪"session", "agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200, budgetMs? := some 60000 })),
+  .answered ⟪"session", "agent", "time_budget"⟫ .time (.ok (.timing { spentMs := 1200 })),
+  .answered ⟪"session", "grader"⟫ (.exec "sh g.sh" { timeoutSeconds := 900, merge := false })
     (.ok (.execution { output := { output := "ok 1\n", stderr? := some "e", exitCode? := some 1 }, workspace := snapshot 'e' })),
-  .opened ⟪"agent", "bash"⟫ ⟨"bash", .mkObj [("command", "ls")]⟩,
-  .returned ⟪"agent", "bash"⟫ (.mkObj [("output", "x")]),
-  .failed ⟪"agent", "bash"⟫ "no routine named bash",
-  .stopped "to grade this point",
+  .opened ⟪"session", "agent", "bash"⟫ { name := "bash", arguments := .mkObj [("command", "ls")] },
+  .returned ⟪"session", "agent", "bash"⟫ (.mkObj [("output", "x")]),
+  .failed ⟪"session", "agent", "bash"⟫ "no routine named bash",
+  .broke ⟪"session", "agent"⟫ "to grade this point",
   .commented "a comment\non two lines",
   (graderCall "sh /grader/g.sh").event,
   callAgent "the task"]
 
 /-- The call of the agent of `runOf`'s runs. -/
-private def agentCall : RoutineCall := ⟨"agent", .null⟩
+private def agentCall : RoutineCall := { name := "agent", arguments := .null }
 
-/-- A run whose routine calls `computation` as its agent at once, with a tool `boom` that fails,
-and ends with what the agent gave: no session, so that a log of one call ends where it does. -/
-private def runOf (computation : Computation Agent Json) : Routine Agent :=
-  { name := "run"
-    body := fun _ => .call agentCall fun
-      | .ok value => pure value
-      | .error error => throw error
-    scope := Scope.fix fun scope => #[{ name := "agent", body := fun _ => computation, scope },
-      { name := "boom", body := fun _ => throw "it broke", scope }] }
+/-- A run whose call is of the agent itself, `computation`, with a tool `boom` that fails, and
+ends with what the agent gave: no session, so that a log of one call ends where it does. -/
+private def runOf (computation : Computation Agent Json) : Scope Agent :=
+  Scope.fix fun scope => #[{ name := "agent", body := fun _ => computation, scope },
+    { name := "boom", body := fun _ => throw "it broke", scope }]
 
-private def rootOnly : Log Agent := #[.arrived (.changed default "p")]
+/-- The start of a log of `runOf`'s runs: the workspace, and the call of the agent. -/
+private def rootOnly : Log Agent := #[.arrived (.changed default "p"), agentCall.event]
 
 def suite : Suite := Testing.suite "log" #[
   iotest "every event reads back from its JSON as itself" do
@@ -93,55 +90,67 @@ def suite : Suite := Testing.suite "log" #[
     if named.contains (snapshot 'b') then throw <| IO.userError "a request's digest is no snapshot",
 
   test "a read takes what it is for, even what arrived before it was made" do
-    -- A message arrives before the agent is called: the run's wait for a call passes it over, and
-    -- the agent's first read takes it.
+    -- A message arrives before the agent is called, and both calls are there before any read:
+    -- each wait for a call takes one, and passes the message over; the agent's first read takes it.
     match miniRun with
     | .error problem => fail problem
     | .ok run =>
-      let early : Log Agent := #[.arrived (.changed default "p"), .arrived (.said "a hint"), callAgent "the task"]
+      let early : Log Agent := #[.arrived (.changed default "p"), sessionCall.event, .arrived (.said "a hint"),
+        callAgent "the task"]
       match next run early with
-      | .mark (.heard #[] notices) => assertEqual "the run takes the call alone" notices #[2]
-      | _ => fail "the run reads its call first"
+      | .mark (.heard #[] notices) => assertEqual "the outside takes the run's call alone" notices #[1]
+      | _ => fail "the outside reads the run's call first"
+      check ((settle run early).any fun | .heard ⟪"session"⟫ #[3] => true | _ => false) "the session takes the agent's call alone"
       let log := settle run early
       match next run log with
       | .ask { op := .sample _ request, .. } =>
         check (request.messages.any fun | .user text => contains text "the task" | _ => false) "the task is told"
         check (request.messages.any fun | .user text => contains text "a hint" | _ => false) "and the message"
       | _ => fail "the agent goes on to sample"
-      check (log.any fun | .heard ⟪"agent"⟫ #[1] => true | _ => false) "the agent's read takes the message at 1",
+      check (log.any fun | .heard ⟪"session", "agent"⟫ #[2] => true | _ => false) "the agent's read takes the message at 2",
 
-  test "a stop ends the call wherever it is, and has no place where no call runs" do
+  test "a break ends the call open in its frame, and has no place where none is" do
     -- An agent that waits for a message.
     let run := Scripted.runOf fun _ => do
       let _ ← await fun _ notice => notice matches .said _
       return "done"
-    -- Where no call runs there is nothing to stop.
-    match next run #[.arrived (.changed default "p"), .stopped "now"] with
+    -- Where no call is open there is nothing to break.
+    match next run #[.arrived (.changed default "p"), .broke ⟪"session", "agent"⟫ "now"] with
     | .mismatch 1 => pure ()
-    | _ => fail "a stop before any call is no trace of the run"
+    | _ => fail "a break before any call is no trace of the run"
     let waiting := settle run opening
     match next run waiting with
-    | .waits ⟪"agent"⟫ _ => pure ()
+    | .waits ⟪"session", "agent"⟫ _ => pure ()
     | _ => fail "the agent waits for a message"
-    let ended := settle run (waiting.push (.stopped "no message"))
+    let ended := settle run (waiting.push (.broke ⟪"session", "agent"⟫ "no message"))
     match next run ended with
-    | .waits #[] none => pure ()
+    | .waits ⟪"session"⟫ none => pure ()
     | _ => fail "the agent is over, and the run waits for a call"
     check (((lastCall? ended).bind (·.2)) matches some (.stopped "no message")) "the log says how the call ended"
-    match next run (ended.push (.stopped "again")) with
+    match next run (ended.push (.broke ⟪"session", "agent"⟫ "again")) with
     | .mismatch position => assertEqual "where" position ended.size
-    | _ => fail "a stop after the end is no trace of the program",
+    | _ => fail "a break of a call that is over is no trace of the program"
+    -- A break of the run's own call ends the run, with the reason as its failure.
+    match next run (waiting.push (.broke ⟪"session"⟫ "enough")) with
+    | .ended (.error reason) => assertEqual "the run's failure" reason "enough"
+    | _ => fail "a break of the run's call ends the run"
+    -- Nothing is open in the outside, nor in a frame that is no call's.
+    for frame in [⟪⟫, ⟪"session", "grader"⟫, ⟪"session", "agent", "bash"⟫] do
+      check ((next run (waiting.push (.broke frame "x"))) matches .mismatch _) s!"no call open in {Frame.render frame}",
 
-  test "a log with no root waits, and one that starts otherwise is broken" do
+  test "a log waits outside until its call arrives, and passes over what arrives before it" do
     match miniRun with
     | .error problem => fail problem
     | .ok run =>
       match next run #[] with
       | .waits #[] _ => pure ()
-      | _ => fail "an empty log waits for its workspace"
-      match next run #[.arrived (.said "hello")] with
-      | .mismatch 0 => pure ()
-      | _ => fail "a log that starts with no workspace is broken",
+      | _ => fail "an empty log waits for its call"
+      match next run #[.arrived (.said "hello"), .arrived (.changed default "p")] with
+      | .waits #[] _ => pure ()
+      | _ => fail "notices that are no call leave the outside waiting"
+      match next run #[.arrived (.said "hello"), sessionCall.event] with
+      | .mark (.heard #[] #[1]) => pure ()
+      | _ => fail "the call is taken where it is",
 
   iotest "an event of a kind this build does not know is refused, not guessed" do
     let frame : Json := .arr #[(0 : Json)]
@@ -169,10 +178,10 @@ def suite : Suite := Testing.suite "log" #[
       let .ask sampled := next run log | fail "the agent samples"
       let other : Chat.Response := {}
       broken "another request" log (.answered sampled.frame (.sample testModelSpec.toJson (Hash.ofBytes "other".toUTF8)) (.ok (.response other)))
-      broken "another frame" log (.answered ⟪"agent", "bash"⟫ sampled.op.key (.ok (.response other)))
+      broken "another frame" log (.answered ⟪"session", "agent", "bash"⟫ sampled.op.key (.ok (.response other)))
       broken "an answer of another kind" log (.answered sampled.frame sampled.op.key (.ok (.timing { spentMs := 1 })))
       broken "an answer to another operation" log (.answered sampled.frame .time (.ok (.timing { spentMs := 1 })))
-      broken "a mark where an answer is due" log (.heard ⟪"agent"⟫ #[])
+      broken "a mark where an answer is due" log (.heard ⟪"session", "agent"⟫ #[])
       let log := respond run log (responseWith #[call "c" "bash" "ls"])
       let .ask ran := next run log | fail "the command is asked for"
       broken "another command" log (.answered ran.frame (.exec "rm -rf /" {}) (.ok (.execution default)))
@@ -180,10 +189,10 @@ def suite : Suite := Testing.suite "log" #[
       let log := log.push (.answered ran.frame ran.op.key (.ok (.execution execution)))
       let .mark (.returned frame value) := next run log | fail "the call returns"
       broken "another value" log (.returned frame (.str "x"))
-      broken "another frame's return" log (.returned ⟪"agent", "bash#1"⟫ value)
+      broken "another frame's return" log (.returned ⟪"session", "agent", "bash#1"⟫ value)
       broken "a failure where it returned" log (.failed frame "x")
       match next run (log.push (.returned frame value)) with
-      | .mark (.heard ⟪"agent"⟫ _) => pure ()
+      | .mark (.heard ⟪"session", "agent"⟫ _) => pure ()
       | _ => fail "the log as the program makes it goes on",
 
   test "a failure is caught around a loop, around a call, or by no one, and each try is in the log" do
@@ -241,24 +250,25 @@ def suite : Suite := Testing.suite "log" #[
       let _ ← time
       return "done"
     let run := runOf commenting
-    let over (label : String) (run : Routine Agent) (log : Log Agent) : TestM Unit :=
+    let over (label : String) (run : Scope Agent) (log : Log Agent) : TestM Unit :=
       check ((next run log) matches .ended (.ok _)) s!"{label}: the run is not over"
     -- At the end of a log, the program's comments since its last event wait for the next event:
     -- what comes next is the operation.
-    let opened := rootOnly.push (.opened ⟪"agent"⟫ agentCall)
+    let opened := rootOnly ++ #[.heard #[] #[1], .opened ⟪"agent"⟫ agentCall]
     check ((next run opened) matches .ask { op := .time, .. }) "the operation is next"
     assertEqual "the comment before it" (Replayer.ofLog run opened).comments #["starting"]
     -- Settled as the driver settles it, the log holds each comment once, before the event it precedes.
     let log := answer run (settle run rootOnly) (.timing { spentMs := 7 })
     assertEqual "the comments" (log.filterMap fun | .commented text => some text | _ => none)
       #["starting", "the clock says 7"]
-    check (log[2]! matches .commented "starting") "the first, before the clock"
+    check (log[4]! matches .commented "starting") "the first, before the clock"
     over "with its comments" run log
     -- Replay needs none of them: without them, reworded, or with others among them, the log is
     -- the same trace; and a program whose comments were taken out reads the old log.
     over "without them" run (log.filter fun | .commented .. => false | _ => true)
     over "reworded" run (log.map fun | .commented _ => .commented "reworded" | event => event)
-    for i in [1:log.size + 1] do
+    -- After the read of the call: a comment before a notice would move it, and the read with it.
+    for i in [3:log.size + 1] do
       over s!"another at {i}" run ((log.extract 0 i).push (.commented "by hand") ++ log.extract i log.size)
     over "a program without comments" (runOf quiet) log
     -- A comment of the log is never taken for the program's, even with its very words: the
@@ -270,7 +280,7 @@ def suite : Suite := Testing.suite "log" #[
     | .error problem => fail problem
     | .ok mini =>
       let early : Log Agent := #[.arrived (.changed default "p"), .commented "before the call",
-        callAgent "the task", .commented "after the call"]
+        sessionCall.event, .commented "after the call"]
       check ((next mini early) matches .mark (.heard #[] #[2])) "the call is at 2, the comments around it"
     -- A comment reads no event: a loop that only comments is as unguarded as one that does nothing.
     let spins := runOf (iter (fun (n : Nat) => (do
@@ -284,39 +294,45 @@ def suite : Suite := Testing.suite "log" #[
     | .ok run =>
       -- The agent ends, and the run waits for the next call.
       let log := respond run (settle run opening) (responseWith #[submitCall "s" "done"])
-      check ((next run log) matches .waits #[] none) "the run waits for a call"
+      check ((next run log) matches .waits ⟪"session"⟫ none) "the run waits for a call"
       check (((lastCall? log).bind (·.2)) matches some (.returned _)) "the agent returned"
       -- The grader: the run takes the call, opens it in `grader`, and its command is asked for there,
       -- with its stderr apart.
       let called := log.size
       let log := settle run (log.push (graderCall "sh g.sh").event)
-      check (log.any fun | .heard #[] notices => notices == #[called] | _ => false) "the run's own frame takes the call"
-      check (log.any fun | .opened ⟪"grader"⟫ ⟨"grader", _⟩ => true | _ => false) "the grader opens in a frame of its own"
+      check (log.any fun | .heard ⟪"session"⟫ notices => notices == #[called] | _ => false) "the session takes the call"
+      check (log.any fun | .opened ⟪"session", "grader"⟫ { name := "grader", .. } => true | _ => false) "the grader opens in a frame of its own"
       let .ask first := next run log | fail "the grader's command is asked for"
-      assertEqual "in its frame" first.frame ⟪"grader"⟫
+      assertEqual "in its frame" first.frame ⟪"session", "grader"⟫
       check (first.op matches .exec "sh g.sh" { merge := false, .. }) "the command, its stderr apart"
       -- Its verdict is the value of its call, and the run waits again.
       let graded := answer run log (.execution { output := { output := "1..1\nok 1\n", stderr? := some "", exitCode? := some 0 }, workspace := default })
-      check ((next run graded) matches .waits #[] none) "the run waits for the next call"
+      check ((next run graded) matches .waits ⟪"session"⟫ none) "the run waits for the next call"
       match lastCall? graded with
       | some (opened, some (.returned verdict)) =>
         assertEqual "the grader's verdict" (opened.name, Agents.Grader.verdictStatus verdict) ("grader", "pass")
       | _ => fail "the grader returned its verdict",
 
-  test "a call's environment is the person's call's, which the run took before it opened the call" do
+  test "a frame's commands run where the nearest call on its path that names an environment says" do
     let unreadable (label : String) (log : Log Agent) (frame : Frame) : TestM Unit :=
       assertError label (environmentOf log frame) fun | .storage _ => true | _ => false
-    unreadable "no opening" rootOnly ⟪"agent"⟫
-    unreadable "the run's own frame" (rootOnly.push (.opened ⟪"agent"⟫ (testCall "t"))) #[]
-    unreadable "no person's call" (rootOnly.push (.opened ⟪"agent"⟫ (testCall "t"))) ⟪"agent"⟫
-    -- A call inside the call shares its environment.
-    let environment ← assertOk <| environmentOf (opening "t") ⟪"agent", "bash"⟫
-    assertEqual "the environment" environment.toJson.compress testEnvironment.toJson.compress,
+    unreadable "no opening" rootOnly ⟪"session", "agent"⟫
+    unreadable "the outside" (opening "t") #[]
+    unreadable "the session, which names none" (opening "t") ⟪"session"⟫
+    unreadable "a call that names none, on a path where none does"
+      (rootOnly.push (.opened ⟪"session", "agent"⟫ { testCall "t" with environment? := none })) ⟪"session", "agent"⟫
+    -- A call inside the call that names none shares its caller's environment.
+    let (named, environment) ← assertOk <| environmentOf (opening "t") ⟪"session", "agent", "bash"⟫
+    assertEqual "the caller's" (named, environment.image) (⟪"session", "agent"⟫, testEnvironment.image)
+    -- One that names its own runs there, and so do the calls inside it.
+    let grading := (opening "t").push (.opened ⟪"session", "agent", "grader"⟫ (graderCall "sh g.sh" "grader:1"))
+    let (named, environment) ← assertOk <| environmentOf grading ⟪"session", "agent", "grader", "bash"⟫
+    assertEqual "its own" (named, environment.image) (⟪"session", "agent", "grader"⟫, "grader:1"),
 
   iotest "frames render as paths of routines, read back, and a reference to an entry may name a position" do
-    if Frame.render ⟪"agent", "bash#2", "x"⟫ != "agent/bash#2/x" || Frame.render ⟪⟫ != "-" then
+    if Frame.render ⟪"session", "agent", "bash#2", "x"⟫ != "session/agent/bash#2/x" || Frame.render ⟪⟫ != "-" then
       throw <| IO.userError "frames render as paths of routines"
-    if (Frame.parse "agent/bash#2/x").toOption != some ⟪"agent", "bash#2", "x"⟫ || (Frame.parse "-").toOption != some ⟪⟫ then
+    if (Frame.parse "session/agent/bash#2/x").toOption != some ⟪"session", "agent", "bash#2", "x"⟫ || (Frame.parse "-").toOption != some ⟪⟫ then
       throw <| IO.userError "frames read back as they render"
     if (Frame.parse "agent/bash#x").toOption.isSome || (Frame.parse "agent//x").toOption.isSome then
       throw <| IO.userError "a malformed frame is refused"

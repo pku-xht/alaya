@@ -7,7 +7,7 @@ one before it starts, and removes the containers its tests left running when it 
 
 namespace Testing
 
-open Alaya
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 
 /-- The test image. Small, and `busybox` gives it a `timeout(1)`. -/
 def testImageReference : String := "alpine:3"

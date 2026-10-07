@@ -8,7 +8,7 @@ view may omit old outputs in blocks, naming the files that hold them. -/
 
 namespace ContextTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Alaya.Agents.MiniSwe
 open Lean (Json)
 
@@ -125,7 +125,7 @@ def suite : Suite := Testing.suite "context" #[
     let small := contextTokens (measured 4) (view masking (measured 4))
     if small > 200 then throw <| IO.userError s!"not measured before the boundary moves: {small}"
     let moved := contextTokens (measured 5) (view masking (measured 5))
-    if moved != estimateTokens (view masking (measured 5)) then
+    if moved != Chat.estimateTokens (view masking (measured 5)) then
       throw <| IO.userError s!"measured across a move of the boundary: {moved}"
     -- The limit is the model's context less the reserve, or less its output size when smaller.
     let model : Models.Spec := { name := "m", contextTokens? := some 3000, outputTokens? := some 500 }
@@ -166,7 +166,7 @@ def suite : Suite := Testing.suite "context" #[
       let rt ← runtime executor (some (← refusing #[response "c1"]))
       let tip ← start rt run
       let (ended, stop) ← assertOk <| Driver.drive rt run tip
-      check (stop matches .idle) "the agent is over"
+      check (isIdle stop) "the agent is over"
       let log ← logAt rt ended
       match agentResult log with
       | some (.ok value) =>

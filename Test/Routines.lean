@@ -8,7 +8,7 @@ the agent is the nesting of what it did. -/
 
 namespace RoutinesTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Lean (Json ToJson FromJson toJson)
 
 structure Task where
@@ -43,7 +43,7 @@ def planner : Routine.Typed Agent Task Plan := routine "planner" fun task => do
     let mut messages := messages.push response.message
     for asked in response.toolCalls do
       -- The model's call is a call of the routine it names, with the arguments it gave.
-      let result ← try Alaya.call asked.name asked.arguments catch error => pure (.str s!"error: {error}")
+      let result ← try Alaya.Core.call asked.name asked.arguments catch error => pure (.str s!"error: {error}")
       messages := messages.push (.tool asked.id result)
     return Sum.inl messages) opening
   return { steps := ((answer.splitOn "\n").filter (!·.isEmpty)).toArray }
@@ -75,10 +75,10 @@ def agent : Routine Agent :=
   (routine "agent" fun (config : Config) => workflow.call { goal := config.task }).within scope
 
 /-- The run: the run's routine, whose scope has the agent, so that a person's call of it finds it. -/
-def run : Routine Agent := { session with scope := Scope.of #[agent] }
+def run : Scope Agent := Scope.of #[Catalog.session (Scope.of #[agent])]
 
 /-- Runs `k` with the run of `make`'s computation for the task, in the scope above. -/
-private def withRun (make : String → Computation Agent Json) (k : Routine Agent → TestM Unit) : TestM Unit :=
+private def withRun (make : String → Computation Agent Json) (k : Scope Agent → TestM Unit) : TestM Unit :=
   k (runOf make scope)
 
 /-- The openings of a log: the frame each call runs in, and the routine it names. -/
@@ -99,28 +99,28 @@ def suite : Suite := Testing.suite "routines" #[
         responseWith #[{ id := "l", name := "lookup", arguments := .mkObj [("word", "build")] }],
         { content? := some "make\nmake test" }]
       let (rt, last, stop) ← drive run executor model "ship it"
-      check (stop matches .idle) "the agent is over"
+      check (isIdle stop) "the agent is over"
       let log ← logAt rt last
       assertEqual "the agent's result" ((agentResult log).bind (·.toOption) |>.map (·.compress)) (some "\"2 steps, 1 failed\"")
       assertEqual "the calls, each in its caller's next frame" (openings log)
-        #[(⟪"agent"⟫, "agent"), (⟪"agent", "workflow"⟫, "workflow"), (⟪"agent", "workflow", "planner"⟫, "planner"),
-          (⟪"agent", "workflow", "planner", "lookup"⟫, "lookup"), (⟪"agent", "workflow", "step"⟫, "step"),
-          (⟪"agent", "workflow", "step#1"⟫, "step")]
+        #[(⟪"session"⟫, "session"), (⟪"session", "agent"⟫, "agent"), (⟪"session", "agent", "workflow"⟫, "workflow"), (⟪"session", "agent", "workflow", "planner"⟫, "planner"),
+          (⟪"session", "agent", "workflow", "planner", "lookup"⟫, "lookup"), (⟪"session", "agent", "workflow", "step"⟫, "step"),
+          (⟪"session", "agent", "workflow", "step#1"⟫, "step")]
       -- A call's opening holds its arguments, and its end its result: both data, in the log.
-      check (log.any fun | .opened ⟪"agent", "workflow"⟫ ⟨"workflow", arguments⟩ => arguments.compress == "{\"goal\":\"ship it\"}" | _ => false)
+      check (log.any fun | .opened ⟪"session", "agent", "workflow"⟫ { name := "workflow", arguments, .. } => arguments.compress == "{\"goal\":\"ship it\"}" | _ => false)
         "the workflow's arguments"
-      check (log.any fun | .returned ⟪"agent", "workflow", "planner"⟫ value => value.compress == "{\"steps\":[\"make\",\"make test\"]}" | _ => false)
+      check (log.any fun | .returned ⟪"session", "agent", "workflow", "planner"⟫ value => value.compress == "{\"steps\":[\"make\",\"make test\"]}" | _ => false)
         "the planner's plan"
-      check (log.any fun | .returned ⟪"agent", "workflow", "step#1"⟫ value => value.compress == "1" | _ => false) "the failed step's status"
+      check (log.any fun | .returned ⟪"session", "agent", "workflow", "step#1"⟫ value => value.compress == "1" | _ => false) "the failed step's status"
       -- What a routine asks the world for is asked from its own frame.
       let asked := log.filterMap fun
         | .answered frame (.sample ..) _ => some (frame, "sample")
         | .answered frame (.exec command _) _ => some (frame, command)
         | _ => none
       assertEqual "who asked for what" asked
-        #[(⟪"agent", "workflow", "planner"⟫, "sample"), (⟪"agent", "workflow", "planner", "lookup"⟫, "grep build notes.txt"),
-          (⟪"agent", "workflow", "planner"⟫, "sample"), (⟪"agent", "workflow", "step"⟫, "make"),
-          (⟪"agent", "workflow", "step#1"⟫, "make test")]
+        #[(⟪"session", "agent", "workflow", "planner"⟫, "sample"), (⟪"session", "agent", "workflow", "planner", "lookup"⟫, "grep build notes.txt"),
+          (⟪"session", "agent", "workflow", "planner"⟫, "sample"), (⟪"session", "agent", "workflow", "step"⟫, "make"),
+          (⟪"session", "agent", "workflow", "step#1"⟫, "make test")]
       -- The sub-agent's conversation is its own: its second request holds the tool's result.
       let requests := samplesOf run log
       assertEqual "two samples, both the planner's" requests.size 2
@@ -129,25 +129,25 @@ def suite : Suite := Testing.suite "routines" #[
 
   test "a routine is entered by a call alone, and what crosses the call must be what it takes" do
     -- Called with arguments it cannot read, a routine fails; its caller may catch that.
-    withRun (fun _ => try Alaya.call "step" (.mkObj [("command", "make")]) catch error => pure (.str error)) fun run => do
+    withRun (fun _ => try Alaya.Core.call "step" (.mkObj [("command", "make")]) catch error => pure (.str error)) fun run => do
       let log := settle run opening
-      check (log.any fun | .failed ⟪"agent", "step"⟫ error => contains error "step: its arguments cannot be read" | _ => false)
+      check (log.any fun | .failed ⟪"session", "agent", "step"⟫ error => contains error "step: its arguments cannot be read" | _ => false)
         "the routine failed, in its own frame"
-      check ((next run log) matches .waits #[] _) "and the agent went on, to its end"
+      check ((next run log) matches .waits ⟪"session"⟫ _) "and the agent went on, to its end"
     -- A handle that expects another result than the routine gives fails where the result is read.
     let mistaken : Routine.Typed Agent String String := routine "step" fun _ => pure ""
     withRun (fun _ => toJson <$> mistaken.call "make") fun run => do
       let log := answer run (settle run opening) (executed)
-      check (log.any fun | .returned ⟪"agent", "step"⟫ value => value.compress == "0" | _ => false) "the routine returned its status"
-      check (log.any fun | .failed ⟪"agent"⟫ error => contains error "step: its result cannot be read" | _ => false)
+      check (log.any fun | .returned ⟪"session", "agent", "step"⟫ value => value.compress == "0" | _ => false) "the routine returned its status"
+      check (log.any fun | .failed ⟪"session", "agent"⟫ error => contains error "step: its result cannot be read" | _ => false)
         "the caller could not read it"
     -- The grader is a program a person calls, no routine: nothing an agent calls reaches it.
-    withRun (fun _ => Alaya.call "grader" (.mkObj [("command", "true")])) fun run => do
+    withRun (fun _ => Alaya.Core.call "grader" (.mkObj [("command", "true")])) fun run => do
       let log := settle run opening
-      check (log.any fun | .failed ⟪"agent", "grader"⟫ "no routine named grader" => true | _ => false) "there is no such routine",
+      check (log.any fun | .failed ⟪"session", "agent", "grader"⟫ "no routine named grader" => true | _ => false) "there is no such routine",
 
   test "a program brings its scope: an agent's tools and itself, fixed where it is defined" do
-    match Agents.Catalog.scope.find "mini-swe" with
+    match Catalog.scope.find "mini-swe" with
     | none => fail "mini-swe is a program"
     | some swe =>
       assertEqual "what a call inside MiniSwe can name"
@@ -156,7 +156,7 @@ def suite : Suite := Testing.suite "routines" #[
       -- The scope holds MiniSwe itself, with the same scope: what lets it call itself.
       check ((swe.scope.find "mini-swe").any fun inner => (inner.scope.find "bash").isSome)
         "MiniSwe in its own scope has the same scope"
-    check (Agents.Catalog.scope.find "nothing").isNone "no program of that name"
+    check (Catalog.scope.find "nothing").isNone "no program of that name"
 ]
 
 end RoutinesTests

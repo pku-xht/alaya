@@ -10,8 +10,8 @@ stand in for it in the other tests, so that those test against something faithfu
 
 namespace WorkspacesTests
 
-open Testing Alaya
-open Alaya.Workspaces (Change ChangeKind)
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
+open Alaya.Runtime.Workspaces (Change ChangeKind)
 
 private structure Backend where
   name : String
@@ -328,15 +328,15 @@ def runSuite : Suite := Testing.suite "workspaces.run" #[
     let rt : Driver.Runtime := {
       store, workspaces, workDir := work, outputsDir := (← scratch) / "outputs"
       executor := fun _ => pure executor, model := fun _ => throw <| .input "no model" }
-    let (root, _) ← assertOk <| Notices.create store workspaces project
+    let root ← Scripted.begin store workspaces run project
     let (called, _) ← assertOk <| Driver.append store run root (Scripted.callAgent)
     let (tip, stop) ← assertOk <| Driver.drive rt run called
-    check (stop matches .waits ⟪"agent"⟫ none) "the agent waits for a message"
+    check (stop matches .waits ⟪"session", "agent"⟫ none) "the agent waits for a message"
     IO.FS.writeFile (project / "README.md") "readme, by hand"
     writeSpec project #[("tests/extra.txt", "extra")]
-    let event ← assertOk <| Notices.changed store workspaces tip project "by hand"
+    let event ← assertOk <| Notices.changed store workspaces tip project
     let .arrived (.changed after summary) := event | fail "a change is a notice"
-    assertEqual "what changed" summary "  M README.md\n  + tests\nby hand"
+    assertEqual "what changed" summary "M README.md\n+ tests"
     let (changed, _) ← assertOk <| Driver.append store run tip event
     -- Graded there: the agent is stopped, and the grader reads the person's files.
     let grader := Scripted.graderCall "test -f tests/extra.txt && printf '1..1\\nok 1\\n'" (← testImage)

@@ -8,7 +8,7 @@ import Alaya
 feedback, submission, and its limits. -/
 
 namespace MiniVeroTests
-open Testing Alaya
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 open Alaya.Agents
 open Lean (Json)
 
@@ -25,13 +25,13 @@ private def openingText (task : String) (mode : MiniVero.Mode := .codeproof) : T
   | _ => fail "missing task"
 
 /-- Runs `k` with MiniVero's run, configured by `config`. -/
-private def withVero (config : MiniVero.Config) (k : Routine Agent → TestM Unit) : TestM Unit :=
+private def withVero (config : MiniVero.Config) (k : Scope Agent → TestM Unit) : TestM Unit :=
   k (Scripted.runOf (MiniVero.computation config Scripted.testModelSpec)
     (Scope.of Tools.routines))
 
 /-- The log after the world answered what the agent asked with `answers`, in order: settled at
 what it asks next. -/
-private def after (run : Routine Agent) (answers : Array Stored) : Log Agent :=
+private def after (run : Scope Agent) (answers : Array Stored) : Log Agent :=
   answers.foldl (Scripted.answer run) (Scripted.settle run Scripted.opening)
 
 def suite : Suite := Testing.suite "mini-vero" #[
@@ -129,7 +129,7 @@ def suite : Suite := Testing.suite "mini-vero" #[
       let asked := after run #[.response { toolCalls := #[call] }]
       match next run asked with
       | .ask { op := .exec "lake lean Proof.lean" { timeoutSeconds := 600, .. }, frame } =>
-        assertEqual "in the call's frame" frame ⟪"agent", "bash"⟫
+        assertEqual "in the call's frame" frame ⟪"session", "agent", "bash"⟫
       | _ => fail "expected the command run, as the response's first call"
       let ran := after run #[.response { toolCalls := #[call] },
         .execution { output := { output := "Lean type mismatch", exitCode? := some 1 }, workspace := default }]
@@ -186,11 +186,11 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
     withVero config fun run => do
       let asked := after run #[.response (turn #[call "t" "time_budget"])]
       match next run asked with
-      | .ask { op := .time, frame } => assertEqual "in the tool's frame" frame ⟪"agent", "time_budget"⟫
+      | .ask { op := .time, frame } => assertEqual "in the tool's frame" frame ⟪"session", "agent", "time_budget"⟫
       | _ => fail "expected the clock read"
       let gives (timing : Timing) : Option Json :=
         (Scripted.answer run asked (.timing timing)).findSome? fun
-          | .returned ⟪"agent", "time_budget"⟫ value => some value
+          | .returned ⟪"session", "agent", "time_budget"⟫ value => some value
           | _ => none
       assertEqual "left" ((gives { spentMs := 60500, budgetMs? := some 3600000 }).bind (·.getObjVal? "seconds_left" |>.toOption) |>.map (·.compress)) (some "3539")
       check ((gives { spentMs := 60500 }).bind (·.getObjVal? "seconds_left" |>.toOption) == some .null) "no budget, no number",
@@ -243,7 +243,7 @@ def timeSuite : Suite := Testing.suite "mini-vero.time" #[
         check ((stop matches .paused _) && again == paused) "spent: nothing more"
         assertEqual "no entry written" (← assertOk rt.store.forest).entries.size count
         let (final, stop) ← assertOk <| Driver.drive rt run paused
-        check (stop matches .idle) "without a budget it runs on"
+        check (Scripted.isIdle stop) "without a budget it runs on"
         assertEqual "submitted" (Scripted.agentStatus (← Scripted.logAt rt final)) "Submitted"
       finally executor.close
 ]

@@ -10,7 +10,7 @@ that counts calls detects unwanted side effects. -/
 
 namespace AskUserTests
 
-open Testing Alaya Scripted
+open Testing Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App Scripted
 open Alaya.Agents
 open Alaya.Agents.MiniSwe (Config parseActions)
 open Lean (Json)
@@ -69,7 +69,7 @@ private def scripted (responses : Array Chat.Response) : IO (Model × IO.Ref (Ar
         | none => throw <| Error.protocol "scripted model exhausted" } }, requests)
 
 /-- Runs `k` with the run of `agent`. -/
-private def withRun (agent : String × Json) (k : Routine Agent → TestM Unit) : TestM Unit :=
+private def withRun (agent : String × Json) (k : Scope Agent → TestM Unit) : TestM Unit :=
   match runOfConfig agent.1 agent.2 with
   | .ok run => k run
   | .error problem => fail problem
@@ -84,7 +84,7 @@ private def shownResult (request : Chat.Request) : TestM Json := do
 
 /-- Appends a reply to the question the log at `tip` waits on, read from `text` against the
 question's form, or that the person cannot answer. -/
-private def replyAt (rt : Driver.Runtime) (run : Routine Agent) (tip : Hash) (text? : Option String) :
+private def replyAt (rt : Driver.Runtime) (run : Scope Agent) (tip : Hash) (text? : Option String) :
     Result Hash := do
   let forest ← rt.store.forest
   let log ← rt.store.log forest tip
@@ -186,9 +186,8 @@ def suite : Suite := Testing.suite "ask_user" #[
         let (executor, calls) ← countingExecutor
         let (model, _) ← scripted #[bad]
         let (rt, last, stop) ← drive run executor model
-        match stop with
-        | .idle => assertEqual "rejected turn outcome" (agentStatus (← logAt rt last)) "RepeatedFormatError"
-        | _ => fail "an invalid question must not wait for an answer"
+        if isIdle stop then assertEqual "rejected turn outcome" (agentStatus (← logAt rt last)) "RepeatedFormatError"
+        else fail "an invalid question must not wait for an answer"
         assertEqual "executor calls" (← calls.get) 0,
 
   test "typed questions record candidate, none-of-above, yes/no, open and unavailable replies" do
@@ -213,16 +212,15 @@ def suite : Suite := Testing.suite "ask_user" #[
           let (waiting, stop) ← assertOk <| Driver.drive rt run tip
           match stop with
           | .waits frame (some question) =>
-            assertEqual "the asking call's frame" frame ⟪"agent", "ask_user"⟫
+            assertEqual "the asking call's frame" frame ⟪"session", "agent", "ask_user"⟫
             assertEqual "the form" question.form.name questionType
           | _ => fail "the run must wait for the answer"
           -- Every answer forks the waiting log: each is a branch of its own.
           for (text?, shown) in answers do
             let replied ← assertOk <| replyAt rt run waiting text?
             let (final, stop) ← assertOk <| Driver.drive rt run replied
-            match stop with
-            | .idle => assertEqual "submitted after the reply" (agentStatus (← logAt rt final)) "Submitted"
-            | _ => fail "the run must go on after the reply"
+            if isIdle stop then assertEqual "submitted after the reply" (agentStatus (← logAt rt final)) "Submitted"
+            else fail "the run must go on after the reply"
             let some request := (← requests.get).back? | fail "no request after the reply"
             assertEqual s!"{questionType} answer in the model's view" (← shownResult request).compress shown.compress
           let forest ← assertOk rt.store.forest
@@ -283,37 +281,37 @@ def suite : Suite := Testing.suite "ask_user" #[
   test "a program asks without any tool: the question is in the log, and a reply to its frame answers it" do
     let deploy : Question := { text := "Deploy?", form := .yesNo }
     let program : Computation Agent Json := do
-      let first ← Alaya.ask deploy
-      let second ← Alaya.ask { text := "Which region?", form := .singleChoice #["east", "west"] }
+      let first ← Alaya.Core.ask deploy
+      let second ← Alaya.Core.ask { text := "Which region?", form := .singleChoice #["east", "west"] }
       return .str s!"{first.line}, {second.line}"
     do
       let run := runOf fun _ => program
       let log := settle run opening
-      check (log.back? matches some (.asked ⟪"agent"⟫ _)) "the question is the last event: a mark of the program"
-      check (log.any fun | .asked ⟪"agent"⟫ question => question == deploy | _ => false) "the question, whole"
+      check (log.back? matches some (.asked ⟪"session", "agent"⟫ _)) "the question is the last event: a mark of the program"
+      check (log.any fun | .asked ⟪"session", "agent"⟫ question => question == deploy | _ => false) "the question, whole"
       match next run log with
-      | .waits ⟪"agent"⟫ (some question) => assertEqual "the question the run waits on" question deploy
+      | .waits ⟪"session", "agent"⟫ (some question) => assertEqual "the question the run waits on" question deploy
       | _ => fail "the run waits on the question, in the frame that asked"
       -- A reply that does not fit is refused; one that fits is taken, and the next question asked.
       check (replyTo (next run log) (.choice 1)).toOption.isNone "a choice answers no yes/no question"
       let reply ← assertOk <| Result.fromExcept Error.input (replyTo (next run log) .yes)
-      check (reply matches .arrived (.replied ⟪"agent"⟫ .yes)) "the reply is addressed to the frame that asked"
+      check (reply matches .arrived (.replied ⟪"session", "agent"⟫ .yes)) "the reply is addressed to the frame that asked"
       let log := settle run (log.push reply)
       match next run log with
-      | .waits ⟪"agent"⟫ (some question) => assertEqual "the second question" question.text "Which region?"
+      | .waits ⟪"session", "agent"⟫ (some question) => assertEqual "the second question" question.text "Which region?"
       | _ => fail "the run waits on the second question, asked from the same frame"
       -- The first reply is read already: it does not answer the second question.
       check (replyTo (next run log) .yes).toOption.isNone "yes answers no choice"
       let reply ← assertOk <| Result.fromExcept Error.input (replyTo (next run log) (.choice 2))
       let log := settle run (log.push reply)
-      check (log.any fun | .returned ⟪"agent"⟫ (.str "yes, 2") => true | _ => false) "the program went on with both replies"
+      check (log.any fun | .returned ⟪"session", "agent"⟫ (.str "yes, 2") => true | _ => false) "the program went on with both replies"
       assertEqual "two questions asked" (log.filter (· matches .asked ..)).size 2
       check (replyTo (next run log) .yes).toOption.isNone "no question waits once the agent is over"
     -- A question that cannot be asked is a failure where it is asked, and nothing waits.
     do
-      let run := runOf fun _ => Json.str <$> (·.line) <$> Alaya.ask { text := " \n" }
+      let run := runOf fun _ => Json.str <$> (·.line) <$> Alaya.Core.ask { text := " \n" }
       let log := settle run opening
-      check (log.any fun | .failed ⟪"agent"⟫ error => contains error "blank" | _ => false) "a blank question fails"
+      check (log.any fun | .failed ⟪"session", "agent"⟫ error => contains error "blank" | _ => false) "a blank question fails"
       check (!log.any (· matches .asked ..)) "and is never asked",
 
   test "ask_user lets a model ask only the kinds of question its configuration names" do

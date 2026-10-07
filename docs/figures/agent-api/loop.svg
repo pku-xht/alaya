@@ -1,14 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 448" width="920" height="448">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 520" width="920" height="520">
 <title>A loop of three rounds: the log holds their events, flat</title>
 <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;font-size:13px;fill:#1c1e21}.m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}.s{font-size:11px;fill:#6f7985}.f{font-size:11px;fill:#a3abb5}.b{font-weight:600}.n{font-variant-numeric:tabular-nums}.fr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px;fill:#a3abb5}.ch{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}.e{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:11.5px}.a{stroke:#a3abb5;fill:none}.d{stroke-dasharray:3 3}.bx{stroke:#d3d9e0;fill:none}</style>
-<rect width="920" height="448" fill="#fff"/>
+<rect width="920" height="520" fill="#fff"/>
 <text x="12" y="14" class="s">computation</text>
 <text x="304" y="14" class="s">carried out by</text>
 <text x="447" y="14" class="s">log</text>
-<rect x="440.5" y="22.5" width="474" height="397" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
-<path fill="#fafbfc" d="M12.5,407.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V407.5Q297.5,413.5 291.5,413.5H18.5Q12.5,413.5 12.5,407.5Z"/><path class="bx" d="M12.5,407.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V407.5Q297.5,413.5 291.5,413.5H18.5Q12.5,413.5 12.5,407.5"/>
-<path fill="#fff" d="M26.5,227.5V172.5Q26.5,166.5 32.5,166.5H287.5Q293.5,166.5 293.5,172.5V227.5Q293.5,233.5 287.5,233.5H32.5Q26.5,233.5 26.5,227.5Z"/><path class="bx" d="M26.5,227.5V172.5Q26.5,166.5 32.5,166.5H287.5Q293.5,166.5 293.5,172.5V227.5Q293.5,233.5 287.5,233.5H32.5Q26.5,233.5 26.5,227.5"/>
-<path fill="#fff" d="M26.5,341.5V286.5Q26.5,280.5 32.5,280.5H287.5Q293.5,280.5 293.5,286.5V341.5Q293.5,347.5 287.5,347.5H32.5Q26.5,347.5 26.5,341.5Z"/><path class="bx" d="M26.5,341.5V286.5Q26.5,280.5 32.5,280.5H287.5Q293.5,280.5 293.5,286.5V341.5Q293.5,347.5 287.5,347.5H32.5Q26.5,347.5 26.5,341.5"/>
+<rect x="440.5" y="22.5" width="474" height="469" rx="6" fill="#fafbfc" stroke="#e3e6ea"/>
+<path fill="#fafbfc" d="M12.5,487.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V487.5H12.5Z"/><path class="bx" d="M12.5,487.5V106.5Q12.5,100.5 18.5,100.5H291.5Q297.5,100.5 297.5,106.5V487.5"/>
+<path fill="#fff" d="M26.5,479.5V178.5Q26.5,172.5 32.5,172.5H287.5Q293.5,172.5 293.5,178.5V479.5Q293.5,485.5 287.5,485.5H32.5Q26.5,485.5 26.5,479.5Z"/><path class="bx" d="M26.5,479.5V178.5Q26.5,172.5 32.5,172.5H287.5Q293.5,172.5 293.5,178.5V479.5Q293.5,485.5 287.5,485.5H32.5Q26.5,485.5 26.5,479.5"/>
+<path fill="#fafbfc" d="M40.5,299.5V244.5Q40.5,238.5 46.5,238.5H283.5Q289.5,238.5 289.5,244.5V299.5Q289.5,305.5 283.5,305.5H46.5Q40.5,305.5 40.5,299.5Z"/><path class="bx" d="M40.5,299.5V244.5Q40.5,238.5 46.5,238.5H283.5Q289.5,238.5 289.5,244.5V299.5Q289.5,305.5 283.5,305.5H46.5Q40.5,305.5 40.5,299.5"/>
+<path fill="#fafbfc" d="M40.5,413.5V358.5Q40.5,352.5 46.5,352.5H283.5Q289.5,352.5 289.5,358.5V413.5Q289.5,419.5 283.5,419.5H46.5Q40.5,419.5 40.5,413.5Z"/><path class="bx" d="M40.5,413.5V358.5Q40.5,352.5 46.5,352.5H283.5Q289.5,352.5 289.5,358.5V413.5Q289.5,419.5 283.5,419.5H46.5Q40.5,419.5 40.5,413.5"/>
 <text x="460" y="42" class="f n" text-anchor="end">0</text>
 <text x="468" y="42" class="fr">-</text>
 <g transform="translate(537,31.5) scale(0.9286)" stroke="#4a4f57" fill="#4a4f57" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="2.6"/><circle cx="7" cy="7" r="5.6" fill="none"/></g>
@@ -20,7 +21,7 @@
 <text x="460" y="66" class="f n" text-anchor="end">1</text>
 <text x="468" y="66" class="fr">-</text>
 <g transform="translate(537,55.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
-<text x="556" y="66.5" style="fill:#7556a3">call agent “fix the build”</text>
+<text x="556" y="66.5" style="fill:#7556a3">call session</text>
 <text x="898" y="66" class="f" text-anchor="end">arrived</text>
 <text x="304" y="59.5" class="s">a person</text>
 <path class="a" d="M307,67.5H432"/><path fill="#a3abb5" d="M436,67.5l-5,-2.5v5z"/>
@@ -37,107 +38,133 @@
 <text x="369" y="85" class="s" text-anchor="middle">the log</text>
 <path class="a d" d="M436,91.5H69.3"/><path fill="#a3abb5" d="M65.3,91.5l5,-2.5v5z"/>
 <text x="460" y="114" class="f n" text-anchor="end">3</text>
-<text x="468" y="114" class="fr">agent</text>
+<text x="468" y="114" class="fr">session</text>
 <g transform="translate(537,103.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="556" y="114.5">open agent</text>
+<text x="556" y="114.5">open session</text>
 <text x="898" y="114" class="f" text-anchor="end">opened</text>
-<text x="20.5" y="114" class="s b">agent</text>
+<text x="20.5" y="114" class="s b">session</text>
 <path class="a" d="M298.5,110.5H432"/><path fill="#a3abb5" d="M436,110.5l-5,-2.5v5z"/>
-<text x="20.5" y="135" class="s">round 1 · state: 2 messages</text>
-<text x="460" y="156" class="f n" text-anchor="end">4</text>
-<text x="468" y="156" class="fr">agent</text>
-<g transform="translate(537,145.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
-<text x="556" y="156.5">sample → bash make</text>
-<text x="898" y="156" class="f" text-anchor="end">answered</text>
-<rect x="21.0" y="143.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
-<text x="27" y="156" class="ch">sample request</text>
-<path class="a" d="M139.1,147.5H432"/><path fill="#a3abb5" d="M436,147.5l-5,-2.5v5z"/>
-<rect x="348.9" y="141.0" width="40.2" height="13" fill="#fff"/>
-<text x="369" y="151" class="s" text-anchor="middle">model</text>
-<path class="a d" d="M436,157.5H143.1"/><path fill="#a3abb5" d="M139.1,157.5l5,-2.5v5z"/>
-<text x="460" y="180" class="f n" text-anchor="end">5</text>
-<text x="468" y="180" class="fr">bash</text>
-<g transform="translate(537,169.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="556" y="180.5">open bash “make”</text>
-<text x="898" y="180" class="f" text-anchor="end">opened</text>
-<text x="34.5" y="180" class="s b">bash</text>
-<path class="a" d="M294.5,176.5H432"/><path fill="#a3abb5" d="M436,176.5l-5,-2.5v5z"/>
-<text x="460" y="204" class="f n" text-anchor="end">6</text>
-<text x="468" y="204" class="fr">bash</text>
-<g transform="translate(537,193.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
-<text x="556" y="204.5">exec make → exit 2</text>
-<text x="898" y="204" class="f" text-anchor="end">answered</text>
-<rect x="35.0" y="191.0" width="91.9" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
-<text x="41" y="204" class="ch">exec "make"</text>
-<path class="a" d="M131.4,195.5H432"/><path fill="#a3abb5" d="M436,195.5l-5,-2.5v5z"/>
-<rect x="341.4" y="189.0" width="55.1" height="13" fill="#fff"/>
-<text x="369" y="199" class="s" text-anchor="middle">executor</text>
-<path class="a d" d="M436,205.5H135.4"/><path fill="#a3abb5" d="M131.4,205.5l5,-2.5v5z"/>
+<text x="460" y="138" class="f n" text-anchor="end">4</text>
+<text x="468" y="138" class="fr">-</text>
+<g transform="translate(537,127.5) scale(0.9286)" stroke="#7556a3" fill="#7556a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h8v9H3z" fill="none"/><path d="M5 5.5l1.2 1.2L8.8 4.2M5 9h4" fill="none"/></g>
+<text x="556" y="138.5" style="fill:#7556a3">call agent “fix the build”</text>
+<text x="898" y="138" class="f" text-anchor="end">arrived</text>
+<text x="304" y="131.5" class="s">a person</text>
+<path class="a" d="M307,139.5H432"/><path fill="#a3abb5" d="M436,139.5l-5,-2.5v5z"/>
+<circle cx="307" cy="139.5" r="2.5" fill="#7556a3"/>
+<text x="460" y="162" class="f n" text-anchor="end">5</text>
+<text x="468" y="162" class="fr">session</text>
+<g transform="translate(537,151.5) scale(0.9286)" stroke="#a3abb5" fill="#a3abb5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h3l1 1.5h2l1-1.5h3" fill="none"/><path d="M2 8.5L3.5 3h7L12 8.5v3H2z" fill="none"/></g>
+<text x="556" y="162.5">inbox: takes 4</text>
+<text x="898" y="162" class="f" text-anchor="end">heard</text>
+<rect x="21.0" y="149.0" width="48.3" height="18" rx="4" fill="#f6f7f9" stroke="#7556a3"/>
+<text x="27" y="162" class="ch">await</text>
+<path class="a" d="M73.8,153.5H432"/><path fill="#a3abb5" d="M436,153.5l-5,-2.5v5z"/>
+<rect x="346.9" y="147.0" width="44.1" height="13" fill="#fff"/>
+<text x="369" y="157" class="s" text-anchor="middle">the log</text>
+<path class="a d" d="M436,163.5H77.8"/><path fill="#a3abb5" d="M73.8,163.5l5,-2.5v5z"/>
+<text x="460" y="186" class="f n" text-anchor="end">6</text>
+<text x="468" y="186" class="fr">agent</text>
+<g transform="translate(537,175.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="556" y="186.5">open agent</text>
+<text x="898" y="186" class="f" text-anchor="end">opened</text>
+<text x="34.5" y="186" class="s b">agent</text>
+<path class="a" d="M294.5,182.5H432"/><path fill="#a3abb5" d="M436,182.5l-5,-2.5v5z"/>
+<text x="34.5" y="207" class="s">round 1 · state: 2 messages</text>
 <text x="460" y="228" class="f n" text-anchor="end">7</text>
-<text x="468" y="228" class="fr">bash</text>
-<g transform="translate(537,217.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
-<text x="556" y="228.5">return exit 2: no rule to make target</text>
-<text x="898" y="228" class="f" text-anchor="end">returned</text>
-<text x="285.5" y="228" class="e" style="fill:#2a7a4b" text-anchor="end">return</text>
-<path class="a" d="M294.5,224.5H432"/><path fill="#a3abb5" d="M436,224.5l-5,-2.5v5z"/>
-<path class="a" d="M8,126.5H4.5V232.5H8"/>
-<text x="20.5" y="249" class="s">round 2 · 4 messages</text>
-<text x="460" y="270" class="f n" text-anchor="end">8</text>
-<text x="468" y="270" class="fr">agent</text>
-<g transform="translate(537,259.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
-<text x="556" y="270.5">sample → bash ninja</text>
-<text x="898" y="270" class="f" text-anchor="end">answered</text>
-<rect x="21.0" y="257.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
-<text x="27" y="270" class="ch">sample request</text>
-<path class="a" d="M139.1,261.5H432"/><path fill="#a3abb5" d="M436,261.5l-5,-2.5v5z"/>
-<rect x="348.9" y="255.0" width="40.2" height="13" fill="#fff"/>
-<text x="369" y="265" class="s" text-anchor="middle">model</text>
-<path class="a d" d="M436,271.5H143.1"/><path fill="#a3abb5" d="M139.1,271.5l5,-2.5v5z"/>
-<text x="460" y="294" class="f n" text-anchor="end">9</text>
-<text x="468" y="294" class="fr">bash#1</text>
-<g transform="translate(537,283.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
-<text x="556" y="294.5">open bash “ninja”</text>
-<text x="898" y="294" class="f" text-anchor="end">opened</text>
-<text x="34.5" y="294" class="s b">bash#1</text>
-<path class="a" d="M294.5,290.5H432"/><path fill="#a3abb5" d="M436,290.5l-5,-2.5v5z"/>
-<text x="460" y="318" class="f n" text-anchor="end">10</text>
-<text x="468" y="318" class="fr">bash#1</text>
-<g transform="translate(537,307.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
-<text x="556" y="318.5">exec ninja → exit 0</text>
-<text x="898" y="318" class="f" text-anchor="end">answered</text>
-<rect x="35.0" y="305.0" width="99.1" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
-<text x="41" y="318" class="ch">exec "ninja"</text>
-<path class="a" d="M138.6,309.5H432"/><path fill="#a3abb5" d="M436,309.5l-5,-2.5v5z"/>
-<rect x="341.4" y="303.0" width="55.1" height="13" fill="#fff"/>
-<text x="369" y="313" class="s" text-anchor="middle">executor</text>
-<path class="a d" d="M436,319.5H142.6"/><path fill="#a3abb5" d="M138.6,319.5l5,-2.5v5z"/>
+<text x="468" y="228" class="fr">agent</text>
+<g transform="translate(537,217.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="556" y="228.5">sample → bash make</text>
+<text x="898" y="228" class="f" text-anchor="end">answered</text>
+<rect x="35.0" y="215.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
+<text x="41" y="228" class="ch">sample request</text>
+<path class="a" d="M153.1,219.5H432"/><path fill="#a3abb5" d="M436,219.5l-5,-2.5v5z"/>
+<rect x="348.9" y="213.0" width="40.2" height="13" fill="#fff"/>
+<text x="369" y="223" class="s" text-anchor="middle">model</text>
+<path class="a d" d="M436,229.5H157.1"/><path fill="#a3abb5" d="M153.1,229.5l5,-2.5v5z"/>
+<text x="460" y="252" class="f n" text-anchor="end">8</text>
+<text x="468" y="252" class="fr">bash</text>
+<g transform="translate(537,241.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="556" y="252.5">open bash “make”</text>
+<text x="898" y="252" class="f" text-anchor="end">opened</text>
+<text x="48.5" y="252" class="s b">bash</text>
+<path class="a" d="M290.5,248.5H432"/><path fill="#a3abb5" d="M436,248.5l-5,-2.5v5z"/>
+<text x="460" y="276" class="f n" text-anchor="end">9</text>
+<text x="468" y="276" class="fr">bash</text>
+<g transform="translate(537,265.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="556" y="276.5">exec make → exit 2</text>
+<text x="898" y="276" class="f" text-anchor="end">answered</text>
+<rect x="49.0" y="263.0" width="91.9" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
+<text x="55" y="276" class="ch">exec "make"</text>
+<path class="a" d="M145.4,267.5H432"/><path fill="#a3abb5" d="M436,267.5l-5,-2.5v5z"/>
+<rect x="341.4" y="261.0" width="55.1" height="13" fill="#fff"/>
+<text x="369" y="271" class="s" text-anchor="middle">executor</text>
+<path class="a d" d="M436,277.5H149.4"/><path fill="#a3abb5" d="M145.4,277.5l5,-2.5v5z"/>
+<text x="460" y="300" class="f n" text-anchor="end">10</text>
+<text x="468" y="300" class="fr">bash</text>
+<g transform="translate(537,289.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="556" y="300.5">return exit 2: no rule to make target</text>
+<text x="898" y="300" class="f" text-anchor="end">returned</text>
+<text x="281.5" y="300" class="e" style="fill:#2a7a4b" text-anchor="end">return</text>
+<path class="a" d="M290.5,296.5H432"/><path fill="#a3abb5" d="M436,296.5l-5,-2.5v5z"/>
+<path class="a" d="M8,198.5H4.5V304.5H8"/>
+<text x="34.5" y="321" class="s">round 2 · 4 messages</text>
 <text x="460" y="342" class="f n" text-anchor="end">11</text>
-<text x="468" y="342" class="fr">bash#1</text>
-<g transform="translate(537,331.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
-<text x="556" y="342.5">return exit 0: build ok</text>
-<text x="898" y="342" class="f" text-anchor="end">returned</text>
-<text x="285.5" y="342" class="e" style="fill:#2a7a4b" text-anchor="end">return</text>
-<path class="a" d="M294.5,338.5H432"/><path fill="#a3abb5" d="M436,338.5l-5,-2.5v5z"/>
-<path class="a" d="M8,240.5H4.5V346.5H8"/>
-<text x="20.5" y="363" class="s">round 3 · 6 messages → result</text>
-<text x="460" y="384" class="f n" text-anchor="end">12</text>
-<text x="468" y="384" class="fr">agent</text>
-<g transform="translate(537,373.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
-<text x="556" y="384.5">sample → says “fixed: use ninja”</text>
-<text x="898" y="384" class="f" text-anchor="end">answered</text>
-<rect x="21.0" y="371.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
-<text x="27" y="384" class="ch">sample request</text>
-<path class="a" d="M139.1,375.5H432"/><path fill="#a3abb5" d="M436,375.5l-5,-2.5v5z"/>
-<rect x="348.9" y="369.0" width="40.2" height="13" fill="#fff"/>
-<text x="369" y="379" class="s" text-anchor="middle">model</text>
-<path class="a d" d="M436,385.5H143.1"/><path fill="#a3abb5" d="M139.1,385.5l5,-2.5v5z"/>
-<path class="a" d="M8,354.5H4.5V388.5H8"/>
-<text x="460" y="408" class="f n" text-anchor="end">13</text>
-<text x="468" y="408" class="fr">agent</text>
-<g transform="translate(537,397.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
-<text x="556" y="408.5">return fixed: use ninja</text>
-<text x="898" y="408" class="f" text-anchor="end">returned</text>
-<text x="289.5" y="408" class="e" style="fill:#2a7a4b" text-anchor="end">return</text>
-<path class="a" d="M298.5,404.5H432"/><path fill="#a3abb5" d="M436,404.5l-5,-2.5v5z"/>
-<text x="12" y="436" class="s">a loop writes nothing of its own; every round reads an event</text>
+<text x="468" y="342" class="fr">agent</text>
+<g transform="translate(537,331.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="556" y="342.5">sample → bash ninja</text>
+<text x="898" y="342" class="f" text-anchor="end">answered</text>
+<rect x="35.0" y="329.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
+<text x="41" y="342" class="ch">sample request</text>
+<path class="a" d="M153.1,333.5H432"/><path fill="#a3abb5" d="M436,333.5l-5,-2.5v5z"/>
+<rect x="348.9" y="327.0" width="40.2" height="13" fill="#fff"/>
+<text x="369" y="337" class="s" text-anchor="middle">model</text>
+<path class="a d" d="M436,343.5H157.1"/><path fill="#a3abb5" d="M153.1,343.5l5,-2.5v5z"/>
+<text x="460" y="366" class="f n" text-anchor="end">12</text>
+<text x="468" y="366" class="fr">bash#1</text>
+<g transform="translate(537,355.5) scale(0.9286)" stroke="#6f7985" fill="#6f7985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h7" fill="none"/><path d="M6.5 4.5L9 7l-2.5 2.5" fill="none"/><path d="M11.5 2.5v9" fill="none"/></g>
+<text x="556" y="366.5">open bash “ninja”</text>
+<text x="898" y="366" class="f" text-anchor="end">opened</text>
+<text x="48.5" y="366" class="s b">bash#1</text>
+<path class="a" d="M290.5,362.5H432"/><path fill="#a3abb5" d="M436,362.5l-5,-2.5v5z"/>
+<text x="460" y="390" class="f n" text-anchor="end">13</text>
+<text x="468" y="390" class="fr">bash#1</text>
+<g transform="translate(537,379.5) scale(0.9286)" stroke="#2b6f6f" fill="#2b6f6f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l7 4.5-7 4.5z" fill="none"/></g>
+<text x="556" y="390.5">exec ninja → exit 0</text>
+<text x="898" y="390" class="f" text-anchor="end">answered</text>
+<rect x="49.0" y="377.0" width="99.1" height="18" rx="4" fill="#f6f7f9" stroke="#2b6f6f"/>
+<text x="55" y="390" class="ch">exec "ninja"</text>
+<path class="a" d="M152.6,381.5H432"/><path fill="#a3abb5" d="M436,381.5l-5,-2.5v5z"/>
+<rect x="341.4" y="375.0" width="55.1" height="13" fill="#fff"/>
+<text x="369" y="385" class="s" text-anchor="middle">executor</text>
+<path class="a d" d="M436,391.5H156.6"/><path fill="#a3abb5" d="M152.6,391.5l5,-2.5v5z"/>
+<text x="460" y="414" class="f n" text-anchor="end">14</text>
+<text x="468" y="414" class="fr">bash#1</text>
+<g transform="translate(537,403.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="556" y="414.5">return exit 0: build ok</text>
+<text x="898" y="414" class="f" text-anchor="end">returned</text>
+<text x="281.5" y="414" class="e" style="fill:#2a7a4b" text-anchor="end">return</text>
+<path class="a" d="M290.5,410.5H432"/><path fill="#a3abb5" d="M436,410.5l-5,-2.5v5z"/>
+<path class="a" d="M8,312.5H4.5V418.5H8"/>
+<text x="34.5" y="435" class="s">round 3 · 6 messages → result</text>
+<text x="460" y="456" class="f n" text-anchor="end">15</text>
+<text x="468" y="456" class="fr">agent</text>
+<g transform="translate(537,445.5) scale(0.9286)" stroke="#3567a0" fill="#3567a0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L6 7l-3.5 3.5" fill="none"/><path d="M7.5 10.5h4" fill="none"/></g>
+<text x="556" y="456.5">sample → says “fixed: use ninja”</text>
+<text x="898" y="456" class="f" text-anchor="end">answered</text>
+<rect x="35.0" y="443.0" width="113.6" height="18" rx="4" fill="#f6f7f9" stroke="#3567a0"/>
+<text x="41" y="456" class="ch">sample request</text>
+<path class="a" d="M153.1,447.5H432"/><path fill="#a3abb5" d="M436,447.5l-5,-2.5v5z"/>
+<rect x="348.9" y="441.0" width="40.2" height="13" fill="#fff"/>
+<text x="369" y="451" class="s" text-anchor="middle">model</text>
+<path class="a d" d="M436,457.5H157.1"/><path fill="#a3abb5" d="M153.1,457.5l5,-2.5v5z"/>
+<path class="a" d="M8,426.5H4.5V460.5H8"/>
+<text x="460" y="480" class="f n" text-anchor="end">16</text>
+<text x="468" y="480" class="fr">agent</text>
+<g transform="translate(537,469.5) scale(0.9286)" stroke="#2a7a4b" fill="#2a7a4b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 4.5v2.5a2 2 0 0 1-2 2H3" fill="none"/><path d="M5.5 6.5L3 9l2.5 2.5" fill="none"/></g>
+<text x="556" y="480.5">return fixed: use ninja</text>
+<text x="898" y="480" class="f" text-anchor="end">returned</text>
+<text x="285.5" y="480" class="e" style="fill:#2a7a4b" text-anchor="end">return</text>
+<path class="a" d="M294.5,476.5H432"/><path fill="#a3abb5" d="M436,476.5l-5,-2.5v5z"/>
+<text x="12" y="508" class="s">a loop writes nothing of its own; every round reads an event</text>
 </svg>

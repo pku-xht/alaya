@@ -1,4 +1,4 @@
-import Alaya.Replay
+import Alaya.Core.Replay
 import Test.Framework
 import Test.Frames
 
@@ -8,13 +8,14 @@ its scripted world and its driver, transliterated, must print what the sketch pr
 be read — a fork that is stopped, a question that waits, a failure that is caught, a log that is
 no trace of the program — is checked against the sketch, line for line.
 
-One line departs from the sketch on purpose. The sketch could stop its agent alone; in Alaya a
-stop ends whichever call of the run is running, so a stop while the sketch's run grades ends the
-grading, and the run's routine fails with it. -/
+Some lines depart from the sketch on purpose. A run is a call made from outside, `run`, so its
+log begins with that call, its read and its opening, and every frame is inside `run`'s. A stop
+is a break of the call open in a frame, here the agent's. And a change of the workspace is read
+by no one: the agent does not hear of it. -/
 
 namespace PrototypeTests
 
-open Alaya
+open Alaya Alaya.Base Alaya.Core
 open Lean (Json)
 
 /-! ## The sketch's stubs -/
@@ -120,7 +121,7 @@ def read : (op : Op) → Stored → Option op.Answer
 abbrev Agent : Signature :=
   { Op, Answer := Op.Answer, Key := Op, key := id, sameKey := (· == ·), Stored, store, read }
 
-def perform (op : Op) : Computation Agent op.Answer := Alaya.perform (σ := Agent) op
+def perform (op : Op) : Computation Agent op.Answer := Alaya.Core.perform (σ := Agent) op
 
 /-! ## The sketch's programs -/
 
@@ -147,7 +148,7 @@ def noticeText : Notice → String
   | .said message => message
   | .changed _ summary => s!"The workspace was changed: {summary}"
   | .replied _ reply => render reply
-  | .called call _ => s!"{call.name} was called"
+  | .called call => s!"{call.name} was called"
 
 def askUser : Tool where
   name := "ask_user"
@@ -223,7 +224,7 @@ def grading (_ : Except String Json) : Computation Agent Json := call "hidden_te
 
 def graded (config : Config) (after : Except String Json → Computation Agent Json := grading) : Routine Agent :=
   { name := "run"
-    body := fun _ => .call ⟨"agent", config.json⟩ after
+    body := fun _ => .call { name := "agent", arguments := config.json } after
     scope := scopeOf [agent config, bash, timeBudget, askUser, delegate config.model, commit, hiddenTests] }
 
 /-! ## The sketch's world and driver -/
@@ -239,10 +240,10 @@ def workspace (log : Log') : Snapshot :=
 
 def reply (log : Log') (answer : Reply) : Except String (Event Agent) := do
   let bracket := log.reverse.find? fun
-    | .opened .. | .returned .. | .failed .. | .stopped _ => true
+    | .opened .. | .returned .. | .failed .. | .broke .. => true
     | _ => false
   match bracket with
-  | some (.opened frame ⟨"ask_user", arguments⟩) =>
+  | some (.opened frame { name := "ask_user", arguments, .. }) =>
     if (← Question.parse (txt arguments)).accepts answer then pure (.arrived (.replied frame answer))
     else throw "the reply is not of the form the question asks for"
   | _ => throw "no question waits for a reply"
@@ -260,9 +261,18 @@ def World.answer (world : World) (log : Log') : (op : Op) → Except String op.A
   | .time => .ok world.clock
   | .external command image _ _ => .ok (world.external (workspace log) image command)
 
+/-- What a run of `run`, called from outside, does next after `log`. -/
+def nextOf (run : Routine Agent) (log : Log') : Next Agent := next (Scope.of #[run]) log
+
+/-- The call that starts a run. -/
+def runCall : RoutineCall := { name := "run", arguments := .null }
+
+/-- The frame of the sketch's agent, inside the run's. -/
+def agentFrame : Frame := #[{ name := "run" }, { name := "agent" }]
+
 partial def drive (world : World) (run : Routine Agent) (log : Log') : Log' × Next Agent :=
   let log := log ++ ((world.arrivals log).map Event.arrived).toArray
-  match next run log with
+  match nextOf run log with
   | .ask call =>
     let answer := (world.answer log call.op).map (store call.op)
     drive world run (log.push (.answered call.frame call.op answer))
@@ -282,7 +292,7 @@ def Request.last (request : Request) : String :=
   | none => ""
 
 def calls (pairs : List (String × String)) : Response :=
-  { text := "", toolCalls := pairs.map fun (name, arguments) => ⟨name, .str arguments⟩ }
+  { text := "", toolCalls := pairs.map fun (name, arguments) => { name, arguments := .str arguments } }
 
 def script (request : Request) : Response :=
   match request.last with
@@ -300,7 +310,7 @@ def asked (log : Log') : Bool :=
     | .arrived (.said _) | .arrived (.changed ..) => false
     | _ => true
   match last with
-  | some (.opened _ ⟨"ask_user", _⟩) => true
+  | some (.opened _ { name := "ask_user", .. }) => true
   | _ => false
 
 def version (n : Nat) : Snapshot := ⟨s!"w{n}"⟩
@@ -323,9 +333,9 @@ def world : World where
       elapsedMs := 1200 }
   clock := (412000, some 3600000)
   arrivals log :=
-    if log.isEmpty then [.changed (version 0) "the repository"]
-    else if log.size == 2 then [.said "the task"]
-    else if log.size == 22 then [.changed (version 2) "a person edited README"]
+    if log.isEmpty then [.changed (version 0) "the repository", .called runCall]
+    else if log.size == 5 then [.said "the task"]
+    else if log.size == 25 then [.changed (version 2) "a person edited README"]
     else if !asked log then []
     else match reply log (.text "the default one") with
       | .ok (.arrived notice) => [notice]
@@ -375,7 +385,7 @@ def describe (o : Frame → List Nat) : Event Agent → String
   | .arrived (.said message) => s!"-  arrived: said {message}"
   | .arrived (.changed workspace _) => s!"-  arrived: changed → {workspace.hex}"
   | .arrived (.replied to answer) => s!"-  arrived: replied to {o to}: {render answer}"
-  | .arrived (.called call _) => s!"-  arrived: called {call.name}"
+  | .arrived (.called call) => s!"-  arrived: called {call.name}"
   | .commented text => s!"-  commented: {text}"
   | .answered frame (.external command image ..) (.ok (.external ran)) =>
     s!"{o frame}  answered: external {command}, in {image} → exit {ran.exit}, {ran.checkout.hex}"
@@ -388,7 +398,7 @@ def describe (o : Frame → List Nat) : Event Agent → String
   | .returned frame value => s!"{o frame}  returned: {txt value}"
   | .failed frame error =>
     s!"{o frame}  failed: {error.replace "no routine named" "no tool named"}"
-  | .stopped reason => s!"-  stopped: {reason}"
+  | .broke frame reason => s!"-  broke {o frame}: {reason}"
   | .heard frame notices => s!"{o frame}  heard {notices.toList}"
   | .asked frame question => s!"{o frame}  asked: {question.text}"
 
@@ -403,7 +413,7 @@ def describeNext (o : Frame → List Nat) : Next Agent → String
   | .mark (.asked frame question) => s!"log the question of {o frame}: {question.text}"
   | .mark event => s!"mark {describe o event}"
   | .waits frame _ =>
-    if frame.isEmpty then "wait: there is no workspace to start on"
+    if frame.isEmpty then "wait: the run's call has not arrived"
     else s!"wait: {o frame} reads the inbox once something arrives"
   | .mismatch position => s!"mismatch at {position}"
   | .unguarded frame => s!"unguarded loop in {o frame}"
@@ -421,7 +431,7 @@ def without (run : Routine Agent) (name : String) : Routine Agent :=
 
 def faithful (run : Routine Agent) (log : Log') : Bool :=
   (List.range (log.size + 1)).all fun i =>
-    match log[i]?, next run (log.extract 0 i) with
+    match log[i]?, nextOf run (log.extract 0 i) with
     | some (.arrived _), _ => true
     | some (.answered frame op _), .ask call => frame == call.frame && op == call.op
     | some (.heard frame notices), .mark (.heard reader taken) => frame == reader && notices == taken
@@ -439,46 +449,46 @@ def transcript : Array String := Id.run do
       agent := { tools := ["bash", "time_budget", "commit", "ask_user"], retries := 2 }
       model := { name := "a-model", maxTokens := 4096 } }
   let run := graded config
-  let replay := fun log => describeNext (ordinals log) (next run log)
+  let replay := fun log => describeNext (ordinals log) (nextOf run log)
   let same := fun (one other : Log') => one.map (describe (ordinals one)) == other.map (describe (ordinals other))
   let (log, result) := drive world run #[]
   for (event, i) in log.zipIdx do out := out.push s!"{i}  {describe (ordinals log) event}"
   out := out.push (describeNext (ordinals log) result)
   out := out.push s!"workspace {(workspace log).hex}"
   out := out.push s!"replay agrees with the run wherever the driver asked: {faithful run log}"
-  let stoppedAt := fun position => (log.extract 0 position).push (.stopped "to grade this state")
+  let stoppedAt := fun position => (log.extract 0 position).push (.broke agentFrame "to grade this state")
   out := out.push "the states of the run, where the workspace is at a new version, forked and stopped:"
-  for position in (versions log).filter (· < 42) do
+  for position in (versions log).filter (· < 45) do
     let (fork, grade) := drive world run (stoppedAt position)
     let v := workspace (log.extract 0 position)
     let more := fork.size - position
     out := out.push s!"  at {position}, workspace {v.hex}: {describeNext (ordinals fork) grade}, in {more} more events"
-  out := out.push "the fork stopped at 24:"
-  let stopped := (drive world run (stoppedAt 24)).1
+  out := out.push "the fork stopped at 27:"
+  let stopped := (drive world run (stoppedAt 27)).1
   for (event, i) in stopped.zipIdx do
-    if i ≥ 23 then out := out.push s!"  {i}  {describe (ordinals stopped) event}"
+    if i ≥ 26 then out := out.push s!"  {i}  {describe (ordinals stopped) event}"
   out := out.push s!"the run itself is as it was: {same (drive world run log).1 log}"
-  out := out.push s!"the agent cannot go on after a stop: {replay (stoppedAt 24 ++ drop log 24)}"
-  out := out.push s!"a stop once the agent is over: {replay ((log.extract 0 44).push (.stopped "x"))}"
+  out := out.push s!"the agent cannot go on after a stop: {replay (stoppedAt 27 ++ drop log 27)}"
+  out := out.push s!"a stop once the agent is over: {replay ((log.extract 0 42).push (.broke agentFrame "x"))}"
   out := out.push s!"a reply when no question waits: {(reply log .yes).toOption.isSome}"
-  let asking := log.extract 0 6
+  let asking := log.extract 0 9
   out := out.push s!"a reply of another form than asked: {(reply asking .yes).toOption.isSome}"
   out := out.push s!"that the person cannot answer: {(reply asking .unavailable).toOption.isSome}"
-  let wrong := asking.push (.arrived (.replied ⟪"agent", "ask_user"⟫ .yes))
+  let wrong := asking.push (.arrived (.replied ⟪"run", "agent", "ask_user"⟫ .yes))
   out := out.push s!"a reply of another form, put in the log: {replay wrong}"
-  let (waiting, pending) := drive { world with arrivals := upTo 2 } run #[]
+  let (waiting, pending) := drive { world with arrivals := upTo 5 } run #[]
   out := out.push s!"while the person has not replied: {describeNext (ordinals waiting) pending}"
   out := out.push s!"  and the log ends with: {(waiting.back?.map (describe (ordinals waiting))).getD ""}"
   out := out.push s!"resumed to the same log: {same (drive world run waiting).1 log}"
   let (interrupted, pending) := drive { world with arrivals := fun log =>
-    if log.size == 6 then [.changed (version 1) "a person edited README"] else upTo 2 log } run #[]
+    if log.size == 9 then [.said "a person edited README"] else upTo 5 log } run #[]
   out := out.push s!"with another notice while a question waits: {describeNext (ordinals interrupted) pending}"
   out := out.push s!"  and the log ends with: {(interrupted.back?.map (describe (ordinals interrupted))).getD ""}"
   let (later, _) := drive world run interrupted
   for (event, i) in later.zipIdx do
-    if 6 ≤ i ∧ i ≤ 10 then out := out.push s!"  {i}  {describe (ordinals later) event}"
+    if 9 ≤ i ∧ i ≤ 13 then out := out.push s!"  {i}  {describe (ordinals later) event}"
   let flaky := { world with
-    arrivals := fun log => if log.size == 22 then [] else world.arrivals log
+    arrivals := fun log => if log.size == 25 then [] else world.arrivals log
     execute := fun v command =>
       if command.startsWith "git commit" ∧ v == version 3 then
         { text := "nothing to commit", workspace := version 4, exit := 1 }
@@ -486,30 +496,30 @@ def transcript : Array String := Id.run do
   let (failing, ended) := drive flaky run #[]
   out := out.push "with a commit that fails the first time:"
   for (event, i) in failing.zipIdx do
-    if 30 ≤ i ∧ i ≤ 36 then out := out.push s!"  {i}  {describe (ordinals failing) event}"
+    if 33 ≤ i ∧ i ≤ 39 then out := out.push s!"  {i}  {describe (ordinals failing) event}"
   out := out.push s!"  and the run ends, after {failing.size} events: {describeNext (ordinals failing) ended}"
   let (once, ended) := drive { world with model := failsOnce } run #[]
   out := out.push "with a model that fails to answer once:"
   for (event, i) in once.zipIdx do
-    if 17 ≤ i ∧ i ≤ 19 then out := out.push s!"  {i}  {describe (ordinals once) event}"
+    if 20 ≤ i ∧ i ≤ 22 then out := out.push s!"  {i}  {describe (ordinals once) event}"
   out := out.push s!"  and the run ends, after {once.size} events: {describeNext (ordinals once) ended}"
   let (thrice, ended) := drive { world with model := keepsFailing } run #[]
   out := out.push "with a model that keeps failing a sub-agent:"
   for (event, i) in thrice.zipIdx do
-    if 17 ≤ i ∧ i ≤ 25 then out := out.push s!"  {i}  {describe (ordinals thrice) event}"
+    if 20 ≤ i ∧ i ≤ 28 then out := out.push s!"  {i}  {describe (ordinals thrice) event}"
   out := out.push s!"  and the run ends, after {thrice.size} events: {describeNext (ordinals thrice) ended}"
   let (missing, _) := drive world (without run "bash") #[]
   out := out.push "with a tool that the run does not have:"
   for (event, i) in missing.zipIdx do
-    if 10 ≤ i ∧ i ≤ 14 then out := out.push s!"  {i}  {describe (ordinals missing) event}"
+    if 13 ≤ i ∧ i ≤ 17 then out := out.push s!"  {i}  {describe (ordinals missing) event}"
   let (refused, _) := drive { world with model := overreaches } run #[]
   out := out.push "with a model that asks for a tool it was not offered:"
   for (event, i) in refused.zipIdx do
-    if 4 ≤ i ∧ i ≤ 6 then out := out.push s!"  {i}  {describe (ordinals refused) event}"
+    if 7 ≤ i ∧ i ≤ 9 then out := out.push s!"  {i}  {describe (ordinals refused) event}"
   let (broken, ended) := drive world (withAgent run (throw "no model")) #[]
   out := out.push "with an agent that fails:"
   for (event, i) in broken.zipIdx do
-    if i ≥ 3 then out := out.push s!"  {i}  {describe (ordinals broken) event}"
+    if i ≥ 6 then out := out.push s!"  {i}  {describe (ordinals broken) event}"
   out := out.push s!"  {describeNext (ordinals broken) ended}"
   let (graders, ended) := drive world (graded config (after := fun _ => throw "no grader")) #[]
   out := out.push s!"with graders that fail, the run ends: {describeNext (ordinals graders) ended}"
@@ -518,26 +528,29 @@ def transcript : Array String := Id.run do
   let (idle, pending) := drive { world with arrivals := upTo 0 } run #[]
   out := out.push s!"with no task yet: {describeNext (ordinals idle) pending}, after {idle.size} events"
   out := out.push s!"resumed to the same log: {same (drive world run idle).1 log}"
-  let crashed := log.extract 0 24
-  out := out.push s!"after a crash at 24: {replay crashed}"
+  let crashed := log.extract 0 27
+  out := out.push s!"after a crash at 27: {replay crashed}"
   out := out.push s!"resumed to the same log: {same (drive world run crashed).1 log}"
-  let removed := log.extract 0 18 ++ drop log 19
+  let removed := log.extract 0 21 ++ drop log 22
   out := out.push s!"an answer removed: {replay removed}"
-  out := out.push s!"  where the program would {replay (removed.extract 0 18)}"
-  out := out.push s!"an answer left over: {replay (log ++ drop log 45)}"
-  out := out.push s!"an opening removed: {replay (log.extract 0 5 ++ drop log 6)}"
-  out := out.push s!"a reply removed: {replay (log.extract 0 6 ++ drop log 7)}"
-  out := out.push s!"a return removed: {replay (log.extract 0 8 ++ drop log 9)}"
-  out := out.push s!"a read not marked: {replay (log.extract 0 35 ++ drop log 36)}"
-  let unseen := (log.extract 0 35).push (.arrived (.said "stop")) ++ drop log 35
-  out := out.push s!"a log with no root: {replay (drop log 1)}"
+  out := out.push s!"  where the program would {replay (removed.extract 0 21)}"
+  out := out.push s!"an answer left over: {replay (log ++ drop log 43)}"
+  out := out.push s!"an opening removed: {replay (log.extract 0 8 ++ drop log 9)}"
+  out := out.push s!"a reply removed: {replay (log.extract 0 9 ++ drop log 10)}"
+  out := out.push s!"a return removed: {replay (log.extract 0 11 ++ drop log 12)}"
+  out := out.push s!"a read not marked: {replay (log.extract 0 38 ++ drop log 39)}"
+  let unseen := (log.extract 0 38).push (.arrived (.said "stop")) ++ drop log 38
+  out := out.push s!"a log without its first event: {replay (drop log 1)}"
   out := out.push s!"a notice put in before a read: {replay unseen}"
   let spin : Computation Agent Json := iter (fun (n : Nat) => pure (.inl (n + 1))) 0
-  out := out.push s!"a loop that reads nothing: {describeNext (ordinals log) (next (withAgent run spin) log)}"
+  out := out.push s!"a loop that reads nothing: {describeNext (ordinals log) (nextOf (withAgent run spin) log)}"
   return out
 
 def suite : Testing.Suite := Testing.suite "prototype" #[
   Testing.iotest "the interpreter reads every log as the sketch does, line for line" do
+    -- `ALAYA_REGENERATE=1` writes the transcript as the expected one, after a change of design.
+    if (← IO.getEnv "ALAYA_REGENERATE").isSome then
+      IO.FS.writeFile ("Test" / "Prototype" / "expected.txt") ("\n".intercalate transcript.toList ++ "\n")
     let expected := (← IO.FS.readFile ("Test" / "Prototype" / "expected.txt")).splitOn "\n"
     let expected := if expected.getLast? == some "" then expected.dropLast else expected
     let actual := transcript.toList

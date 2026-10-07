@@ -50,11 +50,12 @@ assert packages and all(p.is_symlink() and str(p.readlink()).startswith("/opt/ve
 alaya = ROOT / ".lake/build/bin/alaya"
 data = output / "audit"
 # The run is created on the source alone; the agent is called on it with its configuration.
-root = json_lines(run(alaya, "new", source, "--data", data, "--json").stdout)[0]
-called = json_lines(run(alaya, "call", root["entry"], "mini-vero", "--set-file", f"task={output / 'MINIVERO_TASK.md'}",
+made = json_lines(run(alaya, "new", source, "--data", data, "--json").stdout)
+root = made[0]
+called = json_lines(run(alaya, "call", made[-1]["entry"], "mini-vero", "--set-file", f"task={output / 'MINIVERO_TASK.md'}",
                         "--set", "mode=proof", "--set", "model=gpt-oss-120b",
                         "--image", args.agent_image, "--data", data, "--json").stdout)[0]
-environment = called["event"]["notice"]["environment"]
+environment = called["event"]["notice"]["call"]["environment"]
 workspace = root["event"]["notice"]["workspace"]
 stats = json.loads(run("restic", "--repo", data / "restic", "--insecure-no-password",
                        "stats", workspace, "--mode", "restore-size", "--json").stdout)

@@ -63,7 +63,7 @@ The format carries no version: a data directory is read by the Alaya that wrote 
 What each event means is `docs/agent-api.md` §2 and §3. This is how each is stored: an object
 with its kind under `type`, and its frame, where it has one, as an array of steps, outermost
 first: each the name of the routine called, with `#N` after it for the call of that name its
-caller made after N others (`["mini-swe", "bash#1"]`).
+caller made after N others (`["session", "mini-swe", "bash#1"]`).
 
 | `type` | Fields |
 | --- | --- |
@@ -74,7 +74,7 @@ caller made after N others (`["mini-swe", "bash#1"]`).
 | `opened` | `frame`, `routine`: `{name, arguments}` |
 | `returned` | `frame`, `value` |
 | `failed` | `frame`, `error` |
-| `stopped` | `reason` |
+| `broke` | `frame`: the frame of the call it ends; `reason` |
 | `commented` | `text` |
 
 | Notice `type` | Fields |
@@ -82,7 +82,7 @@ caller made after N others (`["mini-swe", "bash#1"]`).
 | `said` | `message` |
 | `changed` | `workspace`: a snapshot; `summary` |
 | `replied` | `to`: the frame that asked; `reply`: `{type}` of `yes`, `no`, `none_of_above`, `unavailable`, or `{type: "choice", number}`, `{type: "text", text}` |
-| `called` | `call`: `{name, arguments}`, the program the run is to call and its configuration; `environment`: `{image, workdir}`, where its commands run (§2) |
+| `called` | `call`: `{name, arguments, environment}`, the routine to call, its configuration, and, when it says, where its commands run |
 
 | `op.type` | Fields of `op` | `answer` |
 | --- | --- | --- |
@@ -94,34 +94,38 @@ A sample is kept by the digest of its request, not the request: replay computes 
 again from the log before it, so the log does not hold the conversation once more with every
 response.
 
-*The events of a run that calls an agent on its task, runs a command, and calls a grader.*
+*The events of a run: the session, a call of an agent on its task that runs a command, and a
+call of a grader.*
 
 ```json
 {"type":"arrived","notice":{"type":"changed","workspace":"3f2a…","summary":"the workspace the run starts from"}}
-{"type":"arrived","notice":{"type":"called","call":{"name":"mini-swe","arguments":{"model":{…},"task":"Implement the language in SPEC.md",…}},"environment":{"image":"…@sha256:…","workdir":"/workspace"}}}
+{"type":"arrived","notice":{"type":"called","call":{"name":"session","arguments":null}}}
 {"type":"heard","frame":[],"notices":[1]}
-{"type":"opened","frame":["mini-swe"],"routine":{"name":"mini-swe","arguments":{"model":{…},"task":"…",…}}}
-{"type":"answered","frame":["mini-swe"],"op":{"type":"exec","command":"uname -sm","config":{…}},"answer":{"output":{"output":"Linux x86_64\n",…},…},"error":null}
-{"type":"heard","frame":["mini-swe"],"notices":[]}
-{"type":"answered","frame":["mini-swe"],"op":{"type":"sample","model":{…},"request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
-{"type":"opened","frame":["mini-swe","bash"],"routine":{"name":"bash","arguments":{"command":"make","executor":{"timeout_seconds":30,…}}}}
-{"type":"answered","frame":["mini-swe","bash"],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
-{"type":"returned","frame":["mini-swe","bash"],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
+{"type":"opened","frame":["session"],"routine":{"name":"session","arguments":null}}
+{"type":"arrived","notice":{"type":"called","call":{"name":"mini-swe","arguments":{"model":{…},"task":"Implement the language in SPEC.md",…},"environment":{"image":"…@sha256:…","workdir":"/workspace"}}}}
+{"type":"heard","frame":["session"],"notices":[4]}
+{"type":"opened","frame":["session","mini-swe"],"routine":{"name":"mini-swe","arguments":{"model":{…},"task":"…",…},"environment":{…}}}
+{"type":"answered","frame":["session","mini-swe"],"op":{"type":"exec","command":"uname -sm","config":{…}},"answer":{"output":{"output":"Linux x86_64\n",…},…},"error":null}
+{"type":"heard","frame":["session","mini-swe"],"notices":[]}
+{"type":"answered","frame":["session","mini-swe"],"op":{"type":"sample","model":{…},"request":"9b0c…"},"answer":{"content":null,"tool_calls":[…],…},"error":null}
+{"type":"opened","frame":["session","mini-swe","bash"],"routine":{"name":"bash","arguments":{"command":"make","executor":{"timeout_seconds":30,…}}}}
+{"type":"answered","frame":["session","mini-swe","bash"],"op":{"type":"exec","command":"make","config":{…}},"answer":{"output":{…},"workspace":"c1d2…","file":null},"error":null}
+{"type":"returned","frame":["session","mini-swe","bash"],"value":{"output":"…","exit_code":0,"error":null,"file":null}}
 …
-{"type":"returned","frame":["mini-swe"],"value":{"status":"Submitted","submission":"…"}}
-{"type":"arrived","notice":{"type":"called","call":{"name":"grader","arguments":{"command":"sh /grader/grade.sh","timeout_seconds":900}},"environment":{…}}}
-{"type":"heard","frame":[],"notices":[212]}
-{"type":"opened","frame":["grader"],"routine":{"name":"grader","arguments":{…}}}
-{"type":"answered","frame":["grader"],"op":{"type":"exec","command":"sh /grader/grade.sh","config":{…,"merge":false}},"answer":{"output":{"output":"1..2\nok 1\nok 2\n","stderr":"",…},…},"error":null}
-{"type":"returned","frame":["grader"],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],"exit_code":0}}
+{"type":"returned","frame":["session","mini-swe"],"value":{"status":"Submitted","submission":"…"}}
+{"type":"arrived","notice":{"type":"called","call":{"name":"grader","arguments":{"command":"sh /grader/grade.sh","timeout_seconds":900},"environment":{…}}}}
+{"type":"heard","frame":["session"],"notices":[215]}
+{"type":"opened","frame":["session","grader"],"routine":{"name":"grader","arguments":{…}}}
+{"type":"answered","frame":["session","grader"],"op":{"type":"exec","command":"sh /grader/grade.sh","config":{…,"merge":false}},"answer":{"output":{"output":"1..2\nok 1\nok 2\n","stderr":"",…},…},"error":null}
+{"type":"returned","frame":["session","grader"],"value":{"status":"pass","passed":2,"total":2,"reason":"","checks":[…],"exit_code":0}}
 ```
 
-A person's call of a program names it, and its arguments are the program's complete
-**configuration**, an agent's model and task in it. Every later command builds the program from
-there. The `called` notice also holds the **environment** the call's commands run in: the pinned
-image, and the workdir. The driver finds it from the call's opening, through the read just before
-it, which took the notice. A program a program calls, a sub-agent, is called with its
-configuration alone, and runs where its caller's commands do. A tool's opening holds the model's
+A call names a routine, and its arguments are, for a program, its complete **configuration**, an
+agent's model and task in it. Every later command builds the program from there. A call may also
+name the **environment** its commands run in: the pinned image, and the workdir. A person's call
+always does, and the session's does not; a call inside one that names none, a sub-agent's or a tool's, runs where its
+caller's commands do. The driver reads a frame's environment off the nearest opening on its path
+that names one. A tool's opening holds the model's
 arguments with what the agent's configuration adds, as how its command runs.
 
 ## 3. The forest
@@ -130,7 +134,7 @@ Entries that name the same parent are its continuations, so every entry kept for
 root is a run; an entry with two continuations is a **fork**; and a log is any path from a root.
 Nothing is rewritten: a log only grows, and two logs with the same beginning share its entries.
 
-*A run driven again from the read at 4, which takes a new draw; a person's note at a later
+*A run driven again from the read at 8, which takes a new draw; a person's note at a later
 entry; and that entry graded as it stood.*
 
 ```mermaid
@@ -141,12 +145,13 @@ flowchart TD
   classDef ok fill:#dcf1e2,stroke:#2a7a4b,color:#1c5c33
   classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
 
-  root("0 · the workspace the run starts from"):::notice --> called("1 · call mini-swe"):::notice
-  called --> opened("2, 3 · inbox: takes 1, open mini-swe") --> heard("4 · inbox: nothing")
-  heard --> first("5 · sample, draw 0 …"):::sample --> firstEnd("… return pass 41/48"):::ok
-  heard --> second("5 · sample, draw 1 …"):::sample --> secondEnd("… return pass 48/48"):::ok
+  root("0 · the workspace the run starts from"):::notice --> session("1–3 · call session, inbox: takes 1, open session"):::notice
+  session --> called("4 · call mini-swe"):::notice
+  called --> opened("5, 6 · inbox: takes 4, open mini-swe") --> heard("8 · inbox: nothing")
+  heard --> first("9 · sample, draw 0 …"):::sample --> firstEnd("… return pass 41/48"):::ok
+  heard --> second("9 · sample, draw 1 …"):::sample --> secondEnd("… return pass 48/48"):::ok
   first --> note("k · said “a note”"):::notice --> noteEnd("… return pass 45/48"):::ok
-  first --> stopped("k · stopped: to grade this point"):::bad
+  first --> stopped("k · stopped session/mini-swe: to grade"):::bad
   stopped --> grader("k+1 · call grader"):::notice --> graded("… return fail 12/48"):::bad
   linkStyle default stroke-width:1px
 ```
@@ -156,10 +161,10 @@ flowchart TD
 ```
 $ alaya tree
 3f2a9c1b8e7d  root  mini-swe, gpt-6-luna
-  06d9ae75ae21..8cb007600701  1-40  sample → bash make test
-    07d75e6a71ee..bcef7c505d44  41-212  return pass 41/48  [done: pass 41/48]
-    9a11c0de42f7..53be0f1a2c90  41-260  return pass 48/48  [done: pass 48/48]
-    d9d628fe75d2..9cea64cdaa71  41-46  return fail 12/48  [done: fail 12/48]
+  06d9ae75ae21..8cb007600701  1-43  sample → bash make test
+    07d75e6a71ee..bcef7c505d44  44-215  return pass 41/48  [done: pass 41/48]
+    9a11c0de42f7..53be0f1a2c90  44-263  return pass 48/48  [done: pass 48/48]
+    d9d628fe75d2..9cea64cdaa71  44-49  return fail 12/48  [done: fail 12/48]
 ```
 
 Every command that writes appends entries after the one it is given. Appending after an entry
@@ -167,13 +172,13 @@ that already goes on is a fork; appending at the end of a log lets the next `res
 
 | Command | Appends |
 | --- | --- |
-| `new` | the root |
+| `new` | the root, the call of the session, and its read and opening |
 | `call` | a `called` notice |
 | `resume` | an entry for each event of the run, until it stops |
 | `tell` | a `said` notice |
-| `commit` | a `changed` notice: the snapshot of a directory, and the lines of what changed |
+| `commit` | a `changed` notice: the snapshot of a directory, and the lines of what changed; then a `said` notice that says so |
 | `reply` | a `replied` notice |
-| `stop` | a `stopped` event |
+| `stop` | a `broke` event |
 | `comment` | a `commented` event |
 
 `rm ENTRY` deletes an entry and everything after it. What each command takes and refuses is
@@ -322,7 +327,7 @@ place, and never changes.
 ### Workspace snapshots
 
 A log names each version of the workspace by a **snapshot**: an identifier of 64 hexadecimal
-digits, which means something only to the store that issued it. `Alaya.Workspaces` is the
+digits, which means something only to the store that issued it. `Alaya.Runtime.Workspaces` is the
 contract, and `Workspaces.Restic` keeps it with restic 0.17 or later.
 
 | Operation | Does | Used by | restic |

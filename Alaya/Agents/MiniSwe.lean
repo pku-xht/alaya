@@ -1,6 +1,6 @@
 import Alaya.Agents.Tools
-import Alaya.Agents.Config
-import Alaya.Models
+import Alaya.Base.ConfigJson
+import Alaya.LLM.Models
 
 /-! A port of mini-SWE-agent's default tool-calling agent as a program. It waits for its task,
 then goes round a loop whose state is the conversation: it samples the model on mini's view of
@@ -10,8 +10,9 @@ See `docs/miniswe.md`. -/
 
 namespace Alaya.Agents.MiniSwe
 
+open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
+
 open Lean (Json)
-open Alaya (Output Executor Uname)
 
 /-- The context a sample is conditioned on: the output of a view. -/
 abbrev Dialogue := Array Chat.Message
@@ -387,10 +388,6 @@ def view (config : Config) (history : History) : Dialogue := Id.run do
 def request (config : Config) (history : History) : Chat.Request :=
   { messages := view config history, tools := tools config }
 
-/-- The tokens of a request with `dialogue`, estimated at four characters a token of its JSON. -/
-def estimateTokens (dialogue : Dialogue) : Nat :=
-  (dialogue.foldl (fun n m => n + m.toJson.compress.length) 0 + 3) / 4
-
 /-- The tokens `full`, the messages of the next request, holds, known without a tokenizer. The
 latest response that reported its size says how many the request it answered held, and how many
 it returned; what `full` holds after that request and the message that shows the response is
@@ -399,12 +396,12 @@ masked, or nothing reported a size, the whole is estimated. -/
 def contextTokens (history : History) (full : Dialogue) : Nat :=
   let wire (dialogue : Dialogue) := dialogue.map (·.toJson.compress)
   match history.measured? with
-  | none => estimateTokens full
+  | none => Chat.estimateTokens full
   | some (before, input, output?) =>
     if before.size < full.size && wire (full.extract 0 before.size) == wire before then
-      let response := output?.getD (estimateTokens (full.extract before.size (before.size + 1)))
-      input + response + estimateTokens (full.extract (before.size + 1) full.size)
-    else estimateTokens full
+      let response := output?.getD (Chat.estimateTokens (full.extract before.size (before.size + 1)))
+      input + response + Chat.estimateTokens (full.extract (before.size + 1) full.size)
+    else Chat.estimateTokens full
 
 /-- How the agent ends: a status, what it submitted, and, where the status alone does not say,
 why. -/
@@ -412,16 +409,12 @@ def outcome (status : String) (submission : String := "") (reason? : Option Stri
   .mkObj ([("status", (status : Json)), ("submission", (submission : Json))] ++
     (reason?.map fun reason => ("reason", (reason : Json))).toList)
 
-/-- What a notice tells the model: a person's message, or a change a person made to the
-workspace, in an envelope that says it came from a person while the agent was paused. A notice
-addressed to another reader — a reply, a call — tells it nothing, and no read of the agent's
-takes one. -/
+/-- What a notice tells the model: a person's message, in an envelope that says it came from a
+person while the agent was paused. No other notice reaches a read of the agent's. -/
 def noticeMessage : Notice → Option Chat.Message
   | .said message =>
     some (.user s!"<intervention>\nA person sent you a message while you were paused.\n{message}\n</intervention>")
-  | .changed _ summary =>
-    some (.user s!"<intervention>\nA person changed the workspace while you were paused:\n{summary}\n</intervention>")
-  | .replied .. | .called .. => none
+  | _ => none
 
 /-- The conversation with what has arrived since the last read of the inbox. -/
 def listen (history : History) : Computation Agent History := do
@@ -463,7 +456,7 @@ def round (config : Config) (history : History) : Computation Agent (History ⊕
       -- The call is the one the tool makes of the model's arguments.
       let made : RoutineCall := match config.offered.find? (·.name == asked.name) with
         | some tool => tool.call asked.arguments
-        | none => ⟨asked.name, asked.arguments⟩
+        | none => { name := asked.name, arguments := asked.arguments }
       let result ← try call made.name made.arguments
         catch error => pure (.mkObj [("error", .str error)])
       results := results.push (asked, result)

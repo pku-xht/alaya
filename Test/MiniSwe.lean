@@ -15,7 +15,7 @@ namespace MiniSweTests
 
 open Testing
 open Scripted
-open Alaya
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
 open Alaya.Agents.MiniSwe
 open Alaya.Agents.Tools.Bash (observation)
 open Lean (Json)
@@ -279,10 +279,10 @@ def runSuite : Suite := suite "mini-swe.run" #[
     assertEqual "the agent's outcome" ((agentResult log).bind (·.toOption) |>.map (status ·)) (some "Submitted")
     assertEqual "the calls: each agent's uname, MiniSwe itself in the agent's frame, its bash in the sub-agent's"
       (log.filterMap fun | .opened frame opened => some (frame, opened.name) | _ => none)
-      #[(⟪"agent"⟫, "agent"), (⟪"agent", "mini-swe"⟫, "mini-swe"), (⟪"agent", "mini-swe", "bash"⟫, "bash")]
+      #[(⟪"session"⟫, "session"), (⟪"session", "agent"⟫, "agent"), (⟪"session", "agent", "mini-swe"⟫, "mini-swe"), (⟪"session", "agent", "mini-swe", "bash"⟫, "bash")]
     -- The sub-agent's call is the agent's own, with the model's task: its configuration, its model.
     check (log.any fun
-        | .opened ⟪"agent", "mini-swe"⟫ ⟨"mini-swe", delegated⟩ =>
+        | .opened ⟪"session", "agent", "mini-swe"⟫ { name := "mini-swe", arguments := delegated, environment? := none } =>
           taskOf delegated == some "write b.txt" &&
             (delegated.getObjVal? "tools").toOption == some (Lean.toJson config.tools)
         | _ => false)

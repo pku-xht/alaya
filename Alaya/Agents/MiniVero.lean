@@ -4,7 +4,7 @@ import Alaya.Agents.MiniSwe
 grading are external; the log, model providers and executor are shared with MiniSwe. -/
 namespace Alaya.Agents.MiniVero
 
-open Alaya (Executor Uname)
+open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
 
 /-- Vero's evaluation modes. A run is sent the grading rules of its own mode only, as Vero's
 per-mode instruction templates do. -/

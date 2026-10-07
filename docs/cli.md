@@ -14,7 +14,7 @@ flowchart TD
   new("<b>new</b><br/>create a run")
   call("<b>call</b><br/>an agent, a grader")
   resume("<b>resume</b><br/>drive it on")
-  idle("no call runs<br/>exit 0, or 1 if it failed;<br/>a grader: by its verdict"):::ok
+  idle("the session waits for a call<br/>exit 0, or 1 if it failed;<br/>a grader: by its verdict"):::ok
   paused("paused at a limit<br/>exit 4"):::wait
   waits("waits for a person<br/>exit 3"):::wait
   stop("<b>stop</b><br/>end the call")
@@ -48,7 +48,7 @@ alaya resume ENTRY [--provider NAME [--url URL] [--port N]] [--samples N] [--tim
 alaya tell ENTRY TEXT                                append a person's message
 alaya commit ENTRY DIR [--message TEXT]              append a change to the workspace
 alaya reply ENTRY (TEXT | --unavailable)             answer the question the log waits on
-alaya stop ENTRY [--reason TEXT]                     stop the call running there
+alaya stop ENTRY [--frame FRAME] [--reason TEXT]     stop the call running there
 alaya comment ENTRY TEXT                             append a comment to the log
 alaya rm ENTRY                                       delete ENTRY and everything after it
 alaya rebase ENTRY DIR [--set PATH=VALUE …]          copy the log at ENTRY into a new data directory,
@@ -97,10 +97,10 @@ A command that appends prints each entry it appends on a line of its own: the en
 its position, its frame, and its event in a few words.
 
 ```
-d176eb02…5235  2  -    said "Create hello.txt"
-b064afdd…73b   3  0    inbox: takes [2]
-1cd9bd3f…4e6   4  0    sample → bash ls -la && cat README.md
-310195fb…959   5  0.0  open bash "ls -la && cat README.md"
+d176eb02…5235  9   -                       said "Create hello.txt"
+b064afdd…73b   10  session/mini-swe        inbox: takes [9]
+1cd9bd3f…4e6   11  session/mini-swe        sample → bash ls -la && cat README.md
+310195fb…959   12  session/mini-swe/bash   open bash "ls -la && cat README.md"
 ```
 
 The last line is the entry the log now ends at, which a script takes with
@@ -113,7 +113,7 @@ With `--json`, a command prints one object a line:
 | Command | Object |
 | --- | --- |
 | a command that appends | each entry: `{entry, parent, position, frame, summary, event, elapsed_ms}` |
-| `resume` | then how it stopped: `{entry, status, …}`. Where no call runs, `call` names the last call, and `status` is `done` with `value`, `failed` with `error`, or `stopped` with `reason`; or `idle` before any call. Or `waits` with `frame` and `question`; or `paused` with `reason` |
+| `resume` | then how it stopped: `{entry, status, …}`. Where the session waits for a call, `call` names the last call, and `status` is `done` with `value`, `failed` with `error`, or `stopped` with `reason`; or `idle` before any call. Or `waits` with `frame` and `question`; or `paused` with `reason`; or `ended` with `value` or `error`, once the run's own call is over |
 | `config` | a line for each `{program, config}`, `{model}` and `{provider}`; with `--program`, the one `{program, config}` that `call` would record |
 | `tree` | every entry: `{entry, parent, position, summary, status}` |
 | `log` | every entry of the log: `{entry, position, frame, event, elapsed_ms}`, then `{next}` |
@@ -134,7 +134,7 @@ command.
 
 | Status | Means | What to do |
 | --- | --- | --- |
-| 0 | success; `resume`: no call runs, and the last one returned or was stopped; a grader's: a pass | |
+| 0 | success; `resume`: the session waits for a call, and the last one returned or was stopped; a grader's: a pass | |
 | 1 | `resume`: the last call failed; a grader's: a fail | look at the log |
 | 2 | `resume`: the last call was a grader, and its verdict is an error: it did not finish, or printed no complete TAP | look at the grader's command |
 | 3 | `resume`: a call waits for a person | `reply` or `tell`, then `resume` from the new entry |
@@ -146,7 +146,7 @@ command.
 | 75 | `transient`: another command is writing the data directory, or the provider is unreachable or throttling after alaya's own retries | try again later |
 | 76 | `model`: the provider rejected the request, or answered it wrongly | fix the model's settings, or the key |
 
-- **The five from `input` on are the classes of `Alaya.Error`** (`docs/llm-api.md` §7).
+- **The five from `input` on are the classes of `Alaya.Base.Error`** (`docs/llm-api.md` §7).
 - **A failure prints** `error: MESSAGE` on stderr, or with `--json` one object:
   `{"error": CLASS, "message": …}`, with `status` and `retry_after_ms` for an HTTP failure.
 - **A failed `resume` keeps every entry it appended.** The operation it was carrying out is
@@ -163,7 +163,8 @@ command appends.
 
 ### `new`
 
-Creates a run: its root, the workspace, where the run waits for a program to be called.
+Creates a run: its root, the workspace, and its call, the session, which waits for a program to
+be called. It prints the root and the session's call, read and opening.
 
 ```sh
 alaya new ./project
@@ -175,11 +176,13 @@ alaya new --image swebench/sweb.eval.django-11099:latest --workdir /testbed
 - **The workspace** is `PROJECT`, a directory, or the directory `--workdir` of the image
   `--image`, copied out of it; by default the image's own `WORKDIR`. So task images that hold
   their project in place, such as SWE-bench's at `/testbed`, work as they are.
-- **No program.** A run calls its programs after it is created, with `call`.
+- **No program.** A run calls its programs after it is created, with `call`, at the last entry
+  `new` printed.
 
 ### `call`
 
-Calls a program after `ENTRY`, where no call runs: an agent, or a grader. `resume` then drives it.
+Calls a program after `ENTRY`, where the session waits for one: an agent, or a grader. `resume`
+then drives it.
 
 ```sh
 alaya call 3f2a9c mini-swe --set model=gpt-6-luna --set-file task=TASK.txt --image my-task:1
@@ -211,8 +214,8 @@ alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grad
 
 ### `resume`
 
-Replays the log that ends at `ENTRY` and drives it on, until no call runs, a call waits for a
-person, or it reaches a limit.
+Replays the log that ends at `ENTRY` and drives it on, until the session waits for a call, a call
+waits for a person, or it reaches a limit.
 
 ```sh
 alaya resume 4f2c8b --provider apiyi --samples 50 --time-budget 3600
@@ -248,9 +251,12 @@ alaya tell 4f2c8b:140 'The parser is fine; look at the evaluator.'
 The call running reads it at its next read of its inbox, which MiniSwe makes at the start of
 every round. It is refused where no call runs, where no one would read it.
 
+A message is the only notice a call reads unasked: a change of the workspace is read by no one,
+and a reply only by the question it answers.
+
 ### `commit`
 
-Appends a change to the workspace: the files of `DIR`, and the list of what changed.
+Appends a change to the workspace, the files of `DIR`, and then a message that says what changed.
 
 ```sh
 alaya checkout 4f2c8b ./edited          # the workspace as the log has it
@@ -260,8 +266,11 @@ alaya commit 4f2c8b ./edited --message 'Fixed the evaluator.'
 
 ![commit: a directory is snapshotted and appended as the workspace's new version](figures/cli/commit.svg)
 
-The notice lists each change — `M path`, `+ path`, `- path` — with the message after the list,
-and the agent reads it like a message. A directory with no change is refused.
+The change lists each path — `M path`, `+ path`, `- path` — and the next command runs on the
+new files. No read takes the change itself: by the time a call reads, its list may be out of
+date. So `commit` appends a message after it, `I changed the workspace:` with the list and
+`--message` under it, which the call reads like any message. A directory with no change is
+refused.
 
 ### `reply`
 
@@ -291,16 +300,19 @@ alaya resume REPLY --provider apiyi        # go on from the entry reply printed
 
 ### `stop`
 
-Ends the call running at an entry.
+Ends the call running at an entry: the program the session runs, or the call open in `--frame`.
 
 ```sh
 alaya stop 4f2c8b --reason 'wrong approach'
+alaya stop 4f2c8b --frame session/mini-swe/mini-swe --reason 'the sub-agent is stuck'
 ```
 
 ![stop: a stop is appended, and the call is over](figures/cli/stop.svg)
 
-Every frame of the call ends there (`docs/agent-api.md` §3.7), and the run waits for the next
-call. A stop is refused where no call runs.
+A stop appends `broke FRAME REASON`: the call open in `FRAME` ends there, with every call inside
+it (`docs/agent-api.md` §3.7). Its caller is told it failed with the reason: the session waits
+for the next call, and an agent whose sub-agent was stopped goes on. A stop is refused where no
+call is open in its frame.
 
 ### Grading
 

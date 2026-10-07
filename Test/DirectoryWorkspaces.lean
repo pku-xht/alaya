@@ -7,8 +7,8 @@ spends most of a second deriving the repository key — and so keeps tests of ru
 
 namespace Testing
 
-open Alaya
-open Alaya.Workspaces (Change)
+open Alaya Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime Alaya.App
+open Alaya.Runtime.Workspaces (Change)
 
 private def storageIO (action : IO α) : Result α := Result.fromIO Error.storage action
 
@@ -32,7 +32,7 @@ private partial def listing (base : System.FilePath) (relative : String := "")
     | .symlink =>
       let out ← IO.Process.output { cmd := "readlink", args := #[child.path.toString] }
       found := found.push (path, some s!"link {out.stdout}")
-    | _ => found := found.push (path, some s!"file {Sha256.sumHex (← IO.FS.readBinFile child.path)}")
+    | _ => found := found.push (path, some s!"file {(Hash.ofBytes (← IO.FS.readBinFile child.path)).hex}")
   pure found
 
 private def under (roots : Array String) (path : String) : Bool :=
@@ -40,7 +40,7 @@ private def under (roots : Array String) (path : String) : Bool :=
 
 def directoryWorkspaces (root : System.FilePath) : Workspaces where
   snapshot directory := storageIO do
-    let id : Hash := ⟨Sha256.sumHex s!"{directory} {← IO.monoNanosNow}".toUTF8⟩
+    let id : Hash := Hash.ofBytes s!"{directory} {← IO.monoNanosNow}".toUTF8
     copy directory (root / id.hex)
     pure id
   materialize id directory := do
@@ -102,7 +102,7 @@ def directoryWorkspaces (root : System.FilePath) : Workspaces where
   -- A copy gets an identifier of its own, as one of restic's does, so that a caller who keeps
   -- the old one is found out.
   transfer ids location := ids.mapM fun id => storageIO do
-    let moved : Hash := ⟨Sha256.sumHex s!"copy of {id.hex}".toUTF8⟩
+    let moved : Hash := Hash.ofBytes s!"copy of {id.hex}".toUTF8
     if !(← (root / id.hex).isDir) then throw <| IO.userError s!"no snapshot {id.hex}"
     if !(← (location / moved.hex).isDir) then copy (root / id.hex) (location / moved.hex)
     pure moved
