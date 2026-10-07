@@ -104,9 +104,9 @@ def parseSuite : Suite := suite "agents/mini-swe.parse" #[
     assertContains "no call" (formatErrorOf { content? := some "just prose", finishReason? := some "stop" }) "No tool calls found"
     assertContains "a tool mini does not have" (formatErrorOf (responseWith #[submitCall "s" "done"])) "Unknown tool 'submit'."
     assertContains "no command" (formatErrorOf (responseWith #[{ id := "c", name := "bash", arguments := .mkObj [] }]))
-      "Missing 'command'"
+      "missing required property `command`"
     assertContains "a command that is no string"
-      (formatErrorOf (responseWith #[{ id := "c", name := "bash", arguments := .mkObj [("command", (42 : Json))] }])) "must be a string"
+      (formatErrorOf (responseWith #[{ id := "c", name := "bash", arguments := .mkObj [("command", (42 : Json))] }])) "command: expected a string"
     let bad : Chat.ToolCall := { id := "c", name := "bash", arguments := .null, invalidArguments? := some "{\"command\": \"ls" }
     assertContains "arguments that are no JSON" (formatErrorOf (responseWith #[bad])) "Error parsing tool call arguments: "
     assertContains "cut off by the provider" (formatErrorOf { toolCalls := #[bad], finishReason? := some "length" })
@@ -116,7 +116,7 @@ def parseSuite : Suite := suite "agents/mini-swe.parse" #[
 
   test "a command that prints the sentinel first ends the run, and what follows it is the submission" do
     let result (output : String) : Json :=
-      Agents.Tools.Bash.result { output := { output, exitCode? := some 0 }, workspace := default }
+      Agents.Tools.Bash.result.write { output := { output, exitCode? := some 0 } }
     let submitted := submitted? sentinel
     assertEqual "the sentinel alone" (submitted (result "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n")) (some "")
     assertEqual "with what follows" (submitted (result "\n  COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT  \nmy patch\n")) (some "my patch\n")

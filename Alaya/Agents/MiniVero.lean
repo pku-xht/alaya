@@ -168,8 +168,8 @@ def view (history : History) (masking : Masking := masking) : Dialogue :=
   let turns := history.items.foldl (init := 0) fun n item => match item with | .told _ => n | _ => n + 1
   let omitted := masking.omittedTurns turns
   Basic.viewWith (items := history.items) fun turn call result =>
-    match call.name, Tools.Bash.ofResult? result with
-    | "bash", some (output, file?) => observe output file? (omitted > 0 && turn ≤ omitted)
+    match call.name, (Tools.Bash.result.read result).toOption with
+    | "bash", some ran => observe ran.output ran.file? (omitted > 0 && turn ≤ omitted)
     | _, _ => Basic.shown call result
 
 /-- The tokens `full`, the messages of the next request, holds, known without a tokenizer. The

@@ -18,15 +18,17 @@ port of mini-SWE-agent.
 
 ## 1. Tools
 
-A **tool** is what a model needs to call it, and the routine call its arguments make:
+A **tool** is described once, by the types of its arguments (`α`) and of its routine's result
+(`β`):
 
 ```lean
-structure Tool where
+structure Tool.Spec (α β : Type) where
   definition   : Chat.ToolDefinition              -- its name, description and schema, for a model
   alone        : Bool := false                    -- must be the only call of its turn
   instruction? : Option String := none            -- appended to the prompt
-  check        : Json → Except String Unit        -- what is wrong with a call's arguments; by default, its schema's
-  call         : Json → RoutineCall               -- the call the model's arguments make
+  read         : Json → Except String α           -- its arguments, by the tool's own rules
+  call         : α → RoutineCall                  -- the routine call they make, with the agent's settings
+  result       : Codec β                          -- how the routine's result is written and read back
 
 Tools.routines : Array (Routine Agent)            -- bash, ask_user, time_budget
 ```
@@ -36,26 +38,64 @@ kinds of question: `bash` by how a command runs, which its call adds to the mode
 `subagent` by the agent itself, its name and its configuration, which its call names with the
 model's task. The routines are fixed, so all of it is in the call's arguments, in the log.
 
-A model's tool call becomes a call of a routine in four steps:
+### 1.1 Who checks what
 
-1. The agent samples a request that offers the tools' `definition`s.
-2. The response names tools and gives arguments. The agent checks each call with the tool's
-   `check`, by default whether the arguments fit the tool's schema; a call that is wrong is
-   answered with its problem and is not made.
-3. The agent makes each tool's call of the model's arguments, `tool.call asked.arguments`. The
-   routine runs in a frame of its own.
-4. The agent puts each result in the next request, as a tool message. A tool that failed gives
-   its error as its result.
+A tool call crosses four boundaries. The rule is the same for every tool: **what is valid is the
+tool's to say; reporting a problem and showing a result are the agent's. Each side checks what it
+receives.**
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
+flowchart LR
+  classDef sample stroke:#3567a0
+  classDef exec stroke:#2b6f6f
+  classDef bad fill:#f8dfdd,stroke:#b3261e,color:#8a2a25
+
+  asks("the model's<br/>tool call"):::sample
+  subgraph agentIn["the agent"]
+    check("1 · check the arguments<br/>schema, then read")
+  end
+  subgraph routine["the routine, in a frame of its own"]
+    reads("2 · read its arguments<br/>with the same read")
+    writes("3 · write its result<br/>with the tool's result")
+  end
+  subgraph agentOut["the agent"]
+    show("4 · read the result back,<br/>and show it its own way")
+  end
+  problem("answer the call<br/>with its problem; not made"):::bad
+  sees("the next<br/>request"):::sample
+
+  asks --> check
+  check -- "fits" --> reads
+  reads --> writes
+  writes --> show
+  show --> sees
+  check -- "wrong" --> problem
+  problem --> sees
+  linkStyle default stroke-width:1px
+```
+
+1. **The model's arguments** are checked by the agent, before the call is made or logged:
+   against the tool's schema, then with its `read`. A call that is wrong is answered with its
+   problem, in the agent's way (§4.2, §6.3), and is not made.
+2. **The routine's arguments** are read by the routine, with the same `read`: they may come from
+   the log, or from a program that never checked them. Arguments it cannot read fail its frame.
+   Since the check and the routine read alike, a call the agent made is one the routine takes.
+3. **The result** is written by the routine with the tool's `result`, and read back by the agent
+   with it. A routine that fails gives its error instead.
+4. **What the model sees** of a result is the agent's: Basic's command output (§4.4), mini's
+   observation (§6.3), or old outputs left out (§5.6). Any other text is shown as it is, and
+   anything else as JSON.
 
 ![A response that asks for two tools, and the two calls it becomes](figures/agent-api/tool-call.svg)
 
 | Tool | Arguments | Its call | Result |
 | --- | --- | --- | --- |
-| `bash` | `command` | `bash`: `exec command`, with the executor settings the agent adds | `output`, `exit_code`, `error`, `file` |
+| `bash` | `command`, a string | `bash`: `exec command`, with the executor settings the agent adds | `output`, `exit_code`, `error`, `file` |
 | `time_budget` | none | `time_budget`: `time` | `seconds_left`, or that the run has no limit |
-| `ask_user` | `question_type`, `question`, `options` | `ask_user`: `ask` the question (§2) | the reply |
-| `submit` | `message` | none: the agent that offers it ends with the message; called alone | |
-| `subagent` | `task` | the agent itself, `mini-vero`, with its configuration and the model's task | the sub-agent's outcome |
+| `ask_user` | `question_type`, `question`, `options`: a question that can be asked (§2) | `ask_user`: `ask` the question | the reply |
+| `submit` | `message`, a string | none: the agent that offers it ends with the message; called alone | |
+| `subagent` | `task`, a string that is not blank | the agent itself, `mini-vero`, with its configuration and the model's task | the sub-agent's outcome: `status`, `submission`, `reason` |
 
 A tool is independent of the agent that offers it. The agent chooses which tools to offer, how
 to report a malformed call, and how to show a result to its model. Basic offers `bash`,
@@ -597,6 +637,9 @@ A command runs as Basic's does (§4.4); the model sees it as mini's observation 
   they would put the machine a run was created on into the prompt.
 - **A format error names one problem**, where mini concatenates every problem found. A
   `command` that is not a string is a format error, where Python would run a list.
+- **A malformed `bash` call is named in the schema's words**, as every tool's is (§1.1):
+  "Invalid arguments for the bash tool: missing required property `command`." where mini says
+  "Missing 'command' argument in bash tool call."
 - **Error texts are plain**, not Python's exception messages, and invalid UTF-8 in output is
   replaced byte by byte.
 - **The environment is a snapshot of the workspace**, not a persistent machine: what a command

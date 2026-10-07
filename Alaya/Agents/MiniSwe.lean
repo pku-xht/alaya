@@ -145,7 +145,7 @@ def formatError? (config : Config) (response : Chat.Response) : Option String :=
 /-- What a command printed after the sentinel `line`, when it printed the line first: mini's
 `has_finished`. -/
 def submitted? (line : String) (result : Json) : Option String := do
-  let (output, _) ← Tools.Bash.ofResult? result
+  let output := (← (Tools.Bash.result.read result).toOption).output
   match (output.output.trimAsciiStart.toString.splitOn "\n") with
   | first :: rest => if first.trimAscii.toString == line then some ("\n".intercalate rest) else none
   | [] => none
@@ -171,8 +171,8 @@ def round (config : Config) (model : Models.Spec) : Basic.Dialogue × Nat → Co
       | .ok result =>
         if let some submission := submitted? sentinel result then
           return .inr (Basic.outcome "Submitted" submission)
-        pure <| match Tools.Bash.ofResult? result with
-          | some (output, _) => observation output
+        pure <| match (Tools.Bash.result.read result).toOption with
+          | some ran => observation ran.output
           | none => result.pretty
     messages := messages.push (.tool asked.id (.str shown))
   return .inl (messages, 0)

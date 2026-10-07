@@ -132,7 +132,7 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
   test "single choice offers None of the above beside the model's options, kept verbatim" do
     let question := "  Which rule applies?\nContext: α < β.  "
     let candidates := #[" Keep α ", "Change β\nwith evidence"]
-    let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question Question.Kind.all (args question candidates))
+    let form ← assertOk <| Result.fromExcept Error.protocol ((Tools.AskUser.spec Question.Kind.all).parse (args question candidates))
     assertEqual "a choice of the original candidates" form.form (.singleChoice candidates)
     assertEqual "original question" form.text question
     let rendered := form.render
@@ -148,7 +148,7 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
     for (questionType, expectedForm) in #[("yes_no", Question.Form.yesNo),
         ("open_ended", Question.Form.openEnded)] do
       let arguments := args question #[] questionType
-      let form ← assertOk <| Result.fromExcept Error.protocol (Tools.AskUser.question Question.Kind.all arguments)
+      let form ← assertOk <| Result.fromExcept Error.protocol ((Tools.AskUser.spec Question.Kind.all).parse arguments)
       assertEqual "question form" form.form expectedForm
       assertEqual "original question" form.text question
       check (!contains form.render "none_of_above") s!"{questionType} must not offer the reserved single-choice answer",
@@ -253,12 +253,12 @@ def suite : Suite := Testing.suite "agents/ask-user" #[
 
   test "a call's arguments read as a question only when it can be asked" do
     let question ← assertOk <| Result.fromExcept Error.protocol
-      (Tools.AskUser.question Question.Kind.all (args "Which?" #["first", "second"]))
+      ((Tools.AskUser.spec Question.Kind.all).parse (args "Which?" #["first", "second"]))
     assertEqual "its form" question.form (.singleChoice #["first", "second"])
     for arguments in #[Json.null, args " \n" #["a", "b"], args "q" #["only"], args "q" #["same", " same "],
         args "q" #["valid", " \n"], args "q" #["valid", "None of the above"], args "q" #["a", "b"] "yes_no",
         (args).setObjVal! "question_type" "unknown", (args).setObjVal! "options" "not an array"] do
-      check (Tools.AskUser.question Question.Kind.all arguments).toOption.isNone
+      check ((Tools.AskUser.spec Question.Kind.all).parse arguments).toOption.isNone
         s!"a question was read from {arguments.compress}",
 
   test "a program asks without any tool: the question is in the log, and a reply to its frame answers it" do

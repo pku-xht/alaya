@@ -223,10 +223,9 @@ inductive Item where
   | turn (response : Chat.Response) (answers : Array (Chat.ToolCall × Answer))
 
 /-- How the agent ends: a status, what it submitted, and, where the status alone does not say,
-why. -/
+why (`Outcome`). -/
 def outcome (status : String) (submission : String := "") (reason? : Option String := none) : Json :=
-  .mkObj ([("status", (status : Json)), ("submission", (submission : Json))] ++
-    (reason?.map fun reason => ("reason", (reason : Json))).toList)
+  Outcome.codec.write { status, submission, reason? }
 
 /-- How the agent ends when the provider refuses a request as too long: the one failure of a
 sample the driver answers with. -/
@@ -275,7 +274,7 @@ def respond (tools : Array Tool) (items : Array Item) (response : Chat.Response)
     | some problem => answers := answers.push (asked, .error problem)
     | none =>
       if asked.name == Tools.Submit.definition.name then
-        return .inr (outcome "Submitted" (Tools.Submit.message asked.arguments))
+        return .inr (outcome "Submitted" ((Tools.Submit.spec.read asked.arguments).toOption.getD ""))
       answers := answers.push (asked, ← Tools.make tools asked)
   return .inl (items.push (.turn response answers))
 
@@ -301,8 +300,8 @@ def viewWith (shown : Nat → Chat.ToolCall → Json → String) (items : Array 
 /-- A call's result as the model sees it: a command's as its `observation`, a text as it is, and
 any other as JSON. -/
 def shown (call : Chat.ToolCall) (result : Json) : String :=
-  match call.name, Tools.Bash.ofResult? result, result with
-  | "bash", some (output, file?), _ => observation output file?
+  match call.name, (Tools.Bash.result.read result).toOption, result with
+  | "bash", some ran, _ => observation ran.output ran.file?
   | _, _, .str text => text
   | _, _, _ => result.pretty
 

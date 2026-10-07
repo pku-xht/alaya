@@ -101,7 +101,7 @@ def callTitle (call : RoutineCall) : String := (agentTitle? call).getD call.name
 
 /-- What a value is, when it has the shape one of Alaya's own writes: a grader's verdict
 (`verdictJson`), a command's result (`Tools.Bash.result`), an agent's outcome
-(`MiniSwe.outcome`). Any routine may return any value, so a value is of a kind only when it has
+(`Outcome`). Any routine may return any value, so a value is of a kind only when it has
 every field of the kind, each of its type, and no other; anything else is of no kind, and is
 shown as what it holds. -/
 inductive ValueKind where
