@@ -436,8 +436,10 @@ the next `resume`.
 
 - **No prescribed workflow.** Vero's `Workflow` and `Proof strategy` sections tell the agent to
   follow a fixed order of steps and to decompose proofs over lists into helper lemmas. MiniVero
-  leaves them out, so the strategy is the model's own. It keeps `Persistence`, which says to
-  keep working until the budget is spent. Vero's `Previous iteration feedback` is left out too:
+  leaves them out, so the strategy is the model's own. It keeps `Persistence` up to its advice:
+  its heading and first three paragraphs, which say to keep working until the budget is spent.
+  What follows them in Vero, keeping the build green and what to do when stuck, is said in
+  `Checkpointing` or is advice on how to work. Vero's `Previous iteration feedback` is left out too:
   feedback is a message appended with `alaya tell` (§5.3).
 - **File lists are the sandbox's own.** Vero's base template, shared by both modes, lists
   `Impl/*.lean` as editable even in `proof`, where its mode template says it is frozen. The

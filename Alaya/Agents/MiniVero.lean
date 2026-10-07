@@ -94,6 +94,8 @@ def rules : String := quoted (include_str "MiniVero/rules.md")
 def gradingProof : String := quoted (include_str "MiniVero/grading-proof.md")
 def gradingCodeproof : String := quoted (include_str "MiniVero/grading-codeproof.md")
 def doneCondition : String := quoted (include_str "MiniVero/done.md")
+/-- Vero's `Persistence` section up to its advice: its heading and first three paragraphs, to the
+byte. What follows them in Vero is said in `Checkpointing`, or is advice on how to work. -/
 def persistence : String := quoted (include_str "MiniVero/persistence.md")
 def antiCheating : String := quoted (include_str "MiniVero/anti-cheating.md")
 

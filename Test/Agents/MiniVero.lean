@@ -109,12 +109,13 @@ def suite : Suite := Testing.suite "agents/mini-vero" #[
       "## Reference — original upstream source",
       "upstream_source"] do
       check (!contains text absent) s!"the prompt should not carry {absent}",
-  test "Vero's Persistence is sent, and its Workflow and Proof strategy are not" do
+  test "Vero's Persistence is sent up to its advice, and its Workflow and Proof strategy are not" do
     let text ← openingText "TASK_CODEPROOF"
     assertContains "Vero's Persistence, to the byte" text MiniVero.persistence
-    for present in ["keep iterating", "Never regress", "The turn/budget cap is the only valid stop signal."] do
-      assertContains "its advice" text present
-    for absent in ["## Workflow", "## Proof strategy", "## Scoring"] do
+    for present in ["keep iterating", "The turn/budget cap is the only valid stop signal.", "Progress matters"] do
+      assertContains "its first paragraphs" text present
+    for absent in ["Never regress", "When progress stalls", "The ONLY signal to stop", "## Workflow",
+        "## Proof strategy", "## Scoring"] do
       check (!contains text absent) s!"the prompt should not carry {absent}",
   test "a failed compile remains observable and the agent continues" do
     withVero config fun run => do
