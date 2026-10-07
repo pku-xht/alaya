@@ -340,7 +340,7 @@ contract, and `Workspaces.Restic` keeps it with restic 0.17 or later.
 | `retainOnly` | drops every snapshot not listed | `rm`, with the snapshots the remaining entries name | `forget`, then `prune` |
 | `transfer` | copies snapshots into a new store, under names of their own there | `rebase` | `init --from-repo --copy-chunker-params`, then `copy`, matched by each copy's `original` |
 
-What the contract requires (`Test/Workspaces.lean`):
+What the contract requires (`Test/Runtime/Workspaces.lean`):
 
 - A snapshot materializes as the directory it was taken of: contents, executable bits, symbolic
   links, empty directories, and file names with any character.
