@@ -25,14 +25,36 @@
   "runs": [
     {
       "run": "greenery-solo-02",
-      "observed_requests": 6,
+      "observed_requests": 46,
       "status_counts": {
-        "200": 6
+        "200": 44,
+        "429": 2
       },
       "first_observed": "2026-10-07T14:34:27.336075+00:00",
-      "last_observed": "2026-10-07T14:34:42.045214+00:00",
-      "observed_429": 0,
-      "retry_headers": []
+      "last_observed": "2026-10-07T15:04:37.307857+00:00",
+      "observed_429": 2,
+      "retry_headers": [
+        {
+          "observed_at": "2026-10-07T14:39:46.803445+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        },
+        {
+          "observed_at": "2026-10-07T14:59:25.761904+00:00",
+          "retry_after": [
+            {
+              "value": 60,
+              "unit": "seconds"
+            }
+          ],
+          "legacy_untyped_values": null
+        }
+      ]
     },
     {
       "run": "munkres-solo-02",
