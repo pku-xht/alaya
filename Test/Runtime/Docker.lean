@@ -232,8 +232,10 @@ def suite : Suite := Testing.suite "runtime/docker" #[
 
   test "a cut output is readable, read-only, in a recreated container, and stays out of the workspace" <| withDocker
     fun settings => do
-      let recover := { miniConfig with recoverOutput := true }
-      withRun recover fun run => do
+      let vero : Agents.MiniVero.Config := { executor := { miniConfig.executor with env := #[] } }
+      match Scripted.runOfConfig "mini-vero" vero.toJson with
+      | .error problem => fail problem
+      | .ok run => do
         let model ← Scripted.scriptedModel #[
           toolResponse "awk 'BEGIN {for(i=0;i<6000;i++) printf \"a\"; printf \"MIDDLE\"; for(i=0;i<6000;i++) printf \"z\"}'",
           toolResponse "grep -c MIDDLE /alaya/outputs/*.txt; touch /alaya/outputs/x 2>/dev/null || echo read-only; ls -A"]
@@ -455,7 +457,7 @@ def settingsSuite : Suite := Testing.suite "runtime/executor" #[
     assertEqual "what the agent is told" out.error? (some Executor.couldNotRun)
     assertEqual "the detail, for a reader of the log" out.detail? (some said)
     -- What a model is shown of it holds nothing docker said.
-    let shown := (Agents.Tools.Bash.observation out Agents.MiniSwe.outputLimit).compress
+    let shown := Agents.Basic.observation out none
     for leaked in ["3f9a1c", "/data/tmp", "daemon"] do
       check (!contains shown leaked) s!"the observation holds {leaked}: {shown}"
     check (contains shown Executor.couldNotRun) "and says the command could not be run",

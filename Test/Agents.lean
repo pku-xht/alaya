@@ -1,3 +1,4 @@
+import Test.Agents.Basic
 import Test.Agents.MiniSwe
 import Test.Agents.MiniVero
 import Test.Agents.AskUser
@@ -13,9 +14,11 @@ namespace AgentsTests
 open Testing
 
 def suites : Array Suite := #[
+  BasicTests.suite, { BasicTests.containerSuite with needs := #[docker] },
   MiniSweTests.goldenSuite, MiniSweTests.parseSuite, MiniSweTests.dialogueSuite,
   { MiniSweTests.runSuite with needs := #[docker] },
   MiniVeroTests.suite, { MiniVeroTests.timeSuite with needs := #[docker] },
+  { MiniVeroTests.containerSuite with needs := #[docker] },
   AskUserTests.suite, ContextTests.suite, GraderTests.suite, AgentRoutinesTests.suite]
 
 end AgentsTests

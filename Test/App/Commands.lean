@@ -90,7 +90,7 @@ private def newRun : TestM (System.FilePath × System.FilePath × Array Json × 
   writeSpec project #[("a.txt", "one\n"), ("src/b.txt", "two\n")]
   let root ← records (← ok data "new" #["--json", project.toString])
   let called ← records (← ok data "call" #["--json", text root.back! ["entry"], "mini-swe", "--set", "task=the task",
-    "--image", testImageReference, "--set", "model=gpt-oss-120b", "--set", "context_reserve=7"])
+    "--image", testImageReference, "--set", "model=gpt-oss-120b", "--set", "max_consecutive_format_errors=7"])
   let resumed ← alaya data "resume" #[text called[0]! ["entry"], "--json"]
   if resumed.exit != 65 || !contains resumed.stderr "--provider" then
     fail s!"resume without a provider: {resumed.exit} {resumed.stderr}"
@@ -107,7 +107,7 @@ def suite : Suite := Testing.suite "app/commands" #[
     let call := field made[4]! ["event", "notice", "call"]
     let config := field call ["arguments"]
     assertEqual "the call names its program, and its arguments are its configuration, model and task"
-      (text call ["name"], text config ["model", "name"], (field config ["context_reserve"]).compress,
+      (text call ["name"], text config ["model", "name"], (field config ["max_consecutive_format_errors"]).compress,
         text config ["task"])
       ("mini-swe", "gpt-oss-120b", "7", "the task")
     check ((field config ["name"]) == Json.null) "the name is the call's alone"

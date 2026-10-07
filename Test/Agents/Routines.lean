@@ -14,12 +14,13 @@ def suite : Suite := Testing.suite "agents/routines" #[
   test "an agent brings its scope: its tools and itself, fixed where it is defined" do
     let names := #["bash", "submit", "ask_user", "time_budget", "subagent", "mini-swe", "mini-vero", "grader"]
     let reach (routine : Routine Agent) := names.filter fun name => (routine.scope.find name).isSome
-    assertEqual "inside MiniSwe" (reach MiniSwe.routine) #["bash", "ask_user", "time_budget", "mini-swe"]
+    assertEqual "inside the basic agent" (reach Basic.routine) #["bash"]
+    assertEqual "inside MiniSwe" (reach MiniSwe.routine) #["bash"]
     assertEqual "inside MiniVero" (reach MiniVero.routine) #["bash", "ask_user", "time_budget", "mini-vero"]
     assertEqual "inside the grader" (reach Grader.routine) #[]
-    -- MiniSwe in its own scope has that same scope: what lets a sub-agent call it in turn.
-    check ((MiniSwe.routine.scope.find "mini-swe").any fun inner => (inner.scope.find "bash").isSome)
-      "MiniSwe in its own scope has the same scope",
+    -- MiniVero in its own scope has that same scope: what lets a sub-agent call it in turn.
+    check ((MiniVero.routine.scope.find "mini-vero").any fun inner => (inner.scope.find "bash").isSome)
+      "MiniVero in its own scope has the same scope",
 
   test "a call an agent cannot run on fails in its frame, in the configuration's terms" do
     let failure (routine : Routine Agent) (arguments : Json) : Option String :=

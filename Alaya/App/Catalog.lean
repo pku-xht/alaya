@@ -1,3 +1,4 @@
+import Alaya.Agents.Basic
 import Alaya.Agents.MiniSwe
 import Alaya.Agents.MiniVero
 import Alaya.Agents.Grader
@@ -95,6 +96,9 @@ def completeModel (config : Json) : Except String Json :=
 
 /-! ## Programs -/
 
+def basic : Definition :=
+  { routine := Basic.routine, complete := fun json => (Basic.Config.fromJson json).map (·.toJson) }
+
 def miniSwe : Definition :=
   { routine := MiniSwe.routine, complete := fun json => (MiniSwe.Config.fromJson json).map (·.toJson) }
 
@@ -104,7 +108,7 @@ def miniVero : Definition :=
 def grader : Definition :=
   { routine := Grader.routine, complete := fun json => (Grader.Config.fromJson json).map (·.toJson) }
 
-def all : Array Definition := #[miniSwe, miniVero, grader]
+def all : Array Definition := #[basic, miniSwe, miniVero, grader]
 
 def names : String := ", ".intercalate (all.map (·.name)).toList
 

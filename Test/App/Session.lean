@@ -13,7 +13,7 @@ open Lean (Json)
 
 def suite : Suite := Testing.suite "app/session" #[
   test "a grader is a call like any: the run waits for it, opens it in a frame of its own, and it gives the verdict" do
-    match miniRun with
+    match veroRun with
     | .error problem => fail problem
     | .ok run =>
       -- The agent ends, and the run waits for the next call.
@@ -65,7 +65,7 @@ def suite : Suite := Testing.suite "app/session" #[
     assertInput "the session alone" (Session.callToStop (open' #[⟪"session"⟫])) "nothing to stop"
     assertInput "nothing open" (Session.callToStop #[]) "nothing to stop",
   test "a run of the session starts waiting, takes one call at a time, and goes on after a call is stopped" do
-    match miniRun with
+    match veroRun with
     | .error problem => fail problem
     | .ok run =>
       check (Session.idle (next run (settle run (opening "t").pop.pop.pop))) "the session waits for a call"

@@ -175,7 +175,7 @@ print([r["entry"] for r in rows if r.get("frame") == frame
 The grader runs in a container of the task's grader image, by digest, offline,
 as the agent's user, on the workspace the log has reached, and the log records
 all of it: the grader's call, its command's answer, and the verdict
-(`docs/agents.md` §6).
+(`docs/agents.md` §3).
 
 The grader's call fixes the mode, in its command, and the trusted benchmark, in its image; the
 grader does not read `MINIVERO_TASK.md` or anything else in the workspace to choose either. It

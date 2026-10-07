@@ -191,8 +191,8 @@ alaya call 9a11c0 grader --image my-grader:1 --set command='python3 /grader/grad
 
 ![call: a call of a program is appended, and the next resume opens it in a frame of its own](figures/cli/call.svg)
 
-- **`PROGRAM`** is one of the catalog: `mini-swe` and `mini-vero`, the agents
-  (`docs/agents.md` §4 and §5), or `grader` (§6 there). Their defaults
+- **`PROGRAM`** is one of the catalog: `basic`, `mini-vero` and `mini-swe`, the agents
+  (`docs/agents.md` §4–§6), or `grader` (§3 there). Their defaults
   are in code, and there are no configuration files.
 - **`--set PATH=VALUE`** overrides one field of the program's configuration, and repeats
   (`executor.timeout_seconds=60`, `command='make check'`). `VALUE` is read as JSON when it
@@ -304,7 +304,7 @@ Ends the call running at an entry: the program the session runs, or the call ope
 
 ```sh
 alaya stop 4f2c8b --reason 'wrong approach'
-alaya stop 4f2c8b --frame session/mini-swe/mini-swe --reason 'the sub-agent is stuck'
+alaya stop 4f2c8b --frame session/mini-vero/mini-vero --reason 'the sub-agent is stuck'
 ```
 
 ![stop: a stop is appended, and the call is over](figures/cli/stop.svg)
@@ -334,7 +334,7 @@ alaya resume CALLED                                       # exits 0 pass, 1 fail
 - **Grading a point again** with another grader is a fork from the entry before the first was
   called, or a second call after the first's end.
 
-What a grader runs on, and how its output becomes a verdict, is `docs/agents.md` §6.
+What a grader runs on, and how its output becomes a verdict, is `docs/agents.md` §3.
 
 ### `comment`
 

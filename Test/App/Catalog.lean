@@ -33,13 +33,12 @@ def suite : Suite := Testing.suite "app/catalog" #[
     refused "unknown program" "mini-swf" (.mkObj []) "unknown program"
     refused "a name in the configuration" "mini-swe" (.mkObj [("name", "mini-swe")]) "unknown field 'name'"
     refused "typo" "mini-swe" (.mkObj [("step_limt", 1)]) "unknown field 'step_limt'"
-    refused "type" "mini-swe" (.mkObj [("recover_output", "yes")]) "must be true or false"
-    refused "mode" "mini-vero" (.mkObj [("mode", "both")]) "unknown mode"
+    refused "type" "mini-swe" (.mkObj [("max_consecutive_format_errors", "yes")]) "must be a non-negative integer"
+    refused "mode" "mini-vero" (.mkObj [("mode", "both")]) "must be proof or codeproof, not both"
     refused "nested" "mini-swe" (.mkObj [("executor", .mkObj [("timeout", 1)])]) "unknown field 'timeout'"
-    refused "own field, misnamed" "mini-vero" (.mkObj [("stepp", 1)]) "mask_observations, mode"
-    let built ← assertOk <| Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof", agentSet ["recover_output"] true]
-    assertEqual "tools follow the settings" ((built.getObjVal? "tools").toOption.map (·.compress))
-      (some "[\"bash\",\"submit\",\"time_budget\"]")
+    refused "own field, misnamed" "mini-vero" (.mkObj [("stepp", 1)]) "context_reserve, question_types"
+    let built ← assertOk <| Catalog.resolve "mini-vero" #[agentSet ["mode"] "codeproof"]
+    assertEqual "a setting" ((built.getObjVal? "mode").toOption.map (·.compress)) (some "\"codeproof\"")
     -- How commands run is in each command the agent asks for.
     let nested ← assertOk <| Catalog.resolve "mini-swe" #[agentSet ["executor", "timeout_seconds"] (5 : Nat)]
     let timeout? : Option Nat := match Scripted.runOfConfig "mini-swe" nested with
@@ -56,7 +55,7 @@ def suite : Suite := Testing.suite "app/catalog" #[
       | _ => false,
 
   test "a run's configuration is the opening of its agent's call, and the tree names it" do
-    let agent ← assertOk <| Catalog.complete "mini-swe" (.mkObj [("model", "gpt-oss-120b"), ("context_reserve", 7)])
+    let agent ← assertOk <| Catalog.complete "mini-swe" (.mkObj [("model", "gpt-oss-120b"), ("max_consecutive_format_errors", 7)])
     let run := Session.scope
     let rt ← Scripted.runtime noCommands none
     let project := (← scratch) / "project"

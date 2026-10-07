@@ -27,8 +27,11 @@ structure Tool where
   alone : Bool := false
   /-- What the model is told of the tool beyond its definition, appended to the prompt. -/
   instruction? : Option String := none
-  /-- What is wrong with a call's arguments, if anything: checked before the call is made. -/
-  check : Json → Except String Unit := fun _ => pure ()
+  /-- What is wrong with a call's arguments, if anything: checked before the call is made. By
+  default, whether they fit the tool's schema. -/
+  check : Json → Except String Unit := fun arguments =>
+    (definition.parameters.validate arguments).mapError fun problem =>
+      s!"Invalid arguments for the {definition.name} tool: {problem}."
   /-- The routine call the model's arguments make: by default, of the routine of the tool's name,
   with those arguments. -/
   call : Json → RoutineCall := fun arguments => { name := definition.name, arguments }
@@ -36,6 +39,32 @@ structure Tool where
 def Tool.name (tool : Tool) : String := tool.definition.name
 
 namespace Tools
+
+/-- What is wrong with one tool call against the tools offered: arguments that are not JSON, a
+tool not offered, or arguments its tool refuses; `none` when it can be made. -/
+def callProblem? (tools : Array Tool) (call : Chat.ToolCall) : Option String :=
+  if let some raw := call.invalidArguments? then
+    some ("Error parsing tool call arguments: " ++
+      (match Lean.Json.parse raw with | .error e => e | .ok _ => "invalid JSON") ++ ".")
+  else match tools.find? (·.name == call.name) with
+    | none => some s!"Unknown tool '{call.name}'."
+    | some tool => match tool.check call.arguments with
+      | .ok () => none
+      | .error problem => some problem
+
+/-- The tool that must be alone in a response with other calls, if any. -/
+def lone? (tools : Array Tool) (response : Chat.Response) : Option Tool :=
+  if response.toolCalls.size ≤ 1 then none
+  else tools.find? fun tool => tool.alone && response.toolCalls.any (·.name == tool.name)
+
+/-- Makes the call a model's tool call asks for: the routine call its tool makes of the model's
+arguments. Gives its result, or its error when it fails. -/
+def make (tools : Array Tool) (asked : Chat.ToolCall) : Computation Agent (Except String Json) := do
+  let made : RoutineCall := match tools.find? (·.name == asked.name) with
+    | some tool => tool.call asked.arguments
+    | none => { name := asked.name, arguments := asked.arguments }
+  try .ok <$> call made.name made.arguments
+  catch error => pure (.error error)
 
 /-! ## bash: a command in the workspace -/
 
@@ -47,24 +76,17 @@ def definition : Chat.ToolDefinition := {
   parameters := .object #[("command", .string (description? := some "The bash command to execute"))]
 }
 
-/-- The command of a call, or what is wrong with its arguments. -/
+/-- The command of a call, or what is wrong with its arguments, in mini's words: the check of
+the tool, in place of its schema's. -/
 def command (arguments : Lean.Json) : Except String String :=
   match arguments.getObjVal? "command" with
   | .ok (.str command) => .ok command
   | .ok _ => .error "The 'command' argument of the bash tool must be a string."
   | .error _ => .error "Missing 'command' argument in bash tool call."
 
-/-- The fields saying how a command ended, after `fields`. -/
-private def withStatus (o : Output) (fields : List (String × Lean.Json)) : Lean.Json :=
-  let fields := fields ++ [("exit_code", o.exitCode?.map (fun c => Lean.Json.num c.toNat) |>.getD .null)]
-  let fields := match o.error? with
-    | some error => fields ++ [("error", Lean.Json.str error)]
-    | none => fields
-  .mkObj fields
-
 /-- A command's result, as its call gives it: the whole output, how it ended, and the file a
 later command finds the output in, when the command was run so. What a model is shown of it is
-its agent's to say (`observation`). -/
+its agent's to say. -/
 def result (execution : Execution) : Json :=
   .mkObj [("output", execution.output.output),
     ("exit_code", execution.output.exitCode?.map (fun c => Json.num c.toNat) |>.getD .null),
@@ -100,31 +122,6 @@ def tool (config : Executor.Config := {}) : Tool := {
   check := fun arguments => (command arguments).map fun _ => ()
   call := fun arguments => { name := definition.name, arguments := arguments.setObjVal! "executor" config.toJson } }
 
-/-- What an omitted output says in its place. -/
-def omittedNotice (file : String) : String := s!"[output omitted; full output: {file}]"
-
-/-- How the model sees an `Output`: as JSON, with `output` cut to its first and last `limit / 2`
-characters when it is `limit` or longer — mini's `observation_template`. With `file?`, where
-the whole output can be read, the warning names it instead, as the DeepSeek harness does. -/
-def observation (o : Output) (limit : Nat) (file? : Option String := none) : Lean.Json :=
-  let length := o.output.length
-  let fields : List (String × Lean.Json) :=
-    if length < limit then [("output", o.output)]
-    else
-      let half := limit / 2
-      [("output_head", String.ofList (o.output.toList.take half)),
-       ("output_tail", String.ofList (o.output.toList.drop (length - half))),
-       ("elided_chars", (length - limit : Nat)),
-       ("warning", match file? with
-         | none => "Output too long."
-         | some file => s!"[output truncated; full output: {file}]")]
-  withStatus o fields
-
-/-- How the model sees an `Output` it is no longer shown: the file holding it, in place of
-`output`, and how the command ended. -/
-def omitted (o : Output) (file : String) : Lean.Json :=
-  withStatus o [("output", omittedNotice file)]
-
 end Bash
 
 /-! ## submit: the end of a run -/
@@ -137,15 +134,15 @@ def definition : Chat.ToolDefinition := {
   parameters := .object #[("message", .string (description? := some "A short summary of what you did"))]
 }
 
-/-- The submission; a call without a string message submits nothing. -/
+/-- The submission of a call, whose arguments fit the schema. -/
 def message (arguments : Lean.Json) : String :=
   match arguments.getObjVal? "message" with
   | .ok (.str message) => message
   | _ => ""
 
-/-- Ends the agent, its message the submission. An agent that offers it ends when the call is
-the next to make, and calls no routine. -/
-def tool : Tool := { definition }
+/-- Ends the agent, its message the submission; alone in its turn, so that nothing is left
+unmade. An agent that offers it ends at the call, and calls no routine. -/
+def tool : Tool := { definition, alone := true }
 
 end Submit
 
@@ -344,12 +341,12 @@ def definition : Chat.ToolDefinition := {
   parameters := .object #[("task", .string (description? := some "The task, complete: the sub-agent sees nothing else"))]
 }
 
-/-- The task of a call, or what is wrong with its arguments. -/
-def task (arguments : Lean.Json) : Except String String :=
-  match arguments.getObjVal? "task" with
-  | .ok (.str task) => if task.trimAscii.isEmpty then .error "The 'task' argument of the subagent tool is empty." else .ok task
-  | .ok _ => .error "The 'task' argument of the subagent tool must be a string."
-  | .error _ => .error "Missing 'task' argument in subagent tool call."
+/-- The task of a call whose arguments fit the schema, or that it is blank. -/
+def task (arguments : Lean.Json) : Except String String := do
+  let task ← (arguments.getObjVal? "task" >>= Lean.Json.getStr?).mapError fun _ =>
+    "The subagent tool takes its task as a string."
+  if task.trimAscii.isEmpty then throw "The 'task' argument of the subagent tool is empty."
+  pure task
 
 def instruction : String :=
   "You may call subagent to hand a self-contained part of the work to a sub-agent like you; " ++
@@ -361,35 +358,18 @@ offers the same tools, this one among them. It runs where its caller's commands 
 def tool (name : String) (config : Json) : Tool := {
   definition
   instruction? := some instruction
-  check := fun arguments => (task arguments).map fun _ => ()
+  check := fun arguments => do
+    ({ definition } : Tool).check arguments
+    discard <| task arguments
   call := fun arguments => match task arguments with
     | .ok task => { name, arguments := config.setObjVal! "task" task }
     | .error _ => { name, arguments } }
 
 end Subagent
 
-/-- What an agent's configuration says of the tools it offers. -/
-structure Options where
-  /-- How `bash` runs a command. -/
-  commands : Executor.Config := {}
-  /-- The kinds of question `ask_user` lets a model ask. -/
-  questions : Array Question.Kind := #[]
-  /-- The agent that offers the tools, which `subagent` calls: its name, and its configuration. -/
-  agent : String × Json := ("", .null)
-
-/-- The tools an agent's configuration can name, as `options` say. -/
-def all (options : Options := {}) : Array Tool :=
-  #[Bash.tool options.commands, Submit.tool, AskUser.tool options.questions, TimeBudget.tool,
-    Subagent.tool options.agent.1 options.agent.2]
-
 /-- The routines the tools call, but an agent's own: each fixed, what an agent's configuration
 says of a call coming in its arguments. -/
 def routines : Array (Routine Agent) := #[Bash.routine, AskUser.routine, TimeBudget.routine]
-
-def names : Array String := (all).map (·.name)
-
-def named? (name : String) (options : Options := {}) : Option Tool :=
-  (all options).find? (·.name == name)
 
 end Tools
 

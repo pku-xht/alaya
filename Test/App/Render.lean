@@ -139,7 +139,7 @@ def suite : Suite := Testing.suite "app/render" #[
       (stored (some { input? := some 109, output? := some 20, reasoning? := some 2, cached? := some 60 })),
 
   test "the usage of a run is the sum of its responses, at every entry of its log" do
-    match miniRun with
+    match veroRun with
     | .error problem => fail problem
     | .ok run =>
       let responses : Array Chat.Response := #[
@@ -159,7 +159,7 @@ def suite : Suite := Testing.suite "app/render" #[
       assertEqual "before any" (stored (usages[0]?.map (·.2))) (stored (some {})),
 
   test "the tree shows each stretch of a log on a line, forks under where they fork, and how a log ends" do
-    match miniRun with
+    match veroRun with
     | .error problem => fail problem
     | .ok run =>
       let rt ← runtime echoing (some (← cached (← scriptedModel #[

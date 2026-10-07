@@ -1,7 +1,11 @@
-import Alaya.Agents.MiniSwe
+import Alaya.Agents.Basic
 
-/-! A minimal MiniSwe specialization for Vero: MiniSwe's loop with Vero's prompts. Rendering and
-grading are external; the log, model providers and executor are shared with MiniSwe. -/
+/-! Alaya's agent for Vero's Lean implementation and proof tasks: the basic agent with Vero's
+instructions, and every extension of its loop on. It ends with the `submit` tool, paces
+itself by `time_budget`, can hand work to a sub-agent like it, names the file a long output is
+kept in, and leaves old outputs out of its view; `ask_user` is offered when its configuration
+names the kinds of question it may ask. Rendering and grading are external. See
+`docs/agents.md` §5. -/
 namespace Alaya.Agents.MiniVero
 
 open Alaya.Base Alaya.Core Alaya.LLM Alaya.Runtime
@@ -21,41 +25,74 @@ instance : ToString Mode := ⟨Mode.toString⟩
 
 def Mode.all : List Mode := [.proof, .codeproof]
 
-def Mode.ofString? (name : String) : Option Mode :=
-  Mode.all.find? (·.toString == name)
+/-! ## Configuration -/
 
-/-- MiniSwe's configuration, offering `time_budget` too, and Vero's evaluation mode. -/
-structure Config where
-  base : MiniSwe.Config := {
-    executor := { timeoutSeconds := 600, env := #[] }
-    tools := #["bash", "submit", "time_budget"] }
+
+/-- Which old outputs the view omits: those of the turns before a boundary that keeps the last
+`keepTurns` turns whole and moves `block` turns at a time, so between its moves the context only
+grows at its end and the provider's prompt cache holds. -/
+structure Masking where
+  keepTurns : Nat
+  block : Nat
+  deriving Inhabited, BEq, Repr
+
+/-- How many turns from the first are omitted when the conversation holds `turns`: none until
+the boundary first moves, then a multiple of `block`. -/
+def Masking.omittedTurns (m : Masking) (turns : Nat) : Nat :=
+  if turns < m.keepTurns + m.block then 0 else ((turns - m.keepTurns) / m.block) * m.block
+
+/-- The old outputs its view omits: all but the last 20 turns', the boundary moving 10 turns at a
+time. -/
+def masking : Masking := { keepTurns := 20, block := 10 }
+
+/-- The basic agent's configuration, with Vero's mode, the room kept for a response, and the
+kinds of question it may ask. -/
+structure Config extends Basic.Config where
   mode : Mode := .proof
+  /-- Tokens kept free for the next response when deciding whether the context is full, or the
+  model's `output_tokens` when that is less. -/
+  contextReserve : Nat := 8000
+  /-- The kinds of question `ask_user` lets the model ask; none, the default, offers no
+  `ask_user`. -/
+  questionTypes : Array Question.Kind := #[]
   deriving Inhabited
 
-/-- The configuration as JSON: MiniSwe's fields, and `mode`. -/
-def Config.toJson (config : Config) : Lean.Json :=
-  match config.base.toJson with
-  | .obj fields => .obj (fields.insert "mode" (toString config.mode))
-  | other => other
+/-- Kinds of question, each named once. -/
+def questionTypesCodec : Codec (Array Question.Kind) :=
+  let kinds := Codec.array (.enum Question.Kind.name Question.Kind.all.toList)
+  { kinds with read := fun json => do
+      let read ← kinds.read json
+      for kind in read do
+        if (read.filter (· == kind)).size > 1 then throw s!"names {kind.name} twice"
+      pure read }
 
-/-- Whether the run is offered `time_budget`, and so asked to pace itself by it. -/
-def Config.pacing (config : Config) : Bool :=
-  config.base.tools.contains "time_budget"
+def fields : Fields Config :=
+  Basic.fields.lift (·.toConfig) (fun b c => { c with toConfig := b }) ++ #[
+  .of "mode" (.enum toString Mode.all) (·.mode) fun v c => { c with mode := v },
+  .of "context_reserve" .nat (·.contextReserve) fun v c => { c with contextReserve := v },
+  .of "question_types" questionTypesCodec (·.questionTypes) fun v c => { c with questionTypes := v }]
 
-def Config.fromJson (json : Lean.Json) : Except String Config := do
-  let mode ← match json.getObjVal? "mode" with
-    | .error _ => pure Mode.proof
-    | .ok (.str name) =>
-      match Mode.ofString? name with
-      | some mode => pure mode
-      | none => throw s!"unknown mode: {name} (use {" or ".intercalate (Mode.all.map toString)})"
-    | .ok other => throw s!"'mode' must be a string, not {other.compress}"
-  let defaults := ({} : Config).base
-  -- The rest is MiniSwe's, read without the field that is this agent's own.
-  let base ← match json with
-    | .obj fields => MiniSwe.Config.fromJson (.obj (fields.erase "mode")) defaults #["mode"]
-    | other => MiniSwe.Config.fromJson other defaults
-  pure { base, mode }
+/-- The configuration as JSON: what a run records, and what `alaya config` shows. -/
+def Config.toJson (config : Config) : Lean.Json := fields.toJson config
+
+/-- Reads a configuration; a field left out is its default, and an unknown one is an error. -/
+def Config.fromJson (json : Lean.Json) : Except String Config := fields.read json {}
+
+/-- The tools it offers: the basic agent's, `bash` and `submit`; `ask_user`, for the kinds of
+question its configuration names; `time_budget`; and `subagent`, calling the agent itself with
+its configuration. -/
+def Config.tools (config : Config) : Array Tool :=
+  Basic.tools config.executor ++
+    (if config.questionTypes.isEmpty then #[] else #[Tools.AskUser.tool config.questionTypes]) ++
+    #[Tools.TimeBudget.tool, Tools.Subagent.tool "mini-vero" config.toJson]
+
+/-- `text` with the instructions of the offered tools after it, a blank line before each: what
+a tool adds to the prompt, which is only ever added. -/
+def withInstructions (config : Config) (text : String) : String :=
+  config.tools.foldl (init := text) fun text tool =>
+    match tool.instruction? with
+    | some instruction => text ++ "\n\n" ++ instruction
+    | none => text
 
 def systemMessage : String :=
   "You are MiniVero, a Lean 4 implementation and proof agent working in a Vero sandbox. " ++
@@ -101,13 +138,14 @@ def mechanics : String :=
 
 /-- The opening task message: the sections of this run, a blank line between them. Only
 `grading` depends on the mode. -/
-def taskMessage (task : String) (mode : Mode) (uname : Uname) (pacing : Bool := false) : String :=
+def taskMessage (task : String) (mode : Mode) (uname : Uname) : String :=
   "\n\n".intercalate <| [
     framing,
     "Solve this Vero task:\n\n" ++ task,
     rules,
     grading mode,
-    doneCondition] ++ (if pacing then [checkpointing] else []) ++ [
+    doneCondition,
+    checkpointing,
     antiCheating,
     scoring,
     mechanics,
@@ -116,29 +154,90 @@ def taskMessage (task : String) (mode : Mode) (uname : Uname) (pacing : Bool := 
 
 /-- The opening of a conversation: the system message and the task. -/
 def openingMessages (config : Config) (task : String) (uname : Uname) : Array Chat.Message :=
-  #[.system systemMessage,
-    .user (MiniSwe.withInstructions config.base (taskMessage task config.mode uname config.pacing))]
+  #[.system systemMessage, .user (withInstructions config (taskMessage task config.mode uname))]
 
-/-- MiniVero, for a call of `model` on `task`, on the machine the call names, which
-`subagent` calls as `itself`: MiniSwe's loop, with its linear context, and Vero's opening. -/
-def computation (config : Config) (model : Models.Spec) (task : String)
-    (itself : String × Lean.Json := ("", .null)) : Computation Agent Lean.Json := do
+/-! ## The loop
+
+The basic agent's loop, with its extensions: old outputs are left out of the view, and a request
+that would not fit the model's context ends the agent before it is sent. -/
+
+open Basic (Dialogue Item outcome)
+
+/-- The state of the loop: the conversation, and the latest request whose response reported its
+size: its messages, the tokens it held, and the tokens of the response. -/
+structure History where
+  items : Array Item := #[]
+  measured? : Option (Dialogue × Nat × Option Nat) := none
+
+/-- What an omitted output says in its place. -/
+def omittedNotice (file : String) : String := s!"[output omitted; full output: {file}]"
+
+/-- How the model sees a command: as the basic agent shows it; and, in a turn the view leaves old
+outputs out of, as the file that holds it, unless the output is shorter than saying so. -/
+def observe (output : Output) (file? : Option String) (omittedTurn : Bool) : String :=
+  match file? with
+  | some file =>
+    if omittedTurn && output.output.length > (omittedNotice file).length then
+      Basic.withStatus output (omittedNotice file)
+    else Basic.observation output file?
+  | none => Basic.observation output none
+
+/-- The view: the basic agent's, with the outputs of the turns `masking` omits left out. -/
+def view (history : History) (masking : Masking := masking) : Dialogue :=
+  let turns := history.items.foldl (init := 0) fun n item => match item with | .told _ => n | _ => n + 1
+  let omitted := masking.omittedTurns turns
+  Basic.viewWith (items := history.items) fun turn call result =>
+    match call.name, Tools.Bash.ofResult? result with
+    | "bash", some (output, file?) => observe output file? (omitted > 0 && turn ≤ omitted)
+    | _, _ => result.pretty
+
+/-- The tokens `full`, the messages of the next request, holds, known without a tokenizer. The
+latest response that reported its size says how many the request it answered held, and how many
+it returned; what `full` holds after that request and the message that shows the response is
+estimated. When `full` no longer begins with that request, as when old outputs have since been
+masked, or nothing reported a size, the whole is estimated. -/
+def contextTokens (history : History) (full : Dialogue) : Nat :=
+  let wire (dialogue : Dialogue) := dialogue.map (·.toJson.compress)
+  match history.measured? with
+  | none => Chat.estimateTokens full
+  | some (before, input, output?) =>
+    if before.size < full.size && wire (full.extract 0 before.size) == wire before then
+      let response := output?.getD (Chat.estimateTokens (full.extract before.size (before.size + 1)))
+      input + response + Chat.estimateTokens (full.extract (before.size + 1) full.size)
+    else Chat.estimateTokens full
+
+/-- The tokens a request to `model` may hold: its context less the room kept for a response;
+`none` when its context is not known. -/
+def contextLimit? (config : Config) (model : Models.Spec) : Option Nat :=
+  model.contextTokens?.map fun tokens =>
+    tokens - min config.contextReserve (model.outputTokens?.getD config.contextReserve)
+
+/-- One round: the basic agent's, except that it ends before a request too large for the
+context, and keeps the size of the last request a response reported. -/
+def round (config : Config) (model : Models.Spec) (history : History) : Computation Agent (History ⊕ Lean.Json) := do
+  let history := { history with items := history.items ++ (← Basic.heard).map .told }
+  let request : Chat.Request := { messages := view history, tools := config.tools.map (·.definition) }
+  if let some limit := contextLimit? config model then
+    if contextTokens history request.messages >= limit then return .inr (outcome "ContextExceeded")
+  let response ← try sample model request catch refusal => return .inr (Basic.refused refusal)
+  let measured? := match response.usage?.bind (·.input?) with
+    | some input => some (request.messages, input, response.usage?.bind (·.output?))
+    | none => history.measured?
+  return match ← Basic.respond config.tools history.items response with
+    | .inl items => .inl { items, measured? }
+    | .inr ended => .inr ended
+
+/-! ## The agent -/
+
+/-- MiniVero, for a call of `model` on `task`, on the machine the call names. -/
+def computation (config : Config) (model : Models.Spec) (task : String) : Computation Agent Lean.Json := do
   let uname ← Tools.Uname.read
-  MiniSwe.converse { config.base with model? := some model
-                                      contextLimit? := MiniSwe.contextLimit? config.base model, itself }
-    (openingMessages config task uname)
+  iter (round config model) { items := (openingMessages config task uname).map .told }
 
-/-- MiniVero as a routine. A call's arguments are its configuration, its model and its task
-among it; one it cannot run on fails in the call's frame. Its scope is its tools, and itself,
-which `subagent` calls with its configuration and another task. -/
+/-- MiniVero as a routine. Its scope is its tools, and itself, which `subagent` calls with its
+configuration and another task. -/
 def routine : Routine Agent :=
-  let body (arguments : Lean.Json) : Computation Agent Lean.Json :=
-    match Config.fromJson arguments with
-    | .error problem => .fail s!"mini-vero: {problem}"
-    | .ok config => match config.base.model?, config.base.task? with
-      | some model, some task => computation config model task ("mini-vero", config.toJson)
-      | none, _ => .fail "mini-vero: it samples a model, and its configuration names none"
-      | _, none => .fail "mini-vero: it works on a task, and its configuration names none"
-  { name := "mini-vero", body, scope := Scope.fix fun scope => Tools.routines.push { name := "mini-vero", body, scope } }
+  let make := Basic.agent "mini-vero" fields {} (·.toConfig) computation
+  make (Scope.fix fun scope => Tools.routines.push (make scope))
 
 end Alaya.Agents.MiniVero

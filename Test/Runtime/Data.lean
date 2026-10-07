@@ -106,7 +106,7 @@ def suite : Suite := Testing.suite "runtime/data" #[
     withData data fun data => do
       let called ← data.call Session.scope made.back!.hash.hex (agentCall) (admit := Session.admitsCall)
       let model ← Result.fromIO Error.storage (scriptedModel #[responseWith #[call "c" "bash" "write b.txt two"],
-        responseWith #[submitCall "s" "done"]])
+        responseWith #[sentinelCall "s"]])
       let rt ← runtimeOf data model
       let told ← Result.fromIO Error.storage (IO.mkRef (#[] : Array Nat))
       let (last, stop, log) ← data.resume Session.scope called.hash.hex rt {} fun appended =>
@@ -165,7 +165,7 @@ def suite : Suite := Testing.suite "runtime/data" #[
     let (data, made) ← created
     withData data fun data => do
       let called ← data.call Session.scope made.back!.hash.hex (agentCall)
-      let model ← Result.fromIO Error.storage (scriptedModel #[responseWith #[submitCall "s" "done"]])
+      let model ← Result.fromIO Error.storage (scriptedModel #[responseWith #[sentinelCall "s"]])
       let rt ← runtimeOf data model
       let (_, stop, log) ← data.resume Session.scope called.hash.hex rt { samples? := some 0 }
       if !(stop matches .paused _) then throw (.input "paused")

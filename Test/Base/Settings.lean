@@ -1,9 +1,9 @@
 import Test.Support.Framework
 import Alaya.Base.Settings
-import Alaya.Base.ConfigJson
+import Alaya.Base.Fields
 
-/-! Settings from the command line, and the strict reading of a configuration object: a setting
-replaces exactly one key at its path, and a configuration names no key it does not know. -/
+/-! Settings from the command line, and the strict reading of a record described by its fields: a
+setting replaces exactly one key at its path, and a record names no key it does not know. -/
 
 namespace SettingsTests
 
@@ -16,6 +16,13 @@ private def parsed (text : String) : TestM Settings.Setting :=
   | .error problem => fail s!"{text}: {problem}"
 
 private def json (text : String) : Json := (Json.parse text).toOption.getD .null
+
+/-- A record to read and write. -/
+private structure Sample where
+  count : Nat := 0
+  on : Bool := false
+  name : String := ""
+  env : Array (String × String) := #[("PAGER", "cat")]
 
 def suite : Suite := Testing.suite "base/settings" #[
   test "a value is JSON when it parses, and text otherwise, and only the first = splits it" do
@@ -42,26 +49,35 @@ def suite : Suite := Testing.suite "base/settings" #[
     | .ok _ => fail "a key inside a number was set"
     | .error message => assertContains "says where" message "--set a.b: b is inside something that is not an object",
 
-  test "a configuration object names only keys it knows, and each field has the type it takes" do
-    let known := #["count", "on", "name", "env"]
-    match ConfigJson.object (json "{\"cuont\":1}") known with
+  test "a record names only keys it knows, each field has the type it takes, and one left out keeps its value" do
+    let fields : Fields Sample := #[
+      .of "count" .nat (·.count) fun v r => { r with count := v },
+      .of "on" .bool (·.on) fun v r => { r with on := v },
+      .of "name" .string (·.name) fun v r => { r with name := v },
+      .of "env" .pairs (·.env) fun v r => { r with env := v }]
+    let read (text : String) := fields.read (json text) {}
+    match read "{\"cuont\":1}" with
     | .ok _ => fail "a typo was taken"
     | .error message => assertContains "a typo" message "unknown field 'cuont' (the fields are count, on, name, env)"
-    check ((ConfigJson.object (json "[1]") known).toOption.isNone) "not an object"
-    let some object := (ConfigJson.object (json "{\"count\":3,\"on\":true,\"name\":\"x\"}") known).toOption
-      | fail "a valid object"
-    assertEqual "fields" ((object.nat "count" 0).toOption, (object.bool "on" false).toOption,
-      (object.string "name" "").toOption, (object.nat "missing" 7).toOption) (some 3, some true, some "x", some 7)
-    for (label, text, field) in [("a negative count", "{\"count\":-1}", "count"), ("a fraction", "{\"count\":1.5}", "count"),
-        ("a count as text", "{\"count\":\"3\"}", "count")] do
-      let some object := (ConfigJson.object (json text) known).toOption | fail label
-      check ((object.nat field 0).toOption.isNone) label
-    let some object := (ConfigJson.object (json "{\"on\":\"true\",\"name\":3}") known).toOption | fail "an object"
-    check ((object.bool "on" false).toOption.isNone) "true as text is no bool"
-    check ((object.string "name" "").toOption.isNone) "a number is no string"
-    assertEqual "pairs" (ConfigJson.pairs (json "[[\"A\",\"1\"]]")).toOption (some #[("A", "1")])
+    check ((read "[1]").toOption.isNone) "not an object"
+    let some sample := (read "{\"count\":3,\"on\":true,\"name\":\"x\"}").toOption | fail "a valid object"
+    assertEqual "fields" (sample.count, sample.on, sample.name, sample.env) (3, true, "x", #[("PAGER", "cat")])
+    assertEqual "written back" (fields.toJson sample).compress
+      "{\"count\":3,\"env\":[[\"PAGER\",\"cat\"]],\"name\":\"x\",\"on\":true}"
+    for (label, text, says) in [("a negative count", "{\"count\":-1}", "'count' must be a non-negative integer"),
+        ("a fraction", "{\"count\":1.5}", "'count' must be a non-negative integer"),
+        ("a count as text", "{\"count\":\"3\"}", "'count' must be a non-negative integer"),
+        ("true as text", "{\"on\":\"true\"}", "'on' must be true or false"),
+        ("a number for text", "{\"name\":3}", "'name' must be a string")] do
+      match read text with
+      | .ok _ => fail s!"{label} was taken"
+      | .error message => assertContains label message says
+    assertEqual "pairs" ((read "{\"env\":[[\"A\",\"1\"]]}").toOption.map (·.env)) (some #[("A", "1")])
     for bad in ["{}", "[[\"A\"]]", "[[\"A\",1]]", "[\"A=1\"]"] do
-      check ((ConfigJson.pairs (json bad)).toOption.isNone) s!"{bad} is no list of pairs"
+      check ((read ("{\"env\":" ++ bad ++ "}")).toOption.isNone) s!"{bad} is no list of pairs"
+    let enum : Codec Bool := .enum (if · then "yes" else "no") [true, false]
+    assertEqual "one of its names" ((enum.read "no").toOption) (some false)
+    assertEqual "another" (match enum.read "maybe" with | .error m => m | .ok _ => "") "must be yes or no, not maybe"
 ]
 
 end SettingsTests

@@ -13,7 +13,7 @@ open Lean (Json)
 /-- A forest of two branches: a run that asks a question, is answered, and submits, and a fork
 where a person said something instead. -/
 private def forest : TestM (Driver.Runtime × String) := do
-  match miniRun { tools := #["bash", "submit", "ask_user"], questionTypes := Question.Kind.all } with
+  match veroRun { questionTypes := Question.Kind.all } with
   | .error problem => fail problem
   | .ok run =>
     let executor : Executor := { exec := fun _ _ _ _ => pure { output := "a\nb\n", exitCode? := some 0 } }
@@ -61,7 +61,7 @@ def suite : Suite := Testing.suite "app/html" #[
     check (entries.all fun e => (e.getObjVal? "t" >>= Json.getNat?).toOption.isSome) "every entry's time",
 
   test "the report shows how each command changed the workspace, with the text when it is cheap" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let commands := #["write a.txt one", "write .venv/x 1", "write a.txt two", "rm a.txt", "write .venv/x 2"]
       let rt ← filingRuntime (← scriptedModel (commands.mapIdx (fun i command =>
         responseWith #[call s!"c{i}" "bash" command]) ++ #[responseWith #[submitCall "s"]]))
@@ -95,7 +95,7 @@ def suite : Suite := Testing.suite "app/html" #[
       check (entries.all fun row => (row.getObjVal? "e" >>= (·.getObjVal? "k") >>= Json.getStr?).toOption == some "exec"
           || (row.getObjVal? "changes").toOption == some Json.null) "a change on an entry that is no command",
   test "the report carries every sample's request, exactly, and every entry once" do
-    withMini {} fun run => do
+    withVero {} fun run => do
       let responses := #[responseWith #[call "a" "bash" "echo one", call "b" "bash" "echo two"],
         responseWith #[],   -- a format error: the view substitutes a user turn
         responseWith #[submitCall "s"], responseWith #[submitCall "t"]]

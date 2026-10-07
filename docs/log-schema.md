@@ -2,7 +2,7 @@
 
 A run of Alaya is a log of events (`docs/language.md` §2). This page is how logs are kept: the
 **entry**, the stored form of each event, how logs share entries and **fork**, and what the data
-directory holds. How a run is graded is `docs/agents.md` §6.
+directory holds. How a run is graded is `docs/agents.md` §3.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "BlinkMacSystemFont, Segoe UI, Helvetica, Arial", "fontSize": "13px", "primaryColor": "#f6f7f9", "primaryTextColor": "#1c1e21", "primaryBorderColor": "#d3d9e0", "lineColor": "#a3abb5", "textColor": "#6f7985", "edgeLabelBackground": "#ffffff", "clusterBkg": "#fafbfc", "clusterBorder": "#e3e6ea"}}}%%
